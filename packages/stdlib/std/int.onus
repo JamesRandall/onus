@@ -4,9 +4,9 @@ pub union RangeError =
   | NotFinite
   | OutOfRange
 
-pub intrinsic fn to_text(x: Int) -> Text ! alloc
+pub const intrinsic fn to_text(x: Int) -> Text ! alloc
 
-pub intrinsic fn floor(x: Float) -> Result[Int, RangeError]
+pub const intrinsic fn floor(x: Float) -> Result[Int, RangeError]
 
 pub fn abs(x: Int) -> Int where it >= 0
   ensures result == x or result == -x

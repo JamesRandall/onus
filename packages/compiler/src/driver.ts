@@ -12,8 +12,9 @@ import { parse } from './syntax/parser.js';
 import { print } from './syntax/printer.js';
 import { typesPass } from './types/check.js';
 import { effectsPass } from './effects/check.js';
+import { constevalPass } from './consteval/pass.js';
 
-export const PASSES = ['parse', 'canonical', 'resolve', 'types', 'effects'] as const;
+export const PASSES = ['parse', 'canonical', 'resolve', 'types', 'consteval', 'effects'] as const;
 export type PassName = (typeof PASSES)[number];
 
 /**
@@ -107,6 +108,8 @@ export function runPipeline(ctx: Context, to: PassName = 'types', passes: Partia
   guarded(ctx, 'resolve', passes.resolve ?? resolvePass);
   if (upTo < PASSES.indexOf('types') || !clean()) return;
   guarded(ctx, 'types', passes.types ?? typesPass);
+  if (upTo < PASSES.indexOf('consteval') || !clean()) return;
+  guarded(ctx, 'consteval', passes.consteval ?? constevalPass);
   if (upTo < PASSES.indexOf('effects') || !clean()) return;
   guarded(ctx, 'effects', passes.effects ?? effectsPass);
 }

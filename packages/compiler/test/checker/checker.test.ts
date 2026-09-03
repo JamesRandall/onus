@@ -38,7 +38,7 @@ describe('checker fixtures', () => {
 
   it('covers every resolution and typing diagnostic code', () => {
     for (const f of fixtures) for (const d of pipeline(f.path, f.text, here).diagnostics) seen.add(d.code);
-    const codes = Object.keys(CODES).filter((c) => (c.startsWith('E01') || c.startsWith('E02') || c.startsWith('E03')) && !LATER.has(c) && !PARSER_REPORTED.has(c));
+    const codes = Object.keys(CODES).filter((c) => /^E0[12357]/.test(c) && !LATER.has(c) && !PARSER_REPORTED.has(c));
     expect(codes.filter((c) => !seen.has(c))).toEqual([]);
   });
 });

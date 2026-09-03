@@ -1,0 +1,14 @@
+module e0501_budget
+
+const fn count(n: Int where it >= 0) -> Int {
+  var i: Int = 0
+  loop while i < n
+    invariant i <= n
+    decreases n - i
+  {
+    i = i + 1
+  }
+  return i
+}
+
+pub const slow: Int = count(n: 100000000)

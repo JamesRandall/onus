@@ -22,11 +22,30 @@
 import type { Span } from '../source.js';
 
 export type NodeId = number & { readonly __brand: 'NodeId' };
+export type FileId = number & { readonly __brand: 'FileId' };
+export type DefId = number & { readonly __brand: 'DefId' };
+export type ModuleId = number & { readonly __brand: 'ModuleId' };
+
+// This file holds the compiler's only casts: the four brand constructors.
 
 /** Brands a plain number as a NodeId. Only the parser should call this. */
 export function nodeId(n: number): NodeId {
-  // The single sanctioned cast for this brand.
   return n as NodeId;
+}
+
+/** Brands a plain number as a FileId. Only the file table should call this. */
+export function fileId(n: number): FileId {
+  return n as FileId;
+}
+
+/** Brands a plain number as a DefId. Only the resolver should call this. */
+export function defId(n: number): DefId {
+  return n as DefId;
+}
+
+/** Brands a plain number as a ModuleId. Only the loader should call this. */
+export function moduleId(n: number): ModuleId {
+  return n as ModuleId;
 }
 
 export interface NodeBase {

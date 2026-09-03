@@ -73,6 +73,8 @@ export const CODES = {
   E0501: 'verification budget exceeded',
   E0600: 'test module linked into a non-test build',
   E0700: 'library check failed',
+  E0701: 'const evaluation failed',
+  E0702: 'example failed',
   E0999: 'internal error',
 } as const;
 

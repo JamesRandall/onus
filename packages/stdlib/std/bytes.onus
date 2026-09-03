@@ -1,6 +1,6 @@
 module std.bytes
 
-pub intrinsic fn len(b: Bytes) -> Int where it >= 0
+pub const intrinsic fn len(b: Bytes) -> Int where it >= 0
 
 pub intrinsic fn get(
   b: Bytes,

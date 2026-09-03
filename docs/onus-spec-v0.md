@@ -358,19 +358,20 @@ There are no macros, syntax extensions or compiler plugins. Anything a library w
 
 ```
 -- in std.sql, ordinary Onus, verified like everything else
-pub const fn parse_select(text: Text) -> Result[SelectAst, ConstError]
-  ensures result is Ok(ast) implies ast.kind == Select and ast.statements == 1
+pub const fn parse_select(text: Text) -> Result[SelectAst, ConstError] ! alloc
 
-pub fn select[const text: Text, T](params: List[Param], row: T) -> Select[T]
+pub const fn columns_match(text: Text, record: TypeInfo) -> Result[Unit, ConstError] ! alloc
+
+pub intrinsic fn select[const text: Text, T](params: List[Param], row: TypeInfo) -> Select[T]
   requires proved parse_select(text: text) is Ok
-  requires proved columns_match(ast: parse_select(text: text).ok, record: T)
+  requires proved columns_match(text: text, record: row) is Ok
 ```
 
 Rules:
 
-- A `const fn` must be pure and `total`, with every obligation *proved*. The check-time evaluator therefore always terminates and never panics.
+- A `const fn` must be pure apart from `alloc`, and `total`, with every obligation *proved*. The check-time evaluator therefore always terminates and never panics. <!-- changed: M4, docs/CHANGES.md items 52–55: allocation is admitted; until obligations are proved, a failing contract during evaluation is E0701 and a budget overrun is E0501 -->
 - Evaluation runs under the standard per-obligation budget (§12.3). A library cannot make checking slow without `E0501` saying which `const fn` did it.
-- `ConstError` carries an `offset` into the constant being checked and optional `repairs`. When a `const fn` used in a `requires proved` clause yields `Err`, the compiler emits `E0700 library check failed` with the location mapped into the literal — a malformed SQL string is reported at the character in the string, not at the call.
+- `ConstError` (`std.check.ConstError { offset, message }`) carries a grapheme `offset` into the constant being checked. When a `requires proved` clause of a call with constant arguments evaluates to false and a `ConstError` was produced, the compiler emits `E0700 library check failed` with the location mapped into the literal passed for the callee's first `const` Text parameter — a malformed SQL string is reported at the character in the string, not at the call. <!-- changed: M4, docs/CHANGES.md items 53–54 -->
 - A `const fn` may compute over types: `columns_match` receives the record type `T` as a `TypeInfo` value (fields, names, refinements) and compares it to the parser's projected columns. Field/column mismatch is a compile error.
 - A `const fn` may return a `Spec` — a value of the contract language's own AST type. A `requires` or `ensures` clause may reference it with `spec(...)`, and the verifier consumes it as a predicate. This is how a `where` clause in a query becomes a postcondition on the rows (§18.3) without `std.sql` having any standing the user's own library could not have.
 
@@ -525,7 +526,7 @@ property escape_bounded(cx: Float, cy: Float, limit: Iter where it > 0) {
 }
 ```
 
-`example` blocks are concrete assertions evaluated at check time and shown in the module interface. `property` blocks are universally quantified; the compiler attempts to prove them, and where it cannot, runs them under generated inputs (with the refinements as generators) and reports the result as *checked*, never *proved*. Both are part of a function's interface and are read by the reviewer as evidence of intent.
+`example` blocks are concrete assertions evaluated at check time when every statement is evaluable (pure functions and constant values) — a false assertion is `E0702` — and otherwise by the generated tests; both are shown in the module interface. <!-- changed: M4, docs/CHANGES.md item 56 --> `property` blocks are universally quantified; the compiler attempts to prove them, and where it cannot, runs them under generated inputs (with the refinements as generators) and reports the result as *checked*, never *proved*. Both are part of a function's interface and are read by the reviewer as evidence of intent.
 
 ---
 

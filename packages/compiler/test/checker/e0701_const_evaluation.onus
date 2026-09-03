@@ -1,0 +1,25 @@
+module e0701_const_evaluation
+
+const fn div(a: Int, b: Int) -> Int {
+  return a / b
+}
+
+pub const boom: Int = div(a: 1, b: 0)
+
+pub const out_of_range: Int = List.get(xs: [1, 2], i: 5)
+
+pub const too_big: Int = 9007199254740993
+
+fn runtime_only(files: Int) -> Int ! nondet {
+  return files
+}
+
+pub const not_constant: Int = runtime_only(files: 1)
+
+const fn guarded(n: Int) -> Int
+  requires n > 0
+{
+  return n
+}
+
+pub const broken_requires: Int = guarded(n: 0)

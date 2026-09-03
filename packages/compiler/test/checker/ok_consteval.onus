@@ -1,0 +1,96 @@
+module ok_consteval
+import std.sql
+
+const fn double(x: Int) -> Int {
+  return x * 2
+}
+
+const fn sum_to(n: Int where it >= 0) -> Int
+  decreases n
+{
+  if n == 0 {
+    return 0
+  }
+  return n + sum_to(n: n - 1)
+}
+
+const fn shout(t: Text) -> Text ! alloc {
+  return Text.lower(t: t) ++ "!"
+}
+
+pub const limit: Int = double(x: 21)
+
+pub const total: Int = sum_to(n: 10)
+
+pub const greeting: Text = shout(t: "HELLO")
+
+pub const derived: Int = limit + total
+
+record Row {
+  month: Text
+  total: Int
+}
+
+fn aliased(db: sql.Db[ReadOnly]) -> Result[List[Row], sql.Error] ! sql.read, alloc {
+  let stmt: sql.Select[Row] = sql.select[
+    text: "select to_char(created, 'YYYY-MM') as month, sum(amount) as total from orders group by 1"
+  ](params: [], row: Row)
+  return sql.query(db: db, statement: stmt)
+}
+
+fn star(db: sql.Db[ReadOnly]) -> Result[List[Row], sql.Error] ! sql.read, alloc {
+  let stmt: sql.Select[Row] = sql.select[text: "SELECT * FROM orders WHERE total > $1"](
+    params: [sql.int(x: 1)],
+    row: Row
+  )
+  return sql.query(db: db, statement: stmt)
+}
+
+fn dynamic(db: sql.Db[ReadOnly], year: Int) -> Result[List[Row], sql.Error] ! sql.read, alloc {
+  let stmt: sql.Select[Row] = sql.select[text: "select month, total from orders where year = $1"](
+    params: [sql.int(x: year)],
+    row: Row
+  )
+  return sql.query(db: db, statement: stmt)
+}
+
+example arithmetic {
+  double(x: 4) == 8
+  sum_to(n: 4) == 10
+  shout(t: "Hi") == "hi!"
+  limit == 42
+  derived == 97
+}
+
+example lists_and_text {
+  List.len(xs: [1, 2, 3]) == 3
+  List.get(xs: [1, 2, 3], i: 1) == 2
+  Text.len(t: "héllo") == 5
+  Text.graphemes(t: "ab") == ["a", "b"]
+  List.slice(xs: [1, 2, 3, 4], from: 1, to: 3) == [2, 3]
+}
+
+example control_flow {
+  let rows: List[Int] = [3, 1, 2]
+  var best: Int = 0
+  for r: Int in rows {
+    if r > best {
+      best = r
+    }
+  }
+  best == 3
+  forall x: Int in rows: x > 0
+  exists x: Int in 0 ..< 10 where x > 5: x == 7
+}
+
+example results {
+  let r: Result[Int, Text] = Ok(value: 1)
+  r is Ok
+  match r with
+  | Ok(value) -> value == 1
+  | Err(..) -> false
+}
+
+example deferred_to_runtime {
+  Int.to_text(x: 1) == "1"
+}

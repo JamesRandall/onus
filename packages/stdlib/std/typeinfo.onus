@@ -1,0 +1,11 @@
+module std.typeinfo
+
+-- What a `const fn` sees of a type passed as a value (§3.8.1).
+pub record Field {
+  name: Text
+  type_name: Text
+}
+
+pub const intrinsic fn name(t: TypeInfo) -> Text ! alloc
+
+pub const intrinsic fn fields(t: TypeInfo) -> List[Field] ! alloc

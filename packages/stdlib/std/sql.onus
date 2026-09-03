@@ -1,5 +1,6 @@
 module std.sql
 import std.io
+import std.typeinfo
 
 pub union DbMode =
   | ReadOnly
@@ -25,7 +26,217 @@ pub intrinsic fn int(x: Int) -> Param
 
 pub intrinsic fn text(x: Text) -> Param
 
+-- The check-time validator of `select` (§3.8.1): the compiler evaluates the
+-- `requires proved` clauses of `select` when its text is a constant, and a
+-- ConstError lands at the offending character of the literal.
+pub record Column {
+  name: Text
+  offset: Int where it >= 0
+}
+
+pub record SelectAst {
+  columns: List[Column]
+  star: Bool
+}
+
+record Token {
+  text: Text
+  offset: Int where it >= 0
+}
+
+const fn is_space(g: Text) -> Bool {
+  return g == " " or g == "\n" or g == "\t" or g == "\r"
+}
+
+const fn is_punct(g: Text) -> Bool {
+  return g == "(" or g == ")" or g == "," or g == ";" or g == "=" or g == "*" or g == "." or g == "'" or g == "\"" or g == "$"
+}
+
+const fn tokenize(text: Text) -> List[Token] ! alloc {
+  let gs: List[Text] = Text.graphemes(t: text)
+  let n: Int = List.len(xs: gs)
+  var out: List[Token] = []
+  var word: Text = ""
+  var start: Int = 0
+  var i: Int = 0
+  loop while i < n
+    invariant i <= n
+    decreases n - i
+  {
+    let g: Text = List.get(xs: gs, i: i)
+    if is_space(g: g) or is_punct(g: g) {
+      if word != "" {
+        out = out ++ [Token { text: word, offset: start }]
+        word = ""
+      }
+      if is_punct(g: g) {
+        out = out ++ [Token { text: g, offset: i }]
+      }
+    } else {
+      if word == "" {
+        start = i
+      }
+      word = word ++ g
+    }
+    i = i + 1
+  }
+  if word != "" {
+    out = out ++ [Token { text: word, offset: start }]
+  }
+  return out
+}
+
+pub const fn parse_select(text: Text) -> Result[SelectAst, ConstError] ! alloc {
+  let tokens: List[Token] = tokenize(text: text)
+  let count: Int = List.len(xs: tokens)
+  if count == 0 {
+    return Err(
+      error: ConstError { offset: 0, message: "expected a SELECT statement, found nothing" }
+    )
+  }
+  let first: Token = List.get(xs: tokens, i: 0)
+  if Text.lower(t: first.text) != "select" {
+    return Err(
+      error: ConstError { offset: first.offset, message: "expected a single SELECT statement" }
+    )
+  }
+  var columns: List[Column] = []
+  var star: Bool = false
+  var last: Column = Column { name: "", offset: 0 }
+  var depth: Int = 0
+  var seen_from: Bool = false
+  var i: Int = 1
+  loop while i < count
+    invariant i <= count
+    decreases count - i
+  {
+    let tok: Token = List.get(xs: tokens, i: i)
+    let word: Text = Text.lower(t: tok.text)
+    if word == ";" {
+      return Err(error: ConstError { offset: tok.offset, message: "only one statement is allowed" })
+    }
+    if not seen_from {
+      if word == "(" {
+        depth = depth + 1
+      } else {
+        if word == ")" {
+          depth = depth - 1
+        } else {
+          if depth == 0 and word == "from" {
+            seen_from = true
+            if last.name != "" {
+              columns = columns ++ [last]
+            }
+          } else {
+            if depth == 0 and word == "," {
+              if last.name != "" {
+                columns = columns ++ [last]
+              }
+              last = Column { name: "", offset: 0 }
+            } else {
+              if depth == 0 and word == "*" and last.name == "" {
+                star = true
+              } else {
+                if depth == 0 and not is_punct(g: word) and word != "as" {
+                  last = Column { name: tok.text, offset: tok.offset }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    i = i + 1
+  }
+  if not seen_from {
+    return Err(error: ConstError { offset: 0, message: "SELECT without FROM" })
+  }
+  return Ok(value: SelectAst { columns: columns, star: star })
+}
+
+const fn has_field(fields: List[typeinfo.Field], name: Text) -> Bool {
+  let n: Int = List.len(xs: fields)
+  var i: Int = 0
+  loop while i < n
+    invariant i <= n
+    decreases n - i
+  {
+    if List.get(xs: fields, i: i).name == name {
+      return true
+    }
+    i = i + 1
+  }
+  return false
+}
+
+const fn has_column(columns: List[Column], name: Text) -> Bool {
+  let n: Int = List.len(xs: columns)
+  var i: Int = 0
+  loop while i < n
+    invariant i <= n
+    decreases n - i
+  {
+    if List.get(xs: columns, i: i).name == name {
+      return true
+    }
+    i = i + 1
+  }
+  return false
+}
+
+-- Every projected column must be a field of the row record and every field
+-- must be projected, unless the projection is `*`.
+pub const fn columns_match(text: Text, record: TypeInfo) -> Result[Unit, ConstError] ! alloc {
+  match parse_select(text: text) with
+  | Err(error) -> return Err(error: error)
+  | Ok(value) -> {
+    if value.star {
+      return Ok(value: Unit)
+    }
+    let fields: List[typeinfo.Field] = TypeInfo.fields(t: record)
+    let n: Int = List.len(xs: value.columns)
+    var i: Int = 0
+    loop while i < n
+      invariant i <= n
+      decreases n - i
+    {
+      let column: Column = List.get(xs: value.columns, i: i)
+      if not has_field(fields: fields, name: column.name) {
+        return Err(
+          error: ConstError {
+            offset: column.offset,
+            message: "column `" ++ column.name ++ "` is not a field of " ++ TypeInfo.name(t: record)
+          }
+        )
+      }
+      i = i + 1
+    }
+    let m: Int = List.len(xs: fields)
+    var j: Int = 0
+    loop while j < m
+      invariant j <= m
+      decreases m - j
+    {
+      let field: typeinfo.Field = List.get(xs: fields, i: j)
+      if not has_column(columns: value.columns, name: field.name) {
+        return Err(
+          error: ConstError {
+            offset: 0,
+            message: "the column list does not provide field `" ++ field.name ++ "` of " ++ TypeInfo.name(
+              t: record
+            )
+          }
+        )
+      }
+      j = j + 1
+    }
+    return Ok(value: Unit)
+  }
+}
+
 pub intrinsic fn select[const text: Text, T](params: List[Param], row: TypeInfo) -> Select[T]
+  requires proved parse_select(text: text) is Ok
+  requires proved columns_match(text: text, record: row) is Ok
 
 pub intrinsic fn statement[const text: Text](params: List[Param]) -> Statement
 

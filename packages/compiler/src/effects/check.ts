@@ -155,8 +155,8 @@ class EffectChecker {
   private fn(f: A.FnDecl, ifaceFn: Def | null): void {
     const def = this.defOf(f);
     const sig = this.sig(def);
-    if (f.constFn && sig.effects.size > 0) {
-      this.report('E0201', f.name.span, `a \`const fn\` is pure; \`${f.name.text}\` declares ${this.show(sig.effects)}`);
+    if (f.constFn && sig.effects.without(ALLOC).size > 0) {
+      this.report('E0201', f.name.span, `a \`const fn\` may only allocate; \`${f.name.text}\` declares ${this.show(sig.effects.without(ALLOC))}`);
     }
     if (ifaceFn !== null) {
       const bound = this.sig(ifaceFn).effects;

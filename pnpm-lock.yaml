@@ -23,10 +23,17 @@ importers:
       '@noble/hashes':
         specifier: ^2.0.0
         version: 2.4.0
+      '@onus/runtime':
+        specifier: workspace:*
+        version: link:../runtime
     devDependencies:
       fast-check:
         specifier: ^4.0.0
         version: 4.9.0
+
+  packages/runtime: {}
+
+  packages/stdlib: {}
 
 packages:
 

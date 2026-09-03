@@ -221,6 +221,30 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     ranges over the contained list and is vacuously true for `Err`/`None`.
     Both appear in the spec's own examples (§3.8.1, §18.2, §18.3).
 
+## M4 — const evaluator
+
+52. **`const fn` may allocate (§3.8.1).** The spec's own `parse_select`
+    returns an AST, which allocates; a `const fn` therefore declares at most
+    `alloc` (M3 item 48 narrowed). Its signature in §3.8.1 gains `! alloc`.
+53. **`ConstError` and `TypeInfo` in the library (§3.8.1).** `ConstError` is
+    the record `std.check.ConstError { offset, message }` (prelude);
+    `offset` indexes the graphemes of the constant text. A `const fn` reads
+    a type through `std.typeinfo` (`TypeInfo.name`, `TypeInfo.fields`), whose
+    intrinsics exist only at check time. `Spec` values wait for the verifier.
+54. **When check-time checks run.** At a call whose arguments are all
+    constant, the callee's `requires proved` clauses are evaluated; false is
+    `E0700`, located at the offending grapheme of the literal passed for the
+    callee's first `const` Text parameter when a `ConstError` was produced.
+    Clauses with runtime arguments are left to the verifier. `select` no
+    longer needs `.ok`: `columns_match` takes the text and the row type.
+55. **Check-time failures.** A contract failing or an intrinsic panicking
+    during evaluation is `E0701`; a `const` that is not evaluable is `E0701`;
+    exceeding the step budget is `E0501`, naming the function.
+56. **Examples at check time (§5.2).** An `example` whose statements are all
+    evaluable (pure functions, constant values) runs at check time and a
+    false assertion is `E0702`; one that needs the runtime is deferred to the
+    generated tests of milestone 5.
+
 ### Deferred, not changed
 
 - `Stream[T] ! e` as a type (§3.11) is not parsed: `-> Stream[T] ! e` is

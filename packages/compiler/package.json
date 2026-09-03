@@ -15,7 +15,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@noble/hashes": "^2.0.0"
+    "@noble/hashes": "^2.0.0",
+    "@onus/runtime": "workspace:*"
   },
   "devDependencies": {
     "fast-check": "^4.0.0"

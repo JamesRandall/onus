@@ -38,6 +38,8 @@ export const PRELUDE_MODULES = [
   'std.bool',
   'std.bytes',
   'std.duration',
+  'std.check',
+  'std.typeinfo',
 ] as const;
 
 function nameOf(m: A.Module): string {

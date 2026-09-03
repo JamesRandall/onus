@@ -1,0 +1,9 @@
+module std.check
+
+-- The failure a library's check-time validator reports (§3.8.1). `offset`
+-- indexes the graphemes of the constant text being checked; the compiler
+-- maps it into the literal at the call site.
+pub record ConstError {
+  offset: Int where it >= 0
+  message: Text
+}

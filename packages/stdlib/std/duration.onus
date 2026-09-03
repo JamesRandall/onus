@@ -1,5 +1,5 @@
 module std.duration
 
-pub intrinsic fn nanos(d: Duration) -> Int where it >= 0
+pub const intrinsic fn nanos(d: Duration) -> Int where it >= 0
 
-pub intrinsic fn of_millis(ms: Int where it >= 0) -> Duration
+pub const intrinsic fn of_millis(ms: Int where it >= 0) -> Duration

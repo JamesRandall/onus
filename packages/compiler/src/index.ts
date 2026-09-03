@@ -26,4 +26,8 @@ export { TypeTables } from './types/tables.js';
 export type { Type } from './types/type.js';
 export { EffectSet } from './effects/set.js';
 export { effectsPass } from './effects/check.js';
+export { constevalPass } from './consteval/pass.js';
+export { Evaluator, NotConst, EvalPanic, BudgetExceeded } from './consteval/eval.js';
+export { ConstTables } from './consteval/tables.js';
+export type { Value } from './consteval/values.js';
 export { EffectTables } from './effects/tables.js';

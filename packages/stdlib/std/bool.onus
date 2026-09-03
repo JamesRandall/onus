@@ -1,3 +1,3 @@
 module std.bool
 
-pub intrinsic fn to_text(b: Bool) -> Text
+pub const intrinsic fn to_text(b: Bool) -> Text

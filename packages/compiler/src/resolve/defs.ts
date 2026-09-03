@@ -10,18 +10,9 @@ import type * as A from '../syntax/ast.js';
 import type { CommentTable } from '../syntax/comments.js';
 import type { FileId, Span } from '../source.js';
 
-export type DefId = number & { readonly __brand: 'DefId' };
-export type ModuleId = number & { readonly __brand: 'ModuleId' };
+import { defId, moduleId, type DefId, type ModuleId } from '../syntax/ast.js';
 
-/** Brands a plain number as a DefId. Only the resolver should call this. */
-export function defId(n: number): DefId {
-  return n as DefId;
-}
-
-/** Brands a plain number as a ModuleId. Only the loader should call this. */
-export function moduleId(n: number): ModuleId {
-  return n as ModuleId;
-}
+export { defId, moduleId, type DefId, type ModuleId };
 
 export type DefKind =
   | 'fn'

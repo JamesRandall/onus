@@ -1,0 +1,15 @@
+module e0702_example_failed
+
+const fn double(x: Int) -> Int {
+  return x * 2
+}
+
+example wrong {
+  double(x: 2) == 4
+  double(x: 3) == 5
+}
+
+example right {
+  let six: Int = double(x: 3)
+  six == 6
+}

@@ -5,13 +5,9 @@
  * columns in rendered diagnostics are 1-based.
  */
 
-export type FileId = number & { readonly __brand: 'FileId' };
+import { fileId, type FileId } from './syntax/ast.js';
 
-/** Brands a plain number as a FileId. Only the file table should call this. */
-export function fileId(n: number): FileId {
-  // The single sanctioned cast for this brand.
-  return n as FileId;
-}
+export { fileId, type FileId };
 
 export interface Span {
   readonly file: FileId;

@@ -1,7 +1,14 @@
 module std.text
 
-pub intrinsic fn len(t: Text) -> Int where it >= 0
+pub const intrinsic fn len(t: Text) -> Int where it >= 0
 
-pub intrinsic fn bytes(t: Text) -> Bytes
+pub const intrinsic fn graphemes(t: Text) -> List[Text] ! alloc
+  ensures List.len(xs: result) == len(t: t)
 
-pub intrinsic fn starts_with(t: Text, prefix: Text) -> Bool
+pub const intrinsic fn bytes(t: Text) -> Bytes ! alloc
+
+pub const intrinsic fn starts_with(t: Text, prefix: Text) -> Bool
+
+pub const intrinsic fn lower(t: Text) -> Text ! alloc
+
+pub const intrinsic fn trim(t: Text) -> Text ! alloc

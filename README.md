@@ -10,8 +10,8 @@ reviews contracts, and the compiler is the only checker.
 
 ## Status
 
-Milestones 1–3 done: lexer, parser, canonical printer, `onus fmt`; module
-loading, name resolution, the type checker and the effects pass (`onus check` runs passes 1–6,
+Milestones 1–4 done: lexer, parser, canonical printer, `onus fmt`; module
+loading, name resolution, the type checker, the check-time evaluator and the effects pass (`onus check` runs passes 1–6,
 `--to <pass>` stops early). Later milestones per the implementation spec.
 
 ## Commands
@@ -20,6 +20,6 @@ loading, name resolution, the type checker and the effects pass (`onus check` ru
 pnpm install
 pnpm -r build
 pnpm -r test
-pnpm onus check <file.onus> [--json] [--root <dir>] [--stdlib <dir>] [--to parse|canonical|resolve|types|effects]
+pnpm onus check <file.onus> [--json] [--root <dir>] [--stdlib <dir>] [--to parse|canonical|resolve|types|consteval|effects]
 pnpm onus fmt <file.onus> [--stdout]
 ```
