@@ -1,0 +1,8 @@
+node_modules/
+dist/
+out/
+.onus/
+.DS_Store
+*.tsbuildinfo
+*.pgm
+.onus-tmp/
