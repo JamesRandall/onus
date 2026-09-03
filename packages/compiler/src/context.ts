@@ -3,6 +3,7 @@
  * reads the tables of earlier passes and writes only its own.
  */
 import { readFileSync } from 'node:fs';
+import { EffectTables } from './effects/tables.js';
 import { DiagnosticSink, type FileLookup } from './report/diagnostic.js';
 import { ResolveTables } from './resolve/defs.js';
 import { fileId, makeSourceFile, type FileId, type SourceFile, type Span } from './source.js';
@@ -39,6 +40,8 @@ export class Context implements FileLookup {
   readonly resolve = new ResolveTables();
   /** Pass 4 output. */
   readonly types = new TypeTables();
+  /** Pass 6 output. */
+  readonly effects = new EffectTables();
   /** Next node id to assign; node ids are unique across all files of a compilation. */
   nextNodeId = 0;
 

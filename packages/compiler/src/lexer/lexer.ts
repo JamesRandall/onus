@@ -20,16 +20,7 @@ export interface LexResult {
   readonly comments: readonly Token[];
 }
 
-const CONTINUATION: ReadonlySet<TokenKind> = new Set<TokenKind>([
-  '->',
-  'else',
-  '{',
-  'claims',
-  'requires',
-  'ensures',
-  'invariant',
-  'decreases',
-]);
+const CONTINUATION: ReadonlySet<TokenKind> = new Set<TokenKind>(['->', 'else', '{', 'claims', 'requires', 'ensures', 'invariant', 'decreases']);
 
 const INT_MAX = (1n << 63n) - 1n;
 

@@ -88,7 +88,7 @@ function check(args: Args): number {
     process.stderr.write(USAGE);
     return 2;
   }
-  const to = args.values.get('to') ?? 'types';
+  const to = args.values.get('to') ?? 'effects';
   if (!isPass(to)) {
     process.stderr.write(`onus: unknown pass \`${to}\`; expected one of ${PASSES.join(', ')}\n`);
     return 2;

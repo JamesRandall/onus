@@ -27,7 +27,11 @@ export type Type =
   /** Poison: produced after an error, compatible with everything, never reported again. */
   | { readonly k: 'error' };
 
-export type TypeArg = { readonly k: 'type'; readonly type: Type } | { readonly k: 'const'; readonly value: ConstValue };
+export type TypeArg =
+  | { readonly k: 'type'; readonly type: Type }
+  | { readonly k: 'const'; readonly value: ConstValue }
+  /** The binding of an effect parameter at an instantiation. */
+  | { readonly k: 'effects'; readonly effects: EffectSet };
 
 export type ConstValue =
   | { readonly k: 'int'; readonly v: bigint }
@@ -112,6 +116,8 @@ function argsEqual(a: readonly TypeArg[], b: readonly TypeArg[]): boolean {
       if (!sameBase(x.type, y.type)) return false;
     } else if (x.k === 'const' && y.k === 'const') {
       if (!constEquals(x.value, y.value)) return false;
+    } else if (x.k === 'effects' && y.k === 'effects') {
+      if (!x.effects.equals(y.effects)) return false;
     } else {
       return false;
     }
@@ -203,7 +209,7 @@ export function substitute(t: Type, subst: Subst): Type {
         k: 'fn',
         params: t.params.map((p) => ({ name: p.name, inout: p.inout, type: substitute(p.type, subst) })),
         ret: substitute(t.ret, subst),
-        effects: t.effects.substitute(() => null),
+        effects: substituteEffects(t.effects, subst),
       };
     case 'param': {
       const b = subst.get(t.def);
@@ -213,7 +219,17 @@ export function substitute(t: Type, subst: Subst): Type {
 }
 
 export function substituteArg(a: TypeArg, subst: Subst): TypeArg {
-  return a.k === 'type' ? { k: 'type', type: substitute(a.type, subst) } : { k: 'const', value: substituteConst(a.value, subst) };
+  if (a.k === 'type') return { k: 'type', type: substitute(a.type, subst) };
+  if (a.k === 'const') return { k: 'const', value: substituteConst(a.value, subst) };
+  return a;
+}
+
+/** Replaces effect parameters bound in `subst`. Effects: none. */
+export function substituteEffects(effects: EffectSet, subst: Subst): EffectSet {
+  return effects.substitute((def) => {
+    const b = subst.get(def);
+    return b !== undefined && b.k === 'effects' ? b.effects : null;
+  });
 }
 
 export function substituteConst(v: ConstValue, subst: Subst): ConstValue {
@@ -238,8 +254,10 @@ export function typeToString(t: Type, tables: ResolveTables): string {
         const parts = [...x.args.map(showArg), ...x.restrictions.map((r) => `${r.label}: ${constToString(r.value, tables)}`)];
         return `${tables.def(x.def).name}${parts.length > 0 ? `[${parts.join(', ')}]` : ''}`;
       }
-      case 'fn':
-        return `fn(${x.params.map((p) => `${p.name}: ${p.inout ? 'inout ' : ''}${show(p.type)}`).join(', ')}) -> ${show(x.ret)}`;
+      case 'fn': {
+        const eff = x.effects.size > 0 ? ` ! ${effectsToString(x.effects, tables)}` : '';
+        return `fn(${x.params.map((p) => `${p.name}: ${p.inout ? 'inout ' : ''}${show(p.type)}`).join(', ')}) -> ${show(x.ret)}${eff}`;
+      }
       case 'param':
         return tables.def(x.def).name;
       case 'typeinfo':
@@ -250,7 +268,7 @@ export function typeToString(t: Type, tables: ResolveTables): string {
         return '<error>';
     }
   };
-  const showArg = (a: TypeArg): string => (a.k === 'type' ? show(a.type) : constToString(a.value, tables));
+  const showArg = (a: TypeArg): string => (a.k === 'type' ? show(a.type) : a.k === 'const' ? constToString(a.value, tables) : `! ${effectsToString(a.effects, tables)}`);
   const showArgs = (args: readonly TypeArg[]): string => (args.length > 0 ? `[${args.map(showArg).join(', ')}]` : '');
   return show(t);
 }
@@ -279,4 +297,13 @@ export function constToString(v: ConstValue, tables: ResolveTables): string {
 
 export function emptyEffects(): EffectSet {
   return EffectSet.empty();
+}
+
+/** Renders an effect set as `a, b.c` for diagnostics. Effects: none. */
+export function effectsToString(effects: EffectSet, tables: ResolveTables): string {
+  return effects
+    .values()
+    .map((e) => (e.k === 'prim' ? e.name : e.k === 'resource' ? e.name : tables.def(e.def).name))
+    .sort()
+    .join(', ');
 }

@@ -13,7 +13,7 @@
  */
 import { evalBasic } from '../consteval/basic.js';
 import type { Context } from '../context.js';
-import { EffectSet, isPrimEffect, type Effect } from '../effects/set.js';
+import { EffectSet, type Effect } from '../effects/set.js';
 import { diagnostic } from '../report/diagnostic.js';
 import type { Code } from '../report/codes.js';
 import type { Def, DefId, ModuleRecord, ResolveTables } from '../resolve/defs.js';
@@ -177,11 +177,8 @@ class Checker {
   private effectSetOf(refs: readonly A.EffectRef[]): EffectSet {
     const out: Effect[] = [];
     for (const r of refs) {
-      const name = r.name.segments.map((s) => s.text).join('.');
       const res = this.t.refs.get(r.id);
-      if (res !== undefined && res.k === 'def') out.push({ k: 'param', def: res.def });
-      else if (isPrimEffect(name)) out.push({ k: 'prim', name });
-      // Resource effects and claims are the effects pass's concern (milestone 3).
+      if (res !== undefined && res.k === 'effect') out.push(res.effect);
     }
     return EffectSet.of(out);
   }
@@ -635,7 +632,7 @@ class Checker {
 
   private checkContracts(sig: Signature): void {
     for (const c of sig.contracts) {
-      this.inFn({ ret: sig.ret, assertion: false, recover: false, frame: 0 }, () => this.expr(c.expr, BOOL));
+      this.inFn({ ret: sig.ret, assertion: false, recover: false, frame: 0 }, () => this.expr(c.expr, c.clause === 'decreases' ? INT : BOOL));
     }
   }
 
@@ -868,10 +865,8 @@ class Checker {
         }
         const subst = this.substOf(union, st.args);
         const fields = this.fieldsOf(variant);
-        if (p.fields === null) {
-          if (fields.length > 0) this.report('E0310', p.span, `\`${variant.name}\` has ${fields.length} field${fields.length === 1 ? '' : 's'}; write \`${variant.name}(..)\` or name them`);
-          return { kind: 'variant', variant: variant.id, guarded };
-        }
+        // A bare variant name matches any payload, like `Variant(..)`.
+        if (p.fields === null) return { kind: 'variant', variant: variant.id, guarded };
         let i = 0;
         let rest = false;
         for (const pf of p.fields) {
@@ -1261,7 +1256,15 @@ class Checker {
           const ap = a.params[i];
           if (pp === undefined || ap === undefined || pp.inout !== ap.inout || !this.unify(pp.type, ap.type, subst, tvars)) return false;
         }
-        return this.unify(p.ret, a.ret, subst, tvars);
+        if (!this.unify(p.ret, a.ret, subst, tvars)) return false;
+        // An effect parameter of the pattern binds to the actual effects not accounted for by concrete ones.
+        const concrete = EffectSet.of(p.effects.values().filter((e) => e.k !== 'param' || !tvars.has(e.def)));
+        for (const e of p.effects.values()) {
+          if (e.k === 'param' && tvars.has(e.def) && !subst.has(e.def)) {
+            subst.set(e.def, { k: 'effects', effects: EffectSet.of(a.effects.values().filter((x) => !concrete.has(x))) });
+          }
+        }
+        return true;
       }
       case 'param':
         return a.k === 'param' && a.def === p.def;
@@ -1371,7 +1374,11 @@ class Checker {
       this.expr(e.domain.lo, INT);
       this.expr(e.domain.hi, INT);
     } else {
-      const elem = this.elementType(this.infer(e.domain.expr), e.domain.expr.span);
+      // In a contract, a domain of type Result[List[T], E] or Option[List[T]] ranges over the
+      // contained list and the formula holds vacuously for Err / None (§5.3).
+      const domType = this.infer(e.domain.expr);
+      const inner = this.unwrapFallible(domType);
+      const elem = this.elementType(inner === null ? domType : inner.value, e.domain.expr.span);
       if (elem !== null) this.coerce(elem, binder, e.type.span, 'binder');
     }
     if (e.where) this.expr(e.where, BOOL);
@@ -1513,7 +1520,11 @@ class Checker {
     this.matchNamed(e.args, sig.params, subst, tparams, e.span, `\`${fnDef.name}\``);
     for (const p of tparams) {
       if (subst.has(p.def)) continue;
-      if (p.k === 'effect') continue;
+      if (p.k === 'effect') {
+        // An effect parameter no argument mentions is instantiated empty.
+        subst.set(p.def, { k: 'effects', effects: EffectSet.empty() });
+        continue;
+      }
       this.report('E0324', e.span, `cannot determine type argument \`${this.t.def(p.def).name}\` of \`${fnDef.name}\`; pass it explicitly`);
       subst.set(p.def, p.k === 'type' ? { k: 'type', type: ERROR } : { k: 'const', value: { k: 'unit' } });
     }
@@ -1539,6 +1550,10 @@ class Checker {
     });
     const ret = substitute(substitute(sig.ret, subst), indexSubst);
     this.ty.instantiations.set(e.id, tparams.map((p) => subst.get(p.def) ?? { k: 'type', type: ERROR }));
+    this.ty.effectBindings.set(e.id, new Map(tparams.flatMap((p) => {
+      const b = subst.get(p.def);
+      return p.k === 'effect' && b !== undefined && b.k === 'effects' ? [[p.def, b.effects] as const] : [];
+    })));
     return ret;
   }
 }
@@ -1586,9 +1601,9 @@ function hasUnbound(t: Type, tvars: ReadonlySet<DefId>, subst: Subst): boolean {
     case 'union':
     case 'opaque':
     case 'capability':
-      return t.args.some((a) => (a.k === 'type' ? hasUnbound(a.type, tvars, subst) : a.value.k === 'sym' && tvars.has(a.value.def) && !subst.has(a.value.def)));
+      return t.args.some((a) => (a.k === 'type' ? hasUnbound(a.type, tvars, subst) : a.k === 'const' && a.value.k === 'sym' && tvars.has(a.value.def) && !subst.has(a.value.def)));
     case 'fn':
-      return t.params.some((p) => hasUnbound(p.type, tvars, subst)) || hasUnbound(t.ret, tvars, subst);
+      return t.params.some((p) => hasUnbound(p.type, tvars, subst)) || hasUnbound(t.ret, tvars, subst) || t.effects.values().some((e) => e.k === 'param' && tvars.has(e.def) && !subst.has(e.def));
     default:
       return false;
   }
@@ -1603,7 +1618,7 @@ function mentionsSym(t: Type, def: DefId): boolean {
     case 'union':
     case 'opaque':
     case 'capability':
-      return t.args.some((a) => (a.k === 'type' ? mentionsSym(a.type, def) : a.value.k === 'sym' && a.value.def === def));
+      return t.args.some((a) => (a.k === 'type' ? mentionsSym(a.type, def) : a.k === 'const' && a.value.k === 'sym' && a.value.def === def));
     case 'fn':
       return t.params.some((p) => mentionsSym(p.type, def)) || mentionsSym(t.ret, def);
     default:

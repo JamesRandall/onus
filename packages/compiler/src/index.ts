@@ -25,3 +25,5 @@ export { ResolveTables, type Def, type DefId, type ModuleId, type Resolution } f
 export { TypeTables } from './types/tables.js';
 export type { Type } from './types/type.js';
 export { EffectSet } from './effects/set.js';
+export { effectsPass } from './effects/check.js';
+export { EffectTables } from './effects/tables.js';

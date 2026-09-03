@@ -44,6 +44,7 @@ export const CODES = {
   E0113: 'binding shadows a visible name',
   E0114: 'contract keyword outside its context',
   E0201: 'undeclared effect',
+  E0202: 'unknown effect',
   E0302: 'postcondition not established',
   E0310: 'pattern field mismatch',
   E0320: 'recursive cycle without shared measure',

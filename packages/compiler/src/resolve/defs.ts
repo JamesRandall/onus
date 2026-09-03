@@ -5,6 +5,7 @@
  * writes `ResolveTables`: the module graph, the definition table, and for
  * each use site the `Resolution` it denotes. Later passes read only these.
  */
+import type { Effect } from '../effects/set.js';
 import type * as A from '../syntax/ast.js';
 import type { CommentTable } from '../syntax/comments.js';
 import type { FileId, Span } from '../source.js';
@@ -98,7 +99,9 @@ export type Resolution =
   /** `Grid.filled`, `Int.to_text`: function `fn` of the module owning the type. */
   | { readonly k: 'companion'; readonly owner: TypeOwner; readonly fn: DefId }
   /** `Ord.compare`: an interface function, dispatched on the implementing type. */
-  | { readonly k: 'iface-fn'; readonly iface: DefId; readonly fn: DefId };
+  | { readonly k: 'iface-fn'; readonly iface: DefId; readonly fn: DefId }
+  /** An effect reference: primitive, resource, or effect parameter. */
+  | { readonly k: 'effect'; readonly effect: Effect };
 
 export interface ImportRecord {
   readonly alias: string;
@@ -143,6 +146,8 @@ export class ResolveTables {
   readonly members = new Map<ModuleId, ModuleMembers>();
   /** Every node of every loaded module, by id. */
   readonly nodes = new Map<A.NodeId, A.Node>();
+  /** Resource effect names (`sql.read`) granted by each module's capabilities. */
+  readonly granted = new Map<ModuleId, Set<string>>();
 
   def(id: DefId): Def {
     const d = this.defs[id];

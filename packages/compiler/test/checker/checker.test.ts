@@ -13,8 +13,8 @@ import { CODES } from '../../src/report/codes.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-/** Codes of later milestones (verification) that no milestone-2 fixture can produce yet. */
-const LATER = new Set(['E0302', 'E0320']);
+/** Codes of later milestones (verification) that no fixture can produce yet. */
+const LATER = new Set(['E0302']);
 /** Reported by the parser; its fixture lives in test/syntax. */
 const PARSER_REPORTED = new Set(['E0102']);
 
@@ -38,7 +38,7 @@ describe('checker fixtures', () => {
 
   it('covers every resolution and typing diagnostic code', () => {
     for (const f of fixtures) for (const d of pipeline(f.path, f.text, here).diagnostics) seen.add(d.code);
-    const codes = Object.keys(CODES).filter((c) => (c.startsWith('E01') || c.startsWith('E03')) && !LATER.has(c) && !PARSER_REPORTED.has(c));
+    const codes = Object.keys(CODES).filter((c) => (c.startsWith('E01') || c.startsWith('E02') || c.startsWith('E03')) && !LATER.has(c) && !PARSER_REPORTED.has(c));
     expect(codes.filter((c) => !seen.has(c))).toEqual([]);
   });
 });

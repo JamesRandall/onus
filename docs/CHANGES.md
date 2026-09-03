@@ -141,9 +141,10 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
 31. **Module aliases win in dotted names.** `auth.require(...)` denotes the
     module even when a parameter `auth` is in scope (§18.3 relies on this); a
     bare `auth` is the parameter. Aliases live in their own namespace.
-32. **No shadowing.** A local may not reuse the name of a visible value
-    binding (`E0113`): another local, a parameter, or a module-level function
-    or constant. Fixture: `checker/e0113`.
+32. **No shadowing.** A local may not reuse the name of another local or
+    parameter (`E0113`). Module-level functions and constants may be
+    shadowed, because parameters are the labels callers read and the spec's
+    own API pairs `select(..., statement:)` with `sql.statement`. Fixture: `checker/e0113`.
 33. **Examples and properties** share a namespace separate from functions, so
     `example escape_count` may accompany `fn escape_count` (§18.1); paths and
     policies likewise.
@@ -178,6 +179,47 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     and may not `return`; `Panicked` is a record in `std.results`.
 42. **Closures** may not capture capabilities (`E0330`), in addition to `var`s
     and `inout` parameters (§3.7). Fixture: `checker/e0330_capture_capability`.
+
+## M3 — effects
+
+43. **Function-level `decreases` (§5.1).** Recursion needs a measure but the
+    grammar only had `decreases` as a loop clause; it is now also a contract
+    clause of a function (`decreases n` after `requires`/`ensures`). A
+    recursive cycle whose functions lack one and do not declare `diverge` is
+    `E0320`. Fixtures: `roundtrip/14_fn_signatures`, `checker/e0320`.
+44. **Resource effects are declared by `grants` (§6.1, §8).** `sql.read` is
+    the effect `read` of module `sql`, declared by a capability in that
+    module granting `sql.read`; it is spelled the same everywhere and is
+    reachable only where that module is imported. Any other effect name is
+    `E0202`. The primitive set stays closed.
+45. **`mutate` is about the caller's own parameters (§6.1).** A function
+    needs `mutate` iff it assigns to or passes on one of its `inout`
+    parameters; a callee's `mutate` does not propagate through a local
+    `var` (Mandelbrot's `render` calls `Grid.set` with `! alloc` only).
+46. **What allocates (§6.1).** List literals, `++` and closure creation are
+    `alloc`; records and variants are values and are not. A `loop while`
+    without `decreases` is `diverge`. `recover` absorbs `panic`.
+47. **Effect polymorphism (§6.2).** Passing a function value to a parameter of
+    type `fn(...) -> U ! e` binds `e` to the value's effects beyond those
+    the parameter lists; the call contributes the callee's effects with `e`
+    substituted. A function value may not flow into a function-typed
+    position (binding, argument, return) declaring fewer effects (`E0201`).
+    Fixtures: `checker/ok_effects`, `e0201_fn_value_flow`.
+48. **Purity of contracts.** A `const fn` declares no effects; `requires`,
+    `ensures`, `decreases` and `where` clauses may allocate and nothing else.
+49. **Impl effects (§3.6).** An impl function declaring effects beyond the
+    interface's is `E0334`. Fixture: `checker/e0334_impl_effects`.
+50. **Examples completed (§18.2, §18.3).** The reporting and checkout examples
+    referenced modules and functions the spec did not show; `app.config`,
+    `app.auth`, `vendor.payments`, `Request`, `Order`, `Basket`,
+    `load_basket`, `record_order` and the `no_third_party_assumes` policy are
+    now in `examples/`, and `Receipt` is `payments.Receipt`.
+
+51. **Contract conveniences (§3.9, §5.3).** A bare variant in a pattern
+    (`result is Ok`, `| Ok ->`) matches any payload, like `Ok(..)`; and a
+    quantifier whose domain has type `Result[List[T], E]` or `Option[List[T]]`
+    ranges over the contained list and is vacuously true for `Err`/`None`.
+    Both appear in the spec's own examples (§3.8.1, §18.2, §18.3).
 
 ### Deferred, not changed
 

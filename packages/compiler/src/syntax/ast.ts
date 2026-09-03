@@ -332,7 +332,8 @@ export interface EffectRef extends NodeBase {
 
 export interface Contract extends NodeBase {
   readonly kind: 'Contract';
-  readonly clause: 'requires' | 'ensures';
+  /** `decreases` is the termination measure of a recursive function (§5.1). */
+  readonly clause: 'requires' | 'ensures' | 'decreases';
   readonly proved: boolean;
   readonly expr: Expr;
 }

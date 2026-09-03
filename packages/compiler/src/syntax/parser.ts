@@ -419,10 +419,11 @@ class Parser {
 
   private contracts(): A.Contract[] {
     const out: A.Contract[] = [];
-    while (this.at('requires') || this.at('ensures')) {
+    while (this.at('requires') || this.at('ensures') || this.at('decreases')) {
       const s = this.here();
-      const clause = this.advance().kind === 'requires' ? 'requires' : 'ensures';
-      const proved = this.accept('proved') !== null;
+      const kw = this.advance().kind;
+      const clause = kw === 'requires' ? 'requires' : kw === 'ensures' ? 'ensures' : 'decreases';
+      const proved = clause !== 'decreases' && this.accept('proved') !== null;
       const expr = this.withoutBrace(() => this.parseExpr());
       out.push({ id: PLACEHOLDER, kind: 'Contract', span: this.spanFrom(s), clause, proved, expr });
     }

@@ -11,8 +11,9 @@ import { fileId, span, type SourceFile } from './source.js';
 import { parse } from './syntax/parser.js';
 import { print } from './syntax/printer.js';
 import { typesPass } from './types/check.js';
+import { effectsPass } from './effects/check.js';
 
-export const PASSES = ['parse', 'canonical', 'resolve', 'types'] as const;
+export const PASSES = ['parse', 'canonical', 'resolve', 'types', 'effects'] as const;
 export type PassName = (typeof PASSES)[number];
 
 /**
@@ -106,4 +107,6 @@ export function runPipeline(ctx: Context, to: PassName = 'types', passes: Partia
   guarded(ctx, 'resolve', passes.resolve ?? resolvePass);
   if (upTo < PASSES.indexOf('types') || !clean()) return;
   guarded(ctx, 'types', passes.types ?? typesPass);
+  if (upTo < PASSES.indexOf('effects') || !clean()) return;
+  guarded(ctx, 'effects', passes.effects ?? effectsPass);
 }

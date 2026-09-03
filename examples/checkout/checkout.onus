@@ -4,6 +4,22 @@ import std.io
 import app.auth
 import vendor.payments
 
+record Request {
+  caller: Text
+  customer: Text
+  idempotency_key: Text
+}
+
+record Order {
+  customer: Text
+  amount_pence: Int where it >= 0
+}
+
+record Basket {
+  items: List[Order]
+  total: Int where it >= 0
+}
+
 -- auth.AuthedCustomer is `pub sealed` (§3.10): readable anywhere, constructible only inside app.auth.
 -- The only producer is auth.require, so any function demanding one is callable only after a successful auth check.
 pub fn recent_orders(
@@ -18,6 +34,33 @@ pub fn recent_orders(
   return sql.query(db: db, statement: stmt)
 }
 
+fn load_basket(
+  db: sql.Db[ReadOnly],
+  who: auth.AuthedCustomer
+) -> Result[Basket, sql.Error] ! sql.read, alloc {
+  let stmt: sql.Select[Order] = sql.select[text: "select * from baskets where customer_id = $1"](
+    params: [sql.text(x: who.id)],
+    row: Order
+  )
+  let items: List[Order] = try sql.query(db: db, statement: stmt)
+  return Ok(value: Basket { items: items, total: 0 })
+}
+
+fn record_order(
+  db: sql.Db[ReadWrite, schema: "orders"],
+  who: auth.AuthedCustomer,
+  basket: Basket,
+  receipt: payments.Receipt
+) -> Result[Unit, sql.Error] ! sql.write, alloc
+  claims Idempotent
+{
+  assume Idempotent "The insert is `on conflict (receipt_id) do nothing`."
+  let stmt: sql.Statement = sql.statement[
+    text: "insert into orders (customer_id, receipt_id, amount_pence) values ($1, $2, $3) on conflict (receipt_id) do nothing"
+  ](params: [sql.text(x: who.id), sql.text(x: receipt.id), sql.int(x: basket.total)])
+  return sql.execute(db: db, statement: stmt)
+}
+
 union CheckoutError =
   | Unauthorised of detail: auth.Error
   | Storage of detail: sql.Error
@@ -30,7 +73,7 @@ pub fn handle_checkout(
   db: sql.Db[ReadWrite, schema: "orders"],
   pay: payments.Client,
   auth: auth.Service
-) -> Result[Receipt, CheckoutError] ! sql.read, sql.write, io.net, io.clock, alloc
+) -> Result[payments.Receipt, CheckoutError] ! sql.read, sql.write, io.net, io.clock, alloc
   claims Idempotent
 {
   let who: auth.AuthedCustomer = try auth.require(
@@ -44,7 +87,7 @@ pub fn handle_checkout(
   if List.is_empty(xs: basket.items) {
     return Err(error: Empty)
   }
-  let receipt: Receipt = try payments.charge(
+  let receipt: payments.Receipt = try payments.charge(
     client: pay,
     key: req.idempotency_key,
     amount: basket.total,
@@ -53,6 +96,9 @@ pub fn handle_checkout(
   try record_order(db: db, who: who, basket: basket, receipt: receipt) else e: Storage(detail: e)
   return Ok(value: receipt)
 }
+
+policy no_third_party_assumes
+  forbid assume outside { self, std.* }
 
 path checkout
   entry handle_checkout

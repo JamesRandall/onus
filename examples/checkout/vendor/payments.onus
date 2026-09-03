@@ -1,0 +1,28 @@
+module vendor.payments
+import std.io
+import app.auth
+
+pub claim Idempotent "Calling twice with the same arguments has the same observable effect as calling once."
+
+pub capability Client
+  grants io.net
+
+pub union Error =
+  | Declined of reason: Text
+
+pub record Receipt {
+  id: Text
+  amount: Int where it >= 0
+}
+
+pub fn charge(
+  client: Client,
+  key: Text,
+  amount: Int where it >= 0,
+  who: auth.AuthedCustomer
+) -> Result[Receipt, Error] ! io.net, alloc
+  claims Idempotent
+{
+  assume Idempotent "Vendor API deduplicates on key for 24h; see contract §4.2"
+  return Ok(value: Receipt { id: key ++ "/" ++ who.id, amount: amount })
+}

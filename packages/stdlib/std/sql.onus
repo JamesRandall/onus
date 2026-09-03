@@ -1,0 +1,52 @@
+module std.sql
+import std.io
+
+pub union DbMode =
+  | ReadOnly
+  | ReadWrite
+
+pub union Error =
+  | Connection of detail: Text
+  | Refinement of row: Int, column: Text
+  | Timeout of after: Duration
+  | Malformed of detail: Text
+
+pub capability Db[const mode: DbMode]
+  grants sql.read when mode == ReadOnly or mode == ReadWrite
+  grants sql.write when mode == ReadWrite
+
+pub intrinsic type Param
+
+pub intrinsic type Select[T]
+
+pub intrinsic type Statement
+
+pub intrinsic fn int(x: Int) -> Param
+
+pub intrinsic fn text(x: Text) -> Param
+
+pub intrinsic fn select[const text: Text, T](params: List[Param], row: TypeInfo) -> Select[T]
+
+pub intrinsic fn statement[const text: Text](params: List[Param]) -> Statement
+
+pub intrinsic fn connect(
+  net: io.Net,
+  dsn: Text,
+  mode: DbMode
+) -> Result[Db[mode], Error] ! io.net, alloc
+
+pub intrinsic fn narrow[const m: DbMode](db: Db[m], to: DbMode) -> Db[to]
+
+pub intrinsic fn restrict[const m: DbMode](db: Db[m], schema: Text) -> Db[m, schema: schema]
+
+pub intrinsic fn deadline[const m: DbMode](db: Db[m], ms: Duration) -> Db[m, deadline: ms]
+
+pub intrinsic fn query[T](
+  db: Db[ReadOnly],
+  statement: Select[T]
+) -> Result[List[T], Error] ! sql.read, alloc
+
+pub intrinsic fn execute(
+  db: Db[ReadWrite],
+  statement: Statement
+) -> Result[Unit, Error] ! sql.write, alloc

@@ -1,0 +1,12 @@
+module e0202_unknown_effect
+import std.io
+
+fn f() -> Int ! magic, io.teleport, sql.read, e {
+  return 1
+}
+
+capability Thing
+  grants other.read
+  grants io.file
+
+claim Weird := effects == { nothing }

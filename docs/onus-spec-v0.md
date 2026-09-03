@@ -387,7 +387,7 @@ match p with
 ```
 
 - Arms are tried in order. A guard (`when expr`) makes an arm conditional; the compiler tracks guard coverage, so the two `Escaped` arms above are exhaustive together and would not be with only the first.
-- A pattern lists the variant's fields in declaration order. A field name binds that field; `_` skips one; `..` skips the rest. Writing a name that is not the field at that position is `E0310 pattern field mismatch` — patterns cannot rename.
+- A pattern lists the variant's fields in declaration order. A field name binds that field; `_` skips one; `..` skips the rest; a bare variant name matches any payload, like `Variant(..)`. Writing a name that is not the field at that position is `E0310 pattern field mismatch` — patterns cannot rename. <!-- changed: M3, docs/CHANGES.md item 51 -->
 - Nested patterns on payload fields are not supported in v0; match on the field in a nested `match`. (This keeps exhaustiveness checking trivially decidable and the grammar LL(1). Revisit if it proves painful.)
 - Bound fields carry their declared refinements into the arm as path knowledge.
 - `match` on `Bool`, `Int` and `Text` literals is permitted and requires a `_` arm.
@@ -444,7 +444,7 @@ Rules:
 
 - `let x: T = e` — immutable binding. Required annotation.
 - `var x: T = e` — mutable local. Assignment `x = e` re-checks `T`'s refinement.
-- A local may not reuse the name of a visible value binding: another local, a parameter, or a function or constant of the module. <!-- changed: M2, docs/CHANGES.md item 32 -->
+- A local may not reuse the name of another local or parameter. <!-- changed: M2, docs/CHANGES.md item 32 -->
 - A bare expression statement must be a call whose result is `Unit`; a discarded value is an error. <!-- changed: M2, docs/CHANGES.md item 39 -->
 - Closures capture by value and cannot capture a `var`.
 - There is no reference type, no address-of, and no aliasing of mutable state anywhere in the language.
@@ -498,7 +498,7 @@ for py: Int in 0 ..< height { ... }
 
 Loop `invariant` clauses are obligations at entry and at the end of every iteration, and are assumptions after exit.
 
-Recursion: a recursive function declares `decreases` on an expression over its parameters, checked at every recursive call site. Mutual recursion requires the same expression (up to renaming) on every function in the cycle; the compiler computes the cycle and reports `E0320 recursive cycle without shared measure` otherwise.
+Recursion: a recursive function declares `decreases` on an expression over its parameters, as a contract clause after `requires`/`ensures` (`decreases n`), checked at every recursive call site. <!-- changed: M3, docs/CHANGES.md item 43 --> Mutual recursion requires the same expression (up to renaming) on every function in the cycle; the compiler computes the cycle and reports `E0320 recursive cycle without shared measure` otherwise.
 
 ### 5.3 Quantifiers
 
@@ -510,7 +510,7 @@ ensures forall px: Int, py: Int where (px, py) != (x, y): grid.get(x: px, y: py)
 invariant exists i: Int in 0 ..< n: xs.get(i: i) == target
 ```
 
-The verifier models `List[T]` and `Bytes` as sequences with `len` and `get`, `Grid` as a two-dimensional sequence, `Map[K, V]` as a partial function, and `Text` as opaque except for `len` and equality. Quantification is over a stated domain — a range, a list, or a finite type — so every quantified obligation is bounded and stays in the decidable fragment. Quantification over all `Int` without a range is a syntax error in v0. Nested quantifiers are permitted to depth two.
+The verifier models `List[T]` and `Bytes` as sequences with `len` and `get`, `Grid` as a two-dimensional sequence, `Map[K, V]` as a partial function, and `Text` as opaque except for `len` and equality. Quantification is over a stated domain — a range, a list, or a finite type — so every quantified obligation is bounded and stays in the decidable fragment. A domain of type `Result[List[T], E]` or `Option[List[T]]` ranges over the contained list and the formula is vacuously true for `Err` and `None`, which is how `ensures forall o: Order in result: …` reads a fallible result. <!-- changed: M3, docs/CHANGES.md item 51 --> Quantification over all `Int` without a range is a syntax error in v0. Nested quantifiers are permitted to depth two.
 
 ### 5.2 Examples and properties
 
@@ -543,20 +543,20 @@ The compiler understands these directly:
 
 | Effect | Meaning |
 |---|---|
-| `alloc` | May allocate on the heap. Absence is proved by the absence of allocating operations. |
-| `mutate` | May mutate an `inout` parameter. |
+| `alloc` | May allocate on the heap. Absence is proved by the absence of allocating operations: list literals, `++`, closure creation, and calls to allocating functions. Records and variants are values and do not allocate. <!-- changed: M3, item 46 --> |
+| `mutate` | May mutate one of its own `inout` parameters, by assignment or by passing it on `inout`. A callee's `mutate` does not propagate through a caller's local `var`. <!-- changed: M3, item 45 --> |
 | `panic` | May halt on a runtime contract violation. A function without `panic` must have every obligation *proved*. |
 | `diverge` | May fail to terminate. |
 | `nondet` | Result depends on something other than its arguments (clock, randomness, scheduling). |
 | `io.file`, `io.net`, `io.env`, `io.clock`, `io.rand` | Access to the corresponding resource, via a capability. |
 
-The set is closed. Library-defined effects are claims (§7).
+The set is closed. Resource effects such as `sql.read` are declared by a capability's `grants` clause in the module whose name ends in `sql` and are spelled `sql.read` everywhere (§8); any other effect name is an error. Library-defined properties beyond these are claims (§7). <!-- changed: M3, item 44 -->
 
 ### 6.2 Composition
 
 A callee's effect set must be a subset of the caller's. This is the only rule, and it is checked structurally.
 
-Higher-order functions are effect-polymorphic:
+Higher-order functions are effect-polymorphic; passing a function value to a parameter of type `fn(x: T) -> U ! e` binds `e` to the value's effects beyond those the parameter lists, and a function value never flows into a function-typed position declaring fewer effects than it has: <!-- changed: M3, item 47 -->
 
 ```
 fn map[T, U, e](xs: List[T], f: fn(x: T) -> U ! e) -> List[U] ! e, alloc

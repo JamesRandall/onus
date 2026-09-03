@@ -1,0 +1,29 @@
+module e0201_fn_value_flow
+
+fn apply(f: fn(x: Int) -> Int, x: Int) -> Int {
+  return f(x: x)
+}
+
+fn map[T, U, e](xs: List[T], f: fn(x: T) -> U ! e) -> List[U] ! e, alloc {
+  var out: List[U] = []
+  for x: T in xs {
+    out = out ++ [f(x: x)]
+  }
+  return out
+}
+
+fn f(xs: List[Int]) -> Int ! alloc {
+  let noisy: fn(x: Int) -> Int ! alloc = fn(x: Int) -> Int ! alloc {
+    return List.len(xs: [x])
+  }
+  let quiet: fn(x: Int) -> Int = noisy
+  let a: Int = apply(f: noisy, x: 1)
+  let b: List[Int] = map(xs: xs, f: noisy)
+  return a + List.len(xs: b)
+}
+
+fn g() -> fn(x: Int) -> Int {
+  return fn(x: Int) -> Int ! alloc {
+    return x
+  }
+}

@@ -16,7 +16,7 @@
  *     then the imports'; more than one candidate is ambiguous;
  *   - a type name resolves through type parameters, this module's types, the
  *     prelude's public types, then the primitives;
- *   - locals may not shadow a visible value binding;
+ *   - locals may not shadow another local or parameter;
  *   - `sealed` types are constructed only in their module (or a test module);
  *   - `it` is legal only in a `where` clause, `result` and `old` only in
  *     `ensures`; `old` takes an `inout` parameter;
@@ -24,6 +24,7 @@
  *     enclosing frame.
  */
 import type { Context } from '../context.js';
+import { isPrimEffect, type Effect } from '../effects/set.js';
 import { diagnostic } from '../report/diagnostic.js';
 import type { Span } from '../source.js';
 import type * as A from '../syntax/ast.js';
@@ -40,7 +41,7 @@ import {
   type TypeOwner,
 } from './defs.js';
 
-type ResolveCode = 'E0105' | 'E0106' | 'E0107' | 'E0108' | 'E0109' | 'E0110' | 'E0111' | 'E0113' | 'E0114' | 'E0330';
+type ResolveCode = 'E0105' | 'E0106' | 'E0107' | 'E0108' | 'E0109' | 'E0110' | 'E0111' | 'E0113' | 'E0114' | 'E0202' | 'E0330';
 
 interface Scope {
   readonly parent: Scope | null;
@@ -191,6 +192,24 @@ class Collector {
         case 'CapabilityDecl': {
           const id = this.add(m, 'capability', item.name, item, { pub: item.vis.pub });
           this.declareType(members.types, id);
+          const own = m.name.split('.').pop() ?? m.name;
+          for (const g of item.grants) {
+            const name = g.effect.name.segments.map((s) => s.text).join('.');
+            if (isPrimEffect(name)) continue;
+            const segs = g.effect.name.segments;
+            if (segs.length !== 2 || segs[0]?.text !== own) {
+              this.ctx.sink.report(
+                diagnostic({ code: 'E0202', span: g.effect.span, def: item.name.text, context: [`a capability in module \`${m.name}\` may grant a primitive effect or a resource effect named \`${own}.<name>\``] }),
+              );
+              continue;
+            }
+            let set = t.granted.get(m.id);
+            if (set === undefined) {
+              set = new Set();
+              t.granted.set(m.id, set);
+            }
+            set.add(name);
+          }
           break;
         }
         case 'PathDecl':
@@ -300,14 +319,42 @@ class ModuleResolver {
     return null;
   }
 
-  /** Records effect parameters referenced by an effect list; other effect names are the effects pass's concern. */
-  private effects(refs: readonly A.EffectRef[], scope: Scope): void {
+  /**
+   * Resolves an effect list: a primitive effect, an effect parameter in
+   * scope, or a resource effect `a.b` granted by a capability of the module
+   * aliased `a` (or of this module, when its name ends in `a`). `allowRecover`
+   * admits `recover` in a path's `forbid` clause (§10.2).
+   */
+  private effects(refs: readonly A.EffectRef[], scope: Scope, allowRecover = false): void {
     for (const e of refs) {
-      const seg = e.name.segments[0];
-      if (seg === undefined || e.name.segments.length !== 1) continue;
-      const d = this.lookupEffectParam(scope, seg.text);
-      if (d !== null) this.t.refs.set(e.id, { k: 'def', def: d });
+      const effect = this.effectOf(e, scope, allowRecover);
+      if (effect !== null) this.t.refs.set(e.id, { k: 'effect', effect });
     }
+  }
+
+  private effectOf(e: A.EffectRef, scope: Scope, allowRecover: boolean): Effect | null {
+    const name = e.name.segments.map((s) => s.text).join('.');
+    if (isPrimEffect(name)) return { k: 'prim', name };
+    const segs = e.name.segments;
+    const head = segs[0];
+    if (head === undefined) return null;
+    if (segs.length === 1) {
+      if (name === 'recover' && allowRecover) return null;
+      const d = this.lookupEffectParam(scope, head.text);
+      if (d !== null) return { k: 'param', def: d };
+      this.report('E0202', e.span, `\`${name}\` is neither a primitive effect nor an effect parameter in scope`);
+      return null;
+    }
+    if (segs.length === 2) {
+      const own = this.m.name.split('.').pop();
+      const mod = head.text === own ? this.m.id : this.aliases.get(head.text);
+      if (mod !== undefined && this.t.granted.get(mod)?.has(name)) return { k: 'resource', module: mod, name };
+      if (mod === undefined) this.report('E0202', e.span, `\`${head.text}\` is not an imported module alias, so \`${name}\` names no effect`);
+      else this.report('E0202', e.span, `no capability of module \`${this.t.moduleOf(mod).name}\` grants \`${name}\``);
+      return null;
+    }
+    this.report('E0202', e.span, `\`${name}\` is not an effect`);
+    return null;
   }
 
   /** Bare variant lookup: this module, then the prelude, then imports. Null when unknown; reports E0108 when ambiguous. */
@@ -331,10 +378,15 @@ class ModuleResolver {
     return found[0] ?? null;
   }
 
-  /** Adds a local value binding, rejecting shadowing. */
+  /**
+   * Adds a local value binding, rejecting shadowing of another local or
+   * parameter. Module-level functions and constants may be shadowed: a
+   * parameter is a label callers read (`select(..., statement: stmt)` next to
+   * `sql.statement`).
+   */
   private bindValue(scope: Scope, kind: DefKind, name: A.Ident, node: A.NodeBase, inout = false): DefId {
     const existing = this.lookupValue(scope, name.text);
-    if (existing !== null) {
+    if (existing !== null && this.t.def(existing).frame >= 0) {
       const prev = this.t.def(existing);
       this.report('E0113', name.span, `\`${name.text}\` is already bound (${prev.kind} at ${this.where(prev.span)}); choose another name`);
     }
@@ -440,6 +492,7 @@ class ModuleResolver {
       case 'CapabilityDecl': {
         const scope = this.child(this.moduleScope);
         this.tparams(item.tparams, scope);
+        // Grant names were validated when the definitions were collected.
         for (const g of item.grants) if (g.when) this.expr(g.when, scope);
         break;
       }
@@ -537,6 +590,8 @@ class ModuleResolver {
     if (entry === undefined || this.t.def(entry).kind !== 'fn') this.report('E0105', p.entry.span, `no function \`${p.entry.text}\` in this module`);
     else this.t.refs.set(p.id, { k: 'def', def: entry });
     for (const c of p.clauses) {
+      if (c.kind === 'PathEffects') this.effects(c.effects, this.moduleScope);
+      if (c.kind === 'PathForbid') this.effects(c.effects, this.moduleScope, true);
       if (c.kind === 'PathRequire') for (const cl of c.claims) this.claimRef(cl);
       if (c.kind === 'PathPolicy') {
         const pol = this.t.membersOf(this.m.id).policies.get(c.name.text);
@@ -550,8 +605,13 @@ class ModuleResolver {
     switch (p.kind) {
       case 'ClaimAtom':
         if (p.name.segments[p.name.segments.length - 1]?.text.match(/^[A-Z]/)) this.claimRef(p.name, p.id);
+        else {
+          const effect = this.effectOf({ id: p.id, kind: 'EffectRef', span: p.span, name: p.name }, this.moduleScope, false);
+          if (effect !== null) this.t.refs.set(p.id, { k: 'effect', effect });
+        }
         break;
       case 'ClaimEffectsEq':
+        this.effects(p.effects, this.moduleScope);
         break;
       case 'ClaimNot':
         this.claimPred(p.operand);

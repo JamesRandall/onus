@@ -1,0 +1,69 @@
+module e0201_undeclared_effect
+import std.io
+
+fn pure_writer(file: io.File) -> Result[Unit, io.Error] {
+  return io.write(file: file, text: "hello")
+}
+
+fn no_alloc(xs: List[Int]) -> List[Int] {
+  return xs ++ [1]
+}
+
+fn literal() -> List[Int] {
+  return [1, 2]
+}
+
+fn closure_creation() -> Int {
+  let f: fn(x: Int) -> Int = fn(x: Int) -> Int {
+    return x
+  }
+  return f(x: 1)
+}
+
+fn closure_body() -> Int ! alloc {
+  let f: fn(x: Int) -> Text = fn(x: Int) -> Text {
+    return Int.to_text(x: x)
+  }
+  return 1
+}
+
+fn spins() -> Int {
+  var i: Int = 0
+  loop while i < 10
+    invariant i >= 0
+  {
+    i = i + 1
+  }
+  return i
+}
+
+fn mutates(x: inout Int) -> Unit {
+  x = 1
+  return Unit
+}
+
+fn passes_on(x: inout Int) -> Unit {
+  bump(v: inout x)
+  return Unit
+}
+
+fn bump(v: inout Int) -> Unit ! mutate {
+  v = v + 1
+  return Unit
+}
+
+fn local_var_is_fine() -> Int {
+  var v: Int = 0
+  bump(v: inout v)
+  return v
+}
+
+const fn impure(x: Int) -> Text ! alloc {
+  return Int.to_text(x: x)
+}
+
+fn contract_effects(file: io.File) -> Int
+  requires io.write(file: file, text: "x") is Ok
+{
+  return 1
+}

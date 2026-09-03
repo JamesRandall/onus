@@ -1,0 +1,89 @@
+module ok_effects
+import std.io
+import std.sql
+
+fn map[T, U, e](xs: List[T], f: fn(x: T) -> U ! e) -> List[U] ! e, alloc {
+  var out: List[U] = []
+  for x: T in xs {
+    out = out ++ [f(x: x)]
+  }
+  return out
+}
+
+fn uses_map(xs: List[Int], file: io.File) -> Result[Unit, io.Error] ! io.file, alloc {
+  let texts: List[Text] = map(
+    xs: xs,
+    f: fn(x: Int) -> Text ! alloc {
+      return Int.to_text(x: x)
+    }
+  )
+  let pure: List[Int] = map(
+    xs: xs,
+    f: fn(x: Int) -> Int {
+      return x + 1
+    }
+  )
+  return Ok(value: Unit)
+}
+
+fn bump(v: inout Int) -> Unit ! mutate {
+  v = v + 1
+  return Unit
+}
+
+fn caller_owns_var() -> Int {
+  var v: Int = 0
+  bump(v: inout v)
+  return v
+}
+
+fn passes_own_inout(x: inout Int) -> Unit ! mutate {
+  bump(v: inout x)
+  return Unit
+}
+
+fn recovers() -> Result[Int, Panicked] {
+  let r: Result[Int, Panicked] = recover {
+    might_panic(x: 1)
+  }
+  return r
+}
+
+fn might_panic(x: Int) -> Int ! panic {
+  return x
+}
+
+fn loops(n: Int where it >= 0) -> Int {
+  var i: Int = 0
+  loop while i < n
+    decreases n - i
+  {
+    i = i + 1
+  }
+  return i
+}
+
+fn diverges() -> Int ! diverge {
+  loop while true {
+    let again: Int = diverges()
+  }
+  return 0
+}
+
+fn reads(
+  db: sql.Db[ReadOnly, schema: "orders"],
+  stmt: sql.Select[Int]
+) -> Result[List[Int], sql.Error] ! sql.read, alloc {
+  return sql.query(db: db, statement: stmt)
+}
+
+fn values_do_not_allocate(a: Int) -> Result[Int, Text] {
+  let r: Result[Int, Text] = Ok(value: a)
+  return r
+}
+
+fn contract_may_allocate(t: Text) -> Text ! alloc
+  ensures result == t ++ "!"
+{
+  return t ++ "!"
+}

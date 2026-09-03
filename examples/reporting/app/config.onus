@@ -1,0 +1,15 @@
+module app.config
+import std.io
+
+pub record Config {
+  reporting_dsn: Text
+}
+
+pub union Error =
+  | Missing of key: Text
+
+pub fn load(env: io.Env) -> Result[Config, Error] ! io.env, alloc {
+  match io.get_env(env: env, name: "REPORTING_DSN") with
+  | Some(value) -> return Ok(value: Config { reporting_dsn: value })
+  | None -> return Err(error: Missing(key: "REPORTING_DSN"))
+}

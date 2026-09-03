@@ -1,0 +1,35 @@
+module e0320_recursion
+
+fn countdown(n: Int where it >= 0) -> Int {
+  if n == 0 {
+    return 0
+  }
+  return countdown(n: n - 1)
+}
+
+fn even(n: Int where it >= 0) -> Bool {
+  if n == 0 {
+    return true
+  }
+  return odd(n: n - 1)
+}
+
+fn odd(n: Int where it >= 0) -> Bool {
+  if n == 0 {
+    return false
+  }
+  return even(n: n - 1)
+}
+
+fn measured(n: Int where it >= 0) -> Int
+  decreases n
+{
+  if n == 0 {
+    return 0
+  }
+  return measured(n: n - 1)
+}
+
+fn forever(n: Int) -> Int ! diverge {
+  return forever(n: n)
+}

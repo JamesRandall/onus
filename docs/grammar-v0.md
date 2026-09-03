@@ -50,7 +50,7 @@ params      = param { "," param } ;
 param       = NAME ":" [ "inout" ] type ;
 effects     = effect { "," effect } ;                 (* a "," followed by NAME ":" ends the list *)
 effect      = QNAME | "recover" ;
-contract    = ( "requires" | "ensures" ) [ "proved" ] expr ;
+contract    = ( "requires" | "ensures" ) [ "proved" ] expr | "decreases" expr ;
 
 type        = QTNAME [ "[" targ { "," targ } "]" ] [ "where" expr ]
             | "fn" "(" [ params ] ")" "->" type [ "!" effects ] ;   (* parameters are named: the labels for calls *)

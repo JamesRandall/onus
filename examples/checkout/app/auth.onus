@@ -1,0 +1,28 @@
+module app.auth
+import std.io
+
+-- AuthedCustomer is evidence: only `require` produces one (§3.10).
+pub sealed record AuthedCustomer {
+  id: Text
+}
+
+pub union Error =
+  | Unknown of caller: Text
+  | Expired
+
+pub capability Service
+  grants io.net
+
+pub fn require(
+  service: Service,
+  caller: Text,
+  customer: Text,
+  clock: io.Clock
+) -> Result[AuthedCustomer, Error] ! io.net, io.clock
+  ensures result is Ok implies caller == customer
+{
+  if caller == customer {
+    return Ok(value: AuthedCustomer { id: customer })
+  }
+  return Err(error: Unknown(caller: caller))
+}

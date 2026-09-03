@@ -5,7 +5,7 @@
  * capability's `grants` clause (`sql.read`), a claim, or an effect parameter.
  * Sets are normalised: parameters are substituted before comparison.
  */
-import type { DefId } from '../resolve/defs.js';
+import type { DefId, ModuleId } from '../resolve/defs.js';
 
 export const PRIMITIVE_EFFECTS = ['alloc', 'mutate', 'panic', 'diverge', 'nondet', 'io.file', 'io.net', 'io.env', 'io.clock', 'io.rand'] as const;
 export type PrimEffect = (typeof PRIMITIVE_EFFECTS)[number];
@@ -19,8 +19,8 @@ export function isPrimEffect(name: string): name is PrimEffect {
 
 export type Effect =
   | { readonly k: 'prim'; readonly name: PrimEffect }
-  | { readonly k: 'resource'; readonly def: DefId; readonly name: string }
-  | { readonly k: 'claim'; readonly def: DefId }
+  /** A resource effect (`sql.read`), declared by a capability's `grants` clause in `module`. */
+  | { readonly k: 'resource'; readonly module: ModuleId; readonly name: string }
   | { readonly k: 'param'; readonly def: DefId };
 
 /** Stable text key of an effect, for set membership. Effects: none. */
@@ -29,9 +29,7 @@ export function effectKey(e: Effect): string {
     case 'prim':
       return e.name;
     case 'resource':
-      return `resource:${e.def}`;
-    case 'claim':
-      return `claim:${e.def}`;
+      return `resource:${e.module}:${e.name}`;
     case 'param':
       return `param:${e.def}`;
   }
@@ -75,6 +73,15 @@ export class EffectSet {
   /** Effects of `this` not in `other`. Effects: none. */
   minus(other: EffectSet): Effect[] {
     return this.values().filter((e) => !other.has(e));
+  }
+
+  /** Effects of `this` without `e`. Effects: none. */
+  without(e: Effect): EffectSet {
+    return EffectSet.of(this.values().filter((x) => effectKey(x) !== effectKey(e)));
+  }
+
+  equals(other: EffectSet): boolean {
+    return this.subsetOf(other) && other.subsetOf(this);
   }
 
   /** Replaces effect parameters by their bindings; unbound parameters stay. Effects: none. */
