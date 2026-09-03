@@ -12,6 +12,7 @@
  *   E05xx  verification
  *   E06xx  test modules and capabilities
  *   E07xx  const evaluation
+ *   E08xx  targets (§19; from M11)
  *   E09xx  compiler
  *
  * Every diagnostic is an error. There is no severity field anywhere.

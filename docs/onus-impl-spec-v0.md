@@ -18,6 +18,7 @@ Syntax note: the language spec borrows F#'s data-model syntax (unions with `of`,
 | Diagnostics | Structured objects from day one (§13); text rendering is a view | Never retrofit |
 | Runtime numbers | `Int` as `number` with range checks at ±2^53; overflow beyond that is a v0 limitation flagged in the ledger | BigInt is correct and slow; revisit |
 | Package manager / test runner | pnpm, vitest | Conventional |
+| Native target | LLVM IR text emitted by the compiler; `clang` assembles and links against a small C runtime | Own lowering (semantics stay ours), borrowed instruction selection and optimisation; nothing to install beyond Xcode CLT / `clang` on Linux <!-- changed: 2026-09-03, docs/CHANGE-LOG.md "Targets" --> |
 
 Non-goals for v0 implementation: performance of generated code, incremental compilation beyond obligation caching, IDE integration beyond `onus next`, concurrency, FFI.
 
@@ -213,6 +214,8 @@ Mapping:
 
 The product output is JavaScript. Under `--emit ts` (fixture suite only) the same codegen emits TypeScript with types derived from the erased Onus types; that output must pass `tsc --strict` with no `any` and no casts. A `tsc` failure there is a codegen bug: add a fixture. Never let `--emit ts` become a user-facing path.
 
+Two targets, one lowering (§19 of the language spec). The codegen pass has two emitters behind one interface, `emit(ctx, target)`. The lowering from checked AST plus obligation statuses to a target-neutral form is shared; only the final emission differs. Do not duplicate lowering logic per target. <!-- changed: 2026-09-03, docs/CHANGE-LOG.md "Targets" -->
+
 ---
 
 ## 7. Verification
@@ -303,6 +306,12 @@ Each milestone has acceptance tests in `test/`. Do not start the next milestone 
 **M9 — `onus next`.** Accept: for every fixture, the token set at every offset is a superset of the token actually present; expected types are correct at 20 hand-picked positions.
 
 **M10 — Review tool.** Static page in `packages/review` rendering `interface.json` and `path.json`: the path view (graph, ledger rows), interface view, ledger view, diff view. Reads files; computes nothing beyond layout. Accept: the checkout path renders with the assumed leaf highlighted and the gate region drawn.
+
+<!-- changed: 2026-09-03, docs/CHANGE-LOG.md "Targets: dual backends as a design goal" — M11 and M12 added -->
+
+**M11 — Native backend.** LLVM IR emitter; C runtime for the §19.1 primitive surface (no `sql` yet); `onus build --target native` produces an executable via `clang`. `proved` obligations emit no code; `checked` obligations emit compare-and-branch to `onus_panic` with the obligation id; `recover` via `setjmp`/`longjmp`. `Int` is `i64` with `llvm.*.with.overflow` intrinsics. Accept: Mandelbrot builds natively and writes an identical PGM to the JS build; every `example` passes on both targets; `E0801` fires on a deliberately broken runtime primitive. Before emitting anything: the shared lowering in `codegen/` is the design constraint — if the JS emitter has lowering logic tangled into emission, separate it first, and add a fixture set for the target-neutral form.
+
+**M12 — Targets complete.** `sql` primitives in the C runtime over `libpq`; host claims; `Int` representation obligations in the JS backend; differential test harness running all fixtures on both targets; WebAssembly emission via the same LLVM path (`--target wasm`), with `io.*` mapped to WASI. Accept: all three examples build and agree on both native and JS; the reporting example runs natively against Postgres; a `path` with `forbid { host.js }` rejects a JS-only `assume` leaf.
 
 ---
 

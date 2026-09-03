@@ -41,9 +41,9 @@ pub fn monthly_totals(db: sql.Db[ReadOnly], year: Int)
 `may sql.read, alloc` is the complete list of what this function may do, and everything it calls must fit inside it. The model, asked to add run logging, writes an `insert` into a helper the report calls. The build fails before anyone sees it:
 
 ```
-E0201  undeclared effect sql.write in monthly_totals
-       via log_run (reporting.onus:41), which requires sql.write
-       monthly_totals declares: sql.read, alloc
+reporting.onus:17:3: E0201 undeclared effect
+  in monthly_totals
+  calling `log_run` has effect `sql.write`, which `monthly_totals` does not declare
 ```
 
 The model reads the diagnostic, moves the logging to the caller that holds write access, and the build is green. No prompt was edited, no reviewer read a diff, and the rule cannot be forgotten by the next model or the next person, because it is not advice — it is the function's type. For rules a signature can't express — required guarantees, which assumptions are acceptable, what must hold across a whole critical section — a `path` declaration applies the same check over every function reachable from an entry point.
@@ -60,4 +60,4 @@ Onus does not make the specification correct. If the contract says the wrong thi
 
 ## Status
 
-v0 language specification and implementation plan are complete; the compiler, runtime and review tool are in development in TypeScript, targeting JavaScript. Three worked examples — a Mandelbrot renderer, a read-only SQL report, and a payment endpoint — exercise every mechanism in the language.
+The v0 language specification and all ten milestones of its implementation plan are done: the compiler, runtime, standard library and review tool, in TypeScript, targeting JavaScript, with z3 discharging obligations. Three worked examples — a Mandelbrot renderer, a read-only SQL report, and a payment endpoint — exercise every mechanism in the language and pass end to end: Mandelbrot's ledger is fully proved, the report's path passes with no assumptions, and the checkout path passes with exactly one external assumption, named. Next: native and WebAssembly targets from the same source (§19 of the specification), and the regeneration loop that drives a model against the compiler, specified as a candidate in `onus-loop-v0.md`.

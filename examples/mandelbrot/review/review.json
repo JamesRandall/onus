@@ -1,0 +1,939 @@
+{
+  "generated": {
+    "tool": "onus review",
+    "at": "2026-09-03T19:14:58.663Z"
+  },
+  "entry": "mandelbrot",
+  "modules": [
+    {
+      "module": "mandelbrot",
+      "hash": "b3:c4d86a8afc99f7a11415a63412ee7df02d280e82adc581f8ef442fa1e8bb2b23",
+      "imports": [
+        "std.io"
+      ],
+      "items": [
+        {
+          "effects": [],
+          "claims": [],
+          "contracts": [],
+          "examples": [],
+          "properties": [],
+          "assumes": [],
+          "recovers": [],
+          "obligations": {
+            "proved": 0,
+            "checked": 0,
+            "assumed": 0,
+            "failed": 0
+          },
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                4,
+                1
+              ],
+              [
+                4,
+                46
+              ]
+            ]
+          },
+          "kind": "type",
+          "name": "Iter",
+          "visibility": "private",
+          "signature": "type Iter = Int where 0 <= it and it <= 10000"
+        },
+        {
+          "effects": [],
+          "claims": [],
+          "contracts": [],
+          "examples": [],
+          "properties": [],
+          "assumes": [],
+          "recovers": [],
+          "obligations": {
+            "proved": 0,
+            "checked": 0,
+            "assumed": 0,
+            "failed": 0
+          },
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                6,
+                1
+              ],
+              [
+                6,
+                31
+              ]
+            ]
+          },
+          "kind": "type",
+          "name": "Coord",
+          "visibility": "private",
+          "signature": "type Coord = Int where 0 <= it"
+        },
+        {
+          "effects": [],
+          "claims": [],
+          "contracts": [],
+          "examples": [],
+          "properties": [],
+          "assumes": [],
+          "recovers": [],
+          "obligations": {
+            "proved": 0,
+            "checked": 0,
+            "assumed": 0,
+            "failed": 0
+          },
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                8,
+                1
+              ],
+              [
+                13,
+                2
+              ]
+            ]
+          },
+          "kind": "record",
+          "name": "Viewport",
+          "visibility": "private",
+          "signature": "record Viewport {\n  x_min: Float\n  x_max: Float where it > x_min\n  y_min: Float\n  y_max: Float where it > y_min\n}"
+        },
+        {
+          "effects": [],
+          "claims": [],
+          "contracts": [
+            {
+              "kind": "requires",
+              "text": "limit > 0",
+              "pinned": false,
+              "status": "proved",
+              "sites": 4
+            },
+            {
+              "kind": "ensures",
+              "text": "result <= limit",
+              "pinned": false,
+              "status": "proved",
+              "sites": 1
+            },
+            {
+              "kind": "invariant",
+              "text": "i <= limit",
+              "pinned": false,
+              "status": "proved",
+              "sites": 2
+            },
+            {
+              "kind": "decreases",
+              "text": "limit - i",
+              "pinned": false,
+              "status": "proved",
+              "sites": 1
+            }
+          ],
+          "examples": [
+            {
+              "name": "escape_count",
+              "status": "passed",
+              "at": {
+                "file": "examples/mandelbrot/mandelbrot.onus",
+                "span": [
+                  [
+                    34,
+                    1
+                  ],
+                  [
+                    37,
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "properties": [],
+          "assumes": [],
+          "recovers": [],
+          "obligations": {
+            "proved": 8,
+            "checked": 0,
+            "assumed": 0,
+            "failed": 0
+          },
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                15,
+                1
+              ],
+              [
+                32,
+                2
+              ]
+            ]
+          },
+          "kind": "fn",
+          "name": "escape_count",
+          "visibility": "pub",
+          "signature": "fn escape_count(cx: Float, cy: Float, limit: Iter) -> Iter"
+        },
+        {
+          "effects": [],
+          "claims": [],
+          "contracts": [],
+          "examples": [],
+          "properties": [
+            {
+              "name": "escape_bounded",
+              "status": "checked",
+              "at": {
+                "file": "examples/mandelbrot/mandelbrot.onus",
+                "span": [
+                  [
+                    39,
+                    1
+                  ],
+                  [
+                    41,
+                    2
+                  ]
+                ]
+              }
+            }
+          ],
+          "assumes": [],
+          "recovers": [],
+          "obligations": {
+            "proved": 2,
+            "checked": 1,
+            "assumed": 0,
+            "failed": 0
+          },
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                39,
+                1
+              ],
+              [
+                41,
+                2
+              ]
+            ]
+          },
+          "kind": "property",
+          "name": "escape_bounded",
+          "visibility": "private",
+          "signature": "property escape_bounded(cx: Float, cy: Float, limit: Iter where it > 0) {\n  escape_count(cx: cx, cy: cy, limit: limit) <= limit\n}"
+        },
+        {
+          "effects": [
+            "alloc"
+          ],
+          "claims": [],
+          "contracts": [],
+          "examples": [],
+          "properties": [],
+          "assumes": [],
+          "recovers": [],
+          "obligations": {
+            "proved": 7,
+            "checked": 0,
+            "assumed": 0,
+            "failed": 0
+          },
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                43,
+                1
+              ],
+              [
+                58,
+                2
+              ]
+            ]
+          },
+          "kind": "fn",
+          "name": "render",
+          "visibility": "pub",
+          "signature": "fn render(\n  view: Viewport,\n  width: Coord where it > 0,\n  height: Coord where it > 0,\n  limit: Iter where it > 0\n) -> Grid[Iter, width, height] may alloc"
+        },
+        {
+          "effects": [
+            "io.file",
+            "alloc"
+          ],
+          "claims": [],
+          "contracts": [],
+          "examples": [],
+          "properties": [],
+          "assumes": [],
+          "recovers": [],
+          "obligations": {
+            "proved": 7,
+            "checked": 0,
+            "assumed": 0,
+            "failed": 0
+          },
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                60,
+                1
+              ],
+              [
+                73,
+                2
+              ]
+            ]
+          },
+          "kind": "fn",
+          "name": "main",
+          "visibility": "pub",
+          "signature": "fn main(args: List[Text], files: io.Files) -> Result[Unit, io.Error] may io.file, alloc"
+        }
+      ],
+      "assumes": [],
+      "recovers": [],
+      "sealed_types": [],
+      "test_module": false,
+      "obligations": {
+        "proved": 28,
+        "checked": 1,
+        "assumed": 0,
+        "failed": 0
+      },
+      "ledger": [
+        {
+          "kind": "refinement",
+          "text": "0 <= it and it <= 10000",
+          "def": "escape_count",
+          "status": "proved",
+          "by": "z3",
+          "pinned": false,
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                21,
+                17
+              ],
+              [
+                21,
+                18
+              ]
+            ]
+          }
+        },
+        {
+          "kind": "invariant-entry",
+          "text": "i <= limit",
+          "def": "escape_count",
+          "status": "proved",
+          "by": "z3",
+          "pinned": false,
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                22,
+                3
+              ],
+              [
+                30,
+                4
+              ]
+            ]
+          }
+        },
+        {
+          "kind": "invariant-step",
+          "text": "i <= limit",
+          "def": "escape_count",
+          "status": "proved",
+          "by": "z3",
+          "pinned": false,
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                22,
+                3
+              ],
+              [
+                30,
+                4
+              ]
+            ]
+          }
+        },
+        {
+          "kind": "decreases",
+          "text": "limit - i",
+          "def": "escape_count",
+          "status": "proved",
+          "by": "z3",
+          "pinned": false,
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                22,
+                3
+              ],
+              [
+                30,
+                4
+              ]
+            ]
+          }
+        },
+        {
+          "kind": "overflow",
+          "text": "limit - i within Int",
+          "def": "escape_count",
+          "status": "proved",
+          "by": "z3",
+          "pinned": false,
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                24,
+                15
+              ],
+              [
+                24,
+                24
+              ]
+            ]
+          }
+        },
+        {
+          "kind": "refinement",
+          "text": "0 <= it and it <= 10000",
+          "def": "escape_count",
+          "status": "proved",
+          "by": "z3",
+          "pinned": false,
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                29,
+                9
+              ],
+              [
+                29,
+                14
+              ]
+            ]
+          }
+        },
+        {
+          "kind": "overflow",
+          "text": "i + 1 within Int",
+          "def": "escape_count",
+          "status": "proved",
+          "by": "z3",
+          "pinned": false,
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                29,
+                9
+              ],
+              [
+                29,
+                14
+              ]
+            ]
+          }
+        },
+        {
+          "kind": "ensures",
+          "text": "result <= limit",
+          "def": "escape_count",
+          "status": "proved",
+          "by": "z3",
+          "pinned": false,
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                31,
+                3
+              ],
+              [
+                31,
+                11
+              ]
+            ]
+          }
+        },
+        {
+          "kind": "requires",
+          "text": "limit > 0",
+          "def": "escape_count",
+          "status": "proved",
+          "by": "z3",
+          "pinned": false,
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                35,
+                3
+              ],
+              [
+                35,
+                45
+              ]
+            ]
+          }
+        },
+        {
+          "kind": "refinement",
+          "text": "0 <= it and it <= 10000",
+          "def": "escape_count",
+          "status": "proved",
+          "by": "z3",
+          "pinned": false,
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                35,
+                41
+              ],
+              [
+                35,
+                44
+              ]
+            ]
+          }
+        },
+        {
+          "kind": "requires",
+          "text": "limit > 0",
+          "def": "escape_count",
+          "status": "proved",
+          "by": "z3",
+          "pinned": false,
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                36,
+                3
+              ],
+              [
+                36,
+                45
+              ]
+            ]
+          }
+        },
+        {
+          "kind": "refinement",
+          "text": "0 <= it and it <= 10000",
+          "def": "escape_count",
+          "status": "proved",
+          "by": "z3",
+          "pinned": false,
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                36,
+                41
+              ],
+              [
+                36,
+                44
+              ]
+            ]
+          }
+        },
+        {
+          "kind": "property",
+          "text": "escape_bounded",
+          "def": "escape_bounded",
+          "status": "checked",
+          "by": "milestone 5: run under generated inputs",
+          "pinned": false,
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                39,
+                1
+              ],
+              [
+                41,
+                2
+              ]
+            ]
+          }
+        },
+        {
+          "kind": "requires",
+          "text": "limit > 0",
+          "def": "escape_bounded",
+          "status": "proved",
+          "by": "z3",
+          "pinned": false,
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                40,
+                3
+              ],
+              [
+                40,
+                45
+              ]
+            ]
+          }
+        },
+        {
+          "kind": "refinement",
+          "text": "0 <= it and it <= 10000",
+          "def": "escape_bounded",
+          "status": "proved",
+          "by": "z3",
+          "pinned": false,
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                40,
+                39
+              ],
+              [
+                40,
+                44
+              ]
+            ]
+          }
+        },
+        {
+          "kind": "refinement",
+          "text": "0 <= it and it <= 10000",
+          "def": "render",
+          "status": "proved",
+          "by": "z3",
+          "pinned": false,
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                49,
+                60
+              ],
+              [
+                49,
+                61
+              ]
+            ]
+          }
+        },
+        {
+          "kind": "refinement",
+          "text": "it > 0",
+          "def": "render",
+          "status": "proved",
+          "by": "z3",
+          "pinned": false,
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                49,
+                70
+              ],
+              [
+                49,
+                75
+              ]
+            ]
+          }
+        },
+        {
+          "kind": "refinement",
+          "text": "it > 0",
+          "def": "render",
+          "status": "proved",
+          "by": "z3",
+          "pinned": false,
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                49,
+                85
+              ],
+              [
+                49,
+                91
+              ]
+            ]
+          }
+        },
+        {
+          "kind": "refinement",
+          "text": "0 <= it and it < w",
+          "def": "render",
+          "status": "proved",
+          "by": "z3",
+          "pinned": false,
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                54,
+                37
+              ],
+              [
+                54,
+                39
+              ]
+            ]
+          }
+        },
+        {
+          "kind": "refinement",
+          "text": "0 <= it and it < h",
+          "def": "render",
+          "status": "proved",
+          "by": "z3",
+          "pinned": false,
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                54,
+                44
+              ],
+              [
+                54,
+                46
+              ]
+            ]
+          }
+        },
+        {
+          "kind": "requires",
+          "text": "limit > 0",
+          "def": "render",
+          "status": "proved",
+          "by": "z3",
+          "pinned": false,
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                54,
+                55
+              ],
+              [
+                54,
+                97
+              ]
+            ]
+          }
+        },
+        {
+          "kind": "refinement",
+          "text": "0 <= it and it <= 10000",
+          "def": "render",
+          "status": "proved",
+          "by": "z3",
+          "pinned": false,
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                54,
+                91
+              ],
+              [
+                54,
+                96
+              ]
+            ]
+          }
+        },
+        {
+          "kind": "refinement",
+          "text": "it > x_min",
+          "def": "main",
+          "status": "proved",
+          "by": "constant evaluation",
+          "pinned": false,
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                62,
+                55
+              ],
+              [
+                62,
+                58
+              ]
+            ]
+          }
+        },
+        {
+          "kind": "refinement",
+          "text": "it > y_min",
+          "def": "main",
+          "status": "proved",
+          "by": "constant evaluation",
+          "pinned": false,
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                62,
+                80
+              ],
+              [
+                62,
+                83
+              ]
+            ]
+          }
+        },
+        {
+          "kind": "refinement",
+          "text": "it > 0 and 0 <= it",
+          "def": "main",
+          "status": "proved",
+          "by": "z3",
+          "pinned": false,
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                63,
+                62
+              ],
+              [
+                63,
+                65
+              ]
+            ]
+          }
+        },
+        {
+          "kind": "refinement",
+          "text": "it > 0 and 0 <= it",
+          "def": "main",
+          "status": "proved",
+          "by": "z3",
+          "pinned": false,
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                63,
+                75
+              ],
+              [
+                63,
+                78
+              ]
+            ]
+          }
+        },
+        {
+          "kind": "refinement",
+          "text": "it > 0 and 0 <= it and it <= 10000",
+          "def": "main",
+          "status": "proved",
+          "by": "z3",
+          "pinned": false,
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                63,
+                87
+              ],
+              [
+                63,
+                90
+              ]
+            ]
+          }
+        },
+        {
+          "kind": "refinement",
+          "text": "0 <= it and it < w",
+          "def": "main",
+          "status": "proved",
+          "by": "z3",
+          "pinned": false,
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                68,
+                76
+              ],
+              [
+                68,
+                78
+              ]
+            ]
+          }
+        },
+        {
+          "kind": "refinement",
+          "text": "0 <= it and it < h",
+          "def": "main",
+          "status": "proved",
+          "by": "z3",
+          "pinned": false,
+          "at": {
+            "file": "examples/mandelbrot/mandelbrot.onus",
+            "span": [
+              [
+                68,
+                83
+              ],
+              [
+                68,
+                85
+              ]
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "sources": {
+    "mandelbrot": "module mandelbrot\nimport std.io\n\ntype Iter = Int where 0 <= it and it <= 10000\n\ntype Coord = Int where 0 <= it\n\nrecord Viewport {\n  x_min: Float\n  x_max: Float where it > x_min\n  y_min: Float\n  y_max: Float where it > y_min\n}\n\npub fn escape_count(cx: Float, cy: Float, limit: Iter) -> Iter\n  requires limit > 0\n  ensures result <= limit\n{\n  var zx: Float = 0.0\n  var zy: Float = 0.0\n  var i: Iter = 0\n  loop while i < limit and zx * zx + zy * zy <= 4.0\n    invariant i <= limit\n    decreases limit - i\n  {\n    let nx: Float = zx * zx - zy * zy + cx\n    zy = 2.0 * zx * zy + cy\n    zx = nx\n    i = i + 1\n  }\n  return i\n}\n\nexample escape_count {\n  escape_count(cx: 0.0, cy: 0.0, limit: 100) == 100\n  escape_count(cx: 2.0, cy: 2.0, limit: 100) == 1\n}\n\nproperty escape_bounded(cx: Float, cy: Float, limit: Iter where it > 0) {\n  escape_count(cx: cx, cy: cy, limit: limit) <= limit\n}\n\npub fn render(\n  view: Viewport,\n  width: Coord where it > 0,\n  height: Coord where it > 0,\n  limit: Iter where it > 0\n) -> Grid[Iter, width, height] may alloc {\n  var grid: Grid[Iter, width, height] = Grid.filled(value: 0, width: width, height: height)\n  for py: Int in 0 ..< height {\n    for px: Int in 0 ..< width {\n      let cx: Float = view.x_min + (view.x_max - view.x_min) * Float.of(x: px) / Float.of(x: width)\n      let cy: Float = view.y_min + (view.y_max - view.y_min) * Float.of(x: py) / Float.of(x: height)\n      Grid.set(grid: inout grid, x: px, y: py, value: escape_count(cx: cx, cy: cy, limit: limit))\n    }\n  }\n  return grid\n}\n\npub fn main(args: List[Text], files: io.Files) -> Result[Unit, io.Error] may io.file, alloc {\n  -- files is a root capability supplied by the runtime (§8.3)\n  let view: Viewport = Viewport { x_min: -2.5, x_max: 1.0, y_min: -1.0, y_max: 1.0 }\n  let grid: Grid[Iter, 800, 600] = render(view: view, width: 800, height: 600, limit: 255)\n  let out: io.File = try io.create(files: files, path: \"mandelbrot.pgm\")\n  try io.write(file: out, text: \"P2\\n800 600\\n255\\n\")\n  for py: Int in 0 ..< 600 {\n    for px: Int in 0 ..< 800 {\n      try io.write(file: out, text: Int.to_text(x: Grid.get(grid: grid, x: px, y: py)) ++ \" \")\n    }\n    try io.write(file: out, text: \"\\n\")\n  }\n  return Ok(value: Unit)\n}\n"
+  },
+  "paths": [],
+  "diagnostics": [],
+  "diff": null
+}

@@ -11,7 +11,7 @@ this grammar and prints the canonical form described at the end.
   matching neither (e.g. `xValue`) is `E0005`.
 - Keywords are reserved. *Soft keywords* — `module import test type record
   union interface impl law claim capability grants path entry effects forbid
-  require policy outside except example property of self intrinsic may` — never appear
+  require policy outside except example property of self intrinsic` — never appear
   inside an expression, so they are accepted as names in name positions
   (`Float.of`, `auth.require`, `path: "x"`).
 - Literals: `INT` = `[0-9][0-9_]*` (64-bit signed; larger is `E0008`);

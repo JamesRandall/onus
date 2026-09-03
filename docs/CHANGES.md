@@ -2,6 +2,9 @@
 
 Changes to `onus-spec-v0.md` forced by implementation, by milestone. Each is
 marked in the spec with `<!-- changed: reason -->` and pinned by a fixture.
+Changes the spec author makes are logged in `CHANGE-LOG.md`, dated, with
+what the codebase must do about each; this file records only what
+implementation forced.
 
 ## M1 — front end
 
@@ -422,10 +425,11 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     and not enforced. Locals in scope are listed outermost first; module
     items are not. v0 keeps no resident state between calls (impl spec §12,
     item 5).
-82. **`may` replaces `!` (§2.3, §6).** Requested by the spec author: `!`
-    reads as negation. `may` is a soft keyword (still usable as a name) and
-    `!` is no longer a token (`!=` remains). Applied to the grammar, every
-    example in the spec, the standard library, the examples and the fixtures.
+82. **`may` replaces `!` (§2.3, §6).** Requested by the spec author
+    (`docs/CHANGE-LOG.md`, 2026-09-03): `!` reads as negation. `may` is a
+    reserved word and `!` is no longer a token (`!=` remains). Applied to
+    the grammar, every example in the spec, the standard library, the
+    examples and the fixtures.
 
 ## M10 — the review tool
 

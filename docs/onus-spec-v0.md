@@ -931,7 +931,7 @@ Small, fully contracted, every function accompanied by examples. It is the corpu
 
 Recorded rather than resolved.
 
-1. **Concurrency.** Structured concurrency over immutable inputs with channels by value is the obvious fit; cancellation and deadlock have no proposed mechanism.
+1. **Concurrency.** Structured concurrency over immutable inputs with channels by value is the obvious fit; cancellation and deadlock have no proposed mechanism. Concurrency, when designed, must fit both a single-threaded event-loop host and a native multi-threaded one; structured concurrency over immutable inputs with channels by value is the working assumption. <!-- changed: 2026-09-03, docs/CHANGE-LOG.md "Targets" -->
 2. **Trace properties on paths.** "Auth before any `sql.read`" is expressible by typestate (see §18.3) for most cases. Genuine ordering properties over traces need a model checker or temporal claims; deferred.
 3. **FFI.** Anything beyond `assume` at the boundary — marshalling, foreign effects, resource lifetimes — is unspecified.
 4. **Float verification.** Whether to pursue real-arithmetic proving at all, or commit to runtime checks for floats permanently.
@@ -1177,6 +1177,45 @@ path checkout
 **Panics.** `sql.query` declares `panic` for row refinement failures. `handle_checkout` does not: the library converts them to `sql.Error.Refinement` before they reach it. The HTTP server loop that calls `handle_checkout` wraps each request in `recover` (§10.2), and that site is listed in the path report; the path itself declares nothing about `recover`, so a reviewer who wants a stricter guarantee adds `forbid { recover }` and sees it fail on the server loop.
 
 **What the ledger says.** Reachable functions: 9. Aggregate effects within bound. Obligations: 31 proved, 2 checked (both `Int` refinements on decoded rows, inside `sql.query`, which declares `panic` — surfaced as `sql.Error.Refinement` instead), 1 assumed (`vendor.payments.charge: Idempotent`). The `ensures` on `recent_orders` is proved from the statement's `where` clause: `parse_select` returns a `Spec` for it (§3.8.1), and `sql.query`'s postcondition states that every returned row satisfies that spec.
+
+---
+
+## 19. Targets
+
+<!-- changed: 2026-09-03, docs/CHANGE-LOG.md "Targets: dual backends as a design goal"; implemented from M11 -->
+
+An Onus program compiles unchanged to every supported target. Observable behaviour is defined by this specification, never by the host. Where this specification is silent on something a program can observe, that is a defect in the specification.
+
+### 19.1 Runtime primitive surface
+
+Each target provides a runtime implementing exactly the following primitives. Everything else in `std.*` is written in Onus and compiled by the same backend as user code.
+
+- Memory: allocate, free-at-scope-exit (native) or no-op (collected hosts).
+- `Int`: 64-bit signed arithmetic with overflow detection; see 19.3.
+- `Float`: IEEE 754 binary64 arithmetic; `classify`; formatting to text per the algorithm in `std.float` (shortest round-trip representation).
+- `Text`: UTF-8 storage; grapheme-cluster segmentation per Unicode 16.0 (pinned; the runtime carries the tables); byte and grapheme views; equality by code point sequence.
+- `Bytes`: contiguous byte sequence with bounds-checked access.
+- Panic: raise with an obligation id and optional model; `recover` boundary.
+- Capabilities: opaque handles for `io.Files`, `io.Env`, `io.Net`, `io.Clock`, `io.Rand`, `sql.Db`, plus the `__fake` constructor available only to test modules.
+- `io.*` and `sql.*` raw calls, each mapped one-to-one from an `assume` leaf in `std.io` / `std.sql`.
+
+The primitive surface is versioned with the specification. A backend that lacks a primitive reports `E0800 primitive unavailable on target` at build time for any program reaching it.
+
+### 19.2 Host claims
+
+Code that can only run on one host declares it with a claim: `host.js`, `host.native`, `host.wasm`. These are asserted claims (§7.1) introduced only at `assume` leaves that call host-specific facilities, and they propagate like any claim. A `path` may `forbid { host.js, host.native, host.wasm }` to require portability, and the compiler then rejects anything reachable that depends on a host.
+
+### 19.3 Integer representation
+
+`Int` is 64-bit signed on every target. On targets without native 64-bit integers (JavaScript), the backend chooses a representation per value: a double-precision number where the verifier has proved `|x| <= 2^53 - 1` for every value the binding can hold, and an arbitrary-precision integer otherwise. The choice appears in the ledger as an obligation of kind `representation`, so a reviewer can see which values are running on the slow path and tighten refinements to move them.
+
+### 19.4 Fully specified behaviour
+
+The following are specified so that all targets agree: `Map` iteration is in key order under `Ord[K]`; integer division truncates toward zero and `%` takes the sign of the dividend; `Float` to `Text` is the shortest round-trip form; `example` blocks run in source order; `Stream` elements are produced on demand and never buffered beyond one element by the runtime.
+
+### 19.5 Differential testing
+
+Every `example` and `property` runs on every built target. Any disagreement between targets on a program the compiler accepted is a backend defect, reported as `E0801 target disagreement` with the example, the two results and the targets.
 
 ---
 

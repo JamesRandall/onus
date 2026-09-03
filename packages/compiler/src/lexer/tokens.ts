@@ -31,7 +31,7 @@ export function isKeyword(text: string): text is Keyword {
 export const SOFT_KEYWORDS = [
   'module', 'import', 'test', 'type', 'record', 'union', 'interface', 'impl', 'law', 'claim',
   'capability', 'grants', 'path', 'entry', 'effects', 'forbid', 'require', 'policy', 'outside',
-  'except', 'example', 'property', 'of', 'self', 'intrinsic', 'may',
+  'except', 'example', 'property', 'of', 'self', 'intrinsic',
 ] as const;
 
 const SOFT_SET: ReadonlySet<string> = new Set<string>(SOFT_KEYWORDS);
