@@ -12,7 +12,7 @@
  * policy (E0415) over every `assume` in the reachable set. The analysis is
  * recorded for the path report (§9.1) whether or not it passed.
  */
-import { calleeOf, effectsOfFn } from '../claims/calls.js';
+import { calleeEffects, calleeOf, effectsOfFn } from '../claims/calls.js';
 import { observable } from '../claims/pass.js';
 import type { Context } from '../context.js';
 import { EffectSet, type Effect } from '../effects/set.js';
@@ -23,7 +23,7 @@ import type { Span } from '../source.js';
 import type * as A from '../syntax/ast.js';
 import { walk } from '../syntax/walk.js';
 import { stripRefinements, typeToString, type Type } from '../types/type.js';
-import type { CapabilitySite, PathAssume, UnresolvableCall } from './tables.js';
+import type { CallEdge, CapabilitySite, Gate, PathAssume, RecoverSite, UnresolvableCall } from './tables.js';
 
 /**
  * Pass 12: paths.
@@ -89,7 +89,7 @@ class PathChecker {
         if (bound.has(e)) this.report('E0411', this.path.span, `\`${effectName(this.ctx, e)}\` is allowed by \`effects <=\` and listed under \`forbid\``);
       }
     }
-    const { reachable, unresolvable, capabilities } = this.reach(entry);
+    const { reachable, unresolvable, capabilities, edges, recovers } = this.reach(entry);
     for (const u of unresolvable) {
       this.report('E0410', t.node(u.at).span, `on path \`${this.path.name.text}\`: ${u.reason}, so the reachable set cannot be closed`, t.def(u.fn).name);
     }
@@ -143,6 +143,9 @@ class PathChecker {
       assumes,
       unresolvable,
       capabilities,
+      edges,
+      gates: this.gates(reachable),
+      recovers,
       ok: this.errors === 0,
     });
   }
@@ -166,12 +169,14 @@ class PathChecker {
   }
 
   /** Breadth-first reachability from `entry` over resolvable calls. */
-  private reach(entry: DefId): { reachable: DefId[]; unresolvable: UnresolvableCall[]; capabilities: CapabilitySite[] } {
+  private reach(entry: DefId): { reachable: DefId[]; unresolvable: UnresolvableCall[]; capabilities: CapabilitySite[]; edges: CallEdge[]; recovers: RecoverSite[] } {
     const t = this.ctx.resolve;
     const reachable: DefId[] = [];
     const seen = new Set<DefId>();
     const unresolvable: UnresolvableCall[] = [];
     const capabilities: CapabilitySite[] = [];
+    const edges: CallEdge[] = [];
+    const recovers: RecoverSite[] = [];
     const queue: DefId[] = [entry];
     while (queue.length > 0) {
       const fn = queue.shift();
@@ -181,12 +186,14 @@ class PathChecker {
       const node = t.node(t.def(fn).node);
       if (node.kind !== 'FnDecl' || node.body === null) continue;
       walk(node.body, (n) => {
+        if (n.kind === 'Recover') recovers.push({ fn, at: n.id });
         if (n.kind !== 'Call') return true;
         const callee = calleeOf(this.ctx, n);
         switch (callee.k) {
           case 'fn':
           case 'impl': {
             queue.push(callee.def);
+            edges.push({ from: fn, to: callee.def, at: n.id, effects: calleeEffects(this.ctx, n, callee.def) });
             const produced = capabilityIn(this.ctx.types.exprTypes.get(n.id) ?? null);
             if (produced !== null) capabilities.push({ fn, at: n.id, typeText: this.capabilityText(produced) });
             return true;
@@ -202,7 +209,26 @@ class PathChecker {
         }
       });
     }
-    return { reachable, unresolvable, capabilities };
+    return { reachable, unresolvable, capabilities, edges, recovers };
+  }
+
+  /** Sealed record types that some reachable function returns and others demand as a parameter (§3.10). */
+  private gates(reachable: readonly DefId[]): Gate[] {
+    const t = this.ctx.resolve;
+    const producers = new Map<DefId, DefId[]>();
+    const guarded = new Map<DefId, DefId[]>();
+    for (const fn of reachable) {
+      const sig = this.ctx.types.signatures.get(fn);
+      if (sig === undefined) continue;
+      for (const p of sig.params) for (const e of sealedRecordsIn(p.type, t)) guarded.set(e, [...(guarded.get(e) ?? []), fn]);
+      for (const e of sealedRecordsIn(sig.ret, t)) producers.set(e, [...(producers.get(e) ?? []), fn]);
+    }
+    const out: Gate[] = [];
+    for (const [evidence, ps] of producers) {
+      const gs = (guarded.get(evidence) ?? []).filter((g) => !ps.includes(g));
+      if (gs.length > 0) out.push({ evidence, producers: ps, guarded: gs });
+    }
+    return out;
   }
 
   /** Reachable functions not under an `assume` of `claim`: an assumption covers everything beneath it. */
@@ -240,6 +266,28 @@ class PathChecker {
       const prefix = scope.name.segments.map((s) => s.text).join('.');
       return scope.glob ? name === prefix || name.startsWith(`${prefix}.`) : name === prefix;
     });
+  }
+}
+
+/** The sealed record types mentioned in `t`. Effects: none. */
+function sealedRecordsIn(t: Type, tables: Context['resolve'], out = new Set<DefId>()): Set<DefId> {
+  switch (t.k) {
+    case 'refined':
+      return sealedRecordsIn(t.base, tables, out);
+    case 'record':
+      if (tables.def(t.def).sealed) out.add(t.def);
+      for (const a of t.args) if (a.k === 'type') sealedRecordsIn(a.type, tables, out);
+      return out;
+    case 'union':
+    case 'opaque':
+    case 'capability':
+      for (const a of t.args) if (a.k === 'type') sealedRecordsIn(a.type, tables, out);
+      return out;
+    case 'fn':
+      for (const p of t.params) sealedRecordsIn(p.type, tables, out);
+      return sealedRecordsIn(t.ret, tables, out);
+    default:
+      return out;
   }
 }
 

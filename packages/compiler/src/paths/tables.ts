@@ -27,6 +27,26 @@ export interface CapabilitySite {
   readonly typeText: string;
 }
 
+/** A call from one reachable function to another, with the callee's effects at that site. */
+export interface CallEdge {
+  readonly from: DefId;
+  readonly to: DefId;
+  readonly at: A.NodeId;
+  readonly effects: EffectSet;
+}
+
+/** A typestate gate (§3.10, §18.3): a sealed type only `producers` return, which `guarded` functions demand. */
+export interface Gate {
+  readonly evidence: DefId;
+  readonly producers: readonly DefId[];
+  readonly guarded: readonly DefId[];
+}
+
+export interface RecoverSite {
+  readonly fn: DefId;
+  readonly at: A.NodeId;
+}
+
 export interface PathAnalysis {
   readonly def: DefId;
   readonly module: ModuleId;
@@ -42,6 +62,9 @@ export interface PathAnalysis {
   readonly assumes: readonly PathAssume[];
   readonly unresolvable: readonly UnresolvableCall[];
   readonly capabilities: readonly CapabilitySite[];
+  readonly edges: readonly CallEdge[];
+  readonly gates: readonly Gate[];
+  readonly recovers: readonly RecoverSite[];
   /** No diagnostic was reported for this path. */
   readonly ok: boolean;
 }

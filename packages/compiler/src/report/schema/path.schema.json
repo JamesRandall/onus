@@ -13,7 +13,11 @@
     "obligations",
     "unresolvable_calls",
     "capabilities",
-    "ok"
+    "ok",
+    "graph",
+    "gates",
+    "recovers",
+    "ledger"
   ],
   "additionalProperties": false,
   "properties": {
@@ -197,6 +201,221 @@
     },
     "ok": {
       "type": "boolean"
+    },
+    "graph": {
+      "type": "object",
+      "required": [
+        "nodes",
+        "edges"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "nodes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "module",
+              "kind",
+              "effects",
+              "claims",
+              "obligations",
+              "assumes",
+              "recovers",
+              "unresolvable"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "module": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "entry",
+                  "fn",
+                  "intrinsic"
+                ]
+              },
+              "effects": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "claims": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "obligations": {
+                "type": "object",
+                "required": [
+                  "proved",
+                  "checked",
+                  "assumed",
+                  "failed"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "proved": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "checked": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "assumed": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "failed": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              },
+              "assumes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "recovers": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "unresolvable": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "from",
+              "to",
+              "effects",
+              "at"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              },
+              "effects": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "at": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "gates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "evidence",
+          "producers",
+          "guarded"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "type": "string"
+          },
+          "producers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "guarded": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "recovers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "def",
+          "at"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "def": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "ledger": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "kind",
+          "text",
+          "def",
+          "status",
+          "by",
+          "pinned",
+          "at"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "def": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pinned": {
+            "type": "boolean"
+          },
+          "at": {
+            "type": "string"
+          }
+        }
+      }
     }
   }
 }

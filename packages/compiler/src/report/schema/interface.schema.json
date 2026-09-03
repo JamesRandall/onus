@@ -273,7 +273,8 @@
         "properties",
         "assumes",
         "recovers",
-        "obligations"
+        "obligations",
+        "at"
       ],
       "additionalProperties": false,
       "properties": {
@@ -350,6 +351,9 @@
         },
         "obligations": {
           "$ref": "#/definitions/counts"
+        },
+        "at": {
+          "$ref": "#/definitions/location"
         }
       }
     },

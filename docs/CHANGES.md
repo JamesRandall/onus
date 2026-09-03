@@ -427,6 +427,43 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     `!` is no longer a token (`!=` remains). Applied to the grammar, every
     example in the spec, the standard library, the examples and the fixtures.
 
+## M10 — the review tool
+
+83. **Path report additions (§9.1, §15.1).** The path view must draw the
+    reachable graph, and the tool computes nothing, so the report carries
+    `graph.nodes` (qualified name, module, entry/fn/intrinsic, effects,
+    carried claims, obligation counts, assume and recover counts) and
+    `graph.edges` (caller, callee, effects at the site, location); `gates`
+    (a sealed record type some reachable function returns and others demand
+    as a parameter — the typestate of §18.3, drawn as the gate region);
+    `recovers`; and `ledger` rows for every obligation of a reachable
+    function.
+84. **Interface item locations (§11.1).** Each item carries `at`, so the
+    review page can show an item's canonical source when the reviewer opens
+    a body; the interface itself still contains no bodies.
+85. **Interface diff (§11.1, §15.1).** `onus interface <file> --diff
+    <old.json>` and `onus review --against <old.json>` compare two documents
+    of one module. v0 decides compatibility textually: a `requires` added or
+    an `ensures` removed is breaking, the reverse compatible; a widened
+    effect set or a changed signature line is breaking; new assumptions,
+    recover sites and obligations that left `proved` are listed. Implication
+    between clauses (a weaker `requires` written differently) is not
+    checked; the module is breaking when a public item is. Schema in
+    `interface-diff.schema.json`.
+86. **The review tool (§15).** `packages/review` is dependency-free and
+    renders one self-contained HTML page from the reports (impl spec §12,
+    item 4 resolved: no framework). Views: paths (graph laid out top-down
+    from the entry, assume leaves in amber and recover sites in purple as the
+    only colours, unresolvable calls as a break, gate regions shaded),
+    interfaces (bodies collapsed to `{ ... }`, opening counted per module in
+    the page), ledger (filterable by state, with assumptions, recover sites
+    and capability construction sites), diff, and diagnostics with the
+    solver's counterexample. `onus review <entry> [--out <dir>] [--against
+    <old.json>]` writes `index.html` and `review.json`. Not in v0: the path
+    condition in the counterexample view, promotion drafts, and decisions
+    or contract edits flowing back as tasks (§15.1); an invalid program's
+    page shows its diagnostics only.
+
 ### Deferred, not changed
 
 - `Stream[T] ! e` as a type (§3.11) is not parsed: `-> Stream[T] ! e` is

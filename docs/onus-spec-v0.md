@@ -731,7 +731,7 @@ Clauses (grammar in §2.3):
 }
 ```
 
-The report is the reviewer's primary artefact for a path. It has a human-readable rendering with the same content; the JSON is normative. <!-- changed: M8, docs/CHANGES.md item 79 — the v0 report also carries `effects.forbid`, `obligations.failed`, `ok`, and `permitted_by` is `"scope"`, `"except"` or null; `unresolvable_calls` entries are `{ at, reason }`; a capability's `assumes` list is empty until construction-site assumptions exist -->
+The report is the reviewer's primary artefact for a path. It has a human-readable rendering with the same content; the JSON is normative. <!-- changed: M8, docs/CHANGES.md item 79 — the v0 report also carries `effects.forbid`, `obligations.failed`, `ok`, and `permitted_by` is `"scope"`, `"except"` or null; `unresolvable_calls` entries are `{ at, reason }`; a capability's `assumes` list is empty until construction-site assumptions exist --> <!-- changed: M10, docs/CHANGES.md item 83 — `graph`, `gates`, `recovers` and `ledger` carry what the path view draws -->
 
 ---
 
@@ -821,7 +821,7 @@ Bodies are not in the interface. If an interface is insufficient to trust a modu
 }
 ```
 
-Every item carries its own obligation counts; the module totals are the sum. Diffing two interface documents is how the compiler enforces the compatibility rule below.
+Every item carries its own obligation counts; the module totals are the sum. Diffing two interface documents is how the compiler enforces the compatibility rule below. <!-- changed: M10, docs/CHANGES.md items 84–85 — each item carries `at`; `onus interface --diff` produces the diff document, deciding compatibility textually in v0 -->
 
 Visibility: items are private unless marked `pub`. Private items may have weaker contracts; public ones may not be weakened once published without a major version change (the compiler diffs interfaces and refuses a compatible-version bump that weakens a contract or widens an effect set).
 
@@ -910,6 +910,8 @@ Onus assumes the developer is reviewing, not editing. The review tool is the sur
 **Counterexample view.** A failed obligation with the solver's model rendered as concrete values against the contract text, and the path condition that led there. Its purpose is the one judgement that needs a human: whether the contract is wrong or the body is.
 
 **Promotion.** When a reviewer identifies a convention the code follows but nothing enforces, the tool drafts the enforcing declaration — a `sealed` type, a derived claim, a `path` clause, a `policy` — and files it as a change. This is the mechanism by which the underspecified remainder (§17) shrinks over time.
+
+<!-- changed: M10, docs/CHANGES.md item 86 — v0 renders the path, interface, ledger, diff and diagnostics/counterexample views from the reports as one static page (`onus review`); promotion, the path condition in the counterexample view, and decisions flowing back as tasks are not implemented -->
 
 ### 15.2 What it does not do
 

@@ -7,12 +7,43 @@ import type { DefId } from '../resolve/defs.js';
 import { lineColOf, type Span } from '../source.js';
 import type { PathAnalysis } from '../paths/tables.js';
 import { effectName } from '../paths/pass.js';
+import { effectsOfFn } from '../claims/calls.js';
+import { EffectSet } from '../effects/set.js';
 
 export interface PathAssumeJson {
   readonly claim: string;
   readonly at: string;
   readonly justification: string;
   readonly permitted_by: 'scope' | 'except' | null;
+}
+
+export interface GraphNodeJson {
+  readonly id: string;
+  readonly module: string;
+  readonly kind: 'entry' | 'fn' | 'intrinsic';
+  readonly effects: readonly string[];
+  readonly claims: readonly string[];
+  readonly obligations: { readonly proved: number; readonly checked: number; readonly assumed: number; readonly failed: number };
+  readonly assumes: number;
+  readonly recovers: number;
+  readonly unresolvable: number;
+}
+
+export interface GraphEdgeJson {
+  readonly from: string;
+  readonly to: string;
+  readonly effects: readonly string[];
+  readonly at: string;
+}
+
+export interface PathLedgerJson {
+  readonly kind: string;
+  readonly text: string;
+  readonly def: string;
+  readonly status: string;
+  readonly by: string | null;
+  readonly pinned: boolean;
+  readonly at: string;
 }
 
 export interface PathReport {
@@ -25,6 +56,13 @@ export interface PathReport {
   readonly obligations: { readonly proved: number; readonly checked: number; readonly assumed: number; readonly failed: number; readonly checked_at: readonly string[] };
   readonly unresolvable_calls: readonly { readonly at: string; readonly reason: string }[];
   readonly capabilities: readonly { readonly type: string; readonly constructed_at: string; readonly assumes: readonly string[] }[];
+  /** The reachable call graph for the path view (§15.1): nodes carry claims and obligation counts, edges carry effects. */
+  readonly graph: { readonly nodes: readonly GraphNodeJson[]; readonly edges: readonly GraphEdgeJson[] };
+  /** Typestate gates: a sealed type only `producers` return and `guarded` functions demand (§3.10). */
+  readonly gates: readonly { readonly evidence: string; readonly producers: readonly string[]; readonly guarded: readonly string[] }[];
+  readonly recovers: readonly { readonly def: string; readonly at: string }[];
+  /** Every obligation of a reachable function. */
+  readonly ledger: readonly PathLedgerJson[];
   readonly ok: boolean;
 }
 
@@ -49,6 +87,32 @@ export function pathReport(ctx: Context, analysis: PathAnalysis): PathReport {
     }
   }
   const names = (set: { values(): { k: string }[] }): string[] => set.values().map((e) => effectName(ctx, e as Parameters<typeof effectName>[1])).sort();
+  const countsOf = (fn: DefId): { proved: number; checked: number; assumed: number; failed: number } => {
+    const c = { proved: 0, checked: 0, assumed: 0, failed: 0 };
+    for (const o of obligations) {
+      if (o.def !== fn) continue;
+      if (o.status === 'proved') c.proved += 1;
+      else if (o.status === 'assumed') c.assumed += 1;
+      else if (o.status === 'failed') c.failed += 1;
+      else c.checked += 1;
+    }
+    return c;
+  };
+  const nodes: GraphNodeJson[] = analysis.reachable.map((fn) => {
+    const def = t.def(fn);
+    return {
+      id: t.qualifiedName(fn),
+      module: t.moduleOf(def.module).name,
+      kind: fn === analysis.entry ? 'entry' : def.intrinsic ? 'intrinsic' : 'fn',
+      effects: names(EffectSet.of(effectsOfFn(ctx, fn).values().filter((e) => e.k !== 'param'))),
+      claims: [...(ctx.claims.carried.get(fn) ?? [])].map((c) => t.qualifiedName(c)),
+      obligations: countsOf(fn),
+      assumes: ctx.claims.assumesOf(fn).length,
+      recovers: analysis.recovers.filter((r) => r.fn === fn).length,
+      unresolvable: analysis.unresolvable.filter((u) => u.fn === fn).length,
+    };
+  });
+  const edges: GraphEdgeJson[] = analysis.edges.map((e) => ({ from: t.qualifiedName(e.from), to: t.qualifiedName(e.to), effects: names(e.effects), at: `${t.qualifiedName(e.from)}:${lineCol(ctx, t.node(e.at).span)}` }));
   return {
     path: t.def(analysis.def).name,
     entry: t.qualifiedName(analysis.entry),
@@ -59,6 +123,10 @@ export function pathReport(ctx: Context, analysis: PathAnalysis): PathReport {
     obligations: { ...counts, checked_at: checkedAt },
     unresolvable_calls: analysis.unresolvable.map((u) => ({ at: `${t.qualifiedName(u.fn)}:${lineCol(ctx, t.node(u.at).span)}`, reason: u.reason })),
     capabilities: analysis.capabilities.map((c) => ({ type: c.typeText, constructed_at: `${t.qualifiedName(c.fn)}:${lineCol(ctx, t.node(c.at).span)}`, assumes: [] })),
+    graph: { nodes, edges },
+    gates: analysis.gates.map((g) => ({ evidence: t.qualifiedName(g.evidence), producers: g.producers.map((p) => t.qualifiedName(p)), guarded: g.guarded.map((p) => t.qualifiedName(p)) })),
+    recovers: analysis.recovers.map((r) => ({ def: t.qualifiedName(r.fn), at: `${t.qualifiedName(r.fn)}:${lineCol(ctx, t.node(r.at).span)}` })),
+    ledger: obligations.map((o) => ({ kind: o.kind, text: o.text, def: t.qualifiedName(o.def), status: o.status, by: o.by, pinned: o.pinned !== null, at: `${ctx.fileOf(t.node(o.at).span).path}:${lineCol(ctx, t.node(o.at).span)}` })),
     ok: analysis.ok,
   };
 }
@@ -77,6 +145,8 @@ export function pathText(r: PathReport): string {
   for (const u of r.unresolvable_calls) lines.push(`    ${u.at}: ${u.reason}`);
   lines.push(r.capabilities.length === 0 ? '  capabilities: none' : '  capabilities:');
   for (const c of r.capabilities) lines.push(`    ${c.type} at ${c.constructed_at}`);
+  for (const g of r.gates) lines.push(`  gate: ${g.evidence} from ${g.producers.join(', ')} guards ${g.guarded.join(', ')}`);
+  lines.push(`  graph: ${r.graph.nodes.length} nodes, ${r.graph.edges.length} edges`);
   return `${lines.join('\n')}\n`;
 }
 

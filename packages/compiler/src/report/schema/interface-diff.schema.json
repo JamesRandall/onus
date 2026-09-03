@@ -1,0 +1,263 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://onus-lang.dev/schema/v0/interface-diff.json",
+  "title": "Onus interface diff (language spec \u00a711.1, \u00a715.1)",
+  "type": "object",
+  "required": [
+    "module",
+    "old_hash",
+    "new_hash",
+    "added",
+    "removed",
+    "changed",
+    "breaking"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "module": {
+      "type": "string"
+    },
+    "old_hash": {
+      "type": "string"
+    },
+    "new_hash": {
+      "type": "string"
+    },
+    "added": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "kind",
+          "visibility"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "visibility": {
+            "enum": [
+              "pub",
+              "private"
+            ]
+          }
+        }
+      }
+    },
+    "removed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "kind",
+          "visibility"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "visibility": {
+            "enum": [
+              "pub",
+              "private"
+            ]
+          }
+        }
+      }
+    },
+    "changed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "kind",
+          "visibility",
+          "signature",
+          "effects",
+          "contracts",
+          "assumes",
+          "recovers",
+          "obligations",
+          "breaking"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "visibility": {
+            "enum": [
+              "pub",
+              "private"
+            ]
+          },
+          "signature": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "old",
+                  "new"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "old": {
+                    "type": "string"
+                  },
+                  "new": {
+                    "type": "string"
+                  }
+                }
+              }
+            ]
+          },
+          "effects": {
+            "type": "object",
+            "required": [
+              "added",
+              "removed"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "added": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "removed": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "contracts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "kind",
+                "text",
+                "change",
+                "compatibility"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "change": {
+                  "enum": [
+                    "added",
+                    "removed"
+                  ]
+                },
+                "compatibility": {
+                  "enum": [
+                    "compatible",
+                    "breaking"
+                  ]
+                }
+              }
+            }
+          },
+          "assumes": {
+            "type": "object",
+            "required": [
+              "added",
+              "removed"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "added": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "removed": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "recovers": {
+            "type": "object",
+            "required": [
+              "added",
+              "removed"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "added": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "removed": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          "obligations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "kind",
+                "text",
+                "from",
+                "to"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "breaking": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "breaking": {
+      "type": "boolean"
+    }
+  }
+}

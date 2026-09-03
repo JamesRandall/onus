@@ -96,6 +96,8 @@ export interface InterfaceItem {
   readonly assumes: readonly AssumeEntry[];
   readonly recovers: readonly RecoverEntry[];
   readonly obligations: ObligationCounts;
+  /** Where the item is declared, so a reviewer's tool can show its source on request (§15.1). */
+  readonly at: Location;
 }
 
 export interface InterfaceDocument {
@@ -182,6 +184,7 @@ class InterfaceBuilder {
       assumes: this.assumesIn(item),
       recovers: this.recoversIn(item),
       obligations: counts(own),
+      at: this.location(item.span),
     };
     const elided = printItem(item, this.rec.comments, { elideBodies: true });
     switch (item.kind) {

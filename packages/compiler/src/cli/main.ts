@@ -16,6 +16,11 @@ import { build, runLauncher } from '../codegen/build.js';
 import { interfaceOf, interfaceText } from '../report/interface.js';
 import { pathReport, pathText } from '../report/path.js';
 import { next } from '../next/next.js';
+import { diffText, interfaceDiff } from '../report/diff.js';
+import { reviewData } from '../report/review.js';
+import { renderPage } from '@onus/review';
+import type { InterfaceDocument } from '../report/interface.js';
+import { mkdirSync } from 'node:fs';
 
 const USAGE = `usage:
   onus check <file.onus>... [--json] [--root <dir>] [--stdlib <dir>] [--to <pass>] [--budget <ms>] [--ledger] [--no-cache]
@@ -26,8 +31,11 @@ const USAGE = `usage:
       check, then emit JavaScript for every module into <dir> (default: <root>/out)
   onus run <entry.onus> [--out <dir>] [-- args...]
       build, then run the entry module's main
-  onus interface <file.onus> [--json] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]
-      check, then print the entry module's interface: canonical source with bodies elided, or the §11.1 JSON
+  onus interface <file.onus> [--json] [--diff <old-interface.json>] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]
+      check, then print the entry module's interface: canonical source with bodies elided, or the §11.1 JSON;
+      with --diff, the changes since a previous interface document (§11.1, §15.1)
+  onus review <entry.onus> [--out <dir>] [--against <old-interface.json>] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]
+      check, then write the review page (§15) and its data to <dir> (default: <entry dir>/review)
   onus path <file.onus> [<name>] [--json] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]
       check, then print the §9.1 report of the entry module's paths (or of the named one)
   onus next <file.onus> --offset <n> [--json] [--root <dir>] [--stdlib <dir>]
@@ -41,7 +49,7 @@ interface Args {
   readonly values: ReadonlyMap<string, string>;
 }
 
-const VALUE_FLAGS: ReadonlySet<string> = new Set(['root', 'stdlib', 'to', 'out', 'emit', 'budget', 'offset']);
+const VALUE_FLAGS: ReadonlySet<string> = new Set(['root', 'stdlib', 'to', 'out', 'emit', 'budget', 'offset', 'diff', 'against']);
 
 function parseArgs(argv: readonly string[]): Args {
   const files: string[] = [];
@@ -197,8 +205,55 @@ function interfaceCommand(args: Args): number {
     process.stderr.write(`onus interface: ${entry} is not a module\n`);
     return 2;
   }
-  process.stdout.write(args.flags.has('json') ? `${JSON.stringify(interfaceOf(ctx, rec.id), null, 2)}\n` : interfaceText(ctx, rec.id));
+  const doc = interfaceOf(ctx, rec.id);
+  const oldPath = args.values.get('diff');
+  if (oldPath !== undefined) {
+    const old = readInterface(oldPath);
+    if (old === null) return 2;
+    const d = interfaceDiff(old, doc);
+    process.stdout.write(args.flags.has('json') ? `${JSON.stringify(d, null, 2)}\n` : diffText(d));
+    return d.breaking ? 1 : 0;
+  }
+  process.stdout.write(args.flags.has('json') ? `${JSON.stringify(doc, null, 2)}\n` : interfaceText(ctx, rec.id));
   return 0;
+}
+
+/** Reads a previously written §11.1 document; the shape is trusted to the extent the diff reads it. */
+function readInterface(path: string): InterfaceDocument | null {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
+    if (isInterfaceDocument(parsed)) return parsed;
+    process.stderr.write(`onus: ${path} is not an interface document\n`);
+  } catch (e) {
+    process.stderr.write(`onus: cannot read ${path}: ${e instanceof Error ? e.message : String(e)}\n`);
+  }
+  return null;
+}
+
+function isInterfaceDocument(v: unknown): v is InterfaceDocument {
+  return typeof v === 'object' && v !== null && 'module' in v && typeof v.module === 'string' && 'hash' in v && 'items' in v && Array.isArray(v.items);
+}
+
+function reviewCommand(args: Args): number {
+  const entry = args.files[0];
+  if (entry === undefined) {
+    process.stderr.write(USAGE);
+    return 2;
+  }
+  const againstPath = args.values.get('against');
+  const against = againstPath === undefined ? null : readInterface(againstPath);
+  if (againstPath !== undefined && against === null) return 2;
+  const ctx = newContext(args);
+  if (!readFiles(ctx, [entry])) return 2;
+  runPipeline(ctx, 'paths');
+  emitDiagnostics(ctx, args.flags.has('json'));
+  const data = reviewData(ctx, against);
+  const outDir = args.values.get('out') ?? join(dirname(entry), 'review');
+  mkdirSync(outDir, { recursive: true });
+  writeFileSync(join(outDir, 'index.html'), renderPage(data));
+  writeFileSync(join(outDir, 'review.json'), `${JSON.stringify(data, null, 2)}\n`);
+  process.stderr.write(`onus review: wrote ${join(outDir, 'index.html')}\n`);
+  return ctx.sink.hasErrors() ? 1 : 0;
 }
 
 function pathCommand(args: Args): number {
@@ -267,6 +322,8 @@ function main(argv: readonly string[]): number {
       return pathCommand(args);
     case 'next':
       return nextCommand(args);
+    case 'review':
+      return reviewCommand(args);
     default:
       process.stderr.write(USAGE);
       return 2;

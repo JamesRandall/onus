@@ -1,0 +1,16 @@
+{
+  "name": "@onus/review",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The Onus review tool: a static page rendered from the compiler's JSON reports. It computes nothing beyond layout.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.test.json && vitest run"
+  }
+}

@@ -48,4 +48,6 @@ export { pathsPass } from './paths/pass.js';
 export { PathTables, type PathAnalysis } from './paths/tables.js';
 export { pathReport, pathText, type PathReport } from './report/path.js';
 export { next, tokenName, type NextResult } from './next/next.js';
+export { interfaceDiff, diffText, type InterfaceDiff, type ItemChange } from './report/diff.js';
+export { reviewData, type ReviewData } from './report/review.js';
 export { legalTokensAt, parseWithHole } from './syntax/parser.js';

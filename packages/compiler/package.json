@@ -16,7 +16,8 @@
   },
   "dependencies": {
     "@noble/hashes": "^2.0.0",
-    "@onus/runtime": "workspace:*"
+    "@onus/runtime": "workspace:*",
+    "@onus/review": "workspace:*"
   },
   "devDependencies": {
     "ajv": "^8.20.0",
