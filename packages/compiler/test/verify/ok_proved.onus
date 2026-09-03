@@ -1,0 +1,67 @@
+module ok_proved
+
+record Viewport {
+  x_min: Int
+  x_max: Int where it > x_min
+}
+
+fn clamp(x: Int, lo: Int, hi: Int where it >= lo) -> Int where lo <= it and it <= hi {
+  if x < lo {
+    return lo
+  }
+  if x > hi {
+    return hi
+  }
+  return x
+}
+
+fn abs(x: Int) -> Int where it >= 0
+  ensures result == x or result == -x
+{
+  if x < 0 {
+    return -x
+  }
+  return x
+}
+
+fn count(limit: Int where 0 <= it and it <= 1000) -> Int
+  ensures result == limit
+{
+  var i: Int where it >= 0 = 0
+  loop while i < limit
+    invariant i <= limit
+    decreases limit - i
+  {
+    i = i + 1
+  }
+  return i
+}
+
+fn first_or_zero(xs: List[Int]) -> Int {
+  if List.is_empty(xs: xs) {
+    return 0
+  }
+  return List.get(xs: xs, i: 0)
+}
+
+fn sum_squares(xs: List[Int where 0 <= it and it <= 100]) -> Int where it >= 0 {
+  var total: Int where it >= 0 = 0
+  for x: Int in xs {
+    total = total + x * x
+  }
+  return total
+}
+
+fn widen(v: Viewport) -> Viewport {
+  return { v with x_max: v.x_max + 1 }
+}
+
+fn describe(o: Option[Int where it > 0]) -> Int where it >= 0 {
+  match o with
+  | Some(value) -> return value
+  | None -> return 0
+}
+
+fn build(lo: Int, hi: Int where it > lo) -> Viewport {
+  return Viewport { x_min: lo, x_max: hi }
+}

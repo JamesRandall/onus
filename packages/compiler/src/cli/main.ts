@@ -15,7 +15,7 @@ import { defaultStdlibRoot } from '../resolve/loader.js';
 import { build, runLauncher } from '../codegen/build.js';
 
 const USAGE = `usage:
-  onus check <file.onus>... [--json] [--root <dir>] [--stdlib <dir>] [--to <pass>]
+  onus check <file.onus>... [--json] [--root <dir>] [--stdlib <dir>] [--to <pass>] [--budget <ms>] [--ledger] [--no-cache]
       report every diagnostic; exit 1 if any. Passes: ${PASSES.join(', ')}
   onus fmt <file.onus>... [--stdout]
       rewrite files in canonical form
@@ -33,7 +33,7 @@ interface Args {
   readonly values: ReadonlyMap<string, string>;
 }
 
-const VALUE_FLAGS: ReadonlySet<string> = new Set(['root', 'stdlib', 'to', 'out', 'emit']);
+const VALUE_FLAGS: ReadonlySet<string> = new Set(['root', 'stdlib', 'to', 'out', 'emit', 'budget']);
 
 function parseArgs(argv: readonly string[]): Args {
   const files: string[] = [];
@@ -85,7 +85,22 @@ function isPass(s: string): s is PassName {
 function newContext(args: Args): Context {
   const here = dirname(fileURLToPath(import.meta.url));
   const stdlib = args.values.get('stdlib') ?? defaultStdlibRoot(join(here, '..', '..'));
-  return new Context({ root: args.values.get('root') ?? null, stdlib });
+  const budget = Number(args.values.get('budget') ?? '500');
+  const entry = args.files[0];
+  const cacheDir = args.flags.has('no-cache') ? null : join(args.values.get('root') ?? (entry === undefined ? '.' : dirname(entry)), '.onus', 'cache');
+  return new Context({ root: args.values.get('root') ?? null, stdlib, verify: { budgetMs: Number.isFinite(budget) && budget > 0 ? budget : 500, cacheDir, z3Path: null } });
+}
+
+/** Prints one line per obligation of the entry file's modules: the ledger (§11, §12.2). */
+function printLedger(ctx: Context): void {
+  const entryFile = ctx.files[0];
+  for (const o of ctx.contracts.obligations) {
+    const def = ctx.resolve.def(o.def);
+    const site = ctx.resolve.node(o.at).span;
+    if (entryFile !== undefined && site.file !== entryFile.id) continue;
+    const at = toText(ctx, { code: 'E0001', title: '', def: null, span: site, obligation: null, context: [], repairs: [], canonicalHash: null }).split(': ')[0] ?? '';
+    process.stdout.write(`${o.status.padEnd(8)} ${o.kind.padEnd(16)} ${at}  ${def.name}: ${o.text}${o.by ? `  [${o.by}]` : ''}\n`);
+  }
 }
 
 function check(args: Args): number {
@@ -93,7 +108,7 @@ function check(args: Args): number {
     process.stderr.write(USAGE);
     return 2;
   }
-  const to = args.values.get('to') ?? 'contracts';
+  const to = args.values.get('to') ?? 'verify';
   if (!isPass(to)) {
     process.stderr.write(`onus: unknown pass \`${to}\`; expected one of ${PASSES.join(', ')}\n`);
     return 2;
@@ -102,6 +117,7 @@ function check(args: Args): number {
   if (!readFiles(ctx, args.files)) return 2;
   runPipeline(ctx, to);
   emitDiagnostics(ctx, args.flags.has('json'));
+  if (args.flags.has('ledger')) printLedger(ctx);
   if (ctx.sink.hasErrors()) {
     if (!args.flags.has('json')) process.stdout.write(`${ctx.sink.count} error${ctx.sink.count === 1 ? '' : 's'}\n`);
     return 1;

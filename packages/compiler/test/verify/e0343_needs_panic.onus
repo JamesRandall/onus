@@ -1,0 +1,9 @@
+module e0343_needs_panic
+
+fn silent(x: Int) -> Int where it >= 0 {
+  return x
+}
+
+fn declared(x: Int) -> Int where it >= 0 ! panic {
+  return x
+}

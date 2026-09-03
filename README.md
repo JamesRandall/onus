@@ -10,12 +10,15 @@ reviews contracts, and the compiler is the only checker.
 
 ## Status
 
-Milestones 1–5 done: lexer, parser, canonical printer, `onus fmt`; module
+Milestones 1–6 done: lexer, parser, canonical printer, `onus fmt`; module
 loading, name resolution, the type checker, the check-time evaluator, the
-effects pass and obligation objects (`onus check`; `--to <pass>` stops early);
-JavaScript output with every obligation checked at runtime, generated vitest
-files for examples, properties and laws, and `onus build` / `onus run`.
-Later milestones per the implementation spec.
+effects pass, obligation objects and the z3-backed verifier (`onus check`,
+`--ledger` shows every obligation's status; `--to <pass>` stops early);
+JavaScript output with a runtime check for every obligation the verifier did
+not prove, generated vitest files for examples, properties and laws, and
+`onus build` / `onus run`. `z3` must be on PATH for verification; without
+it every obligation is checked at runtime. Later milestones per the
+implementation spec.
 
 ## Commands
 
@@ -23,7 +26,7 @@ Later milestones per the implementation spec.
 pnpm install
 pnpm -r build
 pnpm -r test
-pnpm onus check <file.onus> [--json] [--root <dir>] [--stdlib <dir>] [--to <pass>]
+pnpm onus check <file.onus> [--json] [--root <dir>] [--stdlib <dir>] [--to <pass>] [--ledger] [--budget <ms>] [--no-cache]
 pnpm onus fmt <file.onus> [--stdout]
 pnpm onus build <entry.onus> [--out <dir>] [--emit js|ts]
 pnpm onus run <entry.onus> [--out <dir>] [-- args]

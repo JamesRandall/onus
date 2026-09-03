@@ -1550,6 +1550,7 @@ class Checker {
     });
     const ret = substitute(substitute(sig.ret, subst), indexSubst);
     this.ty.instantiations.set(e.id, tparams.map((p) => subst.get(p.def) ?? { k: 'type', type: ERROR }));
+    this.ty.indexBindings.set(e.id, indexSubst);
     this.ty.effectBindings.set(e.id, new Map(tparams.flatMap((p) => {
       const b = subst.get(p.def);
       return p.k === 'effect' && b !== undefined && b.k === 'effects' ? [[p.def, b.effects] as const] : [];

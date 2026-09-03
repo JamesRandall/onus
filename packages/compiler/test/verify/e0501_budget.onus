@@ -1,0 +1,11 @@
+module e0501_budget
+
+fn fermat(a: Int where it > 0, b: Int where it > 0, c: Int where it > 0) -> Int
+  requires proved a * a * a + b * b * b != c * c * c
+{
+  return a + b + c
+}
+
+fn caller(a: Int where it > 0, b: Int where it > 0, c: Int where it > 0) -> Int {
+  return fermat(a: a, b: b, c: c)
+}

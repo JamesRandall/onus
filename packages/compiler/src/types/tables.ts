@@ -54,6 +54,8 @@ export class TypeTables {
   readonly instantiations = new Map<A.NodeId, readonly TypeArg[]>();
   /** Effect parameters bound at each generic call site. */
   readonly effectBindings = new Map<A.NodeId, ReadonlyMap<DefId, EffectSet>>();
+  /** Value parameters used as type indices, bound to the constants passed for them at each call site. */
+  readonly indexBindings = new Map<A.NodeId, ReadonlyMap<DefId, TypeArg>>();
   readonly refinementFlows: RefinementFlow[] = [];
   /** Variants of each union, in declaration order. */
   readonly variants = new Map<DefId, readonly DefId[]>();

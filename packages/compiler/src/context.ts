@@ -12,6 +12,15 @@ import { fileId, makeSourceFile, type FileId, type SourceFile, type Span } from 
 import type { ParseResult } from './syntax/parser.js';
 import { TypeTables } from './types/tables.js';
 
+export interface VerifyOptions {
+  /** Per-obligation solver budget in milliseconds (§12.3). */
+  readonly budgetMs: number;
+  /** Directory of the proof cache, or null to disable caching. */
+  readonly cacheDir: string | null;
+  /** Explicit z3 executable; null searches PATH. */
+  readonly z3Path: string | null;
+}
+
 export interface ContextOptions {
   /** Project root that module names are resolved against; inferred from the first entry file when null. */
   readonly root: string | null;
@@ -19,6 +28,9 @@ export interface ContextOptions {
   readonly stdlib: string | null;
   /** File access for the loader; returns null when the file does not exist. */
   readonly readFile: (path: string) => string | null;
+  readonly verify: VerifyOptions;
+  /** Informational output that is not a diagnostic (e.g. "z3 not found"). */
+  readonly log: (line: string) => void;
 }
 
 /** Reads a file from disk, or null if it cannot be read. Effects: reads the file system. */
@@ -56,7 +68,14 @@ export class Context implements FileLookup {
       root: options.root ?? null,
       stdlib: options.stdlib ?? null,
       readFile: options.readFile ?? readFileOrNull,
+      verify: options.verify ?? { budgetMs: 500, cacheDir: null, z3Path: null },
+      log: options.log ?? ((line) => process.stderr.write(`${line}\n`)),
     };
+  }
+
+  /** Emits an informational line through the configured logger. Effects: those of the logger. */
+  log(line: string): void {
+    this.options.log(line);
   }
 
   /**

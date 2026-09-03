@@ -1,0 +1,23 @@
+{
+  "diagnostics": [],
+  "obligations": [
+    {
+      "kind": "refinement",
+      "at": [
+        7,
+        12
+      ],
+      "text": "0.0 <= it and it <= 1.0",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        9,
+        10
+      ],
+      "text": "0.0 <= it and it <= 1.0",
+      "status": "checked"
+    }
+  ]
+}

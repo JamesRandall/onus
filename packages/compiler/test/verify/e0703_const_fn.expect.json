@@ -1,0 +1,28 @@
+{
+  "diagnostics": [
+    {
+      "code": "E0703",
+      "span": [
+        [
+          4,
+          30
+        ],
+        [
+          4,
+          31
+        ]
+      ]
+    }
+  ],
+  "obligations": [
+    {
+      "kind": "refinement",
+      "at": [
+        4,
+        30
+      ],
+      "text": "0 <= it and it < len(xs: xs)",
+      "status": "checked"
+    }
+  ]
+}

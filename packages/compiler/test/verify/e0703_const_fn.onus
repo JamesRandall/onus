@@ -1,0 +1,5 @@
+module e0703_const_fn
+
+const fn head(xs: List[Int], i: Int) -> Int {
+  return List.get(xs: xs, i: i)
+}

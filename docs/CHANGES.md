@@ -287,6 +287,55 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     (§3.7, item 26) without a runtime mismatch; the `tsc --strict` oracle
     caught the original defect.
 
+## M6 — verification
+
+64. **Lowering (impl spec §7.1).** Records and unions are not SMT datatypes:
+    field access is an uninterpreted projection per type instantiation, a
+    variant test compares an uninterpreted integer tag, lists have
+    uninterpreted `len`/`get`, `Text` is an opaque sort whose literals are
+    pairwise distinct, and every call is an uninterpreted function per
+    instantiation (a fresh constant when effectful) with the callee's
+    `ensures` and return refinement asserted about the result. A value's
+    declared refinements are facts, recursively through record fields, union
+    payloads and list elements. Floats are opaque values; a float operation
+    makes only the operand it appears in unknown.
+65. **Path knowledge (§3.2.1).** A body is walked once with fresh SMT
+    constants per `var` assignment; `if` conditions, `match` arms (with the
+    failure of earlier arms), loop conditions and invariants inside loops,
+    their negation and the invariants after exit, `for` ranges and list
+    membership, and `try` success are facts. Loops and branch joins forget
+    the variables they assign. An early-returning branch leaves its negated
+    condition in force afterwards.
+66. **Constant discharge.** An obligation without a solver condition whose
+    predicate and inputs are constants (the `Viewport` literal of §18.1) is
+    decided by evaluation; this is how float refinements over constants are
+    proved.
+67. **Statuses and codes.** `unsat` → proved; `sat` → checked, or for a pinned
+    clause `failed` with the model as counterexample (`E0302` ensures,
+    `E0342` requires); `unknown`/timeout → checked for unpinned nonlinear
+    obligations, otherwise `E0501`. The panic rule of §6.1 is `E0343`
+    (a checked obligation in a function without `panic`); a `const fn` with a
+    checked obligation is `E0703`. Overflow obligations are exempt from both
+    in v0: the ±2^53 range is the runtime's assumption (impl spec §12.1) and
+    they stay runtime checks.
+68. **Codegen consumes statuses.** A callee's entry check for a `requires`
+    clause or a parameter refinement is omitted when every call site proved
+    it (whole-program), so Mandelbrot's generated code carries no checks.
+69. **CLI.** `onus check --ledger` prints the obligations of the entry file
+    with their statuses and provenance; `--budget <ms>` sets the per-obligation
+    solver budget (default 500); `--no-cache` bypasses `.onus/cache/`;
+    `ONUS_DUMP_SMT=<dir>` writes every problem for inspection.
+70. **Checkout example (§18.3).** `recent_orders`'s `ensures forall o: Order in
+    result: o.customer == who.id` needs the `Spec` mechanism and is commented
+    out until it exists; its proof from the statement's `where` clause is the
+    open item of item 53.
+
+71. **Sequential solving.** The impl spec (§7.2) runs obligations in parallel
+    up to the CPU count; v0 runs one `z3 -in -smt2` process at a time with
+    `spawnSync`, relying on the proof cache for repeat runs. Mandelbrot,
+    reporting and checkout verify in a few seconds each; parallelism is a
+    performance item for later.
+
 ### Deferred, not changed
 
 - `Stream[T] ! e` as a type (§3.11) is not parsed: `-> Stream[T] ! e` is

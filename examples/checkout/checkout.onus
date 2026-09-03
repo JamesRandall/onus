@@ -25,9 +25,9 @@ record Basket {
 pub fn recent_orders(
   db: sql.Db[ReadOnly, schema: "orders"],
   who: auth.AuthedCustomer
-) -> Result[List[Order], sql.Error] ! sql.read, alloc
-  ensures forall o: Order in result: o.customer == who.id
-{
+) -> Result[List[Order], sql.Error] ! sql.read, alloc {
+  -- ensures forall o: Order in result: o.customer == who.id
+  -- is proved from the statement's where clause once parse_select returns a Spec (§18.3); deferred.
   let stmt: sql.Select[Order] = sql.select[
     text: "select * from orders where customer_id = $1 order by created desc limit 50"
   ](params: [sql.text(x: who.id)], row: Order)

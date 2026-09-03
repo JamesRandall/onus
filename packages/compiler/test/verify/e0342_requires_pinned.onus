@@ -1,0 +1,11 @@
+module e0342_requires_pinned
+
+fn recip(x: Int) -> Int
+  requires proved x != 0
+{
+  return 1000 / x
+}
+
+fn caller(y: Int) -> Int {
+  return recip(x: y)
+}

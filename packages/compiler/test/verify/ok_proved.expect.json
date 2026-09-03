@@ -1,0 +1,239 @@
+{
+  "diagnostics": [],
+  "obligations": [
+    {
+      "kind": "refinement",
+      "at": [
+        10,
+        12
+      ],
+      "text": "lo <= it and it <= hi",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        13,
+        12
+      ],
+      "text": "lo <= it and it <= hi",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        15,
+        10
+      ],
+      "text": "lo <= it and it <= hi",
+      "status": "proved"
+    },
+    {
+      "kind": "ensures",
+      "at": [
+        22,
+        5
+      ],
+      "text": "result == x or result == -x",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        22,
+        12
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "ensures",
+      "at": [
+        24,
+        3
+      ],
+      "text": "result == x or result == -x",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        24,
+        10
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        30,
+        30
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "invariant-entry",
+      "at": [
+        31,
+        3
+      ],
+      "text": "i <= limit",
+      "status": "proved"
+    },
+    {
+      "kind": "invariant-step",
+      "at": [
+        31,
+        3
+      ],
+      "text": "i <= limit",
+      "status": "proved"
+    },
+    {
+      "kind": "decreases",
+      "at": [
+        31,
+        3
+      ],
+      "text": "limit - i",
+      "status": "proved"
+    },
+    {
+      "kind": "overflow",
+      "at": [
+        33,
+        15
+      ],
+      "text": "limit - i within Int",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        35,
+        9
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "overflow",
+      "at": [
+        35,
+        9
+      ],
+      "text": "i + 1 within Int",
+      "status": "proved"
+    },
+    {
+      "kind": "ensures",
+      "at": [
+        37,
+        3
+      ],
+      "text": "result == limit",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        44,
+        30
+      ],
+      "text": "0 <= it and it < len(xs: xs)",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        48,
+        34
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        50,
+        13
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "overflow",
+      "at": [
+        50,
+        13
+      ],
+      "text": "total + x * x within Int",
+      "status": "checked"
+    },
+    {
+      "kind": "overflow",
+      "at": [
+        50,
+        21
+      ],
+      "text": "x * x within Int",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        52,
+        10
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        56,
+        26
+      ],
+      "text": "it > x_min",
+      "status": "proved"
+    },
+    {
+      "kind": "overflow",
+      "at": [
+        56,
+        26
+      ],
+      "text": "v.x_max + 1 within Int",
+      "status": "checked"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        61,
+        27
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        62,
+        20
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        66,
+        39
+      ],
+      "text": "it > x_min",
+      "status": "proved"
+    }
+  ]
+}

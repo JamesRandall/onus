@@ -1,0 +1,73 @@
+{
+  "diagnostics": [
+    {
+      "code": "E0501",
+      "span": [
+        [
+          10,
+          10
+        ],
+        [
+          10,
+          34
+        ]
+      ]
+    }
+  ],
+  "obligations": [
+    {
+      "kind": "overflow",
+      "at": [
+        6,
+        10
+      ],
+      "text": "a + b + c within Int",
+      "status": "checked"
+    },
+    {
+      "kind": "overflow",
+      "at": [
+        6,
+        10
+      ],
+      "text": "a + b within Int",
+      "status": "checked"
+    },
+    {
+      "kind": "requires",
+      "at": [
+        10,
+        10
+      ],
+      "text": "a * a * a + b * b * b != c * c * c",
+      "status": "failed"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        10,
+        20
+      ],
+      "text": "it > 0",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        10,
+        26
+      ],
+      "text": "it > 0",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        10,
+        32
+      ],
+      "text": "it > 0",
+      "status": "proved"
+    }
+  ]
+}

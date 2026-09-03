@@ -619,13 +619,16 @@ class Emitter {
     this.fn = null;
   }
 
-  /** Parameter refinements and non-pinned `requires` are checked by the callee on entry. */
+  /** Parameter refinements and non-pinned `requires` are checked by the callee on entry, unless every call site proved them. */
   private entryChecks(sig: Signature, contracts: readonly A.Contract[], defName: string): void {
+    const callSites = this.ctx.contracts.obligations.filter((o) => o.callee === sig.def);
     sig.params.forEach((p, i) => {
       const pd = sig.paramDefs[i];
       if (pd === undefined) return;
       const declared = this.ty.declTypes.get(pd);
       if (declared === undefined) return;
+      const flows = callSites.filter((o) => o.kind === 'refinement' && o.param === p.name);
+      if (flows.length > 0 && flows.every((o) => o.status === 'proved')) return;
       const node = this.t.node(this.t.def(pd).node);
       for (const pred of this.refinementPreds(declared)) {
         const ref = this.obRef('refinement', printExpr(pred), node.span, defName);
@@ -634,6 +637,8 @@ class Emitter {
     });
     for (const c of contracts) {
       if (c.clause !== 'requires' || c.proved) continue;
+      const sites = callSites.filter((o) => o.kind === 'requires' && o.source === c.id);
+      if (sites.length > 0 && sites.every((o) => o.status === 'proved')) continue;
       const ref = this.obRef('requires', printExpr(c.expr), c.span, defName);
       this.w.line(`$rt.check(${this.expr(c.expr).code}, ${ref});`);
     }

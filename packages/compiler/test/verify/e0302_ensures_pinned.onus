@@ -1,0 +1,7 @@
+module e0302_ensures_pinned
+
+fn halve(x: Int) -> Int
+  ensures proved result >= 0
+{
+  return x / 2
+}

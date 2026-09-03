@@ -41,6 +41,9 @@ export interface Obligation {
   readonly source: A.NodeId | null;
   readonly site: RefinementSite;
   readonly pinned: 'proved' | null;
+  /** For `requires` and argument refinements: the called function and, for the latter, the parameter. */
+  readonly callee: DefId | null;
+  readonly param: string | null;
   status: ObligationStatus;
   /** Where the status came from, for the ledger. */
   by: string | null;

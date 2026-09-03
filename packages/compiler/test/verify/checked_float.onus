@@ -1,0 +1,10 @@
+module checked_float
+
+type Ratio = Float where 0.0 <= it and it <= 1.0
+
+fn clamp_ratio(x: Float) -> Ratio ! panic {
+  if x < 0.0 {
+    return 0.0
+  }
+  return x
+}

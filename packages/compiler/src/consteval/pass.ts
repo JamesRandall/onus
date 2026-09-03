@@ -148,21 +148,19 @@ class ConstPass {
       if (v === null) return;
       env.set(p.def, v);
     }
+    // Bind the parameters whose arguments are constant; a clause that needs another one is left to the verifier.
     for (let i = 0; i < sig.params.length; i++) {
       const p = sig.params[i];
       const pd = sig.paramDefs[i];
       const a = call.args.find((x) => x.name.text === p?.name);
       if (p === undefined || pd === undefined || a === undefined) return;
-      let v: Value;
       try {
         this.ev.reset();
-        v = this.ev.evalExpr(a.value, new Map());
+        env.set(pd, this.ev.evalExpr(a.value, new Map()));
       } catch (err) {
-        if (err instanceof NotConst) return;
-        if (err instanceof EvalPanic || err instanceof BudgetExceeded) return;
+        if (err instanceof NotConst || err instanceof EvalPanic || err instanceof BudgetExceeded) continue;
         throw err;
       }
-      env.set(pd, v);
     }
     for (const clause of clauses) {
       this.ev.reset();

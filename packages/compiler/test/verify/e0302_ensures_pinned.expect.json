@@ -1,0 +1,37 @@
+{
+  "diagnostics": [
+    {
+      "code": "E0302",
+      "span": [
+        [
+          6,
+          3
+        ],
+        [
+          6,
+          15
+        ]
+      ]
+    }
+  ],
+  "obligations": [
+    {
+      "kind": "ensures",
+      "at": [
+        6,
+        3
+      ],
+      "text": "result >= 0",
+      "status": "failed"
+    },
+    {
+      "kind": "overflow",
+      "at": [
+        6,
+        10
+      ],
+      "text": "2 != 0",
+      "status": "proved"
+    }
+  ]
+}

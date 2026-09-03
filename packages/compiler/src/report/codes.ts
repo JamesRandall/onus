@@ -68,6 +68,8 @@ export const CODES = {
   E0339: 'value discarded',
   E0340: 'operator not defined for type',
   E0341: 'pattern does not match the scrutinee type',
+  E0342: 'precondition not established',
+  E0343: 'checked obligation in a function without panic',
   E0410: 'unresolvable call on path',
   E0411: 'path effect bound and forbid clause are inconsistent',
   E0501: 'verification budget exceeded',
@@ -75,6 +77,7 @@ export const CODES = {
   E0700: 'library check failed',
   E0701: 'const evaluation failed',
   E0702: 'example failed',
+  E0703: 'const fn obligation not proved',
   E0999: 'internal error',
 } as const;
 

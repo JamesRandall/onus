@@ -17,7 +17,7 @@
  * `checked`.
  */
 import type { Context } from '../context.js';
-import type { Def } from '../resolve/defs.js';
+import type { Def, DefId } from '../resolve/defs.js';
 import type * as A from '../syntax/ast.js';
 import { printExpr } from '../syntax/printer.js';
 import { walk } from '../syntax/walk.js';
@@ -50,7 +50,7 @@ class ContractsPass {
             break;
           }
           case 'PropertyDecl':
-            this.ctx.contracts.add({ kind: 'property', at: item.id, def: this.defOf(item).id, text: item.name.text, source: item.body.id, site: 'other', pinned: null, status: 'checked', by: 'milestone 5: run under generated inputs' });
+            this.ctx.contracts.add({ kind: 'property', at: item.id, def: this.defOf(item).id, text: item.name.text, source: item.body.id, site: 'other', pinned: null, callee: null, param: null, status: 'checked', by: 'milestone 5: run under generated inputs' });
             this.body(item.body, this.defOf(item), null);
             break;
           case 'ExampleDecl':
@@ -87,10 +87,10 @@ class ContractsPass {
         case 'Loop':
           for (const c of n.clauses) {
             if (c.clause === 'invariant') {
-              this.ctx.contracts.add({ kind: 'invariant-entry', at: n.id, def: def.id, text: printExpr(c.expr), source: c.id, site: 'other', pinned: null, status: 'checked', by: null });
-              this.ctx.contracts.add({ kind: 'invariant-step', at: n.id, def: def.id, text: printExpr(c.expr), source: c.id, site: 'other', pinned: null, status: 'checked', by: null });
+              this.ctx.contracts.add({ kind: 'invariant-entry', at: n.id, def: def.id, text: printExpr(c.expr), source: c.id, site: 'other', pinned: null, callee: null, param: null, status: 'checked', by: null });
+              this.ctx.contracts.add({ kind: 'invariant-step', at: n.id, def: def.id, text: printExpr(c.expr), source: c.id, site: 'other', pinned: null, callee: null, param: null, status: 'checked', by: null });
             } else {
-              this.ctx.contracts.add({ kind: 'decreases', at: n.id, def: def.id, text: printExpr(c.expr), source: c.id, site: 'other', pinned: null, status: 'checked', by: null });
+              this.ctx.contracts.add({ kind: 'decreases', at: n.id, def: def.id, text: printExpr(c.expr), source: c.id, site: 'other', pinned: null, callee: null, param: null, status: 'checked', by: null });
             }
           }
           break;
@@ -140,16 +140,16 @@ class ContractsPass {
   private returnSite(r: A.Return, fn: A.FnDecl, def: Def): void {
     for (const c of fn.contracts) {
       if (c.clause !== 'ensures') continue;
-      this.ctx.contracts.add({ kind: 'ensures', at: r.id, def: def.id, text: printExpr(c.expr), source: c.id, site: 'return', pinned: c.proved ? 'proved' : null, status: 'checked', by: null });
+      this.ctx.contracts.add({ kind: 'ensures', at: r.id, def: def.id, text: printExpr(c.expr), source: c.id, site: 'return', pinned: c.proved ? 'proved' : null, callee: null, param: null, status: 'checked', by: null });
     }
     this.flow(r.value, def, 'return');
   }
 
   /** A refinement obligation for the flow recorded at expression `e`, if any. */
-  private flow(e: A.Expr, def: Def, site: RefinementSite): void {
+  private flow(e: A.Expr, def: Def, site: RefinementSite, callee: DefId | null = null, param: string | null = null): void {
     const flow = this.ctx.types.refinementFlows.find((f) => f.at === e.id);
     if (flow === undefined) return;
-    this.ctx.contracts.add({ kind: 'refinement', at: e.id, def: def.id, text: this.refinementText(flow.to), source: refinementSource(flow.to), site, pinned: null, status: 'checked', by: null });
+    this.ctx.contracts.add({ kind: 'refinement', at: e.id, def: def.id, text: this.refinementText(flow.to), source: refinementSource(flow.to), site, pinned: null, callee, param, status: 'checked', by: null });
   }
 
   private refinementText(t: Type): string {
@@ -182,11 +182,13 @@ class ContractsPass {
         source: c.id,
         site: 'other',
         pinned: c.proved ? 'proved' : null,
+        callee: fnDef.id,
+        param: null,
         status: proved ? 'proved' : 'checked',
         by: proved ? 'const evaluator' : null,
       });
     }
-    for (const a of call.args) this.flow(a.value, def, 'argument');
+    for (const a of call.args) this.flow(a.value, def, 'argument', fnDef.id, a.name.text);
   }
 
   private arith(b: A.Binary, def: Def): void {
@@ -195,7 +197,7 @@ class ContractsPass {
     const s = lt === undefined ? undefined : stripRefinements(lt);
     if (s === undefined || s.k !== 'prim' || (s.name !== 'Int' && s.name !== 'Duration')) return;
     const text = b.op === '/' || b.op === '%' ? `${printExpr(b.right)} != 0` : `${printExpr(b)} within Int`;
-    this.ctx.contracts.add({ kind: 'overflow', at: b.id, def: def.id, text, source: null, site: 'other', pinned: null, status: 'checked', by: null });
+    this.ctx.contracts.add({ kind: 'overflow', at: b.id, def: def.id, text, source: null, site: 'other', pinned: null, callee: null, param: null, status: 'checked', by: null });
   }
 
   private laws(impl: A.ImplDecl): void {
@@ -203,7 +205,7 @@ class ContractsPass {
     if (ifaceRes === undefined || ifaceRes.k !== 'def') return;
     const implDef = this.defOf(impl);
     for (const law of this.ctx.resolve.defs.filter((d) => d.parent === ifaceRes.def && d.kind === 'law')) {
-      this.ctx.contracts.add({ kind: 'law', at: impl.id, def: implDef.id, text: law.name, source: law.node, site: 'other', pinned: null, status: 'checked', by: 'milestone 5: run under generated inputs' });
+      this.ctx.contracts.add({ kind: 'law', at: impl.id, def: implDef.id, text: law.name, source: law.node, site: 'other', pinned: null, callee: null, param: null, status: 'checked', by: 'milestone 5: run under generated inputs' });
     }
   }
 }

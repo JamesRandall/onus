@@ -14,16 +14,18 @@ import { CODES } from '../../src/report/codes.js';
 const here = dirname(fileURLToPath(import.meta.url));
 
 /** Codes of later milestones (verification) that no fixture can produce yet. */
-const LATER = new Set(['E0302']);
+const LATER = new Set<string>([]);
 /** Reported by the parser; its fixture lives in test/syntax. */
 const PARSER_REPORTED = new Set(['E0102']);
+/** Reported by the verifier; fixtures live in test/verify. */
+const VERIFIER = new Set(['E0302', 'E0342', 'E0343', 'E0501', 'E0703']);
 
 describe('checker fixtures', () => {
   const fixtures = fixturesIn(here);
   const seen = new Set<string>();
   for (const f of fixtures) {
     it(f.name, () => {
-      const { diagnostics } = pipeline(f.path, f.text, here);
+      const { diagnostics } = pipeline(f.path, f.text, here, 'contracts');
       for (const d of diagnostics) seen.add(d.code);
       // A positive fixture never expects a diagnostic, whatever its expectation file says.
       if (f.name.startsWith('ok_')) expect(diagnostics.map((d) => `${d.code} ${d.context.join(' ')}`)).toEqual([]);
@@ -33,14 +35,14 @@ describe('checker fixtures', () => {
 
   it('rejects a std.* module outside the standard library (E0112)', () => {
     const path = join(here, 'std', 'reserved.onus');
-    const { diagnostics } = pipeline(path, readFileSync(path, 'utf8'), here);
+    const { diagnostics } = pipeline(path, readFileSync(path, 'utf8'), here, 'contracts');
     for (const d of diagnostics) seen.add(d.code);
     expect(diagnostics.map((d) => d.code)).toEqual(['E0112']);
   });
 
   it('covers every resolution and typing diagnostic code', () => {
-    for (const f of fixtures) for (const d of pipeline(f.path, f.text, here).diagnostics) seen.add(d.code);
-    const codes = Object.keys(CODES).filter((c) => /^E0[12357]/.test(c) && !LATER.has(c) && !PARSER_REPORTED.has(c));
+    for (const f of fixtures) for (const d of pipeline(f.path, f.text, here, 'contracts').diagnostics) seen.add(d.code);
+    const codes = Object.keys(CODES).filter((c) => /^E0[12357]/.test(c) && !LATER.has(c) && !PARSER_REPORTED.has(c) && !VERIFIER.has(c));
     expect(codes.filter((c) => !seen.has(c))).toEqual([]);
   });
 });

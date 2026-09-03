@@ -7,7 +7,7 @@ fn half(n: Int) -> Int
   return n / 2
 }
 
-pub fn main(args: List[Text]) -> Result[Unit, io.Error] {
-  let x: Int = half(n: 0)
+pub fn main(args: List[Text]) -> Result[Unit, io.Error] ! panic {
+  let x: Int = half(n: List.len(xs: args) - 5)
   return Ok(value: Unit)
 }

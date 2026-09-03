@@ -57,8 +57,8 @@ const fn tokenize(text: Text) -> List[Token] ! alloc {
   let n: Int = List.len(xs: gs)
   var out: List[Token] = []
   var word: Text = ""
-  var start: Int = 0
-  var i: Int = 0
+  var start: Int where it >= 0 = 0
+  var i: Int where it >= 0 = 0
   loop while i < n
     invariant i <= n
     decreases n - i
@@ -105,7 +105,7 @@ pub const fn parse_select(text: Text) -> Result[SelectAst, ConstError] ! alloc {
   var last: Column = Column { name: "", offset: 0 }
   var depth: Int = 0
   var seen_from: Bool = false
-  var i: Int = 1
+  var i: Int where it >= 0 = 1
   loop while i < count
     invariant i <= count
     decreases count - i
@@ -156,7 +156,7 @@ pub const fn parse_select(text: Text) -> Result[SelectAst, ConstError] ! alloc {
 
 const fn has_field(fields: List[typeinfo.Field], name: Text) -> Bool {
   let n: Int = List.len(xs: fields)
-  var i: Int = 0
+  var i: Int where it >= 0 = 0
   loop while i < n
     invariant i <= n
     decreases n - i
@@ -171,7 +171,7 @@ const fn has_field(fields: List[typeinfo.Field], name: Text) -> Bool {
 
 const fn has_column(columns: List[Column], name: Text) -> Bool {
   let n: Int = List.len(xs: columns)
-  var i: Int = 0
+  var i: Int where it >= 0 = 0
   loop while i < n
     invariant i <= n
     decreases n - i
@@ -195,7 +195,7 @@ pub const fn columns_match(text: Text, record: TypeInfo) -> Result[Unit, ConstEr
     }
     let fields: List[typeinfo.Field] = TypeInfo.fields(t: record)
     let n: Int = List.len(xs: value.columns)
-    var i: Int = 0
+    var i: Int where it >= 0 = 0
     loop while i < n
       invariant i <= n
       decreases n - i
@@ -212,7 +212,7 @@ pub const fn columns_match(text: Text, record: TypeInfo) -> Result[Unit, ConstEr
       i = i + 1
     }
     let m: Int = List.len(xs: fields)
-    var j: Int = 0
+    var j: Int where it >= 0 = 0
     loop while j < m
       invariant j <= m
       decreases m - j

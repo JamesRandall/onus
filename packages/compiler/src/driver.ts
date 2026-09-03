@@ -14,8 +14,9 @@ import { typesPass } from './types/check.js';
 import { effectsPass } from './effects/check.js';
 import { constevalPass } from './consteval/pass.js';
 import { contractsPass } from './contracts/pass.js';
+import { verifyPass } from './verify/pass.js';
 
-export const PASSES = ['parse', 'canonical', 'resolve', 'types', 'consteval', 'effects', 'contracts'] as const;
+export const PASSES = ['parse', 'canonical', 'resolve', 'types', 'consteval', 'effects', 'contracts', 'verify'] as const;
 export type PassName = (typeof PASSES)[number];
 
 /**
@@ -115,4 +116,6 @@ export function runPipeline(ctx: Context, to: PassName = 'types', passes: Partia
   guarded(ctx, 'effects', passes.effects ?? effectsPass);
   if (upTo < PASSES.indexOf('contracts') || !clean()) return;
   guarded(ctx, 'contracts', passes.contracts ?? contractsPass);
+  if (upTo < PASSES.indexOf('verify') || !clean()) return;
+  guarded(ctx, 'verify', passes.verify ?? verifyPass);
 }

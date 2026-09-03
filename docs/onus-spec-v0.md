@@ -546,7 +546,7 @@ The compiler understands these directly:
 |---|---|
 | `alloc` | May allocate on the heap. Absence is proved by the absence of allocating operations: list literals, `++`, closure creation, and calls to allocating functions. Records and variants are values and do not allocate. <!-- changed: M3, item 46 --> |
 | `mutate` | May mutate one of its own `inout` parameters, by assignment or by passing it on `inout`. A callee's `mutate` does not propagate through a caller's local `var`. <!-- changed: M3, item 45 --> |
-| `panic` | May halt on a runtime contract violation. A function without `panic` must have every obligation *proved*. |
+| `panic` | May halt on a runtime contract violation. A function without `panic` must have every obligation *proved*, except integer overflow obligations, which in v0 are runtime checks against the implementation's ±2^53 range and are reported as such in the ledger. <!-- changed: M6, docs/CHANGES.md item 67 --> |
 | `diverge` | May fail to terminate. |
 | `nondet` | Result depends on something other than its arguments (clock, randomness, scheduling). |
 | `io.file`, `io.net`, `io.env`, `io.clock`, `io.rand` | Access to the corresponding resource, via a capability. |
@@ -844,13 +844,13 @@ The compiler never silently downgrades. A function may pin an obligation's state
 
 ### 12.3 Fragment (**provisional**)
 
-Linear integer arithmetic, equality with uninterpreted functions, algebraic datatypes, and bounded quantification over finite ranges. Nonlinear integer arithmetic is attempted with a fixed low budget and falls back to *checked*. Real arithmetic is excluded by default.
+Linear integer arithmetic, equality with uninterpreted functions, algebraic datatypes, and bounded quantification over finite ranges. Nonlinear integer arithmetic is attempted with a fixed low budget and falls back to *checked*. Real arithmetic is excluded by default. <!-- changed: M6, docs/CHANGES.md item 64 — v0 encodes records and unions with uninterpreted projections and tags rather than solver datatypes, and treats Float values as opaque -->
 
 Solver timeouts are hard errors (`E0501 verification budget exceeded`), not silent fallbacks, because a loop that behaves differently on repeated runs is worse than one that fails consistently. Each obligation carries a per-obligation budget; the default is small and may be raised explicitly with `budget` annotations that appear in the interface.
 
 ### 12.4 Caching
 
-Obligations are keyed by the content hash of the canonical text of everything they depend on. Re-checking after an edit re-verifies only obligations whose dependency hashes changed.
+Obligations are keyed by the content hash of the canonical text of everything they depend on. Re-checking after an edit re-verifies only obligations whose dependency hashes changed. <!-- changed: M6, docs/CHANGES.md item 69 — v0 keys the cache by the solver problem text, the solver version and the budget, which is a function of the same dependencies -->
 
 ---
 
