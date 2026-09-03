@@ -14,7 +14,7 @@ const fn sum_to(n: Int where it >= 0) -> Int
   return n + sum_to(n: n - 1)
 }
 
-const fn shout(t: Text) -> Text ! alloc {
+const fn shout(t: Text) -> Text may alloc {
   return Text.lower(t: t) ++ "!"
 }
 
@@ -31,14 +31,14 @@ record Row {
   total: Int
 }
 
-fn aliased(db: sql.Db[ReadOnly]) -> Result[List[Row], sql.Error] ! sql.read, alloc {
+fn aliased(db: sql.Db[ReadOnly]) -> Result[List[Row], sql.Error] may sql.read, alloc {
   let stmt: sql.Select[Row] = sql.select[
     text: "select to_char(created, 'YYYY-MM') as month, sum(amount) as total from orders group by 1"
   ](params: [], row: Row)
   return sql.query(db: db, statement: stmt)
 }
 
-fn star(db: sql.Db[ReadOnly]) -> Result[List[Row], sql.Error] ! sql.read, alloc {
+fn star(db: sql.Db[ReadOnly]) -> Result[List[Row], sql.Error] may sql.read, alloc {
   let stmt: sql.Select[Row] = sql.select[text: "SELECT * FROM orders WHERE total > $1"](
     params: [sql.int(x: 1)],
     row: Row
@@ -46,7 +46,7 @@ fn star(db: sql.Db[ReadOnly]) -> Result[List[Row], sql.Error] ! sql.read, alloc 
   return sql.query(db: db, statement: stmt)
 }
 
-fn dynamic(db: sql.Db[ReadOnly], year: Int) -> Result[List[Row], sql.Error] ! sql.read, alloc {
+fn dynamic(db: sql.Db[ReadOnly], year: Int) -> Result[List[Row], sql.Error] may sql.read, alloc {
   let stmt: sql.Select[Row] = sql.select[text: "select month, total from orders where year = $1"](
     params: [sql.int(x: year)],
     row: Row

@@ -6,6 +6,6 @@ pub record Field {
   type_name: Text
 }
 
-pub const intrinsic fn name(t: TypeInfo) -> Text ! alloc
+pub const intrinsic fn name(t: TypeInfo) -> Text may alloc
 
-pub const intrinsic fn fields(t: TypeInfo) -> List[Field] ! alloc
+pub const intrinsic fn fields(t: TypeInfo) -> List[Field] may alloc

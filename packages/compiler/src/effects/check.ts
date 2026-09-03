@@ -289,6 +289,7 @@ class EffectChecker {
       case 'ResultRef':
       case 'Old':
       case 'Fake':
+      case 'Hole':
         return;
       case 'Ctor':
         for (const a of e.args ?? []) this.expr(a.value, frame, owner);
@@ -450,7 +451,7 @@ class EffectChecker {
   }
 
   private showFn(t: Type): string {
-    return t.k === 'fn' ? `fn(...) -> … ! ${this.show(t.effects) || '∅'}` : '?';
+    return t.k === 'fn' ? `fn(...) -> … may ${this.show(t.effects) || '∅'}` : '?';
   }
 
   // -------------------------------------------------------------------------

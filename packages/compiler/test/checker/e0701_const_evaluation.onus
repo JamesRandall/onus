@@ -10,7 +10,7 @@ pub const out_of_range: Int = List.get(xs: [1, 2], i: 5)
 
 pub const too_big: Int = 9007199254740993
 
-fn runtime_only(files: Int) -> Int ! nondet {
+fn runtime_only(files: Int) -> Int may nondet {
   return files
 }
 

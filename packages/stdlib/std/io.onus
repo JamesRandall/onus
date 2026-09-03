@@ -21,8 +21,8 @@ pub capability Clock
 pub capability File
   grants io.file
 
-pub intrinsic fn create(files: Files, path: Text) -> Result[File, Error] ! io.file, alloc
+pub intrinsic fn create(files: Files, path: Text) -> Result[File, Error] may io.file, alloc
 
-pub intrinsic fn write(file: File, text: Text) -> Result[Unit, Error] ! io.file
+pub intrinsic fn write(file: File, text: Text) -> Result[Unit, Error] may io.file
 
-pub intrinsic fn get_env(env: Env, name: Text) -> Option[Text] ! io.env, alloc
+pub intrinsic fn get_env(env: Env, name: Text) -> Option[Text] may io.env, alloc

@@ -13,6 +13,7 @@ import type { Context } from '../context.js';
 import type { Value } from '../consteval/values.js';
 import type { Def, DefId, ResolveTables } from '../resolve/defs.js';
 import type * as A from '../syntax/ast.js';
+import { isExpr } from '../syntax/walk.js';
 import type { Signature, TypeTables } from '../types/tables.js';
 import { stripRefinements, substitute, substituteArg, type ConstValue, type Type, type TypeArg } from '../types/type.js';
 import { and, app, BOOL, eq, FALSE, implies, INT, int, not, or, TRUE, variable, type Formula, type Sort } from './formula.js';
@@ -322,6 +323,7 @@ export class Lowerer {
       case 'Recover':
       case 'Closure':
       case 'Fake':
+      case 'Hole':
         return this.freshConst('opaque', this.sortOf(this.typeOfExpr(e)));
     }
   }
@@ -795,34 +797,3 @@ function hasInout(sig: Signature): boolean {
   return sig.params.some((p) => p.inout);
 }
 
-function isExpr(n: A.Node): n is A.Expr {
-  switch (n.kind) {
-    case 'IntLit':
-    case 'FloatLit':
-    case 'TextLit':
-    case 'BoolLit':
-    case 'DurationLit':
-    case 'Name':
-    case 'It':
-    case 'ResultRef':
-    case 'Ctor':
-    case 'RecordUpdate':
-    case 'ListLit':
-    case 'Try':
-    case 'Recover':
-    case 'Old':
-    case 'Quantifier':
-    case 'Closure':
-    case 'Fake':
-    case 'FieldAccess':
-    case 'Call':
-    case 'Unary':
-    case 'Binary':
-    case 'And':
-    case 'Or':
-    case 'Is':
-      return true;
-    default:
-      return false;
-  }
-}

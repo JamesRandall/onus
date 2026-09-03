@@ -3,11 +3,11 @@ import std.io
 
 claim Quiet "Writes nothing."
 
-fn leaf(files: io.Files) -> Unit ! io.file {
+fn leaf(files: io.Files) -> Unit may io.file {
   return Unit
 }
 
-pub fn run(files: io.Files) -> Unit ! io.file {
+pub fn run(files: io.Files) -> Unit may io.file {
   return leaf(files: files)
 }
 

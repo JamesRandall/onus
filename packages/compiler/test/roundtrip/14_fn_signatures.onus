@@ -4,15 +4,18 @@ fn pure_fn(x: Int) -> Int {
   return x
 }
 
-pub fn effectful(files: io.Files, path: Text) -> Result[Unit, io.Error] ! io.file, alloc {
+pub fn effectful(files: io.Files, path: Text) -> Result[Unit, io.Error] may io.file, alloc {
   return Ok(value: Unit)
 }
 
-pub fn gen[T: Ord, U, const n: Int, e](xs: List[T], f: fn(x: T) -> U ! e) -> List[U] ! e, alloc {
+pub fn gen[T: Ord, U, const n: Int, e](
+  xs: List[T],
+  f: fn(x: T) -> U may e
+) -> List[U] may e, alloc {
   return []
 }
 
-fn mutating(grid: inout Grid[T, w, h], x: Int, value: T) -> Unit ! mutate
+fn mutating(grid: inout Grid[T, w, h], x: Int, value: T) -> Unit may mutate
   requires x < w
   ensures grid.get(x: x) == value
 {
@@ -32,7 +35,7 @@ pub const fn parse_select(text: Text) -> Result[SelectAst, ConstError]
   return Err(error: ConstError { offset: 0 })
 }
 
-pub fn claiming(pay: Payments) -> Result[Receipt, ChargeError] ! io.net
+pub fn claiming(pay: Payments) -> Result[Receipt, ChargeError] may io.net
   claims Idempotent, audit.Audited
 {
   assume Idempotent "Vendor API deduplicates on req.key for 24h; see contract §4.2"

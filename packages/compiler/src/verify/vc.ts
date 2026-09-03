@@ -19,7 +19,7 @@ import type { Context } from '../context.js';
 import type { Obligation, ObligationId } from '../contracts/obligations.js';
 import type { Def, DefId, ResolveTables } from '../resolve/defs.js';
 import type * as A from '../syntax/ast.js';
-import { walk } from '../syntax/walk.js';
+import { walk, isExpr } from '../syntax/walk.js';
 import type { TypeTables } from '../types/tables.js';
 import { stripRefinements, type Type } from '../types/type.js';
 import { and, app, BOOL, eq, implies, INT, int, not, type Formula, type Sort } from './formula.js';
@@ -643,7 +643,4 @@ function blockReturns(b: A.Block): boolean {
   return b.stmts.some(stmtReturns);
 }
 
-function isExpr(n: A.Node): n is A.Expr {
-  return 'kind' in n && ['IntLit', 'FloatLit', 'TextLit', 'BoolLit', 'DurationLit', 'Name', 'It', 'ResultRef', 'Ctor', 'RecordUpdate', 'ListLit', 'Try', 'Recover', 'Old', 'Quantifier', 'Closure', 'Fake', 'FieldAccess', 'Call', 'Unary', 'Binary', 'And', 'Or', 'Is'].includes(n.kind);
-}
 

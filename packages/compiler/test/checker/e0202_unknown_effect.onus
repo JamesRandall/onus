@@ -1,7 +1,7 @@
 module e0202_unknown_effect
 import std.io
 
-fn f() -> Int ! magic, io.teleport, sql.read, e {
+fn f() -> Int may magic, io.teleport, sql.read, e {
   return 1
 }
 

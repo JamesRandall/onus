@@ -13,11 +13,11 @@ impl Ord[Int] {
 }
 
 impl Codec[MonthlyTotal] {
-  fn encode(value: MonthlyTotal) -> Text ! alloc {
+  fn encode(value: MonthlyTotal) -> Text may alloc {
     return value.month ++ "," ++ Int.to_text(x: value.total_pence)
   }
 
-  fn decode(text: Text) -> Result[MonthlyTotal, CodecError] ! alloc {
+  fn decode(text: Text) -> Result[MonthlyTotal, CodecError] may alloc {
     return Err(error: Malformed)
   }
 }

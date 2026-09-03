@@ -13,14 +13,14 @@ fn add(a: Int, b: Int) -> Int
   return a + b
 }
 
-fn leaf(files: io.Files) -> Unit ! io.file
+fn leaf(files: io.Files) -> Unit may io.file
   claims Quiet
 {
   assume Quiet "The file is opened read-only."
   return Unit
 }
 
-fn mid(files: io.Files) -> Unit ! io.file
+fn mid(files: io.Files) -> Unit may io.file
   claims Quiet
 {
   return leaf(files: files)
@@ -32,7 +32,7 @@ fn pure(x: Int) -> Int
   return x
 }
 
-pub fn main(args: List[Text], files: io.Files) -> Result[Unit, io.Error] ! io.file
+pub fn main(args: List[Text], files: io.Files) -> Result[Unit, io.Error] may io.file
   claims Quiet
 {
   mid(files: files)

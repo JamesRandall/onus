@@ -4,7 +4,7 @@ fn apply(f: fn(x: Int) -> Int, x: Int) -> Int {
   return f(x: x)
 }
 
-fn map[T, U, e](xs: List[T], f: fn(x: T) -> U ! e) -> List[U] ! e, alloc {
+fn map[T, U, e](xs: List[T], f: fn(x: T) -> U may e) -> List[U] may e, alloc {
   var out: List[U] = []
   for x: T in xs {
     out = out ++ [f(x: x)]
@@ -12,8 +12,8 @@ fn map[T, U, e](xs: List[T], f: fn(x: T) -> U ! e) -> List[U] ! e, alloc {
   return out
 }
 
-fn f(xs: List[Int]) -> Int ! alloc {
-  let noisy: fn(x: Int) -> Int ! alloc = fn(x: Int) -> Int ! alloc {
+fn f(xs: List[Int]) -> Int may alloc {
+  let noisy: fn(x: Int) -> Int may alloc = fn(x: Int) -> Int may alloc {
     return List.len(xs: [x])
   }
   let quiet: fn(x: Int) -> Int = noisy
@@ -23,7 +23,7 @@ fn f(xs: List[Int]) -> Int ! alloc {
 }
 
 fn g() -> fn(x: Int) -> Int {
-  return fn(x: Int) -> Int ! alloc {
+  return fn(x: Int) -> Int may alloc {
     return x
   }
 }

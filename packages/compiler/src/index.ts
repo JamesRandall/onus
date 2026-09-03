@@ -47,3 +47,5 @@ export { capabilitiesPass } from './capabilities/pass.js';
 export { pathsPass } from './paths/pass.js';
 export { PathTables, type PathAnalysis } from './paths/tables.js';
 export { pathReport, pathText, type PathReport } from './report/path.js';
+export { next, tokenName, type NextResult } from './next/next.js';
+export { legalTokensAt, parseWithHole } from './syntax/parser.js';

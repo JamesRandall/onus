@@ -76,7 +76,7 @@ item        = fn_decl | type_alias | record_decl | union_decl | interface_decl
 
 visibility  = [ "pub" ] [ "sealed" ] ;
 
-fn_decl     = visibility [ "const" ] [ "intrinsic" ] "fn" NAME [ tparams ] "(" [ params ] ")" "->" type [ "!" effects ]
+fn_decl     = visibility [ "const" ] [ "intrinsic" ] "fn" NAME [ tparams ] "(" [ params ] ")" "->" type [ "may" effects ]   (* changed: M9, docs/CHANGES.md item 82 — `may` replaces `!` before an effect list, everywhere the grammar had it *)
               [ "claims" claim_list ] { contract } ( block | NL ) ;   (* changed: M1 newlines; M2 intrinsic §3.12: no body *)
 tparams     = "[" tparam { "," tparam } "]" ;
 tparam      = TNAME [ ":" TNAME ]                       (* type parameter, optional bound *)
@@ -90,7 +90,7 @@ contract    = "requires" [ "proved" ] expr
             | "ensures"  [ "proved" ] expr ;
 
 type        = QTNAME [ "[" targ { "," targ } "]" ] [ "where" expr ]
-            | "fn" "(" [ params ] ")" "->" type [ "!" effects ] ;   (* changed: M2, parameters are named; §3.7 *)
+            | "fn" "(" [ params ] ")" "->" type [ "may" effects ] ;   (* changed: M2, parameters are named; §3.7 *)
 targ        = [ NAME ":" ] ( type | expr ) ;            (* expr must be constant, §3.8; changed: M1, labelled per §8.2 *)
 
 type_alias  = visibility ( "type" TNAME "=" type | "intrinsic" "type" TNAME [ tparams ] ) NL ;   (* changed: M2, §3.12 *)
@@ -101,7 +101,7 @@ union_decl  = visibility "union" TNAME [ tparams ] "=" NL { "|" variant NL } ;
 variant     = TNAME [ "of" field { "," field } ] ;
 
 interface_decl = visibility "interface" TNAME "[" TNAME "]" "{" NL { iface_item NL } "}" NL ;
-iface_item  = "fn" NAME "(" [ params ] ")" "->" type [ "!" effects ] NL { contract NL }
+iface_item  = "fn" NAME "(" [ params ] ")" "->" type [ "may" effects ] NL { contract NL }
             | "law" NAME "(" [ params ] ")" block ;
 impl_decl   = "impl" TNAME "[" type "]" "{" NL { fn_decl } "}" NL ;
 
@@ -150,7 +150,7 @@ primary     = LITERAL | NAME | "it" | "result"
             | "recover" block
             | "old" "(" NAME ")"
             | ( "forall" | "exists" ) NAME ":" type [ "in" domain ] [ "where" expr ] ":" expr   (* changed: M1; the binder type has no where of its own *)
-            | "fn" "(" [ params ] ")" "->" type [ "!" effects ] block    (* closure *)
+            | "fn" "(" [ params ] ")" "->" type [ "may" effects ] block    (* closure *)
             | "fake" QTNAME "{" [ field_init { "," field_init } ] "}" ;  (* changed: M1, §8.4; syntax error outside a test module *)
 call_args   = "(" [ NAME ":" [ "inout" ] expr { "," NAME ":" [ "inout" ] expr } ] ")" ;   (* changed: M1, §4.1 *)
 field_init  = NAME ":" expr ;
@@ -270,8 +270,8 @@ An interface declares signatures, contracts on those signatures, and `law` block
 
 ```
 interface Codec[T] {
-  fn encode(value: T) -> Text ! alloc
-  fn decode(text: Text) -> Result[T, CodecError] ! alloc
+  fn encode(value: T) -> Text may alloc
+  fn decode(text: Text) -> Result[T, CodecError] may alloc
 
   law round_trip(value: T) {
     decode(text: encode(value: value)) == Ok(value)
@@ -279,10 +279,10 @@ interface Codec[T] {
 }
 
 impl Codec[MonthlyTotal] {
-  fn encode(value: MonthlyTotal) -> Text ! alloc {
+  fn encode(value: MonthlyTotal) -> Text may alloc {
     return value.month ++ "," ++ Int.to_text(x: value.total_pence)
   }
-  fn decode(text: Text) -> Result[MonthlyTotal, CodecError] ! alloc {
+  fn decode(text: Text) -> Result[MonthlyTotal, CodecError] may alloc {
     ...
   }
 }
@@ -318,14 +318,14 @@ Rules:
 - Implementations are explicit (`impl Ord[Int] { ... }`); there is no structural or automatic conformance.
 - Generic code calls an interface function through the interface: `Ord.compare(a: x, b: y)`. The implementing type is taken from the arguments and must have an `impl`, or be a type parameter bounded by the interface. <!-- changed: M2, docs/CHANGES.md item 35 -->
 - Every contract and law on the interface is an obligation on every `impl`, with the usual proved/checked status.
-- An `impl` may not declare effects beyond those in the interface signature. An interface that wants to admit allocating or effectful implementations declares the effect (as `Codec` does with `alloc`) or is effect-polymorphic (`fn f(x: T) -> U ! e`).
+- An `impl` may not declare effects beyond those in the interface signature. An interface that wants to admit allocating or effectful implementations declares the effect (as `Codec` does with `alloc`) or is effect-polymorphic (`fn f(x: T) -> U may e`).
 - There is no overloading and no ad-hoc polymorphism outside interfaces.
 
-Type parameters are declared with their constraints: `fn sort[T: Ord](xs: List[T]) -> List[T] ! alloc`.
+Type parameters are declared with their constraints: `fn sort[T: Ord](xs: List[T]) -> List[T] may alloc`.
 
 ### 3.7 Function values and closures
 
-A function value has type `fn(a: A, b: B) -> R ! e`. Parameters of a function type are named — the names are the labels a caller uses, since every call passes arguments by name (§5) — and may carry refinements; the effect set is part of the type. A closure assigned to a function type may name its own parameters differently; assignability compares positions, types and effects. <!-- changed: M2, function types carry parameter names; without them a call through a function value could not be written -->
+A function value has type `fn(a: A, b: B) -> R may e`. Parameters of a function type are named — the names are the labels a caller uses, since every call passes arguments by name (§5) — and may carry refinements; the effect set is part of the type. A closure assigned to a function type may name its own parameters differently; assignability compares positions, types and effects. <!-- changed: M2, function types carry parameter names; without them a call through a function value could not be written -->
 
 ```
 let step: fn(n: Int where it >= 0) -> Int where it >= 0 = fn(m: Int where it >= 0) -> Int where it >= 0 {
@@ -337,7 +337,7 @@ step(n: 3)
 Rules:
 
 - A closure captures `let` bindings and parameters by value. It cannot capture a `var`, an `inout` parameter, or a capability.
-- A closure's effect set is the union of the effects of everything it calls. Passing a closure to an effect-polymorphic parameter `fn(T) -> U ! e` instantiates `e`.
+- A closure's effect set is the union of the effects of everything it calls. Passing a closure to an effect-polymorphic parameter `fn(T) -> U may e` instantiates `e`.
 - Function values are values: they may be stored, returned and passed. They may not be compared for equality.
 - **Provenance.** For path checking, a call through a function value is resolved to the set of closures and named functions that could reach it, computed by a whole-program flow analysis over `let` bindings, record fields, and list literals. Where that set is finite and known, the path check proceeds against each member. Where it is not — a function value read from a `Map`, decoded from input, or built from a value the analysis cannot follow — the call is *unresolvable* and any path that reaches it fails with `E0410`. Code off a path may call unresolvable function values freely; effect checking is still exact there, because the *type* of the value bounds its effects even when its identity is unknown.
 
@@ -359,9 +359,9 @@ There are no macros, syntax extensions or compiler plugins. Anything a library w
 
 ```
 -- in std.sql, ordinary Onus, verified like everything else
-pub const fn parse_select(text: Text) -> Result[SelectAst, ConstError] ! alloc
+pub const fn parse_select(text: Text) -> Result[SelectAst, ConstError] may alloc
 
-pub const fn columns_match(text: Text, record: TypeInfo) -> Result[Unit, ConstError] ! alloc
+pub const fn columns_match(text: Text, record: TypeInfo) -> Result[Unit, ConstError] may alloc
 
 pub intrinsic fn select[const text: Text, T](params: List[Param], row: TypeInfo) -> Select[T]
   requires proved parse_select(text: text) is Ok
@@ -403,10 +403,10 @@ match p with
 
 ### 3.11 Streams
 
-`Stream[T] ! e` is a lazy sequence whose elements are produced on demand with effect `e`. `for` iterates ranges, `List[T]` and `Stream[T]`; iterating a stream adds its effect to the enclosing function.
+`Stream[T] may e` is a lazy sequence whose elements are produced on demand with effect `e`. `for` iterates ranges, `List[T]` and `Stream[T]`; iterating a stream adds its effect to the enclosing function.
 
 ```
-fn total_pence(rows: Stream[Order] ! sql.read) -> Result[Int where it >= 0, sql.Error] ! sql.read {
+fn total_pence(rows: Stream[Order] may sql.read) -> Result[Int where it >= 0, sql.Error] may sql.read {
   var sum: Int where it >= 0 = 0
   for row: Order in rows {
     sum = sum + row.amount_pence            -- overflow obligation: checked
@@ -429,7 +429,7 @@ pub intrinsic type Grid[T, const width: Int where it > 0, const height: Int wher
 
 pub intrinsic fn len(t: Text) -> Int where it >= 0
 
-pub intrinsic fn set[T, const w: Int, const h: Int](g: inout Grid[T, w, h], x: Int where 0 <= it and it < w, y: Int where 0 <= it and it < h, v: T) -> Unit ! mutate
+pub intrinsic fn set[T, const w: Int, const h: Int](g: inout Grid[T, w, h], x: Int where 0 <= it and it < w, y: Int where 0 <= it and it < h, v: T) -> Unit may mutate
   ensures get(g: g, x: x, y: y) == v
 ```
 
@@ -483,7 +483,7 @@ fn escape_count(cx: Float, cy: Float, limit: Iter) -> Iter
 - `requires` — precondition. Obligation at every call site.
 - `ensures` — postcondition over `result` and `old(...)`. Obligation at every `return`.
 - Arguments are passed by name at every call. Positional calls are a syntax error.
-- Functions are values with type `fn(A) -> R ! effects`.
+- Functions are values with type `fn(A) -> R may effects`.
 
 ### 5.1 Loops and termination
 
@@ -533,10 +533,10 @@ property escape_bounded(cx: Float, cy: Float, limit: Iter where it > 0) {
 
 ## 6. Effects
 
-A function's effects are declared after `!`. Absence means pure.
+A function's effects are declared after `may`. Absence means pure. <!-- changed: M9, docs/CHANGES.md item 82 — `may` replaces `!`, which reads as negation -->
 
 ```
-fn main(args: List[Text]) -> Result[Unit, IoError] ! io.file, alloc
+fn main(args: List[Text]) -> Result[Unit, IoError] may io.file, alloc
 ```
 
 ### 6.1 Primitive effects
@@ -558,10 +558,10 @@ The set is closed. Resource effects such as `sql.read` are declared by a capabil
 
 A callee's effect set must be a subset of the caller's. This is the only rule, and it is checked structurally.
 
-Higher-order functions are effect-polymorphic; passing a function value to a parameter of type `fn(x: T) -> U ! e` binds `e` to the value's effects beyond those the parameter lists, and a function value never flows into a function-typed position declaring fewer effects than it has: <!-- changed: M3, item 47 -->
+Higher-order functions are effect-polymorphic; passing a function value to a parameter of type `fn(x: T) -> U may e` binds `e` to the value's effects beyond those the parameter lists, and a function value never flows into a function-typed position declaring fewer effects than it has: <!-- changed: M3, item 47 -->
 
 ```
-fn map[T, U, e](xs: List[T], f: fn(x: T) -> U ! e) -> List[U] ! e, alloc
+fn map[T, U, e](xs: List[T], f: fn(x: T) -> U may e) -> List[U] may e, alloc
 ```
 
 ### 6.3 Derived effect predicates
@@ -592,7 +592,7 @@ A claim is a named property that propagates over the call graph. Claims come in 
 claim Idempotent
   "Calling twice with the same arguments has the same observable effect as calling once."
 
-fn charge(pay: Payments, req: ChargeRequest) -> Result[Receipt, ChargeError] ! io.net
+fn charge(pay: Payments, req: ChargeRequest) -> Result[Receipt, ChargeError] may io.net
   claims Idempotent
 {
   assume Idempotent "Vendor API deduplicates on req.key for 24h; see contract §4.2"
@@ -634,7 +634,7 @@ capability Db[const mode: DbMode]
 ### 8.1 Construction and the ledger
 
 ```
-fn main(args: List[Text]) -> Result[Unit, AppError] ! io.env, sql.read, sql.write, alloc {
+fn main(args: List[Text]) -> Result[Unit, AppError] may io.env, sql.read, sql.write, alloc {
   let env: Env = io.env.capability()
   let cfg: Config = try config.load(env: env)
   let reporting: Db[ReadOnly] = try sql.connect(net: net, dsn: cfg.reporting_dsn, mode: ReadOnly)
@@ -659,7 +659,7 @@ Attenuation is total and pure apart from `alloc`; it can only remove authority. 
 Root capabilities are constructed by the runtime, not by code. `main` is the only function that may declare root capability parameters, and it receives exactly the ones it names:
 
 ```
-pub fn main(args: List[Text], env: io.Env, files: io.Files, net: io.Net) -> Result[Unit, AppError] ! io.env, io.file, io.net, alloc
+pub fn main(args: List[Text], env: io.Env, files: io.Files, net: io.Net) -> Result[Unit, AppError] may io.env, io.file, io.net, alloc
 ```
 
 A program whose `main` does not name `io.Net` cannot, anywhere, open a socket — there is no other source of a `Net` capability. The runtime closes every root capability's underlying resources when `main` returns. <!-- changed: M8, docs/CHANGES.md item 77 — a `main` parameter of a non-root capability type is `E0602`, since nothing could supply it --> Library functions that produce capabilities (`sql.connect`) take a root capability as an argument (`net: io.Net`) so the derivation is visible; the `sql` example in §18.2 shows this.
@@ -809,7 +809,7 @@ Bodies are not in the interface. If an interface is insufficient to trust a modu
   "items": [
     {
       "kind": "fn", "name": "monthly_totals", "visibility": "pub",
-      "signature": "fn monthly_totals(db: sql.Db[ReadOnly, schema: \"orders\"], year: Int where 2000 <= it and it <= 2100) -> Result[List[MonthlyTotal], sql.Error] ! sql.read, alloc",
+      "signature": "fn monthly_totals(db: sql.Db[ReadOnly, schema: \"orders\"], year: Int where 2000 <= it and it <= 2100) -> Result[List[MonthlyTotal], sql.Error] may sql.read, alloc",
       "effects": ["sql.read", "alloc"], "claims": [],
       "contracts": [ { "kind": "ensures", "text": "forall t: MonthlyTotal in result: t.total_pence >= 0", "status": "checked", "checked_at": "std.sql.query#row_refinement" } ],
       "examples": [], "properties": [],
@@ -889,7 +889,7 @@ Required fields for every diagnostic: a stable `code`, the innermost `def`, a `s
 
 `onus next --at <file>:<offset>` returns the set of legal next tokens at a position, computed from the LL(1) parse state and — where the position is in an expression — from the type checker's expected type, so that a decoder can mask logits at each step. The interface is streaming and incremental; the compiler keeps the parse and type state for a file resident between calls.
 
-Type-constrained masking is exact for expected types and best-effort for refinements (the decoder is allowed to emit a value that later fails a refinement obligation, which the diagnostic loop then catches).
+Type-constrained masking is exact for expected types and best-effort for refinements (the decoder is allowed to emit a value that later fails a refinement obligation, which the diagnostic loop then catches). <!-- changed: M9, docs/CHANGES.md item 81 — v0 is `onus next <file> --offset <n>` with no resident state; the token vocabulary, the newline rule and when `expectedType` is null are recorded there -->
 
 ---
 
@@ -998,7 +998,7 @@ pub fn render(
   width: Coord where it > 0,
   height: Coord where it > 0,
   limit: Iter where it > 0
-) -> Grid[Iter, width, height] ! alloc {
+) -> Grid[Iter, width, height] may alloc {
   var grid: Grid[Iter, width, height] = Grid.filled(value: 0, width: width, height: height)
   for py: Int in 0 ..< height {
     for px: Int in 0 ..< width {
@@ -1010,7 +1010,7 @@ pub fn render(
   return grid
 }
 
-pub fn main(args: List[Text], files: io.Files) -> Result[Unit, io.Error] ! io.file, alloc {
+pub fn main(args: List[Text], files: io.Files) -> Result[Unit, io.Error] may io.file, alloc {
   -- files is a root capability supplied by the runtime (§8.3)
   let view: Viewport = Viewport { x_min: -2.5, x_max: 1.0, y_min: -1.0, y_max: 1.0 }
   let grid: Grid[Iter, 800, 600] = render(view: view, width: 800, height: 600, limit: 255)
@@ -1053,7 +1053,7 @@ union AppError =
 pub fn monthly_totals(
   db: sql.Db[ReadOnly, schema: "orders"],
   year: Int where 2000 <= it and it <= 2100
-) -> Result[List[MonthlyTotal], sql.Error] ! sql.read, alloc
+) -> Result[List[MonthlyTotal], sql.Error] may sql.read, alloc
   ensures forall t: MonthlyTotal in result: t.total_pence >= 0
 {
   -- text is a const parameter (§3.8.1): std.sql's own parse_select runs at check time and rejects anything but a single SELECT.
@@ -1069,7 +1069,7 @@ pub fn main(
   env: io.Env,
   files: io.Files,
   net: io.Net
-) -> Result[Unit, AppError] ! io.env, io.file, io.net, sql.read, alloc {
+) -> Result[Unit, AppError] may io.env, io.file, io.net, sql.read, alloc {
   let cfg: config.Config = try config.load(env: env) else e: Config(detail: e)
   let reporting: sql.Db[ReadOnly] = try sql.connect(
     net: net,
@@ -1116,7 +1116,7 @@ import vendor.payments
 pub fn recent_orders(
   db: sql.Db[ReadOnly, schema: "orders"],
   who: auth.AuthedCustomer
-) -> Result[List[Order], sql.Error] ! sql.read, alloc
+) -> Result[List[Order], sql.Error] may sql.read, alloc
   ensures forall o: Order in result: o.customer == who.id
 {
   let stmt: sql.Select[Order] = sql.select[
@@ -1137,7 +1137,7 @@ pub fn handle_checkout(
   db: sql.Db[ReadWrite, schema: "orders"],
   pay: payments.Client,
   auth: auth.Service
-) -> Result[Receipt, CheckoutError] ! sql.read, sql.write, io.net, io.clock, alloc
+) -> Result[Receipt, CheckoutError] may sql.read, sql.write, io.net, io.clock, alloc
   claims Idempotent
 {
   let who: auth.AuthedCustomer = try auth.require(

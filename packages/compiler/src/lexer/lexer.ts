@@ -20,7 +20,8 @@ export interface LexResult {
   readonly comments: readonly Token[];
 }
 
-const CONTINUATION: ReadonlySet<TokenKind> = new Set<TokenKind>(['->', 'else', '{', 'claims', 'requires', 'ensures', 'invariant', 'decreases']);
+/** Tokens before which a newline is not emitted (multi-line signatures, `try ... else`, blocks on their own line). */
+export const CONTINUATION: ReadonlySet<TokenKind> = new Set<TokenKind>(['->', 'else', '{', 'claims', 'requires', 'ensures', 'invariant', 'decreases']);
 
 const INT_MAX = (1n << 63n) - 1n;
 

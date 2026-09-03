@@ -255,7 +255,7 @@ export function typeToString(t: Type, tables: ResolveTables): string {
         return `${tables.def(x.def).name}${parts.length > 0 ? `[${parts.join(', ')}]` : ''}`;
       }
       case 'fn': {
-        const eff = x.effects.size > 0 ? ` ! ${effectsToString(x.effects, tables)}` : '';
+        const eff = x.effects.size > 0 ? ` may ${effectsToString(x.effects, tables)}` : '';
         return `fn(${x.params.map((p) => `${p.name}: ${p.inout ? 'inout ' : ''}${show(p.type)}`).join(', ')}) -> ${show(x.ret)}${eff}`;
       }
       case 'param':

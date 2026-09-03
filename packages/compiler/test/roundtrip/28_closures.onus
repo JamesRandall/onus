@@ -1,10 +1,10 @@
 module cls
 
-fn f(xs: List[Int]) -> List[Int] ! alloc {
+fn f(xs: List[Int]) -> List[Int] may alloc {
   let step: fn(n: Int where it >= 0) -> Int = fn(m: Int where it >= 0) -> Int where it >= 0 {
     return m + 1
   }
-  let noisy: fn(n: Int) -> Unit ! io.file, alloc = fn(n: Int) -> Unit ! io.file, alloc {
+  let noisy: fn(n: Int) -> Unit may io.file, alloc = fn(n: Int) -> Unit may io.file, alloc {
     io.write(file: out, text: Int.to_text(x: n))
     return Unit
   }

@@ -5,7 +5,7 @@ interface Show[T] {
 }
 
 impl Show[Int] {
-  fn show(value: Int) -> Text ! alloc {
+  fn show(value: Int) -> Text may alloc {
     return Int.to_text(x: value)
   }
 }

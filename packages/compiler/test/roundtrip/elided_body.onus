@@ -2,7 +2,7 @@ module elided_body
 
 pub fn f(x: Int) -> Int { ... }
 
-fn g(x: Int) -> Int where it >= 0 ! alloc
+fn g(x: Int) -> Int where it >= 0 may alloc
   requires x > 0
   ensures result == x
 { ... }

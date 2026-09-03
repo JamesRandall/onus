@@ -141,6 +141,8 @@ export class ResolveTables {
   readonly granted = new Map<ModuleId, Set<string>>();
   /** Claims named by a `claims` clause (keyed by the FnDecl) or a path `require` clause (keyed by the clause). */
   readonly claimLists = new Map<A.NodeId, readonly DefId[]>();
+  /** Local names visible at a `Hole` (`onus next`, §14). */
+  readonly holes = new Map<A.NodeId, readonly string[]>();
 
   def(id: DefId): Def {
     const d = this.defs[id];

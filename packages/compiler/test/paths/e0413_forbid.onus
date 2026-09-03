@@ -1,11 +1,11 @@
 module e0413_forbid
 import std.io
 
-fn log(files: io.Files, msg: Text) -> Unit ! io.file {
+fn log(files: io.Files, msg: Text) -> Unit may io.file {
   return Unit
 }
 
-pub fn run(files: io.Files) -> Unit ! io.file {
+pub fn run(files: io.Files) -> Unit may io.file {
   return log(files: files, msg: "x")
 }
 

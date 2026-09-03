@@ -1,7 +1,7 @@
 module co
 
 pub fn render(view: Viewport, width: Coord where it > 0, height: Coord where it > 0, limit: Iter where it > 0)
-  -> Grid[Iter, width, height] ! alloc
+  -> Grid[Iter, width, height] may alloc
 {
   let who: auth.AuthedCustomer = try auth.require(service: auth)
     else e: Unauthorised(detail: e)
@@ -21,7 +21,7 @@ pub fn render(view: Viewport, width: Coord where it > 0, height: Coord where it 
   return grid
 }
 
-pub fn handle(req: Request) -> Result[Receipt, CheckoutError] ! sql.read
+pub fn handle(req: Request) -> Result[Receipt, CheckoutError] may sql.read
   claims Idempotent
 {
   return Ok(value: r)

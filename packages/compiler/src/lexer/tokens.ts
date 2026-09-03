@@ -10,7 +10,7 @@ export const KEYWORDS = [
   'ensures', 'proved', 'claims', 'let', 'var', 'return', 'if', 'else', 'match', 'with', 'loop',
   'while', 'invariant', 'decreases', 'for', 'in', 'and', 'or', 'not', 'implies', 'is', 'it',
   'result', 'try', 'recover', 'old', 'forall', 'exists', 'fake', 'inout', 'where', 'true', 'false',
-  'self', 'intrinsic',
+  'self', 'intrinsic', 'may',
 ] as const;
 
 export type Keyword = (typeof KEYWORDS)[number];
@@ -31,7 +31,7 @@ export function isKeyword(text: string): text is Keyword {
 export const SOFT_KEYWORDS = [
   'module', 'import', 'test', 'type', 'record', 'union', 'interface', 'impl', 'law', 'claim',
   'capability', 'grants', 'path', 'entry', 'effects', 'forbid', 'require', 'policy', 'outside',
-  'except', 'example', 'property', 'of', 'self', 'intrinsic',
+  'except', 'example', 'property', 'of', 'self', 'intrinsic', 'may',
 ] as const;
 
 const SOFT_SET: ReadonlySet<string> = new Set<string>(SOFT_KEYWORDS);
@@ -44,7 +44,7 @@ export function isNameKind(kind: TokenKind): boolean {
 /** Punctuation, longest first within a shared prefix so the lexer can match greedily. */
 export const PUNCTUATION = [
   '...', '..<', '..', '->', ':=', '==', '!=', '<=', '>=', '++',
-  '(', ')', '[', ']', '{', '}', ',', ':', '.', '=', '<', '>', '+', '-', '*', '/', '%', '!', '|', '_',
+  '(', ')', '[', ']', '{', '}', ',', ':', '.', '=', '<', '>', '+', '-', '*', '/', '%', '|', '_',
 ] as const;
 
 export type Punct = (typeof PUNCTUATION)[number];
@@ -59,6 +59,10 @@ export type TokenKind =
   | 'nl'
   | 'eof'
   | 'comment'
+  /** The position being completed (`onus next`, §14): matches no grammar alternative and cannot be consumed. */
+  | 'cursor'
+  /** A synthesised expression at the cursor, typed to find the expected type (§14). */
+  | 'hole'
   | Keyword
   | Punct;
 

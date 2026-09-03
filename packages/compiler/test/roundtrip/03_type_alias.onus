@@ -6,7 +6,7 @@ pub type Coord = Int where 0 <= it
 
 type Step = fn(x: Int) -> Int
 
-type Handler = fn(name: Text, n: Int where it > 0) -> Result[Unit, Error] ! io.file, alloc
+type Handler = fn(name: Text, n: Int where it > 0) -> Result[Unit, Error] may io.file, alloc
 
 type Ratio = Float where 0.0 <= it and it <= 1.0
 

@@ -233,6 +233,7 @@ function isExpr(n: A.Node): n is A.Expr {
     case 'Quantifier':
     case 'Closure':
     case 'Fake':
+    case 'Hole':
     case 'FieldAccess':
     case 'Call':
     case 'Unary':

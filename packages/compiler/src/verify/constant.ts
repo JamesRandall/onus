@@ -9,7 +9,7 @@ import { BudgetExceeded, EvalPanic, Evaluator, NotConst, type Env } from '../con
 import type { Context } from '../context.js';
 import type { Obligation } from '../contracts/obligations.js';
 import type * as A from '../syntax/ast.js';
-import { walk } from '../syntax/walk.js';
+import { walk, isExpr } from '../syntax/walk.js';
 
 /**
  * True when the obligation's predicate evaluates to true under constant
@@ -179,6 +179,3 @@ function enclosingCtor(ctx: Context, value: A.Expr): A.Ctor | null {
   return found;
 }
 
-function isExpr(n: A.Node): n is A.Expr {
-  return ['IntLit', 'FloatLit', 'TextLit', 'BoolLit', 'DurationLit', 'Name', 'It', 'ResultRef', 'Ctor', 'RecordUpdate', 'ListLit', 'Try', 'Recover', 'Old', 'Quantifier', 'Closure', 'Fake', 'FieldAccess', 'Call', 'Unary', 'Binary', 'And', 'Or', 'Is'].includes(n.kind);
-}

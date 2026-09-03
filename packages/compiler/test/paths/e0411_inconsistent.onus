@@ -1,7 +1,7 @@
 module e0411_inconsistent
 import std.io
 
-pub fn run(files: io.Files) -> Unit ! io.file {
+pub fn run(files: io.Files) -> Unit may io.file {
   return Unit
 }
 

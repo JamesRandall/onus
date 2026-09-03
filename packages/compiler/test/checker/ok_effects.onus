@@ -2,7 +2,7 @@ module ok_effects
 import std.io
 import std.sql
 
-fn map[T, U, e](xs: List[T], f: fn(x: T) -> U ! e) -> List[U] ! e, alloc {
+fn map[T, U, e](xs: List[T], f: fn(x: T) -> U may e) -> List[U] may e, alloc {
   var out: List[U] = []
   for x: T in xs {
     out = out ++ [f(x: x)]
@@ -10,10 +10,10 @@ fn map[T, U, e](xs: List[T], f: fn(x: T) -> U ! e) -> List[U] ! e, alloc {
   return out
 }
 
-fn uses_map(xs: List[Int], file: io.File) -> Result[Unit, io.Error] ! io.file, alloc {
+fn uses_map(xs: List[Int], file: io.File) -> Result[Unit, io.Error] may io.file, alloc {
   let texts: List[Text] = map(
     xs: xs,
-    f: fn(x: Int) -> Text ! alloc {
+    f: fn(x: Int) -> Text may alloc {
       return Int.to_text(x: x)
     }
   )
@@ -26,7 +26,7 @@ fn uses_map(xs: List[Int], file: io.File) -> Result[Unit, io.Error] ! io.file, a
   return Ok(value: Unit)
 }
 
-fn bump(v: inout Int) -> Unit ! mutate {
+fn bump(v: inout Int) -> Unit may mutate {
   v = v + 1
   return Unit
 }
@@ -37,7 +37,7 @@ fn caller_owns_var() -> Int {
   return v
 }
 
-fn passes_own_inout(x: inout Int) -> Unit ! mutate {
+fn passes_own_inout(x: inout Int) -> Unit may mutate {
   bump(v: inout x)
   return Unit
 }
@@ -49,7 +49,7 @@ fn recovers() -> Result[Int, Panicked] {
   return r
 }
 
-fn might_panic(x: Int) -> Int ! panic {
+fn might_panic(x: Int) -> Int may panic {
   return x
 }
 
@@ -63,7 +63,7 @@ fn loops(n: Int where it >= 0) -> Int {
   return i
 }
 
-fn diverges() -> Int ! diverge {
+fn diverges() -> Int may diverge {
   loop while true {
     let again: Int = diverges()
   }
@@ -73,7 +73,7 @@ fn diverges() -> Int ! diverge {
 fn reads(
   db: sql.Db[ReadOnly, schema: "orders"],
   stmt: sql.Select[Int]
-) -> Result[List[Int], sql.Error] ! sql.read, alloc {
+) -> Result[List[Int], sql.Error] may sql.read, alloc {
   return sql.query(db: db, statement: stmt)
 }
 
@@ -82,7 +82,7 @@ fn values_do_not_allocate(a: Int) -> Result[Int, Text] {
   return r
 }
 
-fn contract_may_allocate(t: Text) -> Text ! alloc
+fn contract_may_allocate(t: Text) -> Text may alloc
   ensures result == t ++ "!"
 {
   return t ++ "!"

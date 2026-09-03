@@ -6,7 +6,7 @@ pub intrinsic fn filled[T](
   value: T,
   width: Int where it > 0,
   height: Int where it > 0
-) -> Grid[T, width, height] ! alloc
+) -> Grid[T, width, height] may alloc
   ensures forall x: Int in 0 ..< width: forall y: Int in 0 ..< height: get(
     grid: result,
     x: x,
@@ -24,5 +24,5 @@ pub intrinsic fn set[T, const w: Int, const h: Int](
   x: Int where 0 <= it and it < w,
   y: Int where 0 <= it and it < h,
   value: T
-) -> Unit ! mutate
+) -> Unit may mutate
   ensures get(grid: grid, x: x, y: y) == value

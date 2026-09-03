@@ -1,10 +1,10 @@
 module e0330_capture_capability
 import std.io
 
-fn f(files: io.Files) -> fn(path: Text) -> Result[io.File, io.Error] ! io.file, alloc {
-  let opener: fn(path: Text) -> Result[io.File, io.Error] ! io.file, alloc = fn(
+fn f(files: io.Files) -> fn(path: Text) -> Result[io.File, io.Error] may io.file, alloc {
+  let opener: fn(path: Text) -> Result[io.File, io.Error] may io.file, alloc = fn(
     path: Text
-  ) -> Result[io.File, io.Error] ! io.file, alloc {
+  ) -> Result[io.File, io.Error] may io.file, alloc {
     return io.create(files: files, path: path)
   }
   return opener

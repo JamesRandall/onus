@@ -523,6 +523,7 @@ export type Expr =
   | Quantifier
   | Closure
   | Fake
+  | Hole
   | FieldAccess
   | Call
   | Unary
@@ -639,6 +640,11 @@ export interface Fake extends NodeBase {
   readonly kind: 'Fake';
   readonly capability: QName;
   readonly fields: readonly FieldInit[];
+}
+
+/** The expression being completed (`onus next`, §14). Synthesised at the cursor; never parsed from source. */
+export interface Hole extends NodeBase {
+  readonly kind: 'Hole';
 }
 
 export interface FieldAccess extends NodeBase {

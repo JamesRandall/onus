@@ -6,7 +6,7 @@ fn area_twice(s: shapes.Shape) -> Int {
   return shapes.area(s: s) * 2
 }
 
-fn describe(s: shapes.Shape, shapes_count: Int) -> Text ! alloc {
+fn describe(s: shapes.Shape, shapes_count: Int) -> Text may alloc {
   match s with
   | shapes.Circle(radius) when radius > 10 -> return "big circle"
   | shapes.Circle(_) -> return "circle"
@@ -37,7 +37,7 @@ fn lengths(xs: List[Int], t: Text) -> Int {
   return List.len(xs: xs) + Text.len(t: t)
 }
 
-fn nested(x: Int) -> Int ! alloc {
+fn nested(x: Int) -> Int may alloc {
   let f: fn(y: Int) -> Int = fn(y: Int) -> Int {
     let z: Int = y + x
     return z
@@ -45,7 +45,7 @@ fn nested(x: Int) -> Int ! alloc {
   return f(y: 1)
 }
 
-fn contracts(g: inout Int) -> Int where it >= 0 ! mutate
+fn contracts(g: inout Int) -> Int where it >= 0 may mutate
   requires g > 0
   ensures result == old(g)
 {

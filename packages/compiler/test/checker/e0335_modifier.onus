@@ -7,5 +7,5 @@ pub sealed fn f() -> Int {
 sealed type Iter = Int where it >= 0
 
 pub sealed interface Show[T] {
-  fn show(value: T) -> Text ! alloc
+  fn show(value: T) -> Text may alloc
 }

@@ -3,7 +3,7 @@ import app.checkout
 
 example handle_checkout_empty_basket {
   let db: sql.Db[ReadWrite, schema: "orders"] = fake sql.Db {
-    query: fn(q: Text) -> List[Row] ! alloc {
+    query: fn(q: Text) -> List[Row] may alloc {
       return []
     },
     execute: fn(q: Text) -> Unit {

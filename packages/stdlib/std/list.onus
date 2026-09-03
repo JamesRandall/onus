@@ -12,15 +12,15 @@ pub const fn is_empty[T](xs: List[T]) -> Bool
   return len(xs: xs) == 0
 }
 
-pub const intrinsic fn replicate[T](value: T, count: Int where it >= 0) -> List[T] ! alloc
+pub const intrinsic fn replicate[T](value: T, count: Int where it >= 0) -> List[T] may alloc
   ensures len(xs: result) == count
 
-pub const intrinsic fn append[T](xs: List[T], x: T) -> List[T] ! alloc
+pub const intrinsic fn append[T](xs: List[T], x: T) -> List[T] may alloc
   ensures len(xs: result) == len(xs: xs) + 1
 
 pub const intrinsic fn slice[T](
   xs: List[T],
   from: Int where 0 <= it,
   to: Int where from <= it and it <= len(xs: xs)
-) -> List[T] ! alloc
+) -> List[T] may alloc
   ensures len(xs: result) == to - from

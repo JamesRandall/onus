@@ -152,6 +152,8 @@ export class Evaluator {
         throw new NotConst('closures are not values at check time', e.span);
       case 'Fake':
         throw new NotConst('`fake` capabilities exist only in generated tests', e.span);
+      case 'Hole':
+        throw new NotConst('a hole has no value', e.span);
       case 'FieldAccess':
         return this.fieldAccess(e, env);
       case 'Call':

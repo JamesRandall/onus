@@ -195,7 +195,7 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
 45. **`mutate` is about the caller's own parameters (§6.1).** A function
     needs `mutate` iff it assigns to or passes on one of its `inout`
     parameters; a callee's `mutate` does not propagate through a local
-    `var` (Mandelbrot's `render` calls `Grid.set` with `! alloc` only).
+    `var` (Mandelbrot's `render` calls `Grid.set` with `may alloc` only).
 46. **What allocates (§6.1).** List literals, `++` and closure creation are
     `alloc`; records and variants are values and are not. A `loop while`
     without `decreases` is `diverge`. `recover` absorbs `panic`.
@@ -225,7 +225,7 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
 
 52. **`const fn` may allocate (§3.8.1).** The spec's own `parse_select`
     returns an AST, which allocates; a `const fn` therefore declares at most
-    `alloc` (M3 item 48 narrowed). Its signature in §3.8.1 gains `! alloc`.
+    `alloc` (M3 item 48 narrowed). Its signature in §3.8.1 gains `may alloc`.
 53. **`ConstError` and `TypeInfo` in the library (§3.8.1).** `ConstError` is
     the record `std.check.ConstError { offset, message }` (prelude);
     `offset` indexes the graphemes of the constant text. A `const fn` reads
@@ -404,6 +404,28 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     is trusting on another party's word. The spec's "1 assumed" presumed
     `std.sql` derives `record_order`'s idempotency from the statement (item
     53), which v0 does not do.
+
+## M9 — `onus next`
+
+81. **Constrained decoding (§14, impl spec §8).** `onus next <file> --offset
+    <n>` takes a UTF-16 index (the implementation plan's `--offset`, not §14's
+    `--at file:offset`) and returns `tokens`, `expectedType` and `inScope`.
+    Tokens are the kinds the parser tests at the cursor after parsing the
+    prefix; because the lexer drops a newline before a continuation token,
+    a position after a newline reports the union of both tokenisations.
+    Names in the vocabulary: keywords and punctuation as themselves, `ident`
+    (names and soft keywords), `type-ident`, `literal:int|float|text|duration`,
+    `newline`, `eof`. The expected type comes from a `Hole` expression at the
+    cursor with every open bracket and block closed after it; it is null when
+    the cursor is not in expression position or nothing expects a type there
+    (a bare statement start). Refinements are spelled out in the type text
+    and not enforced. Locals in scope are listed outermost first; module
+    items are not. v0 keeps no resident state between calls (impl spec §12,
+    item 5).
+82. **`may` replaces `!` (§2.3, §6).** Requested by the spec author: `!`
+    reads as negation. `may` is a soft keyword (still usable as a name) and
+    `!` is no longer a token (`!=` remains). Applied to the grammar, every
+    example in the spec, the standard library, the examples and the fixtures.
 
 ### Deferred, not changed
 

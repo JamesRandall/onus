@@ -6,7 +6,7 @@ pub intrinsic type Map[K, V]
 
 pub intrinsic fn len(t: Text) -> Int where it >= 0
 
-pub const intrinsic fn concat(a: Text, b: Text) -> Text ! alloc
+pub const intrinsic fn concat(a: Text, b: Text) -> Text may alloc
   ensures len(t: result) == len(t: a) + len(t: b)
 
 pub intrinsic fn set[T, const w: Int, const h: Int](
@@ -14,7 +14,7 @@ pub intrinsic fn set[T, const w: Int, const h: Int](
   x: Int where 0 <= it and it < w,
   y: Int where 0 <= it and it < h,
   v: T
-) -> Unit ! mutate
+) -> Unit may mutate
   ensures get(g: g, x: x, y: y) == v
 
 fn ordinary(t: Text) -> Int {

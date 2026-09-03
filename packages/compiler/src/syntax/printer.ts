@@ -333,7 +333,7 @@ class Printer {
 
   private effects(es: readonly A.EffectRef[]): Doc {
     if (es.length === 0) return EMPTY;
-    return concat(' ! ', join(', ', es.map((e) => qn(e.name))));
+    return concat(' may ', join(', ', es.map((e) => qn(e.name))));
   }
 
   type(t: A.Type): Doc {
@@ -480,6 +480,8 @@ class Printer {
         return concat('fn', this.params(e.params), ' -> ', this.type(e.ret), this.effects(e.effects), ' ', this.block(e.body));
       case 'Fake':
         return concat('fake ', qn(e.capability), this.fieldInits(e.fields, this.dangling(e)));
+      case 'Hole':
+        return '?';
       case 'FieldAccess':
         return concat(this.operand(e.object, 9, nb), '.', e.name.text);
       case 'Call': {

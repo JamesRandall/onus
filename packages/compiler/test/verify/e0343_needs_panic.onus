@@ -4,6 +4,6 @@ fn silent(x: Int) -> Int where it >= 0 {
   return x
 }
 
-fn declared(x: Int) -> Int where it >= 0 ! panic {
+fn declared(x: Int) -> Int where it >= 0 may panic {
   return x
 }

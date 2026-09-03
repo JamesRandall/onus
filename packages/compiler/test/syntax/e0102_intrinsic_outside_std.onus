@@ -2,4 +2,4 @@ module app
 
 pub intrinsic type Handle
 
-pub intrinsic fn open(path: Text) -> Handle ! io.file
+pub intrinsic fn open(path: Text) -> Handle may io.file

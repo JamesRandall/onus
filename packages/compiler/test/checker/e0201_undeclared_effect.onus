@@ -20,7 +20,7 @@ fn closure_creation() -> Int {
   return f(x: 1)
 }
 
-fn closure_body() -> Int ! alloc {
+fn closure_body() -> Int may alloc {
   let f: fn(x: Int) -> Text = fn(x: Int) -> Text {
     return Int.to_text(x: x)
   }
@@ -47,7 +47,7 @@ fn passes_on(x: inout Int) -> Unit {
   return Unit
 }
 
-fn bump(v: inout Int) -> Unit ! mutate {
+fn bump(v: inout Int) -> Unit may mutate {
   v = v + 1
   return Unit
 }
@@ -58,7 +58,7 @@ fn local_var_is_fine() -> Int {
   return v
 }
 
-const fn impure(x: Int) -> Text ! alloc {
+const fn impure(x: Int) -> Text may alloc {
   return Int.to_text(x: x)
 }
 

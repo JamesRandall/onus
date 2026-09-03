@@ -645,6 +645,15 @@ class ModuleResolver {
     }
   }
 
+  /** Local bindings visible from `scope`, outermost first (`onus next`, §14). */
+  private visibleLocals(scope: Scope): string[] {
+    const chain: Scope[] = [];
+    for (let s: Scope | null = scope; s !== null && s !== this.moduleScope; s = s.parent) chain.push(s);
+    const out: string[] = [];
+    for (const s of chain.reverse()) for (const name of s.values.keys()) if (!out.includes(name)) out.push(name);
+    return out;
+  }
+
   /** Resolves a claim name (`Idempotent` or `payments.Idempotent`) to its definition, recording it at `at` when given. */
   private claimRef(q: A.QName, at?: A.NodeId): DefId | null {
     const last = q.segments[q.segments.length - 1];
@@ -948,6 +957,9 @@ class ModuleResolver {
         });
         return;
       }
+      case 'Hole':
+        this.t.holes.set(e.id, this.visibleLocals(scope));
+        return;
       case 'Fake': {
         const owner = this.typeName(e.capability, scope);
         if (owner !== null && owner.k === 'def') this.t.refs.set(e.id, { k: 'def', def: owner.def });

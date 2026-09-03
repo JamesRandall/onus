@@ -19,7 +19,7 @@ pub fn require(
   caller: Text,
   customer: Text,
   clock: io.Clock
-) -> Result[AuthedCustomer, Error] ! io.net, io.clock
+) -> Result[AuthedCustomer, Error] may io.net, io.clock
   claims Idempotent
   ensures result is Ok implies caller == customer
 {

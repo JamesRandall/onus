@@ -11,7 +11,7 @@ this grammar and prints the canonical form described at the end.
   matching neither (e.g. `xValue`) is `E0005`.
 - Keywords are reserved. *Soft keywords* — `module import test type record
   union interface impl law claim capability grants path entry effects forbid
-  require policy outside except example property of self intrinsic` — never appear
+  require policy outside except example property of self intrinsic may` — never appear
   inside an expression, so they are accepted as names in name positions
   (`Float.of`, `auth.require`, `path: "x"`).
 - Literals: `INT` = `[0-9][0-9_]*` (64-bit signed; larger is `E0008`);
@@ -42,7 +42,7 @@ item        = fn_decl | type_alias | const_decl | record_decl | union_decl
 visibility  = [ "pub" ] [ "sealed" ] ;
 
 fn_decl     = visibility [ "const" ] [ "intrinsic" ] "fn" NAME [ tparams ] "(" [ params ] ")" "->" type
-              [ "!" effects ] [ "claims" CLAIM { "," CLAIM } ] { contract } ( block | NL ) ;
+              [ "may" effects ] [ "claims" CLAIM { "," CLAIM } ] { contract } ( block | NL ) ;   (* `may` replaces `!`: CHANGES item 82 *)
               (* an intrinsic function has no body; intrinsics are legal only under `module std.…` *)
 tparams     = "[" tparam { "," tparam } "]" ;
 tparam      = TNAME [ ":" TNAME ] | "const" NAME ":" type | NAME ;
@@ -53,7 +53,7 @@ effect      = QNAME | "recover" ;
 contract    = ( "requires" | "ensures" ) [ "proved" ] expr | "decreases" expr ;
 
 type        = QTNAME [ "[" targ { "," targ } "]" ] [ "where" expr ]
-            | "fn" "(" [ params ] ")" "->" type [ "!" effects ] ;   (* parameters are named: the labels for calls *)
+            | "fn" "(" [ params ] ")" "->" type [ "may" effects ] ;   (* parameters are named: the labels for calls *)
 targ        = [ NAME ":" ] ( type | expr ) ;          (* uppercase-led is a type; the resolver decides *)
 
 type_alias  = visibility ( "type" TNAME "=" type | "intrinsic" "type" TNAME [ tparams ] ) ;
@@ -64,7 +64,7 @@ union_decl  = visibility "union" TNAME [ tparams ] "=" NL { "|" variant NL } ;
 variant     = TNAME [ "of" field { "," field } ] ;
 
 interface_decl = visibility "interface" TNAME "[" TNAME "]" "{" NL { iface_item } "}" ;
-iface_item  = "fn" NAME "(" [ params ] ")" "->" type [ "!" effects ] { contract } NL
+iface_item  = "fn" NAME "(" [ params ] ")" "->" type [ "may" effects ] { contract } NL
             | "law" NAME "(" [ params ] ")" assert_block NL ;
 impl_decl   = "impl" TNAME "[" type "]" "{" NL { fn_decl NL } "}" ;
 
@@ -119,7 +119,7 @@ primary     = INT | FLOAT | TEXT | DURATION | "true" | "false" | NAME | "it" | "
             | "recover" block
             | "old" "(" NAME ")"
             | ( "forall" | "exists" ) NAME ":" binder_type [ "in" domain ] [ "where" expr ] ":" expr
-            | "fn" "(" [ params ] ")" "->" type [ "!" effects ] block
+            | "fn" "(" [ params ] ")" "->" type [ "may" effects ] block
             | "fake" QTNAME "{" [ field_init { "," field_init } ] "}" ;   (* E0012 outside a test module *)
 ctor_rest   = [ call_args ] [ "{" [ field_init { "," field_init } ] "}" ] ;
 binder_type = QTNAME [ "[" targ { "," targ } "]" ] | "fn" ... ;   (* no "where": it belongs to the quantifier *)

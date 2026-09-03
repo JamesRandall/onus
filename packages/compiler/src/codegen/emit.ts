@@ -954,6 +954,8 @@ class Emitter {
         return this.closure(e);
       case 'Fake':
         return this.fake(e);
+      case 'Hole':
+        throw new Error('a hole cannot be compiled');
       case 'FieldAccess':
         return this.fieldAccess(e);
       case 'Call':
@@ -1573,6 +1575,7 @@ function isExprNode(n: A.Node): n is A.Expr {
     case 'Quantifier':
     case 'Closure':
     case 'Fake':
+    case 'Hole':
     case 'FieldAccess':
     case 'Call':
     case 'Unary':

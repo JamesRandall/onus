@@ -1,0 +1,39 @@
+module positions
+import std.io
+
+record Point {
+  x: Int
+  y: Int where it >= 0
+}
+
+union Shape =
+  | Dot of at: Point
+  | Line of from: Point, to: Point
+
+fn scale(p: Point, k: Int where it > 0) -> Point {
+  return Point { x: p.x * k, y: p.y * k }
+}
+
+fn label(s: Shape, name: Text) -> Text may alloc {
+  match s with
+  | Dot(at) -> return name ++ "."
+  | Line(from, to) -> return name ++ "-"
+}
+
+fn measure(xs: List[Int], ratio: Float, flag: Bool) -> Int where it >= 0 {
+  var total: Int where it >= 0 = 0
+  for x: Int in xs {
+    let bumped: Int = x + 1
+    total = total + 1
+  }
+  let maybe: Option[Text] = None
+  let r: Result[Int, Text] = Ok(value: 1)
+  return total
+}
+
+pub fn main(args: List[Text], files: io.Files) -> Result[Unit, io.Error] may io.file, alloc {
+  let p: Point = scale(p: Point { x: 1, y: 2 }, k: 3)
+  let t: Text = label(s: Dot(at: p), name: "d")
+  let n: Int = measure(xs: [1, 2], ratio: 0.5, flag: true)
+  return Ok(value: Unit)
+}

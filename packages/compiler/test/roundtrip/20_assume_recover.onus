@@ -1,6 +1,6 @@
 module ar
 
-fn charge(pay: Payments, req: ChargeRequest) -> Result[Receipt, ChargeError] ! io.net
+fn charge(pay: Payments, req: ChargeRequest) -> Result[Receipt, ChargeError] may io.net
   claims Idempotent
 {
   assume Idempotent "Vendor API deduplicates on req.key for 24h; see contract §4.2"
@@ -8,7 +8,7 @@ fn charge(pay: Payments, req: ChargeRequest) -> Result[Receipt, ChargeError] ! i
   return pay.send(req: req)
 }
 
-fn serve(req: Request) -> Result[Receipt, Panicked] ! alloc {
+fn serve(req: Request) -> Result[Receipt, Panicked] may alloc {
   let outcome: Result[Receipt, Panicked] = recover {
     handle_checkout(req: req)
   }

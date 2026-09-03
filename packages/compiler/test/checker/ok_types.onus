@@ -43,7 +43,7 @@ fn swap[T, U](p: Pair[T, U]) -> Pair[U, T] {
 }
 
 -- Structural recursion has no Int measure in v0 (see CHANGES.md), so it declares `diverge`.
-fn depth[T](t: Tree[T]) -> Int ! diverge {
+fn depth[T](t: Tree[T]) -> Int may diverge {
   match t with
   | Leaf -> return 0
   | Node(_, left, right) -> {
@@ -56,7 +56,7 @@ fn depth[T](t: Tree[T]) -> Int ! diverge {
   }
 }
 
-fn generics(xs: List[Int]) -> Int ! alloc, diverge {
+fn generics(xs: List[Int]) -> Int may alloc, diverge {
   let p: Pair[Int, Text] = Pair { first: 1, second: "one" }
   let q: Pair[Text, Int] = swap(p: p)
   let t: Tree[Int] = Node(value: 1, left: Leaf, right: Leaf)
@@ -98,7 +98,7 @@ fn options(o: Option[Int]) -> Option[Int] {
   return Some(value: a + 1)
 }
 
-fn closures(xs: List[Int]) -> Int ! alloc {
+fn closures(xs: List[Int]) -> Int may alloc {
   let add: fn(a: Int, b: Int) -> Int = fn(x: Int, y: Int) -> Int {
     return x + y
   }
@@ -117,12 +117,12 @@ fn narrow(db: Db[true]) -> Int {
   return 1
 }
 
-fn mutation(g: inout Grid[Int, 4, 4]) -> Unit ! mutate {
+fn mutation(g: inout Grid[Int, 4, 4]) -> Unit may mutate {
   Grid.set(grid: inout g, x: 1, y: 2, value: 3)
   return Unit
 }
 
-fn grids() -> Int ! alloc {
+fn grids() -> Int may alloc {
   var g: Grid[Int, 4, 4] = Grid.filled(value: 0, width: 4, height: 4)
   mutation(g: inout g)
   return Grid.get(grid: g, x: 1, y: 2)
@@ -149,21 +149,21 @@ fn fallible_inner(r: Result[Int, Text]) -> Int {
   | Err(..) -> return 0
 }
 
-fn literals(d: Duration) -> Bool ! alloc {
+fn literals(d: Duration) -> Bool may alloc {
   let a: Bool = 1 < 2 and 1.5 <= 2.5 and 50ms < 1s
   let b: Bool = "a" ++ "b" == "ab" and not (true implies false)
   let c: Int = -3 * 2 % 5
   return a and b and c == 0
 }
 
-fn describe(s: shapes.Shape) -> Text ! alloc {
+fn describe(s: shapes.Shape) -> Text may alloc {
   match s with
   | shapes.Circle(radius) when radius > 10 -> return "big"
   | shapes.Circle(_) -> return "circle"
   | shapes.Square(..) -> return Int.to_text(x: 1)
 }
 
-fn io_example(files: io.Files) -> Result[Unit, io.Error] ! io.file, alloc {
+fn io_example(files: io.Files) -> Result[Unit, io.Error] may io.file, alloc {
   let out: io.File = try io.create(files: files, path: "x.txt")
   try io.write(file: out, text: "hello")
   return Ok(value: Unit)

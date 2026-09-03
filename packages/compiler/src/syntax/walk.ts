@@ -151,6 +151,8 @@ export function children(n: A.Node): A.Node[] {
       return [...n.params, n.ret, ...n.effects, n.body];
     case 'Fake':
       return [...n.fields];
+    case 'Hole':
+      return [];
     case 'FieldAccess':
       return [n.object];
     case 'Call':
@@ -194,5 +196,39 @@ export function walk(root: A.Node, visit: (n: A.Node) => boolean | void): void {
       const c = cs[i];
       if (c !== undefined) stack.push(c);
     }
+  }
+}
+
+/** True iff `n` is an expression node. Effects: none. */
+export function isExpr(n: A.Node): n is A.Expr {
+  switch (n.kind) {
+    case 'IntLit':
+    case 'FloatLit':
+    case 'TextLit':
+    case 'BoolLit':
+    case 'DurationLit':
+    case 'Name':
+    case 'It':
+    case 'ResultRef':
+    case 'Ctor':
+    case 'RecordUpdate':
+    case 'ListLit':
+    case 'Try':
+    case 'Recover':
+    case 'Old':
+    case 'Quantifier':
+    case 'Closure':
+    case 'Fake':
+    case 'Hole':
+    case 'FieldAccess':
+    case 'Call':
+    case 'Unary':
+    case 'Binary':
+    case 'And':
+    case 'Or':
+    case 'Is':
+      return true;
+    default:
+      return false;
   }
 }

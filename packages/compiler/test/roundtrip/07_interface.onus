@@ -1,9 +1,9 @@
 module i
 
 pub interface Codec[T] {
-  fn encode(value: T) -> Text ! alloc
+  fn encode(value: T) -> Text may alloc
 
-  fn decode(text: Text) -> Result[T, CodecError] ! alloc
+  fn decode(text: Text) -> Result[T, CodecError] may alloc
 
   law round_trip(value: T) {
     decode(text: encode(value: value)) == Ok(value: value)

@@ -26,7 +26,7 @@ record Basket {
 pub fn recent_orders(
   db: sql.Db[ReadOnly, schema: "orders"],
   who: auth.AuthedCustomer
-) -> Result[List[Order], sql.Error] ! sql.read, alloc {
+) -> Result[List[Order], sql.Error] may sql.read, alloc {
   -- ensures forall o: Order in result: o.customer == who.id
   -- is proved from the statement's where clause once parse_select returns a Spec (§18.3); deferred.
   let stmt: sql.Select[Order] = sql.select[
@@ -38,7 +38,7 @@ pub fn recent_orders(
 fn load_basket(
   db: sql.Db[ReadOnly],
   who: auth.AuthedCustomer
-) -> Result[Basket, sql.Error] ! sql.read, alloc
+) -> Result[Basket, sql.Error] may sql.read, alloc
   claims Idempotent
 {
   assume Idempotent "A select reads only; it has no observable effect."
@@ -55,7 +55,7 @@ fn record_order(
   who: auth.AuthedCustomer,
   basket: Basket,
   receipt: payments.Receipt
-) -> Result[Unit, sql.Error] ! sql.write, alloc
+) -> Result[Unit, sql.Error] may sql.write, alloc
   claims Idempotent
 {
   assume Idempotent "The insert is `on conflict (receipt_id) do nothing`."
@@ -77,7 +77,7 @@ pub fn handle_checkout(
   db: sql.Db[ReadWrite, schema: "orders"],
   pay: payments.Client,
   auth: auth.Service
-) -> Result[payments.Receipt, CheckoutError] ! sql.read, sql.write, io.net, io.clock, alloc
+) -> Result[payments.Receipt, CheckoutError] may sql.read, sql.write, io.net, io.clock, alloc
   claims Idempotent
 {
   let who: auth.AuthedCustomer = try auth.require(

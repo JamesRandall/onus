@@ -1,11 +1,11 @@
 module e0329_inout
 
-fn bump(x: inout Int, by: Int) -> Unit ! mutate {
+fn bump(x: inout Int, by: Int) -> Unit may mutate {
   x = x + by
   return Unit
 }
 
-fn twice(a: inout Int, b: inout Int) -> Unit ! mutate {
+fn twice(a: inout Int, b: inout Int) -> Unit may mutate {
   return Unit
 }
 
@@ -21,7 +21,7 @@ fn f(p: Int) -> Int {
   return v
 }
 
-fn g(q: inout Int) -> Unit ! mutate {
+fn g(q: inout Int) -> Unit may mutate {
   bump(x: inout q, by: 1)
   return Unit
 }

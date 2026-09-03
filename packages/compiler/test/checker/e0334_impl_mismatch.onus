@@ -1,9 +1,9 @@
 module e0334_impl_mismatch
 
 interface Codec[T] {
-  fn encode(value: T) -> Text ! alloc
+  fn encode(value: T) -> Text may alloc
 
-  fn decode(text: Text) -> Result[T, Text] ! alloc
+  fn decode(text: Text) -> Result[T, Text] may alloc
 }
 
 record Pair {
@@ -11,7 +11,7 @@ record Pair {
 }
 
 impl Codec[Pair] {
-  fn encode(v: Pair) -> Text ! alloc {
+  fn encode(v: Pair) -> Text may alloc {
     return "pair"
   }
 
@@ -21,21 +21,21 @@ impl Codec[Pair] {
 }
 
 impl Codec[Int] {
-  fn encode(value: Int) -> Int ! alloc {
+  fn encode(value: Int) -> Int may alloc {
     return value
   }
 
-  fn decode(text: Text) -> Result[Int, Text] ! alloc {
+  fn decode(text: Text) -> Result[Int, Text] may alloc {
     return Ok(value: 1)
   }
 }
 
 impl Codec[Int] {
-  fn encode(value: Int) -> Text ! alloc {
+  fn encode(value: Int) -> Text may alloc {
     return "x"
   }
 
-  fn decode(text: Text) -> Result[Int, Text] ! alloc {
+  fn decode(text: Text) -> Result[Int, Text] may alloc {
     return Ok(value: 1)
   }
 }

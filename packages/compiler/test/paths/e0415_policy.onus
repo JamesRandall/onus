@@ -2,7 +2,7 @@ module e0415_policy
 import std.io
 import lib.noisy
 
-pub fn run(files: io.Files) -> Unit ! io.file
+pub fn run(files: io.Files) -> Unit may io.file
   claims noisy.Quiet
 {
   return noisy.leaf(files: files)

@@ -14,7 +14,7 @@ fn count(limit: Iter) -> Iter
   return i
 }
 
-fn spin() -> Unit ! diverge {
+fn spin() -> Unit may diverge {
   loop while true {
     step()
   }

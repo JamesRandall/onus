@@ -6,7 +6,7 @@ pub fn handle_checkout(
   db: sql.Db[ReadWrite, schema: "orders"],
   pay: payments.Client,
   auth: auth.Service
-) -> Result[Receipt, CheckoutError] ! sql.read, sql.write, io.net, io.clock, alloc {
+) -> Result[Receipt, CheckoutError] may sql.read, sql.write, io.net, io.clock, alloc {
   let who: auth.AuthedCustomer = try auth.require(
     service: auth,
     caller: req.caller,

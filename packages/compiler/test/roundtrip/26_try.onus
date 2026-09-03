@@ -1,6 +1,6 @@
 module tr
 
-fn f(files: io.Files) -> Result[Unit, AppError] ! io.file, alloc {
+fn f(files: io.Files) -> Result[Unit, AppError] may io.file, alloc {
   let cfg: config.Config = try config.load(env: env) else e: Config(detail: e)
   let out: io.File = try io.create(files: files, path: "report.csv")
   try io.write(file: out, text: "x")

@@ -6,12 +6,12 @@ record Row {
   total: Int
 }
 
-fn not_a_select(db: sql.Db[ReadOnly]) -> Result[List[Row], sql.Error] ! sql.read, alloc {
+fn not_a_select(db: sql.Db[ReadOnly]) -> Result[List[Row], sql.Error] may sql.read, alloc {
   let stmt: sql.Select[Row] = sql.select[text: "update orders set total = 1"](params: [], row: Row)
   return sql.query(db: db, statement: stmt)
 }
 
-fn misspelt_column(db: sql.Db[ReadOnly]) -> Result[List[Row], sql.Error] ! sql.read, alloc {
+fn misspelt_column(db: sql.Db[ReadOnly]) -> Result[List[Row], sql.Error] may sql.read, alloc {
   let stmt: sql.Select[Row] = sql.select[text: "select month, totla from orders"](
     params: [],
     row: Row
@@ -19,12 +19,12 @@ fn misspelt_column(db: sql.Db[ReadOnly]) -> Result[List[Row], sql.Error] ! sql.r
   return sql.query(db: db, statement: stmt)
 }
 
-fn missing_field(db: sql.Db[ReadOnly]) -> Result[List[Row], sql.Error] ! sql.read, alloc {
+fn missing_field(db: sql.Db[ReadOnly]) -> Result[List[Row], sql.Error] may sql.read, alloc {
   let stmt: sql.Select[Row] = sql.select[text: "select month from orders"](params: [], row: Row)
   return sql.query(db: db, statement: stmt)
 }
 
-fn two_statements(db: sql.Db[ReadOnly]) -> Result[List[Row], sql.Error] ! sql.read, alloc {
+fn two_statements(db: sql.Db[ReadOnly]) -> Result[List[Row], sql.Error] may sql.read, alloc {
   let stmt: sql.Select[Row] = sql.select[text: "select * from orders; drop table orders"](
     params: [],
     row: Row
@@ -32,7 +32,7 @@ fn two_statements(db: sql.Db[ReadOnly]) -> Result[List[Row], sql.Error] ! sql.re
   return sql.query(db: db, statement: stmt)
 }
 
-fn escaped_offsets(db: sql.Db[ReadOnly]) -> Result[List[Row], sql.Error] ! sql.read, alloc {
+fn escaped_offsets(db: sql.Db[ReadOnly]) -> Result[List[Row], sql.Error] may sql.read, alloc {
   let stmt: sql.Select[Row] = sql.select[text: "select\tmonth,\n\"totla\" from orders"](
     params: [],
     row: Row

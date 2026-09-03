@@ -45,7 +45,7 @@ pub fn render(
   width: Coord where it > 0,
   height: Coord where it > 0,
   limit: Iter where it > 0
-) -> Grid[Iter, width, height] ! alloc {
+) -> Grid[Iter, width, height] may alloc {
   var grid: Grid[Iter, width, height] = Grid.filled(value: 0, width: width, height: height)
   for py: Int in 0 ..< height {
     for px: Int in 0 ..< width {
@@ -57,7 +57,7 @@ pub fn render(
   return grid
 }
 
-pub fn main(args: List[Text], files: io.Files) -> Result[Unit, io.Error] ! io.file, alloc {
+pub fn main(args: List[Text], files: io.Files) -> Result[Unit, io.Error] may io.file, alloc {
   -- files is a root capability supplied by the runtime (§8.3)
   let view: Viewport = Viewport { x_min: -2.5, x_max: 1.0, y_min: -1.0, y_max: 1.0 }
   let grid: Grid[Iter, 800, 600] = render(view: view, width: 800, height: 600, limit: 255)

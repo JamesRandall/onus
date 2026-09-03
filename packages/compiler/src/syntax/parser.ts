@@ -13,10 +13,10 @@
  *
  * Node ids are assigned in pre-order after the tree is built (`renumber`).
  */
-import { lex } from '../lexer/lexer.js';
+import { CONTINUATION, lex } from '../lexer/lexer.js';
 import { describeKind, isNameKind, type Token, type TokenKind } from '../lexer/tokens.js';
-import { diagnostic, type DiagnosticSink } from '../report/diagnostic.js';
-import { join as joinSpan, span as mkSpan, type SourceFile, type Span } from '../source.js';
+import { diagnostic, DiagnosticSink } from '../report/diagnostic.js';
+import { join as joinSpan, makeSourceFile, span as mkSpan, type SourceFile, type Span } from '../source.js';
 import type * as A from './ast.js';
 import { nodeId, renumber } from './ast.js';
 import { attachComments, type CommentTable } from './comments.js';
@@ -51,10 +51,85 @@ class ParseError extends Error {
   }
 }
 
-const ITEM_START: ReadonlySet<TokenKind> = new Set<TokenKind>([
+/** The parser tried to consume the cursor: the legal set is complete (`onus next`, §14). */
+class CursorReached extends Error {
+  constructor() {
+    super('cursor reached');
+  }
+}
+
+
+/**
+ * The legal token kinds at `offset` (§14): every kind the parser tests at
+ * the cursor after parsing the text before it. Soft keywords are reported
+ * as `name`. Effects: none; diagnostics of the prefix are discarded.
+ */
+export function legalTokensAt(file: SourceFile, offset: number): ReadonlySet<TokenKind> {
+  const tokens = prefixTokens(file, offset);
+  const run = (prefix: readonly Token[]): ReadonlySet<TokenKind> => {
+    const p = new Parser(file, [...prefix, syntheticToken(file, offset, 'cursor')], new DiagnosticSink(), prefix.length);
+    p.parseModule();
+    return p.legal;
+  };
+  const legal = new Set(run(tokens));
+  const last = tokens[tokens.length - 1];
+  if (last !== undefined && last.kind === 'nl') {
+    // The lexer drops a newline before a continuation token, so the token being predicted decides whether that newline exists.
+    for (const k of run(tokens.slice(0, -1))) if (CONTINUATION.has(k)) legal.add(k);
+  }
+  return legal;
+}
+
+/**
+ * Parses the text before `offset` with a `Hole` expression at the cursor,
+ * closing every open bracket and block after it (§14). Statements the
+ * closers cannot complete are dropped by the parser's recovery.
+ * Effects: reports the prefix's syntax diagnostics to `sink`.
+ */
+export function parseWithHole(file: SourceFile, offset: number, sink: DiagnosticSink, firstId = 0): ParseResult {
+  const tokens = prefixTokens(file, offset);
+  const mk = (kind: TokenKind): Token => syntheticToken(file, offset, kind);
+  const open: TokenKind[] = [];
+  for (const t of tokens) {
+    if (t.kind === '(' || t.kind === '[' || t.kind === '{') open.push(t.kind);
+    else if (t.kind === ')' || t.kind === ']' || t.kind === '}') open.pop();
+  }
+  const closers: Token[] = [];
+  for (const o of open.reverse()) {
+    if (o === '(') closers.push(mk(')'));
+    else if (o === '[') closers.push(mk(']'));
+    else closers.push(mk('nl'), mk('}'));
+  }
+  const p = new Parser(file, [...tokens, mk('hole'), ...closers, mk('nl'), mk('eof')], sink);
+  const module = p.parseModule();
+  if (module === null) return { module: null, comments: new Map(), nextId: firstId };
+  const nextId = renumber(module, firstId);
+  return { module, comments: new Map(), nextId };
+}
+
+/** The tokens of the text before `offset`, without the lexer's synthetic trailing newline and `eof`. */
+function prefixTokens(file: SourceFile, offset: number): Token[] {
+  const prefix = makeSourceFile(file.id, file.path, file.text.slice(0, Math.max(0, Math.min(offset, file.text.length))));
+  const out = lex(prefix, new DiagnosticSink()).tokens.filter((t) => t.kind !== 'eof');
+  const last = out[out.length - 1];
+  if (last !== undefined && last.kind === 'nl' && last.span.start === last.span.end) out.pop();
+  return out;
+}
+
+function syntheticToken(file: SourceFile, offset: number, kind: TokenKind): Token {
+  return { kind, span: mkSpan(file.id, offset, offset), text: '', value: null, ownLine: false };
+}
+
+const ITEM_START_LIST: readonly TokenKind[] = [
   'pub', 'sealed', 'fn', 'const', 'type', 'record', 'union', 'interface', 'impl', 'claim',
   'capability', 'path', 'policy', 'example', 'property',
-]);
+];
+const ITEM_START: ReadonlySet<TokenKind> = new Set<TokenKind>(ITEM_START_LIST);
+const ITEM_KEYWORDS: readonly TokenKind[] = [...ITEM_START_LIST, 'intrinsic'];
+const ITEM_AFTER_VISIBILITY: readonly TokenKind[] = ['fn', 'const', 'intrinsic', 'type', 'record', 'union', 'interface', 'claim', 'capability'];
+const STMT_START: readonly TokenKind[] = ['let', 'var', 'return', 'if', 'match', 'loop', 'for', 'assume'];
+const PRIMARY_START: readonly TokenKind[] = ['int', 'float', 'text', 'duration', 'true', 'false', 'it', 'result', 'tname', '(', '[', 'try', 'recover', 'old', 'forall', 'exists', 'fn', 'fake', 'name'];
+const PATTERN_START: readonly TokenKind[] = ['_', 'int', 'float', 'text', 'duration', 'true', 'false', '-', 'tname', 'name'];
 
 const CMP_OPS: ReadonlySet<TokenKind> = new Set<TokenKind>(['==', '!=', '<', '<=', '>', '>=']);
 const ADD_OPS: ReadonlySet<TokenKind> = new Set<TokenKind>(['+', '-', '++']);
@@ -73,14 +148,28 @@ class Parser {
   /** When true, bare expression statements are assertions (example, property and law blocks). */
   private assertionBlock = false;
 
+  /** Kinds tested at the cursor: the legal next tokens (`onus next`, §14). */
+  readonly legal = new Set<TokenKind>();
+  /** Recording stops at the first syntax error; after it the parser is recovering, not choosing. */
+  private recording: boolean;
+
   constructor(
     private readonly file: SourceFile,
     private readonly tokens: readonly Token[],
     private readonly sink: DiagnosticSink,
-  ) {}
+    /** Index of the `cursor` token when computing legal tokens; null otherwise. */
+    private readonly cursorIndex: number | null = null,
+  ) {
+    this.recording = cursorIndex !== null;
+  }
 
   // -------------------------------------------------------------------------
   // Token access
+  //
+  // Every grammar test of a token kind goes through `is`, `at`, `atAny`,
+  // `atName` or `expecting`, which record the kind when the tested token is
+  // the cursor. Loop guards and negative lookahead use `peekIs`/`atEof`,
+  // which never record.
   // -------------------------------------------------------------------------
 
   private peek(n = 0): Token {
@@ -89,16 +178,39 @@ class Parser {
     return t;
   }
 
+  /** Tests the kind of the token `n` ahead, recording it as legal when that token is the cursor. */
+  private is(n: number, kind: TokenKind): boolean {
+    if (this.recording && this.pos + n === this.cursorIndex) this.legal.add(kind);
+    return this.peek(n).kind === kind;
+  }
+
   private at(kind: TokenKind): boolean {
-    return this.peek().kind === kind;
+    return this.is(0, kind);
+  }
+
+  /** Membership of the token `n` ahead in `kinds`, recording every member at the cursor. */
+  private atAny(kinds: ReadonlySet<TokenKind>, n = 0): boolean {
+    if (this.recording && this.pos + n === this.cursorIndex) for (const k of kinds) this.legal.add(k);
+    return kinds.has(this.peek(n).kind);
+  }
+
+  /** Records `kinds` as legal when the current token is the cursor; precedes a `switch` over the kind. */
+  private expecting(kinds: Iterable<TokenKind>): void {
+    if (this.recording && this.pos === this.cursorIndex) for (const k of kinds) this.legal.add(k);
+  }
+
+  /** A kind test that is not a grammar alternative: never recorded. */
+  private peekIs(n: number, kind: TokenKind): boolean {
+    return this.peek(n).kind === kind;
   }
 
   private atEof(): boolean {
-    return this.at('eof');
+    return this.peekIs(0, 'eof');
   }
 
   private advance(): Token {
     const t = this.peek();
+    if (t.kind === 'cursor') throw new CursorReached();
     if (t.kind !== 'eof') this.pos += 1;
     return t;
   }
@@ -118,6 +230,7 @@ class Parser {
   }
 
   private fail(expected: string, at: Token = this.peek()): never {
+    this.recording = false;
     this.sink.report(
       diagnostic({
         code: 'E0003',
@@ -158,8 +271,8 @@ class Parser {
   }
 
   /** After an item or statement: a newline is required unless one was just consumed or a closer follows. */
-  private terminator(): void {
-    if (this.at('}') || this.atEof()) return;
+  private terminator(inBlock = true): void {
+    if ((inBlock && this.at('}')) || this.atEof()) return;
     if (this.prev().kind === 'nl') return;
     this.expect('nl');
   }
@@ -194,6 +307,7 @@ class Parser {
 
   /** True iff the current token can serve as a name (a `name` token or a soft keyword). */
   private atName(n = 0): boolean {
+    if (this.recording && this.pos + n === this.cursorIndex) this.legal.add('name');
     return isNameKind(this.peek(n).kind);
   }
 
@@ -228,7 +342,7 @@ class Parser {
     const segs: A.Ident[] = [];
     if (this.atName() || this.at('tname')) segs.push(this.ident(this.advance()));
     else this.fail('a name');
-    while (this.at('.') && (this.atName(1) || this.peek(1).kind === 'tname')) {
+    while (this.at('.') && (this.atName(1) || this.is(1, 'tname'))) {
       this.advance();
       segs.push(this.ident(this.advance()));
     }
@@ -240,10 +354,9 @@ class Parser {
     if (this.at('tname')) return true;
     if (!this.atName()) return false;
     let i = 1;
-    while (this.peek(i).kind === '.') {
-      const k = this.peek(i + 1).kind;
-      if (k === 'tname') return true;
-      if (!isNameKind(k)) return false;
+    while (this.is(i, '.')) {
+      if (this.is(i + 1, 'tname')) return true;
+      if (!this.atName(i + 1)) return false;
       i += 2;
     }
     return false;
@@ -282,11 +395,13 @@ class Parser {
         imports.push({ id: PLACEHOLDER, kind: 'Import', span: this.spanFrom(s), name: n });
       }
       const items: A.Item[] = [];
-      while (!this.atEof()) {
+      for (;;) {
+        this.expecting(['eof']);
+        if (this.atEof()) break;
         const before = this.pos;
         try {
           items.push(this.parseItem());
-          this.terminator();
+          this.terminator(false);
         } catch (e) {
           if (!(e instanceof ParseError)) throw e;
           if (this.pos === before) this.advance();
@@ -304,7 +419,7 @@ class Parser {
         items,
       };
     } catch (e) {
-      if (!(e instanceof ParseError)) throw e;
+      if (!(e instanceof ParseError) && !(e instanceof CursorReached)) throw e;
       return null;
     }
   }
@@ -321,6 +436,7 @@ class Parser {
 
   private parseItem(): A.Item {
     const start = this.here();
+    this.expecting(ITEM_KEYWORDS);
     const t = this.peek();
     switch (t.kind) {
       case 'impl':
@@ -337,26 +453,27 @@ class Parser {
         break;
     }
     const vis = this.visibility();
+    this.expecting(ITEM_AFTER_VISIBILITY);
     switch (this.peek().kind) {
       case 'fn':
         return this.parseFn(start, vis, false, false);
       case 'const':
-        if (this.peek(1).kind === 'fn') {
+        if (this.is(1, 'fn')) {
           this.advance();
           return this.parseFn(start, vis, true, false);
         }
-        if (this.peek(1).kind === 'intrinsic' && this.peek(2).kind === 'fn') {
+        if (this.is(1, 'intrinsic') && this.is(2, 'fn')) {
           this.advance();
           this.advance();
           return this.parseFn(start, vis, true, true);
         }
         return this.parseConst(start, vis);
       case 'intrinsic':
-        if (this.peek(1).kind === 'fn') {
+        if (this.is(1, 'fn')) {
           this.advance();
           return this.parseFn(start, vis, false, true);
         }
-        if (this.peek(1).kind === 'type') {
+        if (this.is(1, 'type')) {
           this.advance();
           return this.parseIntrinsicType(start, vis);
         }
@@ -431,13 +548,13 @@ class Parser {
   }
 
   private effectsOpt(): A.EffectRef[] {
-    if (!this.accept('!')) return [];
+    if (!this.accept('may')) return [];
     return this.effectList();
   }
 
   /**
    * `effect { "," effect }`. A comma continues the list only when an effect
-   * follows: inside a parameter list `fn(T) -> U ! e, xs: List[T]` the comma
+   * follows: inside a parameter list `fn(T) -> U may e, xs: List[T]` the comma
    * before `xs:` belongs to the parameters.
    */
   private effectList(): A.EffectRef[] {
@@ -450,8 +567,8 @@ class Parser {
   }
 
   private effectFollows(n: number): boolean {
-    const k = this.peek(n).kind;
-    return (isNameKind(k) || k === 'recover') && this.peek(n + 1).kind !== ':';
+    // A colon after the name makes it a parameter, so it is a legal continuation here.
+    return (this.atName(n) || this.is(n, 'recover')) && !this.is(n + 1, ':');
   }
 
   /** `NAME { "." NAME }` or `recover`: effects are lowercase; claims never appear here. */
@@ -770,7 +887,7 @@ class Parser {
       } else {
         const n = this.moduleName();
         let glob = false;
-        if (this.at('.') && this.peek(1).kind === '*') {
+        if (this.at('.') && this.is(1, '*')) {
           this.advance();
           this.advance();
           glob = true;
@@ -889,7 +1006,7 @@ class Parser {
   private typeArg(): A.TypeArg {
     const s = this.here();
     let label: A.Ident | null = null;
-    if (this.atName() && this.peek(1).kind === ':') {
+    if (this.atName() && this.is(1, ':')) {
       label = this.name();
       this.advance();
     }
@@ -932,6 +1049,7 @@ class Parser {
 
   private parseStmt(): A.Stmt {
     const s = this.here();
+    this.expecting(STMT_START);
     switch (this.peek().kind) {
       case 'let':
       case 'var': {
@@ -1107,9 +1225,8 @@ class Parser {
       const pattern = this.parsePattern();
       return { id: PLACEHOLDER, kind: 'Is', span: this.spanFrom(s), expr: left, pattern };
     }
-    const opTok = this.peek();
-    if (!CMP_OPS.has(opTok.kind)) return left;
-    this.advance();
+    if (!this.atAny(CMP_OPS)) return left;
+    const opTok = this.advance();
     const right = this.addExpr();
     const span = this.spanFrom(s);
     if (CMP_OPS.has(this.peek().kind)) {
@@ -1143,7 +1260,7 @@ class Parser {
   private addExpr(): A.Expr {
     const s = this.here();
     let left = this.mulExpr();
-    while (ADD_OPS.has(this.peek().kind)) {
+    while (this.atAny(ADD_OPS)) {
       const op = this.binaryOp(this.advance().kind);
       const right = this.mulExpr();
       left = { id: PLACEHOLDER, kind: 'Binary', span: this.spanFrom(s), op, left, right };
@@ -1154,7 +1271,7 @@ class Parser {
   private mulExpr(): A.Expr {
     const s = this.here();
     let left = this.unaryExpr();
-    while (MUL_OPS.has(this.peek().kind)) {
+    while (this.atAny(MUL_OPS)) {
       const op = this.binaryOp(this.advance().kind);
       const right = this.unaryExpr();
       left = { id: PLACEHOLDER, kind: 'Binary', span: this.spanFrom(s), op, left, right };
@@ -1176,14 +1293,13 @@ class Parser {
     let e = this.primary();
     for (;;) {
       if (this.at('.')) {
-        const nextKind = this.peek(1).kind;
-        if (isNameKind(nextKind)) {
+        if (this.atName(1)) {
           this.advance();
           const name = this.name();
           e = { id: PLACEHOLDER, kind: 'FieldAccess', span: this.spanFrom(s), object: e, name };
           continue;
         }
-        if (nextKind === 'tname') {
+        if (this.is(1, 'tname')) {
           const prefix = nameChain(e);
           if (prefix === null) this.fail('a field name after `.`', this.peek(1));
           this.advance();
@@ -1259,8 +1375,12 @@ class Parser {
 
   private primary(): A.Expr {
     const s = this.here();
+    this.expecting(this.noBrace ? PRIMARY_START : [...PRIMARY_START, '{']);
     const t = this.peek();
     switch (t.kind) {
+      case 'hole':
+        this.advance();
+        return { id: PLACEHOLDER, kind: 'Hole', span: t.span };
       case 'int': {
         this.advance();
         return { id: PLACEHOLDER, kind: 'IntLit', span: t.span, value: typeof t.value === 'bigint' ? t.value : 0n };
@@ -1403,6 +1523,7 @@ class Parser {
 
   private parsePattern(): A.Pattern {
     const s = this.here();
+    this.expecting(PATTERN_START);
     const t = this.peek();
     switch (t.kind) {
       case '_':

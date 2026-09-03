@@ -52,7 +52,7 @@ const fn is_punct(g: Text) -> Bool {
   return g == "(" or g == ")" or g == "," or g == ";" or g == "=" or g == "*" or g == "." or g == "'" or g == "\"" or g == "$"
 }
 
-const fn tokenize(text: Text) -> List[Token] ! alloc {
+const fn tokenize(text: Text) -> List[Token] may alloc {
   let gs: List[Text] = Text.graphemes(t: text)
   let n: Int = List.len(xs: gs)
   var out: List[Token] = []
@@ -86,7 +86,7 @@ const fn tokenize(text: Text) -> List[Token] ! alloc {
   return out
 }
 
-pub const fn parse_select(text: Text) -> Result[SelectAst, ConstError] ! alloc {
+pub const fn parse_select(text: Text) -> Result[SelectAst, ConstError] may alloc {
   let tokens: List[Token] = tokenize(text: text)
   let count: Int = List.len(xs: tokens)
   if count == 0 {
@@ -186,7 +186,7 @@ const fn has_column(columns: List[Column], name: Text) -> Bool {
 
 -- Every projected column must be a field of the row record and every field
 -- must be projected, unless the projection is `*`.
-pub const fn columns_match(text: Text, record: TypeInfo) -> Result[Unit, ConstError] ! alloc {
+pub const fn columns_match(text: Text, record: TypeInfo) -> Result[Unit, ConstError] may alloc {
   match parse_select(text: text) with
   | Err(error) -> return Err(error: error)
   | Ok(value) -> {
@@ -244,7 +244,7 @@ pub intrinsic fn connect(
   net: io.Net,
   dsn: Text,
   mode: DbMode
-) -> Result[Db[mode], Error] ! io.net, alloc
+) -> Result[Db[mode], Error] may io.net, alloc
 
 pub intrinsic fn narrow[const m: DbMode](db: Db[m], to: DbMode) -> Db[to]
 
@@ -255,9 +255,9 @@ pub intrinsic fn deadline[const m: DbMode](db: Db[m], ms: Duration) -> Db[m, dea
 pub intrinsic fn query[T](
   db: Db[ReadOnly],
   statement: Select[T]
-) -> Result[List[T], Error] ! sql.read, alloc
+) -> Result[List[T], Error] may sql.read, alloc
 
 pub intrinsic fn execute(
   db: Db[ReadWrite],
   statement: Statement
-) -> Result[Unit, Error] ! sql.write, alloc
+) -> Result[Unit, Error] may sql.write, alloc

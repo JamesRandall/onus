@@ -975,6 +975,9 @@ class Checker {
         return this.closure(e);
       case 'Fake':
         return this.fake(e, expected);
+      case 'Hole':
+        this.ty.holes.set(e.id, expected);
+        return ERROR;
       case 'FieldAccess':
         return this.fieldAccess(e);
       case 'Call':

@@ -15,6 +15,7 @@ import { defaultStdlibRoot } from '../resolve/loader.js';
 import { build, runLauncher } from '../codegen/build.js';
 import { interfaceOf, interfaceText } from '../report/interface.js';
 import { pathReport, pathText } from '../report/path.js';
+import { next } from '../next/next.js';
 
 const USAGE = `usage:
   onus check <file.onus>... [--json] [--root <dir>] [--stdlib <dir>] [--to <pass>] [--budget <ms>] [--ledger] [--no-cache]
@@ -29,7 +30,8 @@ const USAGE = `usage:
       check, then print the entry module's interface: canonical source with bodies elided, or the §11.1 JSON
   onus path <file.onus> [<name>] [--json] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]
       check, then print the §9.1 report of the entry module's paths (or of the named one)
-  onus next   (later milestone)
+  onus next <file.onus> --offset <n> [--json] [--root <dir>] [--stdlib <dir>]
+      the legal next tokens, expected type and names in scope at a UTF-16 offset (§14)
 `;
 
 interface Args {
@@ -39,7 +41,7 @@ interface Args {
   readonly values: ReadonlyMap<string, string>;
 }
 
-const VALUE_FLAGS: ReadonlySet<string> = new Set(['root', 'stdlib', 'to', 'out', 'emit', 'budget']);
+const VALUE_FLAGS: ReadonlySet<string> = new Set(['root', 'stdlib', 'to', 'out', 'emit', 'budget', 'offset']);
 
 function parseArgs(argv: readonly string[]): Args {
   const files: string[] = [];
@@ -223,6 +225,31 @@ function pathCommand(args: Args): number {
   return ctx.sink.hasErrors() ? 1 : 0;
 }
 
+function nextCommand(args: Args): number {
+  const entry = args.files[0];
+  const offsetText = args.values.get('offset');
+  if (entry === undefined || offsetText === undefined) {
+    process.stderr.write(USAGE);
+    return 2;
+  }
+  const offset = Number(offsetText);
+  if (!Number.isInteger(offset) || offset < 0) {
+    process.stderr.write(`onus next: --offset takes a non-negative integer\n`);
+    return 2;
+  }
+  let text: string;
+  try {
+    text = readFileSync(entry, 'utf8');
+  } catch (e) {
+    process.stderr.write(`onus: cannot read ${entry}: ${e instanceof Error ? e.message : String(e)}\n`);
+    return 2;
+  }
+  const result = next(newContext(args), entry, text, offset);
+  if (args.flags.has('json')) process.stdout.write(`${JSON.stringify(result)}\n`);
+  else process.stdout.write(`tokens: ${result.tokens.join(' ')}\nexpected: ${result.expectedType ?? '(none)'}\nin scope: ${result.inScope.join(', ')}\n`);
+  return 0;
+}
+
 function main(argv: readonly string[]): number {
   const args = parseArgs(argv);
   switch (args.command) {
@@ -239,8 +266,7 @@ function main(argv: readonly string[]): number {
     case 'path':
       return pathCommand(args);
     case 'next':
-      process.stderr.write(`onus ${args.command}: not available until a later milestone\n`);
-      return 2;
+      return nextCommand(args);
     default:
       process.stderr.write(USAGE);
       return 2;

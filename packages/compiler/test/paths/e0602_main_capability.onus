@@ -1,6 +1,6 @@
 module e0602_main_capability
 import std.sql
 
-pub fn main(args: List[Text], db: sql.Db[ReadOnly]) -> Result[Unit, sql.Error] ! sql.read {
+pub fn main(args: List[Text], db: sql.Db[ReadOnly]) -> Result[Unit, sql.Error] may sql.read {
   return Ok(value: Unit)
 }

@@ -9,4 +9,4 @@ pub const intrinsic fn of(x: Int) -> Float
 
 pub const intrinsic fn classify(x: Float) -> Class
 
-pub const intrinsic fn to_text(x: Float) -> Text ! alloc
+pub const intrinsic fn to_text(x: Float) -> Text may alloc

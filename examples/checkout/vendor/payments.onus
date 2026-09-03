@@ -19,7 +19,7 @@ pub fn charge(
   key: Text,
   amount: Int where it >= 0,
   who: auth.AuthedCustomer
-) -> Result[Receipt, Error] ! io.net, alloc
+) -> Result[Receipt, Error] may io.net, alloc
   claims Idempotent
 {
   assume Idempotent "Vendor API deduplicates on key for 24h; see contract §4.2"

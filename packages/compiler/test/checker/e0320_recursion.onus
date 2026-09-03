@@ -30,6 +30,6 @@ fn measured(n: Int where it >= 0) -> Int
   return measured(n: n - 1)
 }
 
-fn forever(n: Int) -> Int ! diverge {
+fn forever(n: Int) -> Int may diverge {
   return forever(n: n)
 }

@@ -8,4 +8,4 @@ pub intrinsic fn size[K, V](m: Map[K, V]) -> Int where it >= 0
 
 pub intrinsic fn get[K, V](m: Map[K, V], key: K) -> Option[V]
 
-pub intrinsic fn put[K, V](m: Map[K, V], key: K, value: V) -> Map[K, V] ! alloc
+pub intrinsic fn put[K, V](m: Map[K, V], key: K, value: V) -> Map[K, V] may alloc
