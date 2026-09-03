@@ -1,0 +1,7 @@
+module e0115_elided_body
+
+fn f(x: Int) -> Int { ... }
+
+fn g(x: Int) -> Int
+  requires x > 0
+{ ... }

@@ -13,6 +13,7 @@ import { PASSES, runFrontEnd, runPipeline, type PassName } from '../driver.js';
 import { toJson, toText } from '../report/diagnostic.js';
 import { defaultStdlibRoot } from '../resolve/loader.js';
 import { build, runLauncher } from '../codegen/build.js';
+import { interfaceOf, interfaceText } from '../report/interface.js';
 
 const USAGE = `usage:
   onus check <file.onus>... [--json] [--root <dir>] [--stdlib <dir>] [--to <pass>] [--budget <ms>] [--ledger] [--no-cache]
@@ -23,7 +24,9 @@ const USAGE = `usage:
       check, then emit JavaScript for every module into <dir> (default: <root>/out)
   onus run <entry.onus> [--out <dir>] [-- args...]
       build, then run the entry module's main
-  onus interface | path | next   (later milestones)
+  onus interface <file.onus> [--json] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]
+      check, then print the entry module's interface: canonical source with bodies elided, or the §11.1 JSON
+  onus path | next   (later milestones)
 `;
 
 interface Args {
@@ -172,6 +175,27 @@ function buildCommand(args: Args, run: boolean): number {
   return runLauncher(result.launcher, args.files.slice(1));
 }
 
+function interfaceCommand(args: Args): number {
+  const entry = args.files[0];
+  if (entry === undefined) {
+    process.stderr.write(USAGE);
+    return 2;
+  }
+  const ctx = newContext(args);
+  if (!readFiles(ctx, [entry])) return 2;
+  runPipeline(ctx, 'verify');
+  emitDiagnostics(ctx, args.flags.has('json'));
+  if (ctx.sink.hasErrors()) return 1;
+  const file = ctx.files[0];
+  const rec = ctx.resolve.modules.find((m) => file !== undefined && m.file === file.id);
+  if (rec === undefined) {
+    process.stderr.write(`onus interface: ${entry} is not a module\n`);
+    return 2;
+  }
+  process.stdout.write(args.flags.has('json') ? `${JSON.stringify(interfaceOf(ctx, rec.id), null, 2)}\n` : interfaceText(ctx, rec.id));
+  return 0;
+}
+
 function main(argv: readonly string[]): number {
   const args = parseArgs(argv);
   switch (args.command) {
@@ -184,6 +208,7 @@ function main(argv: readonly string[]): number {
     case 'run':
       return buildCommand(args, true);
     case 'interface':
+      return interfaceCommand(args);
     case 'path':
     case 'next':
       process.stderr.write(`onus ${args.command}: not available until a later milestone\n`);

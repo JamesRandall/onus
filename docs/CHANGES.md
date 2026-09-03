@@ -336,6 +336,32 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     reporting and checkout verify in a few seconds each; parallelism is a
     performance item for later.
 
+## M7 — reports
+
+72. **Elided bodies (§2.3, §11.1).** `onus interface` must render "canonical
+    source syntax with bodies elided to `{ ... }`" and the rendering must be
+    valid Onus, so `...` is a token and `{ ... }` is a function body the
+    parser accepts (`Block.elided`). Outside an interface document it is
+    `E0115 elided body outside an interface document`, reported by the
+    resolver; the checker never sees an elided body.
+73. **Interface document shape (§11.1).** Beyond the example in the spec the
+    document carries: every item of the module with its `visibility` (private
+    items included, since the ledger and the assumptions must be complete);
+    a module-level `ledger` of every obligation with status and provenance
+    and module `obligations` totals, both of which the prose of §11 asks for;
+    a `failed` count; on each contract `pinned`, `sites` (how many obligations
+    the clause generated) and `checked_at` as a `file:line:col` of the first
+    runtime check; loop `invariant`/`decreases` clauses listed as contracts of
+    their function; `example`s and `property`s reported under the function
+    of the same name (§18.1) and as items of their own otherwise. `hash` is
+    `b3:` + BLAKE3 of the module's canonical text.
+74. **Diagnostics (§13).** `canonical_hash` is filled for every diagnostic
+    whose file has a canonical form. `onus check --json` prints one object
+    per line. `repairs` are still only produced for E0001.
+75. **Schemas.** JSON Schema (draft-07) for both documents lives in
+    `packages/compiler/src/report/schema/`; the test suite validates every
+    fixture's diagnostics and the three examples' interfaces against them.
+
 ### Deferred, not changed
 
 - `Stream[T] ! e` as a type (§3.11) is not parsed: `-> Stream[T] ! e` is

@@ -401,7 +401,7 @@ class Parser {
     if (intrinsic) {
       if (this.at('{')) this.fail('a newline: an intrinsic function has no body');
     } else {
-      body = this.parseBlock();
+      body = this.parseBlock(true);
     }
     return { id: PLACEHOLDER, kind: 'FnDecl', span: this.spanFrom(start), vis, constFn, intrinsic, name, tparams, params, ret, effects, claims, contracts, body };
   }
@@ -804,6 +804,23 @@ class Parser {
    */
   private braced<T>(item: () => T): T[] {
     this.expect('{');
+    return this.bracedRest(item);
+  }
+
+  /**
+   * A function body: a block, or `{ ... }` when `allowElided` (an interface
+   * rendering, §11.1), which yields null.
+   */
+  private bracedOrElided<T>(item: () => T, allowElided: boolean): T[] | null {
+    this.expect('{');
+    if (allowElided && this.accept('...')) {
+      this.expect('}');
+      return null;
+    }
+    return this.bracedRest(item);
+  }
+
+  private bracedRest<T>(item: () => T): T[] {
     const out: T[] = [];
     if (this.accept('nl')) {
       while (!this.at('}') && !this.atEof()) {
@@ -888,13 +905,13 @@ class Parser {
   // Statements
   // -------------------------------------------------------------------------
 
-  private parseBlock(): A.Block {
+  private parseBlock(allowElided = false): A.Block {
     const s = this.here();
     const saved = this.assertionBlock;
     this.assertionBlock = false;
     try {
-      const stmts = this.withBrace(() => this.braced(() => this.parseStmt()));
-      return { id: PLACEHOLDER, kind: 'Block', span: this.spanFrom(s), stmts };
+      const stmts = this.withBrace(() => this.bracedOrElided(() => this.parseStmt(), allowElided));
+      return { id: PLACEHOLDER, kind: 'Block', span: this.spanFrom(s), stmts: stmts ?? [], elided: stmts === null };
     } finally {
       this.assertionBlock = saved;
     }
@@ -907,7 +924,7 @@ class Parser {
     this.assertionBlock = true;
     try {
       const stmts = this.withBrace(() => this.braced(() => this.parseStmt()));
-      return { id: PLACEHOLDER, kind: 'Block', span: this.spanFrom(s), stmts };
+      return { id: PLACEHOLDER, kind: 'Block', span: this.spanFrom(s), stmts, elided: false };
     } finally {
       this.assertionBlock = saved;
     }
@@ -1007,7 +1024,7 @@ class Parser {
     if (this.accept('else')) {
       if (this.at('if')) {
         const nested = this.parseIf();
-        elseBlock = { id: PLACEHOLDER, kind: 'Block', span: nested.span, stmts: [nested] };
+        elseBlock = { id: PLACEHOLDER, kind: 'Block', span: nested.span, stmts: [nested], elided: false };
       } else {
         elseBlock = this.parseBlock();
       }

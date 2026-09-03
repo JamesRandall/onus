@@ -86,7 +86,8 @@ scope       = "self" | QNAME [ "." "*" ] ;
 example_decl  = "example" NAME assert_block ;
 property_decl = "property" NAME "(" [ params ] ")" assert_block ;
 
-block       = "{" ( NL { stmt NL } | [ stmt ] ) "}" ;     (* single-line form canonicalises to multi-line *)
+block       = "{" ( NL { stmt NL } | [ stmt ] ) "}"       (* single-line form canonicalises to multi-line *)
+            | "{" "..." "}" ;                                (* elided fn body of an interface rendering (§11.1); E0115 in source *)
 assert_block = block ;                                   (* bare expressions are assertions, not E0002 *)
 stmt        = "let" NAME ":" type "=" expr
             | "var" NAME ":" type "=" expr

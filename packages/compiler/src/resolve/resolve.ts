@@ -28,6 +28,7 @@ import { isPrimEffect, type Effect } from '../effects/set.js';
 import { diagnostic } from '../report/diagnostic.js';
 import type { Span } from '../source.js';
 import type * as A from '../syntax/ast.js';
+import { walk } from '../syntax/walk.js';
 import {
   companionModuleOf,
   defId,
@@ -41,7 +42,7 @@ import {
   type TypeOwner,
 } from './defs.js';
 
-type ResolveCode = 'E0105' | 'E0106' | 'E0107' | 'E0108' | 'E0109' | 'E0110' | 'E0111' | 'E0113' | 'E0114' | 'E0202' | 'E0330';
+type ResolveCode = 'E0105' | 'E0106' | 'E0107' | 'E0108' | 'E0109' | 'E0110' | 'E0111' | 'E0113' | 'E0114' | 'E0115' | 'E0202' | 'E0330';
 
 interface Scope {
   readonly parent: Scope | null;
@@ -115,6 +116,15 @@ class Collector {
   collect(m: ModuleRecord): void {
     const t = this.ctx.resolve;
     const members = t.membersOf(m.id);
+    for (const item of m.module.items) {
+      // `{ ... }` is the interface rendering of a body (§11.1), not source.
+      walk(item, (n) => {
+        if (n.kind === 'FnDecl' && n.body !== null && n.body.elided) {
+          this.ctx.sink.report(diagnostic({ code: 'E0115', span: n.body.span, def: n.name.text, context: [`\`${n.name.text}\` has an elided body \`{ ... }\`, which only an interface rendering may contain (§11.1)`] }));
+        }
+        return true;
+      });
+    }
     for (const item of m.module.items) {
       switch (item.kind) {
         case 'FnDecl': {

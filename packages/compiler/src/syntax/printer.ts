@@ -23,14 +23,21 @@ import { NO_COMMENTS, type CommentTable } from './comments.js';
 
 export const LINE_WIDTH = 100;
 
+export interface PrintOptions {
+  /** Print every function body as `{ ... }` (an interface rendering, §11.1). */
+  readonly elideBodies: boolean;
+}
+
+const DEFAULT_OPTIONS: PrintOptions = { elideBodies: false };
+
 /**
  * Prints a module in canonical form.
  * Postconditions: the result ends with exactly one newline; `parse(result)`
  * equals `module` up to spans.
  * Effects: none.
  */
-export function print(module: A.Module, comments: CommentTable = NO_COMMENTS): string {
-  return render(new Printer(comments).module(module), LINE_WIDTH);
+export function print(module: A.Module, comments: CommentTable = NO_COMMENTS, options: PrintOptions = DEFAULT_OPTIONS): string {
+  return render(new Printer(comments, options).module(module), LINE_WIDTH);
 }
 
 /**
@@ -39,24 +46,36 @@ export function print(module: A.Module, comments: CommentTable = NO_COMMENTS): s
  * definition identity (§2.2).
  * Effects: none.
  */
-export function printItem(item: A.Item, comments: CommentTable = NO_COMMENTS): string {
-  return render(new Printer(comments).item(item), LINE_WIDTH);
+export function printItem(item: A.Item, comments: CommentTable = NO_COMMENTS, options: PrintOptions = DEFAULT_OPTIONS): string {
+  return render(new Printer(comments, options).item(item), LINE_WIDTH);
+}
+
+/**
+ * Prints a function's signature line: name, parameters, return type and
+ * effects, without visibility, claims, contracts or body (§11.1).
+ * Effects: none.
+ */
+export function printSignature(f: A.FnDecl): string {
+  return render(new Printer(NO_COMMENTS, DEFAULT_OPTIONS).fnHead(f, false), LINE_WIDTH);
 }
 
 /** Prints an expression in canonical form (used in reports and diagnostics). Effects: none. */
 export function printExpr(e: A.Expr): string {
-  return render(new Printer(NO_COMMENTS).expr(e, false), LINE_WIDTH);
+  return render(new Printer(NO_COMMENTS, DEFAULT_OPTIONS).expr(e, false), LINE_WIDTH);
 }
 
 /** Prints a type in canonical form. Effects: none. */
 export function printType(t: A.Type): string {
-  return render(new Printer(NO_COMMENTS).type(t), LINE_WIDTH);
+  return render(new Printer(NO_COMMENTS, DEFAULT_OPTIONS).type(t), LINE_WIDTH);
 }
 
 const EMPTY = '';
 
 class Printer {
-  constructor(private readonly comments: CommentTable) {}
+  constructor(
+    private readonly comments: CommentTable,
+    private readonly options: PrintOptions,
+  ) {}
 
   // -------------------------------------------------------------------------
   // Comments
@@ -189,9 +208,10 @@ class Printer {
     }
   }
 
-  private fnDecl(f: A.FnDecl): Doc {
-    const head = concat(
-      vis(f.vis),
+  /** The signature line of a function, with or without its visibility prefix. */
+  fnHead(f: A.FnDecl, withVis: boolean): Doc {
+    return concat(
+      withVis ? vis(f.vis) : EMPTY,
       f.constFn ? 'const ' : EMPTY,
       f.intrinsic ? 'intrinsic ' : EMPTY,
       'fn ',
@@ -202,15 +222,24 @@ class Printer {
       this.type(f.ret),
       this.effects(f.effects),
     );
+  }
+
+  private fnDecl(f: A.FnDecl): Doc {
+    const head = this.fnHead(f, true);
     const tail: Doc[] = [];
     if (f.claims.length > 0) tail.push(hardline, 'claims ', join(', ', f.claims.map(qn)));
     for (const c of f.contracts) tail.push(hardline, this.contract(c));
     tail.push(this.dangling(f));
     if (f.body === null) return concat(head, indent(concat(...tail)));
     if (f.claims.length === 0 && f.contracts.length === 0 && !this.hasDangling(f)) {
-      return concat(head, ' ', this.block(f.body));
+      return concat(head, ' ', this.body(f.body));
     }
-    return concat(head, indent(concat(...tail)), hardline, this.block(f.body));
+    return concat(head, indent(concat(...tail)), hardline, this.body(f.body));
+  }
+
+  /** A function body: elided to `{ ... }` when the block is elided or the options say so. */
+  private body(b: A.Block): Doc {
+    return this.options.elideBodies || b.elided ? '{ ... }' : this.block(b);
   }
 
   private contract(c: A.Contract): Doc {
@@ -327,6 +356,7 @@ class Printer {
   // -------------------------------------------------------------------------
 
   private block(b: A.Block): Doc {
+    if (b.elided) return '{ ... }';
     return concat('{', indent(concat(...b.stmts.map((s) => concat(hardline, this.stmt(s))), this.dangling(b))), hardline, '}');
   }
 

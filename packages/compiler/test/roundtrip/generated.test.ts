@@ -111,7 +111,7 @@ const stmt: fc.Arbitrary<A.Stmt> = fc.oneof(
   expr.map((value): A.Stmt => ({ id: ID, kind: 'Return', span: SPAN, value })),
   fc.tuple(expr, expr).map(([cond, value]): A.Stmt => ({
     id: ID, kind: 'If', span: SPAN, cond,
-    then: { id: ID, kind: 'Block', span: SPAN, stmts: [{ id: ID, kind: 'Return', span: SPAN, value }] },
+    then: { id: ID, kind: 'Block', span: SPAN, stmts: [{ id: ID, kind: 'Return', span: SPAN, value }], elided: false },
     else: null,
   })),
 );
@@ -120,7 +120,7 @@ function moduleOf(stmts: A.Stmt[]): A.Module {
   const fn: A.FnDecl = {
     id: ID, kind: 'FnDecl', span: SPAN, vis: { pub: false, sealed: false }, constFn: false, intrinsic: false, name: ident('f'),
     tparams: [], params: [], ret: { id: ID, kind: 'NamedType', span: SPAN, name: qname('Int'), args: [], where: null },
-    effects: [], claims: [], contracts: [], body: { id: ID, kind: 'Block', span: SPAN, stmts },
+    effects: [], claims: [], contracts: [], body: { id: ID, kind: 'Block', span: SPAN, stmts, elided: false },
   };
   const m: A.Module = { id: ID, kind: 'Module', span: SPAN, test: false, name: qname('gen'), imports: [], items: [fn] };
   renumber(m, 0);

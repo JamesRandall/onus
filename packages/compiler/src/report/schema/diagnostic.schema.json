@@ -1,0 +1,176 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://onus-lang.dev/schema/v0/diagnostic.json",
+  "title": "Onus diagnostic (language spec \u00a713)",
+  "type": "object",
+  "required": [
+    "code",
+    "title",
+    "location",
+    "context",
+    "repairs"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "code": {
+      "type": "string",
+      "pattern": "^E[0-9]{4}$"
+    },
+    "title": {
+      "type": "string"
+    },
+    "location": {
+      "type": "object",
+      "required": [
+        "file",
+        "def",
+        "span"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "type": "string"
+        },
+        "def": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "span": {
+          "$ref": "#/definitions/span"
+        }
+      }
+    },
+    "obligation": {
+      "$ref": "#/definitions/obligation"
+    },
+    "context": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "repairs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/repair"
+      }
+    },
+    "canonical_hash": {
+      "type": "string",
+      "pattern": "^b3:[0-9a-f]{64}$"
+    }
+  },
+  "definitions": {
+    "pos": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "span": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/pos"
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "obligation": {
+      "type": "object",
+      "required": [
+        "kind",
+        "text",
+        "status",
+        "counterexample"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "proved",
+            "checked",
+            "assumed",
+            "failed",
+            "unprovable"
+          ]
+        },
+        "counterexample": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      }
+    },
+    "confidence": {
+      "enum": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "repair": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "span",
+            "with",
+            "confidence"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "replace"
+            },
+            "span": {
+              "$ref": "#/definitions/span"
+            },
+            "with": {
+              "type": "string"
+            },
+            "confidence": {
+              "$ref": "#/definitions/confidence"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "after",
+            "text",
+            "confidence"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "insert"
+            },
+            "after": {
+              "$ref": "#/definitions/pos"
+            },
+            "text": {
+              "type": "string"
+            },
+            "confidence": {
+              "$ref": "#/definitions/confidence"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

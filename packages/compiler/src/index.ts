@@ -1,7 +1,7 @@
 export { Context } from './context.js';
 export { runFrontEnd, parsePass, canonicalPass } from './driver.js';
 export { parse, type ParseResult } from './syntax/parser.js';
-export { print, printItem, printExpr, printType, LINE_WIDTH } from './syntax/printer.js';
+export { print, printItem, printExpr, printType, printSignature, LINE_WIDTH, type PrintOptions } from './syntax/printer.js';
 export { lex, type LexResult } from './lexer/lexer.js';
 export { equalIgnoringSpans, firstDifference } from './syntax/equal.js';
 export { attachComments, NO_COMMENTS, type CommentTable, type CommentSet } from './syntax/comments.js';
@@ -38,3 +38,5 @@ export { Evaluator, NotConst, EvalPanic, BudgetExceeded } from './consteval/eval
 export { ConstTables } from './consteval/tables.js';
 export type { Value } from './consteval/values.js';
 export { EffectTables } from './effects/tables.js';
+export { interfaceOf, interfaceText, type InterfaceDocument, type InterfaceItem } from './report/interface.js';
+export { b3 } from './report/hash.js';

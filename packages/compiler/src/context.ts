@@ -7,6 +7,7 @@ import { ConstTables } from './consteval/tables.js';
 import { ContractTables } from './contracts/obligations.js';
 import { EffectTables } from './effects/tables.js';
 import { DiagnosticSink, type FileLookup } from './report/diagnostic.js';
+import { b3 } from './report/hash.js';
 import { ResolveTables } from './resolve/defs.js';
 import { fileId, makeSourceFile, type FileId, type SourceFile, type Span } from './source.js';
 import type { ParseResult } from './syntax/parser.js';
@@ -71,6 +72,12 @@ export class Context implements FileLookup {
       verify: options.verify ?? { budgetMs: 500, cacheDir: null, z3Path: null },
       log: options.log ?? ((line) => process.stderr.write(`${line}\n`)),
     };
+  }
+
+  /** The `b3:` hash of a file's canonical text (§2.2), or null before pass 2 succeeded on it. Effects: none. */
+  canonicalHashOf(file: FileId): string | null {
+    const text = this.canonical.get(file);
+    return text === undefined ? null : b3(text);
   }
 
   /** Emits an informational line through the configured logger. Effects: those of the logger. */

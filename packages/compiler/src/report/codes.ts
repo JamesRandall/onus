@@ -43,6 +43,7 @@ export const CODES = {
   E0112: 'module name reserved for the standard library',
   E0113: 'binding shadows a visible name',
   E0114: 'contract keyword outside its context',
+  E0115: 'elided body outside an interface document',
   E0201: 'undeclared effect',
   E0202: 'unknown effect',
   E0302: 'postcondition not established',

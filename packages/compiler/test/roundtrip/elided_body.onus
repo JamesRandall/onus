@@ -1,0 +1,12 @@
+module elided_body
+
+pub fn f(x: Int) -> Int { ... }
+
+fn g(x: Int) -> Int where it >= 0 ! alloc
+  requires x > 0
+  ensures result == x
+{ ... }
+
+impl Ord[Int] {
+  fn less(a: Int, b: Int) -> Bool { ... }
+}

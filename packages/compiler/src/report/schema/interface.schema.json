@@ -1,0 +1,396 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://onus-lang.dev/schema/v0/interface.json",
+  "title": "Onus interface document (language spec \u00a711.1)",
+  "type": "object",
+  "required": [
+    "module",
+    "hash",
+    "imports",
+    "items",
+    "assumes",
+    "recovers",
+    "sealed_types",
+    "test_module",
+    "obligations",
+    "ledger"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "module": {
+      "type": "string"
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^b3:[0-9a-f]{64}$"
+    },
+    "imports": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/item"
+      }
+    },
+    "assumes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/assume"
+      }
+    },
+    "recovers": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/recover"
+      }
+    },
+    "sealed_types": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "test_module": {
+      "type": "boolean"
+    },
+    "obligations": {
+      "$ref": "#/definitions/counts"
+    },
+    "ledger": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/ledgerEntry"
+      }
+    }
+  },
+  "definitions": {
+    "pos": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "span": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/pos"
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "location": {
+      "type": "object",
+      "required": [
+        "file",
+        "span"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "type": "string"
+        },
+        "span": {
+          "$ref": "#/definitions/span"
+        }
+      }
+    },
+    "status": {
+      "enum": [
+        "proved",
+        "checked",
+        "assumed",
+        "failed"
+      ]
+    },
+    "counts": {
+      "type": "object",
+      "required": [
+        "proved",
+        "checked",
+        "assumed",
+        "failed"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "proved": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "checked": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "assumed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "assume": {
+      "type": "object",
+      "required": [
+        "def",
+        "claim",
+        "justification",
+        "at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "def": {
+          "type": "string"
+        },
+        "claim": {
+          "type": "string"
+        },
+        "justification": {
+          "type": "string"
+        },
+        "at": {
+          "$ref": "#/definitions/location"
+        }
+      }
+    },
+    "recover": {
+      "type": "object",
+      "required": [
+        "def",
+        "at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "def": {
+          "type": "string"
+        },
+        "at": {
+          "$ref": "#/definitions/location"
+        }
+      }
+    },
+    "contract": {
+      "type": "object",
+      "required": [
+        "kind",
+        "text",
+        "pinned",
+        "status",
+        "sites"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "requires",
+            "ensures",
+            "decreases",
+            "invariant"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "pinned": {
+          "type": "boolean"
+        },
+        "status": {
+          "$ref": "#/definitions/status"
+        },
+        "sites": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "checked_at": {
+          "type": "string"
+        }
+      }
+    },
+    "example": {
+      "type": "object",
+      "required": [
+        "name",
+        "status",
+        "at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "passed",
+            "failed",
+            "deferred",
+            "not run"
+          ]
+        },
+        "at": {
+          "$ref": "#/definitions/location"
+        }
+      }
+    },
+    "property": {
+      "type": "object",
+      "required": [
+        "name",
+        "status",
+        "at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/status"
+        },
+        "at": {
+          "$ref": "#/definitions/location"
+        }
+      }
+    },
+    "item": {
+      "type": "object",
+      "required": [
+        "kind",
+        "name",
+        "visibility",
+        "signature",
+        "effects",
+        "claims",
+        "contracts",
+        "examples",
+        "properties",
+        "assumes",
+        "recovers",
+        "obligations"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "fn",
+            "type",
+            "const",
+            "record",
+            "union",
+            "interface",
+            "impl",
+            "claim",
+            "capability",
+            "path",
+            "policy",
+            "example",
+            "property"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "visibility": {
+          "enum": [
+            "pub",
+            "private"
+          ]
+        },
+        "signature": {
+          "type": "string"
+        },
+        "effects": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "claims": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "contracts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/contract"
+          }
+        },
+        "examples": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/example"
+          }
+        },
+        "properties": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/property"
+          }
+        },
+        "assumes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/assume"
+          }
+        },
+        "recovers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/recover"
+          }
+        },
+        "obligations": {
+          "$ref": "#/definitions/counts"
+        }
+      }
+    },
+    "ledgerEntry": {
+      "type": "object",
+      "required": [
+        "kind",
+        "text",
+        "def",
+        "status",
+        "by",
+        "pinned",
+        "at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "def": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "by": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pinned": {
+          "type": "boolean"
+        },
+        "at": {
+          "$ref": "#/definitions/location"
+        }
+      }
+    }
+  }
+}

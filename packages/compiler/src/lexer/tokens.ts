@@ -43,7 +43,7 @@ export function isNameKind(kind: TokenKind): boolean {
 
 /** Punctuation, longest first within a shared prefix so the lexer can match greedily. */
 export const PUNCTUATION = [
-  '..<', '..', '->', ':=', '==', '!=', '<=', '>=', '++',
+  '...', '..<', '..', '->', ':=', '==', '!=', '<=', '>=', '++',
   '(', ')', '[', ']', '{', '}', ',', ':', '.', '=', '<', '>', '+', '-', '*', '/', '%', '!', '|', '_',
 ] as const;
 

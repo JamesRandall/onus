@@ -119,6 +119,7 @@ example_decl  = "example" NAME block ;
 property_decl = "property" NAME "(" [ params ] ")" block ;
 
 block       = "{" ( NL { stmt NL } | [ stmt ] ) "}" ;   (* changed: M1, one-line form canonicalises to multi-line *)
+            | "{" "..." "}" ;   (* changed: M7, docs/CHANGES.md item 72 — an elided body, valid only as a fn body in an interface rendering (§11.1); E0115 elsewhere *)
 stmt        = "let" NAME ":" type "=" expr
             | "var" NAME ":" type "=" expr
             | NAME "=" expr

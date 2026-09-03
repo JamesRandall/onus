@@ -405,6 +405,8 @@ export interface TypeArgConst extends NodeBase {
 export interface Block extends NodeBase {
   readonly kind: 'Block';
   readonly stmts: readonly Stmt[];
+  /** `{ ... }`: a function body elided by an interface rendering (§11.1); `stmts` is empty. Valid only in interface documents (E0115). */
+  readonly elided: boolean;
 }
 
 export type Stmt = Let | Var | Assign | Return | If | Match | Loop | For | Assume | ExprStmt;

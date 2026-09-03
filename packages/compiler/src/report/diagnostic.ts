@@ -6,7 +6,7 @@
  * error to the user.
  */
 import { CODES, type Code } from './codes.js';
-import { lineColOf, type SourceFile, type Span } from '../source.js';
+import { lineColOf, type FileId, type SourceFile, type Span } from '../source.js';
 
 export type Confidence = 'high' | 'medium' | 'low';
 
@@ -107,6 +107,8 @@ export type RepairJson =
 
 export interface FileLookup {
   fileOf(span: Span): SourceFile;
+  /** The `b3:` hash of the file's canonical text, or null when it has none (a syntax error). */
+  canonicalHashOf(file: FileId): string | null;
 }
 
 function jsonSpan(files: FileLookup, s: Span): JsonSpan {
@@ -140,7 +142,8 @@ export function toJson(files: FileLookup, d: Diagnostic): DiagnosticJson {
     repairs,
   };
   const withObligation = d.obligation ? { ...base, obligation: d.obligation } : base;
-  return d.canonicalHash ? { ...withObligation, canonical_hash: d.canonicalHash } : withObligation;
+  const hash = d.canonicalHash ?? files.canonicalHashOf(d.span.file);
+  return hash !== null ? { ...withObligation, canonical_hash: hash } : withObligation;
 }
 
 /**
