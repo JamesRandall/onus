@@ -15,6 +15,9 @@
  *   - `a ..< b` is a domain form for `for` and quantifiers, not an expression
  *   - `x is Pattern` is a comparison-level test
  *   - `test module`, `fake` and `inout` call-site markers are parsed
+ *   - `intrinsic fn` (no body) and `intrinsic type` declare runtime-provided
+ *     primitives; legal only under `std.*`
+ *   - function types carry parameter names (`fn(x: Int) -> Int`)
  */
 import type { Span } from '../source.js';
 
@@ -68,6 +71,7 @@ export interface Import extends NodeBase {
 export type Item =
   | FnDecl
   | TypeAlias
+  | IntrinsicType
   | ConstDecl
   | RecordDecl
   | UnionDecl
@@ -84,6 +88,8 @@ export interface FnDecl extends NodeBase {
   readonly kind: 'FnDecl';
   readonly vis: Visibility;
   readonly constFn: boolean;
+  /** Runtime-provided primitive: no body; contracts are trusted (§3.12). */
+  readonly intrinsic: boolean;
   readonly name: Ident;
   readonly tparams: readonly TParam[];
   readonly params: readonly Param[];
@@ -91,7 +97,8 @@ export interface FnDecl extends NodeBase {
   readonly effects: readonly EffectRef[];
   readonly claims: readonly QName[];
   readonly contracts: readonly Contract[];
-  readonly body: Block;
+  /** null iff `intrinsic`. */
+  readonly body: Block | null;
 }
 
 export interface TypeAlias extends NodeBase {
@@ -99,6 +106,14 @@ export interface TypeAlias extends NodeBase {
   readonly vis: Visibility;
   readonly name: Ident;
   readonly type: Type;
+}
+
+/** `intrinsic type Name[params]`: an opaque type implemented by the runtime. */
+export interface IntrinsicType extends NodeBase {
+  readonly kind: 'IntrinsicType';
+  readonly vis: Visibility;
+  readonly name: Ident;
+  readonly tparams: readonly TParam[];
 }
 
 export interface ConstDecl extends NodeBase {
@@ -337,7 +352,8 @@ export interface NamedType extends NodeBase {
 
 export interface FnType extends NodeBase {
   readonly kind: 'FnType';
-  readonly params: readonly Type[];
+  /** Named: the labels used when calling through a value of this type. */
+  readonly params: readonly Param[];
   readonly ret: Type;
   readonly effects: readonly EffectRef[];
 }

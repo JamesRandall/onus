@@ -25,21 +25,23 @@ export interface ParseResult {
   /** null when the module header could not be parsed. */
   readonly module: A.Module | null;
   readonly comments: CommentTable;
+  /** One past the last node id assigned; the next file continues from here so ids are unique across a compilation. */
+  readonly nextId: number;
 }
 
 /**
  * Parses `file`.
  * Postconditions: every syntax error in the file has been reported to `sink`;
- * if `module` is non-null its ids are `0..n-1` in pre-order.
+ * if `module` is non-null its ids are `firstId .. nextId-1` in pre-order.
  * Effects: reports diagnostics to `sink`.
  */
-export function parse(file: SourceFile, sink: DiagnosticSink): ParseResult {
+export function parse(file: SourceFile, sink: DiagnosticSink, firstId = 0): ParseResult {
   const lexed = lex(file, sink);
   const p = new Parser(file, lexed.tokens, sink);
   const module = p.parseModule();
-  if (module === null) return { module: null, comments: new Map() };
-  renumber(module, 0);
-  return { module, comments: attachComments(module, lexed.comments, file) };
+  if (module === null) return { module: null, comments: new Map(), nextId: firstId };
+  const nextId = renumber(module, firstId);
+  return { module, comments: attachComments(module, lexed.comments, file), nextId };
 }
 
 /** Internal control-flow signal; always accompanied by a reported diagnostic. */
@@ -64,6 +66,8 @@ class Parser {
   private pos = 0;
   private currentDef: string | null = null;
   private isTestModule = false;
+  /** True when the module header names `std.…`; only such modules may declare intrinsics. */
+  private isStdModule = false;
   /** When true, `{` after a type name does not begin a record constructor (condition contexts). */
   private noBrace = false;
   /** When true, bare expression statements are assertions (example, property and law blocks). */
@@ -125,7 +129,7 @@ class Parser {
     throw new ParseError();
   }
 
-  private report(code: 'E0002' | 'E0006' | 'E0007' | 'E0011' | 'E0012', span: Span, detail: string): void {
+  private report(code: 'E0002' | 'E0006' | 'E0007' | 'E0011' | 'E0012' | 'E0102', span: Span, detail: string): void {
     this.sink.report(diagnostic({ code, span, def: this.currentDef, context: [detail] }));
   }
 
@@ -267,6 +271,7 @@ class Parser {
       this.isTestModule = test;
       this.expect('module');
       const name = this.moduleName();
+      this.isStdModule = name.segments[0]?.text === 'std';
       this.expect('nl');
       const imports: A.Import[] = [];
       while (this.at('import')) {
@@ -334,13 +339,29 @@ class Parser {
     const vis = this.visibility();
     switch (this.peek().kind) {
       case 'fn':
-        return this.parseFn(start, vis, false);
+        return this.parseFn(start, vis, false, false);
       case 'const':
         if (this.peek(1).kind === 'fn') {
           this.advance();
-          return this.parseFn(start, vis, true);
+          return this.parseFn(start, vis, true, false);
+        }
+        if (this.peek(1).kind === 'intrinsic' && this.peek(2).kind === 'fn') {
+          this.advance();
+          this.advance();
+          return this.parseFn(start, vis, true, true);
         }
         return this.parseConst(start, vis);
+      case 'intrinsic':
+        if (this.peek(1).kind === 'fn') {
+          this.advance();
+          return this.parseFn(start, vis, false, true);
+        }
+        if (this.peek(1).kind === 'type') {
+          this.advance();
+          return this.parseIntrinsicType(start, vis);
+        }
+        this.advance();
+        return this.fail('`fn` or `type` after `intrinsic`');
       case 'type':
         return this.parseTypeAlias(start, vis);
       case 'record':
@@ -358,10 +379,13 @@ class Parser {
     }
   }
 
-  private parseFn(start: number, vis: A.Visibility, constFn: boolean): A.FnDecl {
-    this.expect('fn');
+  private parseFn(start: number, vis: A.Visibility, constFn: boolean, intrinsic: boolean): A.FnDecl {
+    const fnTok = this.expect('fn');
     const name = this.name();
     this.currentDef = name.text;
+    if (intrinsic && !this.isStdModule) {
+      this.report('E0102', joinSpan(fnTok.span, name.span), 'intrinsic declarations are reserved for `module std.…`');
+    }
     const tparams = this.at('[') ? this.tparams() : [];
     const params = this.paramList();
     this.expect('->');
@@ -373,8 +397,24 @@ class Parser {
       while (this.accept(',')) claims.push(this.dotted());
     }
     const contracts = this.contracts();
-    const body = this.parseBlock();
-    return { id: PLACEHOLDER, kind: 'FnDecl', span: this.spanFrom(start), vis, constFn, name, tparams, params, ret, effects, claims, contracts, body };
+    let body: A.Block | null = null;
+    if (intrinsic) {
+      if (this.at('{')) this.fail('a newline: an intrinsic function has no body');
+    } else {
+      body = this.parseBlock();
+    }
+    return { id: PLACEHOLDER, kind: 'FnDecl', span: this.spanFrom(start), vis, constFn, intrinsic, name, tparams, params, ret, effects, claims, contracts, body };
+  }
+
+  private parseIntrinsicType(start: number, vis: A.Visibility): A.IntrinsicType {
+    const typeTok = this.expect('type');
+    const name = this.tname();
+    this.currentDef = name.text;
+    if (!this.isStdModule) {
+      this.report('E0102', joinSpan(typeTok.span, name.span), 'intrinsic declarations are reserved for `module std.…`');
+    }
+    const tparams = this.at('[') ? this.tparams() : [];
+    return { id: PLACEHOLDER, kind: 'IntrinsicType', span: this.spanFrom(start), vis, name, tparams };
   }
 
   private contracts(): A.Contract[] {
@@ -567,7 +607,7 @@ class Parser {
     const fns = this.braced(() => {
       const s = this.here();
       const vis = this.visibility();
-      return this.parseFn(s, vis, false);
+      return this.parseFn(s, vis, false, false);
     });
     return { id: PLACEHOLDER, kind: 'ImplDecl', span: this.spanFrom(start), iface, target, fns };
   }
@@ -793,15 +833,7 @@ class Parser {
   private parseType(): A.Type {
     const s = this.here();
     if (this.accept('fn')) {
-      this.expect('(');
-      const params: A.Type[] = [];
-      if (!this.at(')')) {
-        this.withBrace(() => {
-          params.push(this.parseType());
-          while (this.accept(',')) params.push(this.parseType());
-        });
-      }
-      this.expect(')');
+      const params = this.paramList();
       this.expect('->');
       const ret = this.parseType();
       const effects = this.effectsOpt();

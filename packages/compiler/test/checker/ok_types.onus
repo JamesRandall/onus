@@ -1,0 +1,177 @@
+module ok_types
+import lib.shapes
+import std.io
+
+type Iter = Int where 0 <= it and it <= 10000
+
+record Pair[T, U] {
+  first: T
+  second: U
+}
+
+union Tree[T] =
+  | Leaf
+  | Node of value: T, left: Tree[T], right: Tree[T]
+
+interface Ord[T] {
+  fn compare(a: T, b: T) -> Int
+    ensures compare(a: a, b: a) == 0
+
+  law reflexive(a: T) {
+    compare(a: a, b: a) == 0
+  }
+}
+
+impl Ord[Int] {
+  fn compare(a: Int, b: Int) -> Int {
+    return a - b
+  }
+}
+
+pub capability Db[const writable: Bool]
+  grants io.net when writable == true
+
+fn smallest[T: Ord](a: T, b: T) -> T {
+  if Ord.compare(a: a, b: b) < 0 {
+    return a
+  }
+  return b
+}
+
+fn swap[T, U](p: Pair[T, U]) -> Pair[U, T] {
+  return Pair { first: p.second, second: p.first }
+}
+
+fn depth[T](t: Tree[T]) -> Int {
+  match t with
+  | Leaf -> return 0
+  | Node(_, left, right) -> {
+    let l: Int = depth(t: left)
+    let r: Int = depth(t: right)
+    if l > r {
+      return l + 1
+    }
+    return r + 1
+  }
+}
+
+fn generics(xs: List[Int]) -> Int ! alloc {
+  let p: Pair[Int, Text] = Pair { first: 1, second: "one" }
+  let q: Pair[Text, Int] = swap(p: p)
+  let t: Tree[Int] = Node(value: 1, left: Leaf, right: Leaf)
+  let n: Int = depth(t: t)
+  let s: Int = smallest(a: 3, b: 4)
+  let empty: List[Text] = []
+  let ys: List[Int] = [1, 2, 3]
+  let zs: List[Int] = ys ++ [4]
+  let first: Int = List.get(xs: zs, i: 0)
+  let count: Int = List.len(xs: xs)
+  let r: Result[Int, Text] = Ok(value: 1)
+  let o: Option[Pair[Int, Int]] = Some(value: Pair { first: 1, second: 2 })
+  let v: Int = p.first + q.second + n + s + first + count
+  return v
+}
+
+fn refinements(limit: Iter) -> Iter
+  requires limit > 0
+  ensures result <= limit
+{
+  var i: Iter = 0
+  loop while i < limit
+    invariant i <= limit
+    decreases limit - i
+  {
+    i = i + 1
+  }
+  return i
+}
+
+fn fallible(r: Result[Int, Text], o: Option[Int]) -> Result[Int, shapes.Shape] {
+  let a: Int = try r else e: shapes.Circle(radius: 1)
+  let b: Int = try o else u: shapes.Square(side: 2)
+  return Ok(value: a + b)
+}
+
+fn options(o: Option[Int]) -> Option[Int] {
+  let a: Int = try o
+  return Some(value: a + 1)
+}
+
+fn closures(xs: List[Int]) -> Int {
+  let add: fn(a: Int, b: Int) -> Int = fn(x: Int, y: Int) -> Int {
+    return x + y
+  }
+  let k: Int = 10
+  let addk: fn(a: Int) -> Int = fn(a: Int) -> Int {
+    return add(a: a, b: k)
+  }
+  return addk(a: 1)
+}
+
+fn capabilities(db: Db[true, schema: "orders"]) -> Int {
+  return narrow(db: db)
+}
+
+fn narrow(db: Db[true]) -> Int {
+  return 1
+}
+
+fn mutation(g: inout Grid[Int, 4, 4]) -> Unit ! mutate {
+  Grid.set(grid: inout g, x: 1, y: 2, value: 3)
+  return Unit
+}
+
+fn grids() -> Int ! alloc {
+  var g: Grid[Int, 4, 4] = Grid.filled(value: 0, width: 4, height: 4)
+  mutation(g: inout g)
+  return Grid.get(grid: g, x: 1, y: 2)
+}
+
+fn quantifiers(xs: List[Int], n: Int) -> Bool
+  ensures forall i: Int in 0 ..< n where i > 0: i > 0
+  ensures exists x: Int in xs: x == 0
+  ensures forall b: Bool: b or not b
+{
+  return true
+}
+
+fn recovers(r: Result[Int, Text]) -> Result[Int, Panicked] {
+  let outcome: Result[Int, Panicked] = recover {
+    fallible_inner(r: r)
+  }
+  return outcome
+}
+
+fn fallible_inner(r: Result[Int, Text]) -> Int {
+  match r with
+  | Ok(value) -> return value
+  | Err(..) -> return 0
+}
+
+fn literals(d: Duration) -> Bool {
+  let a: Bool = 1 < 2 and 1.5 <= 2.5 and 50ms < 1s
+  let b: Bool = "a" ++ "b" == "ab" and not (true implies false)
+  let c: Int = -3 * 2 % 5
+  return a and b and c == 0
+}
+
+fn describe(s: shapes.Shape) -> Text ! alloc {
+  match s with
+  | shapes.Circle(radius) when radius > 10 -> return "big"
+  | shapes.Circle(_) -> return "circle"
+  | shapes.Square(..) -> return Int.to_text(x: 1)
+}
+
+fn io_example(files: io.Files) -> Result[Unit, io.Error] ! io.file, alloc {
+  let out: io.File = try io.create(files: files, path: "x.txt")
+  try io.write(file: out, text: "hello")
+  return Ok(value: Unit)
+}
+
+example smallest_example {
+  smallest(a: 1, b: 2) == 1
+}
+
+property smallest_bounded(a: Int, b: Int) {
+  smallest(a: a, b: b) <= a
+}

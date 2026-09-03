@@ -14,9 +14,11 @@ export function children(n: A.Node): A.Node[] {
     case 'Import':
       return [];
     case 'FnDecl':
-      return [...n.tparams, ...n.params, n.ret, ...n.effects, ...n.contracts, n.body];
+      return [...n.tparams, ...n.params, n.ret, ...n.effects, ...n.contracts, ...(n.body ? [n.body] : [])];
     case 'TypeAlias':
       return [n.type];
+    case 'IntrinsicType':
+      return [...n.tparams];
     case 'ConstDecl':
       return [n.type, n.value];
     case 'RecordDecl':

@@ -111,6 +111,8 @@ class Printer {
         return this.fnDecl(it);
       case 'TypeAlias':
         return concat(vis(it.vis), 'type ', it.name.text, ' = ', this.type(it.type));
+      case 'IntrinsicType':
+        return concat(vis(it.vis), 'intrinsic type ', it.name.text, this.tparams(it.tparams));
       case 'ConstDecl':
         return concat(vis(it.vis), 'const ', it.name.text, ': ', this.type(it.type), ' = ', this.expr(it.value, false));
       case 'RecordDecl':
@@ -191,6 +193,7 @@ class Printer {
     const head = concat(
       vis(f.vis),
       f.constFn ? 'const ' : EMPTY,
+      f.intrinsic ? 'intrinsic ' : EMPTY,
       'fn ',
       f.name.text,
       this.tparams(f.tparams),
@@ -203,6 +206,7 @@ class Printer {
     if (f.claims.length > 0) tail.push(hardline, 'claims ', join(', ', f.claims.map(qn)));
     for (const c of f.contracts) tail.push(hardline, this.contract(c));
     tail.push(this.dangling(f));
+    if (f.body === null) return concat(head, indent(concat(...tail)));
     if (f.claims.length === 0 && f.contracts.length === 0 && !this.hasDangling(f)) {
       return concat(head, ' ', this.block(f.body));
     }
@@ -305,7 +309,8 @@ class Printer {
 
   type(t: A.Type): Doc {
     if (t.kind === 'FnType') {
-      return concat('fn(', join(', ', t.params.map((p) => this.type(p))), ') -> ', this.type(t.ret), this.effects(t.effects));
+      const params = t.params.map((p) => concat(p.name.text, ': ', p.inout ? 'inout ' : EMPTY, this.type(p.type)));
+      return concat('fn(', join(', ', params), ') -> ', this.type(t.ret), this.effects(t.effects));
     }
     // Type argument lists never break: a type must read as one token-like unit.
     const args = t.args.length > 0 ? concat('[', join(', ', t.args.map((a) => this.typeArg(a))), ']') : EMPTY;

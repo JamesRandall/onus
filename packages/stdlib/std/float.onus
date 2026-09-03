@@ -1,0 +1,12 @@
+module std.float
+
+pub union Class =
+  | Finite
+  | Infinite
+  | NotANumber
+
+pub intrinsic fn of(x: Int) -> Float
+
+pub intrinsic fn classify(x: Float) -> Class
+
+pub intrinsic fn to_text(x: Float) -> Text ! alloc

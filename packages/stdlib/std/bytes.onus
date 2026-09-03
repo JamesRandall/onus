@@ -1,0 +1,8 @@
+module std.bytes
+
+pub intrinsic fn len(b: Bytes) -> Int where it >= 0
+
+pub intrinsic fn get(
+  b: Bytes,
+  i: Int where 0 <= it and it < len(b: b)
+) -> Int where 0 <= it and it <= 255

@@ -4,10 +4,11 @@ fn f(
   a: sql.Db[ReadOnly, schema: "orders", deadline: 50ms],
   b: Grid[Iter, width, height],
   c: Map[Text, List[Option[Int]]],
-  d: fn(Int, Text) -> Bool ! alloc,
+  d: fn(a: Int, b: Text) -> Bool ! alloc,
   e: fn() -> Unit,
   g: Int where it > 0 and it < 10,
-  h: List[Int where it >= 0]
-) -> fn(Int) -> Int ! e {
+  h: List[Int where it >= 0],
+  i: fn(g: inout Grid[T, w, h], x: Int) -> Unit ! mutate
+) -> fn(x: Int) -> Int ! e {
   return e
 }

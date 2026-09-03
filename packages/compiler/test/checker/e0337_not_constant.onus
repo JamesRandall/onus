@@ -1,0 +1,9 @@
+module e0337_not_constant
+
+fn f(w: Int where it > 0, h: Int where it > 0) -> Int ! alloc {
+  let n: Int = w * 2
+  let g: Grid[Int, n, 3] = Grid.filled(value: 0, width: n, height: 3)
+  let ok: Grid[Int, w, h] = Grid.filled(value: 0, width: w, height: h)
+  let bad: Grid[Int, 4, 4] = Grid.filled(value: 0, width: w + 1, height: 4)
+  return 0
+}

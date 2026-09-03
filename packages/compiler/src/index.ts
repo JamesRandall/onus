@@ -18,3 +18,10 @@ export {
 } from './report/diagnostic.js';
 export { makeSourceFile, lineColOf, fileId, span, type SourceFile, type Span, type FileId } from './source.js';
 export type * as ast from './syntax/ast.js';
+export { runPipeline, PASSES, type PassName } from './driver.js';
+export { loadPass, defaultStdlibRoot, PRELUDE_MODULES } from './resolve/loader.js';
+export { resolvePass } from './resolve/resolve.js';
+export { ResolveTables, type Def, type DefId, type ModuleId, type Resolution } from './resolve/defs.js';
+export { TypeTables } from './types/tables.js';
+export type { Type } from './types/type.js';
+export { EffectSet } from './effects/set.js';

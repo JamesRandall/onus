@@ -1,0 +1,16 @@
+module e0325_no_field
+
+record Point {
+  x: Int
+}
+
+union Shape =
+  | Circle of radius: Int
+
+fn f(p: Point, s: Shape, n: Int) -> Int {
+  let a: Int = p.z
+  let b: Int = s.radius
+  let c: Int = n.x
+  let d: Point = { p with z: 1 }
+  return a + b + c
+}

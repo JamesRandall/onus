@@ -1,0 +1,33 @@
+module e0321_try
+
+union ErrA =
+  | A
+
+union ErrB =
+  | B
+
+fn ra() -> Result[Int, ErrA] {
+  return Ok(value: 1)
+}
+
+fn rb() -> Result[Int, ErrB] {
+  return Ok(value: 2)
+}
+
+fn opt() -> Option[Int] {
+  return None
+}
+
+fn f() -> Result[Int, ErrA] {
+  let a: Int = try ra()
+  let b: Int = try rb()
+  let c: Int = try opt()
+  let d: Int = try 5
+  let e: Int = try rb() else e: A
+  return Ok(value: a + b + c + d + e)
+}
+
+fn g() -> Int {
+  let a: Int = try ra()
+  return a
+}

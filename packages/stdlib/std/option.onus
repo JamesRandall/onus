@@ -1,0 +1,11 @@
+module std.option
+
+pub union Option[T] =
+  | Some of value: T
+  | None
+
+pub fn is_some[T](o: Option[T]) -> Bool {
+  match o with
+  | Some(_) -> return true
+  | None -> return false
+}

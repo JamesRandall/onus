@@ -1,0 +1,31 @@
+module e0107_duplicates
+import lib.shapes
+import other.shapes
+
+fn f(x: Int, x: Int) -> Int {
+  return x
+}
+
+fn f(y: Int) -> Int {
+  return y
+}
+
+record R {
+  a: Int
+  a: Int
+}
+
+union U =
+  | A
+  | A
+
+union V =
+  | A
+
+record Int {
+  n: Int
+}
+
+fn g() -> Int {
+  return h(a: 1, a: 2)
+}

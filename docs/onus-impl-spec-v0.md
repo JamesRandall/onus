@@ -53,7 +53,7 @@ onus/
     runtime/              the TS runtime the generated code imports
       src/                int.ts, text.ts, list.ts, grid.ts, result.ts, capability.ts, sql.ts, io.ts, panic.ts
     stdlib/               Onus source for std.* (§16), compiled by the compiler
-      std/                int.onus, float.onus, text.onus, list.onus, grid.onus, result.onus, io.onus, sql.onus, config.onus
+      std/                int.onus, float.onus, text.onus, list.onus, grid.onus, results.onus (`result` is a keyword), io.onus, sql.onus, config.onus
     review/               the review tool (§15) — a static web page over the JSON reports; last milestone
   examples/
     mandelbrot/

@@ -1,0 +1,15 @@
+module e0340_operator
+
+fn id(x: Int) -> Int {
+  return x
+}
+
+fn f(t: Text, b: Bool, n: Int) -> Bool {
+  let a: Text = -t
+  let c: Bool = b + b
+  let d: Bool = t < t
+  let e: Int = n ++ n
+  let g: Bool = id == id
+  let h: Bool = n < 2.0
+  return d
+}

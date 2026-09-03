@@ -1,0 +1,25 @@
+module e0322_wrong_arguments
+
+record Point {
+  x: Int
+  y: Int
+}
+
+union Shape =
+  | Circle of radius: Int
+  | Dot
+
+fn area(s: Shape, scale: Int) -> Int {
+  return scale
+}
+
+fn f() -> Int {
+  let a: Int = area(s: Dot, scale: 1, extra: 2)
+  let b: Int = area(s: Dot)
+  let c: Point = Point { x: 1 }
+  let d: Point = Point { x: 1, y: 2, z: 3 }
+  let e: Shape = Circle { radius: 1 }
+  let g: Point = Point(x: 1, y: 2)
+  let h: Shape = Circle(radius: 1, colour: 2)
+  return a + b
+}

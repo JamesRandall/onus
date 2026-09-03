@@ -76,8 +76,8 @@ item        = fn_decl | type_alias | record_decl | union_decl | interface_decl
 
 visibility  = [ "pub" ] [ "sealed" ] ;
 
-fn_decl     = visibility [ "const" ] "fn" NAME [ tparams ] "(" [ params ] ")" "->" type [ "!" effects ]
-              [ "claims" claim_list ] { contract } block ;      (* changed: M1, newlines before contracts and `{` are not significant *)
+fn_decl     = visibility [ "const" ] [ "intrinsic" ] "fn" NAME [ tparams ] "(" [ params ] ")" "->" type [ "!" effects ]
+              [ "claims" claim_list ] { contract } ( block | NL ) ;   (* changed: M1 newlines; M2 intrinsic §3.12: no body *)
 tparams     = "[" tparam { "," tparam } "]" ;
 tparam      = TNAME [ ":" TNAME ]                       (* type parameter, optional bound *)
             | "const" NAME ":" type                     (* compile-time value parameter *)
@@ -90,10 +90,10 @@ contract    = "requires" [ "proved" ] expr
             | "ensures"  [ "proved" ] expr ;
 
 type        = QTNAME [ "[" targ { "," targ } "]" ] [ "where" expr ]
-            | "fn" "(" [ types ] ")" "->" type [ "!" effects ] ;
+            | "fn" "(" [ params ] ")" "->" type [ "!" effects ] ;   (* changed: M2, parameters are named; §3.7 *)
 targ        = [ NAME ":" ] ( type | expr ) ;            (* expr must be constant, §3.8; changed: M1, labelled per §8.2 *)
 
-type_alias  = visibility "type" TNAME "=" type NL ;
+type_alias  = visibility ( "type" TNAME "=" type | "intrinsic" "type" TNAME [ tparams ] ) NL ;   (* changed: M2, §3.12 *)
 const_decl  = visibility "const" NAME ":" type "=" expr NL ;
 record_decl = visibility "record" TNAME [ tparams ] "{" NL { field NL } "}" NL ;
 field       = NAME ":" type ;
@@ -247,7 +247,9 @@ union Pixel =
 
 Construction uses the variant name with named fields: `Escaped(at: 12)`, `Inside`. Variant fields are named, never positional, at construction; patterns list them in declaration order (§3.9).
 
-Unions are nominal and closed. `match` must be exhaustive and has no default arm; adding a variant breaks every match that does not handle it. Variant payloads may carry refinements. Unions have no numeric backing and no ordering unless an `Ord` implementation is provided.
+Unions are nominal and closed. `match` must be exhaustive and has no default arm; adding a variant breaks every match that does not handle it. An arm no value can reach is likewise an error. Variant payloads may carry refinements. Unions have no numeric backing and no ordering unless an `Ord` implementation is provided.
+
+Variant names are in scope bare within the declaring module, and from importing modules either bare (when exactly one imported or prelude union declares that name) or qualified by the module alias (`sql.Refinement`). Two unions in one module may not share a variant name. <!-- changed: M2, docs/CHANGES.md item 30 -->
 
 `Option[T]` and `Result[T, E]` are ordinary library unions.
 
@@ -313,6 +315,7 @@ impl Ord[Int] {
 Rules:
 
 - Implementations are explicit (`impl Ord[Int] { ... }`); there is no structural or automatic conformance.
+- Generic code calls an interface function through the interface: `Ord.compare(a: x, b: y)`. The implementing type is taken from the arguments and must have an `impl`, or be a type parameter bounded by the interface. <!-- changed: M2, docs/CHANGES.md item 35 -->
 - Every contract and law on the interface is an obligation on every `impl`, with the usual proved/checked status.
 - An `impl` may not declare effects beyond those in the interface signature. An interface that wants to admit allocating or effectful implementations declares the effect (as `Codec` does with `alloc`) or is effect-polymorphic (`fn f(x: T) -> U ! e`).
 - There is no overloading and no ad-hoc polymorphism outside interfaces.
@@ -321,10 +324,13 @@ Type parameters are declared with their constraints: `fn sort[T: Ord](xs: List[T
 
 ### 3.7 Function values and closures
 
-A function value has type `fn(A, B) -> R ! e`. Parameters of a function type may carry refinements; the effect set is part of the type.
+A function value has type `fn(a: A, b: B) -> R ! e`. Parameters of a function type are named — the names are the labels a caller uses, since every call passes arguments by name (§5) — and may carry refinements; the effect set is part of the type. A closure assigned to a function type may name its own parameters differently; assignability compares positions, types and effects. <!-- changed: M2, function types carry parameter names; without them a call through a function value could not be written -->
 
 ```
-let step: fn(Int where it >= 0) -> Int where it >= 0 = fn(n: Int where it >= 0) -> Int where it >= 0 { return n + 1 }
+let step: fn(n: Int where it >= 0) -> Int where it >= 0 = fn(m: Int where it >= 0) -> Int where it >= 0 {
+  return m + 1
+}
+step(n: 3)
 ```
 
 Rules:
@@ -411,10 +417,35 @@ Streams are single-pass and cannot be stored in records or captured. Library sou
 
 ---
 
+### 3.12 Intrinsics
+
+<!-- changed: M2, the bottom of the standard library needs a declared, closed way out to the runtime; see docs/CHANGES.md item 25 -->
+The standard library is Onus, but its lowest operations — grapheme counting, float conversion, typed-array grids, file and socket access — have no Onus body. They are declared as *intrinsics*:
+
+```
+pub intrinsic type Grid[T, const width: Int where it > 0, const height: Int where it > 0]
+
+pub intrinsic fn len(t: Text) -> Int where it >= 0
+
+pub intrinsic fn set[T, const w: Int, const h: Int](g: inout Grid[T, w, h], x: Int where 0 <= it and it < w, y: Int where 0 <= it and it < h, v: T) -> Unit ! mutate
+  ensures get(g: g, x: x, y: y) == v
+```
+
+Rules:
+
+- `intrinsic` is legal only in modules named `std.…`, and only the compiler's own standard library may declare such modules. There is no other way to reach code that is not Onus; this is the declared, enumerated escape hatch that §1.2 requires.
+- An intrinsic function has a signature, effects and contracts but no body. It is bound by its qualified name to an export of the runtime package; a missing or mismatched export is a build failure.
+- An intrinsic type is opaque: it has no fields or variants, and only the functions of its module operate on it.
+- An intrinsic's `ensures` clauses and effects cannot be proved. They are recorded in the ledger as **assumed** obligations whose justification names the runtime module, so every path that reaches an intrinsic shows that trust (§12.2). Its `requires` clauses are ordinary obligations at call sites.
+- A `const intrinsic fn` may be evaluated at check time (§3.8); the evaluator calls the same runtime implementation. Effectful intrinsics are never evaluated at check time.
+- Where an operation can be written in Onus over a smaller intrinsic, it should be, so that the compiler proves its contract instead of assuming it. The set of intrinsics is enumerated by a fixture and changes to it are reviewed.
+
 ## 4. Bindings and mutation
 
 - `let x: T = e` — immutable binding. Required annotation.
 - `var x: T = e` — mutable local. Assignment `x = e` re-checks `T`'s refinement.
+- A local may not reuse the name of a visible value binding: another local, a parameter, or a function or constant of the module. <!-- changed: M2, docs/CHANGES.md item 32 -->
+- A bare expression statement must be a call whose result is `Unit`; a discarded value is an error. <!-- changed: M2, docs/CHANGES.md item 39 -->
 - Closures capture by value and cannot capture a `var`.
 - There is no reference type, no address-of, and no aliasing of mutable state anywhere in the language.
 
@@ -528,7 +559,7 @@ A callee's effect set must be a subset of the caller's. This is the only rule, a
 Higher-order functions are effect-polymorphic:
 
 ```
-fn map[T, U, e](xs: List[T], f: fn(T) -> U ! e) -> List[U] ! e, alloc
+fn map[T, U, e](xs: List[T], f: fn(x: T) -> U ! e) -> List[U] ! e, alloc
 ```
 
 ### 6.3 Derived effect predicates
@@ -731,7 +762,7 @@ let outcome: Result[Receipt, Panicked] = recover {
 
 Rules:
 
-- `recover { ... }` yields `Result[T, Panicked]` where `T` is the block's type. `Panicked` carries the obligation's location and counterexample, not a message string.
+- `recover { ... }` yields `Result[T, Panicked]` where `T` is the type of the block's final expression; the block may not `return`. `Panicked` carries the obligation's location and counterexample, not a message string. <!-- changed: M2, docs/CHANGES.md item 41 -->
 - A `recover` block absorbs the `panic` effect of its contents: the enclosing function need not declare `panic` for what happens inside.
 - `inout` parameters are not visible inside `recover` (unwinding would leave them in an unknown state). Capabilities are: a resource is not damaged by a panic in the code using it.
 - Every `recover` site appears in the module interface and the path report. A path may declare `forbid { recover }` to require that nothing on it swallows a failed obligation.
@@ -751,6 +782,8 @@ module reporting
 import std.sql
 import app.config
 ```
+
+Module `a.b.c` lives at `a/b/c.onus` under the project root; `std.*` is the standard library and may not be declared elsewhere. Every module implicitly sees the public types and variants of the prelude modules (`Result`, `Option`, `List`, `Grid`, `Map` and the primitives' companions) without importing them; functions are reached as `Type.f` (`List.len`, `Int.to_text`), which names function `f` of the module declaring `Type`. In a dotted name, an import alias takes precedence over a local of the same name. <!-- changed: M2, docs/CHANGES.md items 27–31 -->
 
 A module's **interface** is generated by the compiler and is the artefact a reviewer reads. It contains, for every public item:
 
@@ -804,7 +837,7 @@ Every `requires` at a call site, every `ensures` at a return, every refinement a
 |---|---|
 | **proved** | Discharged by the verifier from the decidable fragment. No runtime cost. |
 | **checked** | Not provable; a runtime check is inserted. Requires the `panic` effect. |
-| **assumed** | Introduced by `assume`. Recorded, never checked. |
+| **assumed** | Introduced by `assume`, or the contract of an intrinsic (§3.12). Recorded, never checked. <!-- changed: M2 --> |
 
 The compiler never silently downgrades. A function may pin an obligation's state (`proved` on a `requires` clause means "fail compilation if this cannot be proved"), and paths may require that no obligation on them is `checked`.
 

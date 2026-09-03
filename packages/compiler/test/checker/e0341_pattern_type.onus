@@ -1,0 +1,24 @@
+module e0341_pattern_type
+
+union Shape =
+  | Circle of radius: Int
+  | Dot
+
+union Colour =
+  | Red
+  | Green
+
+fn f(s: Shape, n: Int) -> Int {
+  match s with
+  | 1 -> return 1
+  | Red -> return 2
+  | Circle(radius) -> return radius
+  | Dot -> return 0
+}
+
+fn g(n: Int) -> Int {
+  match n with
+  | "one" -> return 1
+  | Dot -> return 2
+  | _ -> return 0
+}

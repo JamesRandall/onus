@@ -1,0 +1,45 @@
+module e0326_e0327_match
+
+union Shape =
+  | Circle of radius: Int
+  | Square of side: Int
+  | Dot
+
+fn missing(s: Shape) -> Int {
+  match s with
+  | Circle(radius) -> return radius
+  | Square(side) when side > 1 -> return side
+}
+
+fn ints(n: Int) -> Int {
+  match n with
+  | 0 -> return 1
+  | 1 -> return 2
+}
+
+fn unreachable(s: Shape) -> Int {
+  match s with
+  | _ -> return 0
+  | Dot -> return 1
+}
+
+fn duplicate(s: Shape) -> Int {
+  match s with
+  | Dot -> return 0
+  | Dot -> return 1
+  | Circle(..) -> return 2
+  | Square(..) -> return 3
+}
+
+fn bools(b: Bool) -> Int {
+  match b with
+  | true -> return 1
+}
+
+fn guarded_then_full(s: Shape) -> Int {
+  match s with
+  | Dot when true -> return 0
+  | Dot -> return 1
+  | Circle(..) -> return 2
+  | Square(..) -> return 3
+}

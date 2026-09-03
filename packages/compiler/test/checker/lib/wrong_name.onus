@@ -1,0 +1,5 @@
+module lib.something_else
+
+pub fn f() -> Int {
+  return 1
+}

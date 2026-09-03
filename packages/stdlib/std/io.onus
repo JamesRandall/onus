@@ -1,0 +1,28 @@
+module std.io
+
+pub union Error =
+  | NotFound of path: Text
+  | Denied of path: Text
+  | Other of detail: Text
+
+pub capability Files
+  grants io.file
+
+pub capability Env
+  grants io.env
+
+pub capability Net
+  grants io.net
+
+pub capability Clock
+  grants io.clock
+  grants nondet
+
+pub capability File
+  grants io.file
+
+pub intrinsic fn create(files: Files, path: Text) -> Result[File, Error] ! io.file, alloc
+
+pub intrinsic fn write(file: File, text: Text) -> Result[Unit, Error] ! io.file
+
+pub intrinsic fn get_env(env: Env, name: Text) -> Option[Text] ! io.env, alloc

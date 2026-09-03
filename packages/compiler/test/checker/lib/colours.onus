@@ -1,0 +1,5 @@
+module lib.colours
+
+pub union Colour =
+  | Red
+  | Circle of hue: Int

@@ -1,0 +1,29 @@
+module e0331_missing_return
+
+fn f(n: Int) -> Int {
+  if n > 0 {
+    return 1
+  }
+}
+
+fn g(n: Int) -> Int {
+  if n > 0 {
+    return 1
+  } else {
+    return 2
+  }
+}
+
+fn h(n: Int) -> Int {
+  let x: Int = n
+}
+
+fn u(n: Int) -> Unit {
+  let x: Int = n
+}
+
+fn m(b: Bool) -> Int {
+  match b with
+  | true -> return 1
+  | false -> return 0
+}

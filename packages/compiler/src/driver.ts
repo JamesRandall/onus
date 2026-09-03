@@ -1,11 +1,19 @@
 /**
- * Pass runners for the front end (impl spec §4, passes 1 and 2).
+ * Pass runners (impl spec §4). `runPipeline(ctx, to)` runs passes in order
+ * up to and including `to`; a later pass never runs when an earlier one
+ * reported diagnostics in a file it depends on.
  */
 import type { Context } from './context.js';
 import { diagnostic } from './report/diagnostic.js';
-import { span, type SourceFile } from './source.js';
+import { loadPass } from './resolve/loader.js';
+import { resolvePass } from './resolve/resolve.js';
+import { fileId, span, type SourceFile } from './source.js';
 import { parse } from './syntax/parser.js';
 import { print } from './syntax/printer.js';
+import { typesPass } from './types/check.js';
+
+export const PASSES = ['parse', 'canonical', 'resolve', 'types'] as const;
+export type PassName = (typeof PASSES)[number];
 
 /**
  * Pass 1: lex and parse every file in `ctx`.
@@ -14,7 +22,10 @@ import { print } from './syntax/printer.js';
  */
 export function parsePass(ctx: Context): void {
   for (const f of ctx.files) {
-    if (!ctx.parsed.has(f.id)) ctx.parsed.set(f.id, parse(f, ctx.sink));
+    if (ctx.parsed.has(f.id)) continue;
+    const r = parse(f, ctx.sink, ctx.nextNodeId);
+    ctx.nextNodeId = r.nextId;
+    ctx.parsed.set(f.id, r);
   }
 }
 
@@ -29,7 +40,7 @@ export function canonicalPass(ctx: Context): void {
   const syntaxErrorFiles = new Set(ctx.sink.all().map((d) => d.span.file));
   for (const f of ctx.files) {
     const parsed = ctx.parsed.get(f.id);
-    if (parsed === undefined || parsed.module === null || syntaxErrorFiles.has(f.id)) continue;
+    if (parsed === undefined || parsed.module === null || syntaxErrorFiles.has(f.id) || ctx.canonical.has(f.id)) continue;
     const canonical = print(parsed.module, parsed.comments);
     ctx.canonical.set(f.id, canonical);
     if (canonical !== f.text) ctx.sink.report(nonCanonical(f, canonical));
@@ -55,4 +66,44 @@ function nonCanonical(f: SourceFile, canonical: string) {
 export function runFrontEnd(ctx: Context): void {
   parsePass(ctx);
   canonicalPass(ctx);
+}
+
+/**
+ * Runs `pass` over `ctx`. An exception escaping a pass is a compiler bug: it
+ * becomes an E0999 diagnostic carrying the stack, never a crash.
+ * Effects: those of `pass`; reports E0999 on an exception.
+ */
+export function guarded(ctx: Context, name: string, pass: (ctx: Context) => void): void {
+  try {
+    pass(ctx);
+  } catch (e) {
+    const first = ctx.files[0];
+    const stack = e instanceof Error ? (e.stack ?? e.message) : String(e);
+    ctx.sink.report(
+      diagnostic({
+        code: 'E0999',
+        span: span(first?.id ?? fileId(0), 0, 0),
+        context: [`the ${name} pass threw; this is a compiler bug, please report it`, ...stack.split('\n')],
+      }),
+    );
+  }
+}
+
+/**
+ * Runs passes 1..`to`. Loading may add files; the canonical check then covers
+ * them too. Resolution and typing are skipped when any syntax error exists.
+ * Effects: those of the passes run.
+ */
+export function runPipeline(ctx: Context, to: PassName = 'types', passes: Partial<Record<PassName, (ctx: Context) => void>> = {}): void {
+  const upTo = PASSES.indexOf(to);
+  const clean = (): boolean => !ctx.sink.all().some((d) => d.code !== 'E0001');
+  guarded(ctx, 'parse', passes.parse ?? parsePass);
+  if (upTo >= PASSES.indexOf('canonical')) guarded(ctx, 'canonical', passes.canonical ?? canonicalPass);
+  if (upTo < PASSES.indexOf('resolve') || !clean()) return;
+  guarded(ctx, 'load', loadPass);
+  if (upTo >= PASSES.indexOf('canonical')) guarded(ctx, 'canonical', canonicalPass);
+  if (!clean()) return;
+  guarded(ctx, 'resolve', passes.resolve ?? resolvePass);
+  if (upTo < PASSES.indexOf('types') || !clean()) return;
+  guarded(ctx, 'types', passes.types ?? typesPass);
 }

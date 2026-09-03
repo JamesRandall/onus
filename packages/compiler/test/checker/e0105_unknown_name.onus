@@ -1,0 +1,9 @@
+module e0105_unknown_name
+import lib.shapes
+
+fn f(x: Int) -> Int {
+  let y: Int = x + z
+  w = 1
+  let s: shapes.Shape = Triangle(side: 1)
+  return shapes
+}

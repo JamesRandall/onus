@@ -1,0 +1,10 @@
+module e0108_ambiguous_variant
+import lib.shapes
+import lib.colours
+
+fn f() -> Int {
+  let c: colours.Colour = Circle(hue: 3)
+  let ok: colours.Colour = colours.Circle(hue: 3)
+  let r: colours.Colour = Red
+  return 0
+}

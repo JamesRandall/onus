@@ -1,0 +1,10 @@
+{
+  "name": "@onus/stdlib",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The Onus standard library, written in Onus.",
+  "scripts": {
+    "build": "node -e \"process.exit(0)\"",
+    "test": "node -e \"process.exit(0)\""
+  }
+}

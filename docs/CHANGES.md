@@ -102,6 +102,83 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
 24. `location.def` is `null` for a diagnostic outside any definition (e.g. a
     malformed module header).
 
+## M2 — resolve and types
+
+25. **Intrinsics (§3.12, new).** `intrinsic fn` (no body) and `intrinsic type`
+    declare runtime-provided primitives, legal only under `module std.…`
+    (`E0102` elsewhere). Their contracts and effects are *assumed*
+    obligations in the ledger (§12.2 extended). Chosen over a hardcoded
+    primitive table (contracts would live outside Onus) and over a general
+    `extern` (the FFI §17 defers). Fixtures: `roundtrip/35_intrinsic`,
+    `syntax/e0102`, `syntax/e0003_intrinsic_with_body`.
+26. **Function types carry parameter names (§3.7).** `fn(x: T) -> U` rather
+    than `fn(T) -> U`: calls are named, so a call through a function value
+    needs labels. A closure assigned to a function type may use its own
+    parameter names. Fixtures: `roundtrip/03_type_alias`, `28_closures`, `34_types`.
+
+### Modules and resolution (§11, §3.4, §3.6, §3.10)
+
+27. **Module files.** `a.b.c` lives at `<root>/a/b/c.onus`; `std.*` lives under
+    the standard library root and no other file may declare a `std.*` name
+    (`E0112`). A file declaring a name other than its path is `E0104`; an
+    import that finds no file is `E0103`. The root is `--root` or is inferred
+    from the entry file and its module name. Fixtures: `checker/e0103`, `e0104`, `e0112`.
+28. **Prelude.** Every module implicitly sees the public types and variants
+    (not the functions) of `std.results`, `std.option`, `std.list`, `std.grid`,
+    `std.map`, `std.int`, `std.float`, `std.text`, `std.bool`, `std.bytes` and
+    `std.duration`. These implicit imports are type-only and are not edges
+    for cycle detection. The `Result` module is `std.results` because
+    `result` is a keyword.
+29. **Companion functions.** `T.f` denotes function `f` of the module that
+    declares `T`; for a primitive, that module is `std.<lowercase name>`
+    (`Int.to_text` → `std.int.to_text`). Functions are never in scope
+    unqualified across modules.
+30. **Variant scope.** A bare variant resolves in this module's unions, then
+    the prelude's, then the imports' public unions; more than one candidate is
+    `E0108` and must be qualified with the module alias. Two unions in one
+    module may not share a variant name (`E0107`), since there is no
+    `Union.Variant` syntax.
+31. **Module aliases win in dotted names.** `auth.require(...)` denotes the
+    module even when a parameter `auth` is in scope (§18.3 relies on this); a
+    bare `auth` is the parameter. Aliases live in their own namespace.
+32. **No shadowing.** A local may not reuse the name of a visible value
+    binding (`E0113`): another local, a parameter, or a module-level function
+    or constant. Fixture: `checker/e0113`.
+33. **Examples and properties** share a namespace separate from functions, so
+    `example escape_count` may accompany `fn escape_count` (§18.1); paths and
+    policies likewise.
+34. **`Unit`** is a built-in value; `TypeInfo` and `Spec` are nameable types.
+35. **Interface dispatch** is written `Ord.compare(a: x, b: y)`: the
+    interface's type parameter is instantiated from the arguments (or an
+    explicit argument) and an `impl` must exist (`E0333`) unless the type is a
+    parameter bounded by that interface. Inside an interface or impl its
+    functions are in scope bare. Fixture: `checker/e0333`.
+
+### Typing (§3, §4, §5, §10)
+
+36. **Generic instantiation** takes type arguments from an explicit `[...]`,
+    then from the expected type in checking position, then from the
+    arguments; an unbound parameter is `E0324`. This is instantiation, not
+    inference onto declarations. Fixture: `checker/ok_types`, `e0324`.
+37. **Type indices** (`Grid[T, width, height]`) must be literals, `const`s or
+    parameters; at a call whose result type uses a parameter as an index, the
+    argument must be such an expression (`E0337`). Fixture: `checker/e0337`.
+38. **Capability restrictions.** Labelled arguments beyond a capability's
+    declared parameters (`schema: "orders"`) are restrictions; a capability
+    with more restrictions is accepted where one with fewer is required
+    (§8.2). This is the one subtyping rule beyond refinement subsumption in
+    impl spec §3.3.
+39. **Expression statements** must have type `Unit` (`E0339`): a discarded
+    `Result` is never silent. `example`, `property` and `law` bodies are
+    assertions and must be `Bool`.
+40. **Unreachable code** is an error, not a warning: a statement after a
+    `return` on every path (`E0332`) and a `match` arm no value can reach
+    (`E0327`). Fixtures: `checker/e0332`, `e0326_e0327_match`.
+41. **`recover`** blocks yield the value of their final expression statement
+    and may not `return`; `Panicked` is a record in `std.results`.
+42. **Closures** may not capture capabilities (`E0330`), in addition to `var`s
+    and `inout` parameters (§3.7). Fixture: `checker/e0330_capture_capability`.
+
 ### Deferred, not changed
 
 - `Stream[T] ! e` as a type (§3.11) is not parsed: `-> Stream[T] ! e` is

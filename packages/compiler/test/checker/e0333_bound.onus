@@ -1,0 +1,25 @@
+module e0333_bound
+
+interface Ord[T] {
+  fn compare(a: T, b: T) -> Int
+}
+
+impl Ord[Int] {
+  fn compare(a: Int, b: Int) -> Int {
+    return a - b
+  }
+}
+
+fn smallest[T: Ord](a: T, b: T) -> T {
+  if Ord.compare(a: a, b: b) < 0 {
+    return a
+  }
+  return b
+}
+
+fn f() -> Int {
+  let a: Int = smallest(a: 1, b: 2)
+  let b: Text = smallest(a: "x", b: "y")
+  let c: Int = Ord.compare(a: 1.0, b: 2.0)
+  return a
+}

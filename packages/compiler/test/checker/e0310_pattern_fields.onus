@@ -1,0 +1,27 @@
+module e0310_pattern_fields
+
+union Pixel =
+  | Inside
+  | Escaped of at: Int, reason: Text
+  | Skipped of reason: Text
+
+fn f(p: Pixel) -> Int {
+  match p with
+  | Inside -> return 0
+  | Escaped(x, reason) -> return x
+  | Skipped(reason, extra) -> return 1
+}
+
+fn g(p: Pixel) -> Int {
+  match p with
+  | Inside -> return 0
+  | Escaped(at) -> return at
+  | Skipped(.., reason) -> return 1
+}
+
+fn h(p: Pixel) -> Int {
+  match p with
+  | Inside -> return 0
+  | Escaped -> return 1
+  | Skipped(..) -> return 2
+}

@@ -1,0 +1,16 @@
+module std.results
+
+pub union Result[T, E] =
+  | Ok of value: T
+  | Err of error: E
+
+pub fn is_ok[T, E](r: Result[T, E]) -> Bool {
+  match r with
+  | Ok(_) -> return true
+  | Err(_) -> return false
+}
+
+pub record Panicked {
+  obligation: Text
+  location: Text
+}

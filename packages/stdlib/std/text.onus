@@ -1,0 +1,7 @@
+module std.text
+
+pub intrinsic fn len(t: Text) -> Int where it >= 0
+
+pub intrinsic fn bytes(t: Text) -> Bytes
+
+pub intrinsic fn starts_with(t: Text, prefix: Text) -> Bool

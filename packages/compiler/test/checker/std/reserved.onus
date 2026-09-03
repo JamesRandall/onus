@@ -1,0 +1,5 @@
+module std.reserved
+
+pub fn f() -> Int {
+  return 1
+}

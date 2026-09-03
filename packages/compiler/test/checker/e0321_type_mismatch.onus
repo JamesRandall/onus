@@ -1,0 +1,23 @@
+module e0321_type_mismatch
+
+record Point {
+  x: Int
+  y: Int
+}
+
+fn f(n: Int, s: Text, b: Bool) -> Int {
+  let a: Int = "text"
+  let c: Float = n + 1.5
+  if n {
+    return 1
+  }
+  var v: Int = 0
+  v = s
+  let p: Point = Point { x: 1, y: "two" }
+  let q: Text = g(x: 1.0)
+  return b
+}
+
+fn g(x: Int) -> Int {
+  return x
+}

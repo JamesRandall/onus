@@ -1,0 +1,5 @@
+module somewhere.other
+
+fn f() -> Int {
+  return 1
+}

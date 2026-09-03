@@ -1,0 +1,6 @@
+module e0103_module_not_found
+import lib.missing
+
+fn f() -> Int {
+  return 1
+}

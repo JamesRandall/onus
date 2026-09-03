@@ -1,18 +1,23 @@
 #!/usr/bin/env node
 /**
- * The `onus` command line (impl spec §2). Milestone 1 provides `check` and
+ * The `onus` command line (impl spec §2). Milestones 1–2 provide `check` and
  * `fmt`; the other commands report that they are not yet available.
  *
  * Exit codes: 0 success, 1 diagnostics reported, 2 usage or I/O failure.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Context } from '../context.js';
-import { runFrontEnd } from '../driver.js';
+import { PASSES, runFrontEnd, runPipeline, type PassName } from '../driver.js';
 import { toJson, toText } from '../report/diagnostic.js';
+import { defaultStdlibRoot } from '../resolve/loader.js';
 
 const USAGE = `usage:
-  onus check <file.onus>... [--json]     report every diagnostic; exit 1 if any
-  onus fmt <file.onus>... [--stdout]     rewrite files in canonical form
+  onus check <file.onus>... [--json] [--root <dir>] [--stdlib <dir>] [--to <pass>]
+      report every diagnostic; exit 1 if any. Passes: ${PASSES.join(', ')}
+  onus fmt <file.onus>... [--stdout]
+      rewrite files in canonical form
   onus build | run | interface | path | next   (later milestones)
 `;
 
@@ -20,18 +25,34 @@ interface Args {
   readonly command: string | null;
   readonly files: readonly string[];
   readonly flags: ReadonlySet<string>;
+  readonly values: ReadonlyMap<string, string>;
 }
+
+const VALUE_FLAGS: ReadonlySet<string> = new Set(['root', 'stdlib', 'to']);
 
 function parseArgs(argv: readonly string[]): Args {
   const files: string[] = [];
   const flags = new Set<string>();
+  const values = new Map<string, string>();
   let command: string | null = null;
-  for (const a of argv) {
-    if (a.startsWith('--')) flags.add(a.slice(2));
-    else if (command === null) command = a;
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === undefined) break;
+    if (a.startsWith('--')) {
+      const name = a.slice(2);
+      if (VALUE_FLAGS.has(name)) {
+        const v = argv[i + 1];
+        if (v !== undefined) {
+          values.set(name, v);
+          i += 1;
+        }
+      } else {
+        flags.add(name);
+      }
+    } else if (command === null) command = a;
     else files.push(a);
   }
-  return { command, files, flags };
+  return { command, files, flags, values };
 }
 
 function readFiles(ctx: Context, paths: readonly string[]): boolean {
@@ -52,14 +73,29 @@ function emitDiagnostics(ctx: Context, json: boolean): void {
   }
 }
 
+function isPass(s: string): s is PassName {
+  return (PASSES as readonly string[]).includes(s);
+}
+
+function newContext(args: Args): Context {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const stdlib = args.values.get('stdlib') ?? defaultStdlibRoot(join(here, '..', '..'));
+  return new Context({ root: args.values.get('root') ?? null, stdlib });
+}
+
 function check(args: Args): number {
   if (args.files.length === 0) {
     process.stderr.write(USAGE);
     return 2;
   }
-  const ctx = new Context();
+  const to = args.values.get('to') ?? 'types';
+  if (!isPass(to)) {
+    process.stderr.write(`onus: unknown pass \`${to}\`; expected one of ${PASSES.join(', ')}\n`);
+    return 2;
+  }
+  const ctx = newContext(args);
   if (!readFiles(ctx, args.files)) return 2;
-  runFrontEnd(ctx);
+  runPipeline(ctx, to);
   emitDiagnostics(ctx, args.flags.has('json'));
   if (ctx.sink.hasErrors()) {
     if (!args.flags.has('json')) process.stdout.write(`${ctx.sink.count} error${ctx.sink.count === 1 ? '' : 's'}\n`);

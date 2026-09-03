@@ -1,0 +1,7 @@
+module e0110_private
+import lib.shapes
+
+fn f() -> Int {
+  let h: shapes.Hidden = shapes.Hidden { v: 1 }
+  return shapes.secret()
+}

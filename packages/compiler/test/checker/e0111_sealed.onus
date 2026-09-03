@@ -1,0 +1,9 @@
+module e0111_sealed
+import lib.shapes
+
+fn f() -> shapes.Token {
+  let t: shapes.Ticket = Issued(id: 1)
+  let v: shapes.Ticket = shapes.Void
+  let ok: shapes.Token = shapes.make_token(id: 1)
+  return shapes.Token { id: 1 }
+}

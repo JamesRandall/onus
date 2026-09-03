@@ -25,7 +25,7 @@ const RESERVED = new Set([
   'ensures', 'proved', 'claims', 'let', 'var', 'return', 'if', 'else', 'match', 'with', 'loop',
   'while', 'invariant', 'decreases', 'for', 'in', 'and', 'or', 'not', 'implies', 'is', 'it',
   'result', 'try', 'recover', 'old', 'forall', 'exists', 'fake', 'inout', 'where', 'true', 'false',
-  'self',
+  'self', 'intrinsic',
 ]);
 
 /** A fresh node per draw: nodes must not be shared, since ids are assigned per occurrence. */
@@ -118,7 +118,7 @@ const stmt: fc.Arbitrary<A.Stmt> = fc.oneof(
 
 function moduleOf(stmts: A.Stmt[]): A.Module {
   const fn: A.FnDecl = {
-    id: ID, kind: 'FnDecl', span: SPAN, vis: { pub: false, sealed: false }, constFn: false, name: ident('f'),
+    id: ID, kind: 'FnDecl', span: SPAN, vis: { pub: false, sealed: false }, constFn: false, intrinsic: false, name: ident('f'),
     tparams: [], params: [], ret: { id: ID, kind: 'NamedType', span: SPAN, name: qname('Int'), args: [], where: null },
     effects: [], claims: [], contracts: [], body: { id: ID, kind: 'Block', span: SPAN, stmts },
   };

@@ -1,0 +1,10 @@
+module e0330_closure_capture
+
+fn f(g: inout Int, xs: List[Int]) -> Int ! mutate {
+  var counter: Int = 0
+  let fixed: Int = 1
+  let bump: fn(n: Int) -> Int = fn(n: Int) -> Int {
+    return n + counter + g + fixed
+  }
+  return bump(n: 1)
+}

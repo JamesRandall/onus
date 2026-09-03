@@ -1,0 +1,9 @@
+test module ok_test_module
+import lib.shapes
+import std.io
+
+example sealed_from_test {
+  let t: shapes.Token = shapes.Token { id: 1 }
+  let clock: io.Clock = fake io.Clock {}
+  t.id == 1
+}

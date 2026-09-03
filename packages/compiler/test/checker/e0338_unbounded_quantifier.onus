@@ -1,0 +1,14 @@
+module e0338_unbounded_quantifier
+
+record Point {
+  x: Int
+}
+
+fn f(n: Int) -> Bool
+  ensures forall x: Int: x == x
+  ensures forall b: Bool: b or not b
+  ensures forall p: Point: p.x == p.x
+  ensures forall i: Int in 0 ..< n: i < n
+{
+  return true
+}

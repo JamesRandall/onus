@@ -1,0 +1,41 @@
+module e0334_impl_mismatch
+
+interface Codec[T] {
+  fn encode(value: T) -> Text ! alloc
+
+  fn decode(text: Text) -> Result[T, Text] ! alloc
+}
+
+record Pair {
+  a: Int
+}
+
+impl Codec[Pair] {
+  fn encode(v: Pair) -> Text ! alloc {
+    return "pair"
+  }
+
+  fn extra() -> Int {
+    return 1
+  }
+}
+
+impl Codec[Int] {
+  fn encode(value: Int) -> Int ! alloc {
+    return value
+  }
+
+  fn decode(text: Text) -> Result[Int, Text] ! alloc {
+    return Ok(value: 1)
+  }
+}
+
+impl Codec[Int] {
+  fn encode(value: Int) -> Text ! alloc {
+    return "x"
+  }
+
+  fn decode(text: Text) -> Result[Int, Text] ! alloc {
+    return Ok(value: 1)
+  }
+}

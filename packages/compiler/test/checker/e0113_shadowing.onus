@@ -1,0 +1,20 @@
+module e0113_shadowing
+import lib.shapes
+
+fn helper() -> Int {
+  return 1
+}
+
+fn f(x: Int) -> Int {
+  let x: Int = 1
+  let helper: Int = 2
+  if x > 0 {
+    let y: Int = 3
+    let y: Int = 4
+  }
+  for x: Int in 0 ..< 3 {
+    return x
+  }
+  let shapes: Int = 5
+  return x + shapes
+}

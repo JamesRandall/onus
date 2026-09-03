@@ -10,7 +10,7 @@ export const KEYWORDS = [
   'ensures', 'proved', 'claims', 'let', 'var', 'return', 'if', 'else', 'match', 'with', 'loop',
   'while', 'invariant', 'decreases', 'for', 'in', 'and', 'or', 'not', 'implies', 'is', 'it',
   'result', 'try', 'recover', 'old', 'forall', 'exists', 'fake', 'inout', 'where', 'true', 'false',
-  'self',
+  'self', 'intrinsic',
 ] as const;
 
 export type Keyword = (typeof KEYWORDS)[number];
@@ -31,7 +31,7 @@ export function isKeyword(text: string): text is Keyword {
 export const SOFT_KEYWORDS = [
   'module', 'import', 'test', 'type', 'record', 'union', 'interface', 'impl', 'law', 'claim',
   'capability', 'grants', 'path', 'entry', 'effects', 'forbid', 'require', 'policy', 'outside',
-  'except', 'example', 'property', 'of', 'self',
+  'except', 'example', 'property', 'of', 'self', 'intrinsic',
 ] as const;
 
 const SOFT_SET: ReadonlySet<string> = new Set<string>(SOFT_KEYWORDS);

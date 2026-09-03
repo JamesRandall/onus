@@ -1,0 +1,27 @@
+module e0329_inout
+
+fn bump(x: inout Int, by: Int) -> Unit ! mutate {
+  x = x + by
+  return Unit
+}
+
+fn twice(a: inout Int, b: inout Int) -> Unit ! mutate {
+  return Unit
+}
+
+fn f(p: Int) -> Int {
+  var v: Int = 0
+  let fixed: Int = 1
+  bump(x: inout fixed, by: 1)
+  bump(x: v, by: 1)
+  bump(x: inout v, by: inout v)
+  twice(a: inout v, b: inout v)
+  bump(x: inout p, by: 1)
+  bump(x: inout v, by: 1)
+  return v
+}
+
+fn g(q: inout Int) -> Unit ! mutate {
+  bump(x: inout q, by: 1)
+  return Unit
+}

@@ -1,0 +1,5 @@
+module std.x
+
+pub intrinsic fn f(x: Int) -> Int {
+  return x
+}

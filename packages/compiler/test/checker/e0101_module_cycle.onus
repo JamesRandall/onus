@@ -1,0 +1,6 @@
+module e0101_module_cycle
+import lib.cycle_a
+
+fn f() -> Int {
+  return cycle_a.a()
+}

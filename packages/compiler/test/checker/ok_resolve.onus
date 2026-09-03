@@ -1,0 +1,76 @@
+module ok_resolve
+import lib.shapes
+import lib.colours
+
+fn area_twice(s: shapes.Shape) -> Int {
+  return shapes.area(s: s) * 2
+}
+
+fn describe(s: shapes.Shape, shapes_count: Int) -> Text ! alloc {
+  match s with
+  | shapes.Circle(radius) when radius > 10 -> return "big circle"
+  | shapes.Circle(_) -> return "circle"
+  | shapes.Square(..) -> return Int.to_text(x: shapes_count)
+}
+
+fn origin_x() -> Int {
+  return shapes.origin.x
+}
+
+fn use_colours(colours: colours.Colour) -> colours.Colour {
+  let r: colours.Colour = Red
+  let c: colours.Colour = colours.Circle(hue: 1)
+  return colours
+}
+
+fn results(o: Option[Int]) -> Result[Int, Text] {
+  match o with
+  | Some(value) -> return Ok(value: value)
+  | None -> return Err(error: "none")
+}
+
+fn unit() -> Unit {
+  return Unit
+}
+
+fn lengths(xs: List[Int], t: Text) -> Int {
+  return List.len(xs: xs) + Text.len(t: t)
+}
+
+fn nested(x: Int) -> Int {
+  let f: fn(y: Int) -> Int = fn(y: Int) -> Int {
+    let z: Int = y + x
+    return z
+  }
+  return f(y: 1)
+}
+
+fn contracts(g: inout Int) -> Int where it >= 0 ! mutate
+  requires g > 0
+  ensures result == old(g)
+{
+  return g
+}
+
+fn typed_value() -> Int {
+  let info: TypeInfo = shapes.Point
+  return 1
+}
+
+fn quantified(xs: List[Int]) -> Bool
+  ensures forall i: Int in 0 ..< List.len(xs: xs) where i > 0: List.get(xs: xs, i: i) >= 0
+{
+  return true
+}
+
+fn tries(r: Result[Int, Text]) -> Result[Int, Text] {
+  let v: Int = try r else e: e
+  return Ok(value: v)
+}
+
+fn assumes() -> Int
+  claims shapes.Careful
+{
+  assume shapes.Careful "Checked by review."
+  return 1
+}

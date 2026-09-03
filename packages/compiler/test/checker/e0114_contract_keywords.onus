@@ -1,0 +1,12 @@
+module e0114_contract_keywords
+
+fn f(x: Int, g: inout Int) -> Int
+  requires result > 0
+  requires old(g) > 0
+  ensures old(x) == x
+  ensures old(g) == g
+{
+  let a: Int = it
+  let b: Int = result
+  return x
+}

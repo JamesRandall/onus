@@ -1,0 +1,16 @@
+module e0332_unreachable
+
+fn f(n: Int) -> Int {
+  return n
+  let x: Int = 1
+  return x
+}
+
+fn g(n: Int) -> Int {
+  if n > 0 {
+    return 1
+  } else {
+    return 2
+  }
+  return 3
+}

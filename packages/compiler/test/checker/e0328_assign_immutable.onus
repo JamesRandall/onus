@@ -1,0 +1,15 @@
+module e0328_assign_immutable
+
+const limit: Int = 10
+
+fn f(n: Int) -> Int {
+  let a: Int = 1
+  a = 2
+  n = 3
+  for i: Int in 0 ..< 3 {
+    i = 4
+  }
+  var ok: Int = 0
+  ok = 5
+  return ok
+}

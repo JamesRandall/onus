@@ -1,0 +1,40 @@
+module lib.shapes
+
+pub union Shape =
+  | Circle of radius: Int
+  | Square of side: Int
+
+pub record Point {
+  x: Int
+  y: Int
+}
+
+pub sealed record Token {
+  id: Int
+}
+
+pub sealed union Ticket =
+  | Issued of id: Int
+  | Void
+
+record Hidden {
+  v: Int
+}
+
+pub fn area(s: Shape) -> Int {
+  match s with
+  | Circle(radius) -> return 3 * radius * radius
+  | Square(side) -> return side * side
+}
+
+fn secret() -> Int {
+  return 42
+}
+
+pub fn make_token(id: Int) -> Token {
+  return Token { id: id }
+}
+
+pub const origin: Point = Point { x: 0, y: 0 }
+
+pub claim Careful "Checks its inputs twice."

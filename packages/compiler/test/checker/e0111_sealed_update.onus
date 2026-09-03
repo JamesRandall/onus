@@ -1,0 +1,6 @@
+module e0111_sealed_update
+import lib.shapes
+
+fn f(t: shapes.Token) -> shapes.Token {
+  return { t with id: 2 }
+}

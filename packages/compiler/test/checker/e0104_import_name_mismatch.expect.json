@@ -1,0 +1,18 @@
+{
+  "diagnostics": [
+    {
+      "code": "E0104",
+      "span": [
+        [
+          1,
+          8
+        ],
+        [
+          1,
+          26
+        ]
+      ],
+      "file": "lib/wrong_name.onus"
+    }
+  ]
+}

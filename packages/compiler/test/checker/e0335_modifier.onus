@@ -1,0 +1,11 @@
+module e0335_modifier
+
+pub sealed fn f() -> Int {
+  return 1
+}
+
+sealed type Iter = Int where it >= 0
+
+pub sealed interface Show[T] {
+  fn show(value: T) -> Text ! alloc
+}

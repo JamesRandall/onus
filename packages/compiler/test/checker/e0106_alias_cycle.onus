@@ -1,0 +1,9 @@
+module e0106_alias_cycle
+
+type A = B
+
+type B = A
+
+fn f(a: A) -> Int {
+  return 1
+}

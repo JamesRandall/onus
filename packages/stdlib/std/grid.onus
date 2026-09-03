@@ -1,0 +1,28 @@
+module std.grid
+
+pub intrinsic type Grid[T, const width: Int where it > 0, const height: Int where it > 0]
+
+pub intrinsic fn filled[T](
+  value: T,
+  width: Int where it > 0,
+  height: Int where it > 0
+) -> Grid[T, width, height] ! alloc
+  ensures forall x: Int in 0 ..< width: forall y: Int in 0 ..< height: get(
+    grid: result,
+    x: x,
+    y: y
+  ) == value
+
+pub intrinsic fn get[T, const w: Int, const h: Int](
+  grid: Grid[T, w, h],
+  x: Int where 0 <= it and it < w,
+  y: Int where 0 <= it and it < h
+) -> T
+
+pub intrinsic fn set[T, const w: Int, const h: Int](
+  grid: inout Grid[T, w, h],
+  x: Int where 0 <= it and it < w,
+  y: Int where 0 <= it and it < h,
+  value: T
+) -> Unit ! mutate
+  ensures get(grid: grid, x: x, y: y) == value

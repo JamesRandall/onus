@@ -8,7 +8,7 @@ pub fn effectful(files: io.Files, path: Text) -> Result[Unit, io.Error] ! io.fil
   return Ok(value: Unit)
 }
 
-pub fn generic[T: Ord, U, const n: Int, e](xs: List[T], f: fn(T) -> U ! e) -> List[U] ! e, alloc {
+pub fn gen[T: Ord, U, const n: Int, e](xs: List[T], f: fn(x: T) -> U ! e) -> List[U] ! e, alloc {
   return []
 }
 

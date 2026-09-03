@@ -1,0 +1,5 @@
+module other.shapes
+
+pub fn nothing() -> Int {
+  return 0
+}

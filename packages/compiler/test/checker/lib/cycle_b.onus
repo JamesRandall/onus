@@ -1,0 +1,6 @@
+module lib.cycle_b
+import lib.cycle_a
+
+pub fn b() -> Int {
+  return 2
+}

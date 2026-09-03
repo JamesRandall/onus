@@ -1,0 +1,13 @@
+module e0106_unknown_type
+import lib.shapes
+
+fn f(x: Nope, p: shapes.Nope) -> Int {
+  let q: nope.Point = p
+  return x
+}
+
+impl Nope[Int] {
+  fn g(x: Int) -> Int {
+    return x
+  }
+}

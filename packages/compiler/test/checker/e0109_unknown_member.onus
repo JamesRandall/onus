@@ -1,0 +1,9 @@
+module e0109_unknown_member
+import lib.shapes
+
+fn f() -> Int {
+  let a: Int = shapes.volume(s: Circle(radius: 1))
+  let b: Int = Int.nope(x: 1)
+  let c: shapes.Point = shapes.Point.make()
+  return a
+}

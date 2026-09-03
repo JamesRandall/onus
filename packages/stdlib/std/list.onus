@@ -1,0 +1,19 @@
+module std.list
+
+pub intrinsic type List[T]
+
+pub intrinsic fn len[T](xs: List[T]) -> Int where it >= 0
+
+pub intrinsic fn get[T](xs: List[T], i: Int where 0 <= it and it < len(xs: xs)) -> T
+
+pub fn is_empty[T](xs: List[T]) -> Bool
+  ensures result == (len(xs: xs) == 0)
+{
+  return len(xs: xs) == 0
+}
+
+pub intrinsic fn replicate[T](value: T, count: Int where it >= 0) -> List[T] ! alloc
+  ensures len(xs: result) == count
+
+pub intrinsic fn append[T](xs: List[T], x: T) -> List[T] ! alloc
+  ensures len(xs: result) == len(xs: xs) + 1

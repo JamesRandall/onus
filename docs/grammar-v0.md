@@ -11,7 +11,7 @@ this grammar and prints the canonical form described at the end.
   matching neither (e.g. `xValue`) is `E0005`.
 - Keywords are reserved. *Soft keywords* — `module import test type record
   union interface impl law claim capability grants path entry effects forbid
-  require policy outside except example property of self` — never appear
+  require policy outside except example property of self intrinsic` — never appear
   inside an expression, so they are accepted as names in name positions
   (`Float.of`, `auth.require`, `path: "x"`).
 - Literals: `INT` = `[0-9][0-9_]*` (64-bit signed; larger is `E0008`);
@@ -41,8 +41,9 @@ item        = fn_decl | type_alias | const_decl | record_decl | union_decl
             | path_decl | policy_decl | example_decl | property_decl ;
 visibility  = [ "pub" ] [ "sealed" ] ;
 
-fn_decl     = visibility [ "const" ] "fn" NAME [ tparams ] "(" [ params ] ")" "->" type
-              [ "!" effects ] [ "claims" CLAIM { "," CLAIM } ] { contract } block ;
+fn_decl     = visibility [ "const" ] [ "intrinsic" ] "fn" NAME [ tparams ] "(" [ params ] ")" "->" type
+              [ "!" effects ] [ "claims" CLAIM { "," CLAIM } ] { contract } ( block | NL ) ;
+              (* an intrinsic function has no body; intrinsics are legal only under `module std.…` *)
 tparams     = "[" tparam { "," tparam } "]" ;
 tparam      = TNAME [ ":" TNAME ] | "const" NAME ":" type | NAME ;
 params      = param { "," param } ;
@@ -52,10 +53,10 @@ effect      = QNAME | "recover" ;
 contract    = ( "requires" | "ensures" ) [ "proved" ] expr ;
 
 type        = QTNAME [ "[" targ { "," targ } "]" ] [ "where" expr ]
-            | "fn" "(" [ type { "," type } ] ")" "->" type [ "!" effects ] ;
+            | "fn" "(" [ params ] ")" "->" type [ "!" effects ] ;   (* parameters are named: the labels for calls *)
 targ        = [ NAME ":" ] ( type | expr ) ;          (* uppercase-led is a type; the resolver decides *)
 
-type_alias  = visibility "type" TNAME "=" type ;
+type_alias  = visibility ( "type" TNAME "=" type | "intrinsic" "type" TNAME [ tparams ] ) ;
 const_decl  = visibility "const" NAME ":" type "=" expr ;
 record_decl = visibility "record" TNAME [ tparams ] "{" NL { field NL } "}" ;
 field       = NAME ":" type ;

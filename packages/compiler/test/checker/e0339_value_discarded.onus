@@ -1,0 +1,15 @@
+module e0339_value_discarded
+
+fn g() -> Int {
+  return 1
+}
+
+fn h() -> Unit {
+  return Unit
+}
+
+fn f() -> Int {
+  g()
+  h()
+  return 0
+}

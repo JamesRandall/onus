@@ -1,0 +1,28 @@
+module e0324_type_args
+
+type Iter = Int where it >= 0
+
+record Pair[T, U] {
+  first: T
+  second: U
+}
+
+fn identity[T](x: T) -> T {
+  return x
+}
+
+fn f() -> Int {
+  let a: List[Int, Int] = []
+  let b: Iter[Int] = 1
+  let c: List[Int] = []
+  let d: fn(x: Int) -> Int = identity
+  let e: Pair[Int] = Pair { first: 1, second: 2 }
+  let gg: Int = identity[Int, Text](x: 1)
+  let h: Int = 1
+  return h
+}
+
+fn g() -> Unit {
+  let empty: Int = List.len(xs: [])
+  return Unit
+}

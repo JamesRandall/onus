@@ -1,0 +1,11 @@
+module e0323_not_callable
+
+record Point {
+  x: Int
+}
+
+fn f(n: Int, p: Point) -> Int {
+  let a: Int = n(x: 1)
+  let b: Int = p(x: 1)
+  return a + b
+}

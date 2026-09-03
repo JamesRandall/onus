@@ -36,6 +36,7 @@ export function isLineNode(n: A.Node): boolean {
     case 'Import':
     case 'FnDecl':
     case 'TypeAlias':
+    case 'IntrinsicType':
     case 'ConstDecl':
     case 'RecordDecl':
     case 'UnionDecl':

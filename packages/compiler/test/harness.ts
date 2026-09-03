@@ -7,10 +7,16 @@
  * `UPDATE_FIXTURES=1` rewrites the expectation files from actual output.
  */
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, dirname, join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Context } from '../src/context.js';
-import { runFrontEnd } from '../src/driver.js';
+import { runFrontEnd, runPipeline, type PassName } from '../src/driver.js';
 import { toJson, type DiagnosticJson } from '../src/report/diagnostic.js';
+
+const here = dirname(fileURLToPath(import.meta.url));
+
+/** The repository's standard library root (`packages/stdlib`). */
+export const STDLIB_ROOT = join(here, '..', '..', 'stdlib');
 
 export interface Fixture {
   readonly name: string;
@@ -27,22 +33,32 @@ export function fixturesIn(dir: string): Fixture[] {
     .map((f) => ({ name: f, path: join(dir, f), text: readFileSync(join(dir, f), 'utf8') }));
 }
 
-export interface FrontEndResult {
+export interface PipelineResult {
   readonly ctx: Context;
   readonly diagnostics: readonly DiagnosticJson[];
 }
 
 /** Runs passes 1–2 over one source text. Effects: none beyond the returned context. */
-export function frontEnd(path: string, text: string): FrontEndResult {
+export function frontEnd(path: string, text: string): PipelineResult {
   const ctx = new Context();
   ctx.addFile(path, text);
   runFrontEnd(ctx);
   return { ctx, diagnostics: ctx.sink.all().map((d) => toJson(ctx, d)) };
 }
 
+/** Runs the pipeline up to `to` over one entry file with the given project root. Effects: reads imported files. */
+export function pipeline(path: string, text: string, root: string | null, to: PassName = 'types'): PipelineResult {
+  const ctx = new Context({ root, stdlib: STDLIB_ROOT });
+  ctx.addFile(path, text);
+  runPipeline(ctx, to);
+  return { ctx, diagnostics: ctx.sink.all().map((d) => toJson(ctx, d)) };
+}
+
 export interface ExpectedDiagnostic {
   readonly code: string;
   readonly span: readonly [readonly [number, number], readonly [number, number]];
+  /** Present when the diagnostic is in another file than the fixture (relative to the fixture's directory). */
+  readonly file?: string;
 }
 
 export interface Expectation {
@@ -61,7 +77,11 @@ function isExpectation(v: unknown): v is Expectation {
  */
 export function checkExpectation(fixturePath: string, actual: readonly DiagnosticJson[]): string | null {
   const expectPath = fixturePath.replace(/\.onus$/, '.expect.json');
-  const got: ExpectedDiagnostic[] = actual.map((d) => ({ code: d.code, span: d.location.span }));
+  const dir = dirname(fixturePath);
+  const got: ExpectedDiagnostic[] = actual.map((d) => {
+    const rel = relative(dir, d.location.file);
+    return rel === basename(fixturePath) ? { code: d.code, span: d.location.span } : { code: d.code, span: d.location.span, file: rel };
+  });
   if (process.env['UPDATE_FIXTURES'] === '1') {
     writeFileSync(expectPath, `${JSON.stringify({ diagnostics: got }, null, 2)}\n`);
     return null;
