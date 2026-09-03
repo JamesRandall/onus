@@ -4,6 +4,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { ConstTables } from './consteval/tables.js';
+import { ContractTables } from './contracts/obligations.js';
 import { EffectTables } from './effects/tables.js';
 import { DiagnosticSink, type FileLookup } from './report/diagnostic.js';
 import { ResolveTables } from './resolve/defs.js';
@@ -45,6 +46,8 @@ export class Context implements FileLookup {
   readonly consteval = new ConstTables();
   /** Pass 6 output. */
   readonly effects = new EffectTables();
+  /** Pass 8 output. */
+  readonly contracts = new ContractTables();
   /** Next node id to assign; node ids are unique across all files of a compilation. */
   nextNodeId = 0;
 

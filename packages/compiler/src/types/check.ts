@@ -918,19 +918,19 @@ class Checker {
    */
   expr(e: A.Expr, expected: Type | null): Type {
     const t = this.exprInner(e, expected);
-    const result = expected === null ? t : this.coerce(t, expected, e.span, 'expression');
+    const result = expected === null ? t : this.coerce(t, expected, e.span, 'expression', e.id);
     this.ty.exprTypes.set(e.id, result);
     return result;
   }
 
-  /** Checks that `actual` flows into `expected`, recording a refinement obligation when it does. */
-  private coerce(actual: Type, expected: Type, span: Span, what: string): Type {
+  /** Checks that `actual` flows into `expected`, recording a refinement obligation at `at` when it does. */
+  private coerce(actual: Type, expected: Type, span: Span, what: string, at: A.NodeId | null = null): Type {
     if (actual.k === 'error' || expected.k === 'error') return actual.k === 'error' ? ERROR : actual;
     if (!assignable(actual, expected)) {
       this.report('E0321', span, `expected ${this.show(expected)}, found ${this.show(actual)}${what === 'expression' ? '' : ` (${what})`}`);
       return ERROR;
     }
-    if (isRefined(expected) && !sameRefinement(actual, expected)) this.ty.refinementFlows.push({ at: -1 as A.NodeId, from: actual, to: expected });
+    if (at !== null && isRefined(expected) && !sameRefinement(actual, expected)) this.ty.refinementFlows.push({ at, from: actual, to: expected });
     return actual;
   }
 

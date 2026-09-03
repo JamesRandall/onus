@@ -25,6 +25,7 @@ export type NodeId = number & { readonly __brand: 'NodeId' };
 export type FileId = number & { readonly __brand: 'FileId' };
 export type DefId = number & { readonly __brand: 'DefId' };
 export type ModuleId = number & { readonly __brand: 'ModuleId' };
+export type ObligationId = number & { readonly __brand: 'ObligationId' };
 
 // This file holds the compiler's only casts: the four brand constructors.
 
@@ -46,6 +47,11 @@ export function defId(n: number): DefId {
 /** Brands a plain number as a ModuleId. Only the loader should call this. */
 export function moduleId(n: number): ModuleId {
   return n as ModuleId;
+}
+
+/** Brands a plain number as an ObligationId. Only the contracts pass should call this. */
+export function obligationId(n: number): ObligationId {
+  return n as ObligationId;
 }
 
 export interface NodeBase {

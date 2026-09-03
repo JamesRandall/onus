@@ -7,6 +7,6 @@ export function len(b: Uint8Array): number {
 
 export function get(b: Uint8Array, i: number): number {
   const x = b[i];
-  if (x === undefined) throw new Panic('Bytes.get index', `index ${i} is outside 0 ..< ${b.length}`);
+  if (x === undefined) throw new Panic({ kind: 'requires', text: '0 <= i and i < len(b: b)', at: 'std.bytes', def: 'get' }, `index ${i} is outside 0 ..< ${b.length}`);
   return x;
 }

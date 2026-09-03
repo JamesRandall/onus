@@ -12,13 +12,18 @@ import { Context } from '../context.js';
 import { PASSES, runFrontEnd, runPipeline, type PassName } from '../driver.js';
 import { toJson, toText } from '../report/diagnostic.js';
 import { defaultStdlibRoot } from '../resolve/loader.js';
+import { build, runLauncher } from '../codegen/build.js';
 
 const USAGE = `usage:
   onus check <file.onus>... [--json] [--root <dir>] [--stdlib <dir>] [--to <pass>]
       report every diagnostic; exit 1 if any. Passes: ${PASSES.join(', ')}
   onus fmt <file.onus>... [--stdout]
       rewrite files in canonical form
-  onus build | run | interface | path | next   (later milestones)
+  onus build <entry.onus> [--out <dir>] [--emit js|ts] [--root <dir>] [--stdlib <dir>]
+      check, then emit JavaScript for every module into <dir> (default: <root>/out)
+  onus run <entry.onus> [--out <dir>] [-- args...]
+      build, then run the entry module's main
+  onus interface | path | next   (later milestones)
 `;
 
 interface Args {
@@ -28,7 +33,7 @@ interface Args {
   readonly values: ReadonlyMap<string, string>;
 }
 
-const VALUE_FLAGS: ReadonlySet<string> = new Set(['root', 'stdlib', 'to']);
+const VALUE_FLAGS: ReadonlySet<string> = new Set(['root', 'stdlib', 'to', 'out', 'emit']);
 
 function parseArgs(argv: readonly string[]): Args {
   const files: string[] = [];
@@ -88,7 +93,7 @@ function check(args: Args): number {
     process.stderr.write(USAGE);
     return 2;
   }
-  const to = args.values.get('to') ?? 'effects';
+  const to = args.values.get('to') ?? 'contracts';
   if (!isPass(to)) {
     process.stderr.write(`onus: unknown pass \`${to}\`; expected one of ${PASSES.join(', ')}\n`);
     return 2;
@@ -126,6 +131,31 @@ function fmt(args: Args): number {
   return 0;
 }
 
+function buildCommand(args: Args, run: boolean): number {
+  const entry = args.files[0];
+  if (entry === undefined) {
+    process.stderr.write(USAGE);
+    return 2;
+  }
+  const emit = args.values.get('emit') ?? 'js';
+  if (emit !== 'js' && emit !== 'ts') {
+    process.stderr.write(`onus: --emit takes js or ts\n`);
+    return 2;
+  }
+  const ctx = newContext(args);
+  if (!readFiles(ctx, [entry])) return 2;
+  const outDir = args.values.get('out') ?? join(dirname(entry), 'out');
+  const result = build(ctx, { outDir, ts: emit === 'ts' });
+  emitDiagnostics(ctx, args.flags.has('json'));
+  if (result === null) return 1;
+  if (!run) return 0;
+  if (result.launcher === null) {
+    process.stderr.write(`onus run: ${entry} declares no \`pub fn main\`\n`);
+    return 2;
+  }
+  return runLauncher(result.launcher, args.files.slice(1));
+}
+
 function main(argv: readonly string[]): number {
   const args = parseArgs(argv);
   switch (args.command) {
@@ -134,7 +164,9 @@ function main(argv: readonly string[]): number {
     case 'fmt':
       return fmt(args);
     case 'build':
+      return buildCommand(args, false);
     case 'run':
+      return buildCommand(args, true);
     case 'interface':
     case 'path':
     case 'next':

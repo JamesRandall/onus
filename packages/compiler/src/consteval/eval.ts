@@ -476,7 +476,7 @@ export class Evaluator {
     try {
       return callImpl(qualified, argValues, ret, this.conv);
     } catch (err) {
-      if (err instanceof Panic) throw new EvalPanic(`${err.obligation}: ${err.detail}`, span);
+      if (err instanceof Panic) throw new EvalPanic(`${err.obligation.kind} \`${err.obligation.text}\` of ${err.obligation.def}: ${err.detail}`, span);
       throw err;
     }
   }

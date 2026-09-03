@@ -37,7 +37,7 @@ fn lengths(xs: List[Int], t: Text) -> Int {
   return List.len(xs: xs) + Text.len(t: t)
 }
 
-fn nested(x: Int) -> Int {
+fn nested(x: Int) -> Int ! alloc {
   let f: fn(y: Int) -> Int = fn(y: Int) -> Int {
     let z: Int = y + x
     return z

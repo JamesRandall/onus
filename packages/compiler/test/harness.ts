@@ -47,7 +47,7 @@ export function frontEnd(path: string, text: string): PipelineResult {
 }
 
 /** Runs the pipeline up to `to` over one entry file with the given project root. Effects: reads imported files. */
-export function pipeline(path: string, text: string, root: string | null, to: PassName = 'effects'): PipelineResult {
+export function pipeline(path: string, text: string, root: string | null, to: PassName = 'contracts'): PipelineResult {
   const ctx = new Context({ root, stdlib: STDLIB_ROOT });
   ctx.addFile(path, text);
   runPipeline(ctx, to);

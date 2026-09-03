@@ -1329,8 +1329,9 @@ class Parser {
         return { id: PLACEHOLDER, kind: 'Try', span: this.spanFrom(s), expr, else: elseClause };
       }
       case 'recover': {
+        // The block's final expression is its value (§10.2), so bare expressions are allowed.
         this.advance();
-        const body = this.parseBlock();
+        const body = this.parseAssertionBlock();
         return { id: PLACEHOLDER, kind: 'Recover', span: this.spanFrom(s), body };
       }
       case 'old': {

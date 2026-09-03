@@ -245,6 +245,48 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     false assertion is `E0702`; one that needs the runtime is deferred to the
     generated tests of milestone 5.
 
+## M5 — codegen, everything checked
+
+57. **Obligations are objects (impl spec §3.5).** The contracts pass creates
+    one per site of §12.1 with status `checked`, except `requires proved`
+    clauses the const evaluator discharged (`proved`). Codegen inserts a
+    runtime check iff `checked`.
+58. **Where checks live.** A callee checks its own non-pinned `requires` and
+    parameter refinements on entry, on behalf of every call site; call-site
+    refinement obligations stay in the ledger but emit no second check.
+    `ensures`, the return type's refinement, `let`/`var`/assignment flows,
+    record and variant field refinements, loop invariants and `decreases`
+    are checked at their sites. Int and Duration `+ - * / %` go through
+    checked runtime arithmetic (`overflow`).
+59. **`inout` convention (impl spec §6).** A function with `inout` parameters
+    returns `[result, ...parameters]` and the caller reassigns its variables;
+    intrinsics follow the same convention (`Grid.set`). Intrinsic shims pass
+    `const` type parameters first, then parameters, positionally.
+60. **`try` unwinds with an exception** (`EarlyReturn`) caught by the
+    enclosing function, instead of the impl spec's `if (r.tag === 'Err')
+    return r;`, so that a `try` nested inside a larger expression keeps
+    evaluation order. `match` is a labelled block of pattern tests in arm
+    order, which is how guards fall through.
+61. **Generics and interfaces.** Type parameters are erased; a bounded
+    parameter `T: I` becomes a hidden dictionary argument and `I.f(...)`
+    dispatches through it; impl functions are emitted as `I$Type$f` and each
+    impl exports its dictionary `I$Type`.
+62. **Tests and `main`.** Every `example`, `property` and `law` becomes a
+    vitest case in `<module>.examples.test.js` (properties and laws under
+    fast-check generators derived from parameter types and filtered by their
+    refinements). `onus run` emits a launcher that constructs the root
+    capabilities `main` names (§8.3) and maps `Ok`/`Err`/`Panic` to exit
+    codes 0/1/2. `std.sql` at runtime has no driver in v0: `connect` returns
+    `Err(Connection)`.
+
+63. **Function values are positional at runtime.** A closure takes its
+    parameters positionally, a call through a function value passes the
+    arguments in the type's parameter order, and a declared function used as
+    a value is wrapped in an adapter to its named-argument form. This is
+    what lets a closure use its own parameter names against a function type
+    (§3.7, item 26) without a runtime mismatch; the `tsc --strict` oracle
+    caught the original defect.
+
 ### Deferred, not changed
 
 - `Stream[T] ! e` as a type (§3.11) is not parsed: `-> Stream[T] ! e` is
@@ -254,3 +296,10 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
   py: Int where (px, py) != (x, y)`) are not in the grammar; nested
   quantifiers (§5.3 allows depth two) express the same thing.
 - `budget` annotations (§12.3) and `proves float` (§3.2) have no syntax yet.
+- Structural recursion over a union (`depth(t: Tree[T])`) has no `Int`
+  measure to write in `decreases`; such functions declare `diverge` for now.
+  A well-founded measure on algebraic data (size, or a `decreases` over a
+  field) is needed before the verifier handles them (§5.1, §17.8).
+- Generated tests import `vitest` and `fast-check` by name and resolve them
+  from the nearest `node_modules`; a project outside this repository needs
+  both installed.

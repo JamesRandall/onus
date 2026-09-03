@@ -1,0 +1,13 @@
+module violated_requires
+import std.io
+
+fn half(n: Int) -> Int
+  requires n > 0
+{
+  return n / 2
+}
+
+pub fn main(args: List[Text]) -> Result[Unit, io.Error] {
+  let x: Int = half(n: 0)
+  return Ok(value: Unit)
+}

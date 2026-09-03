@@ -197,13 +197,13 @@ Mapping:
 | `module a.b` | `out/a/b.js`, one file per module, ESM |
 | `fn` | `export function` (or plain for private); named args → a single object parameter `{x, y}` destructured; call sites pass object literals |
 | `record` | `interface` plus a generated constructor function that applies refinement checks where *checked* |
-| `union` | tagged union `{ tag: 'Escaped', at: number }`; `match ... with` compiled to a `switch` on `tag`, guards as nested `if`, fall-through never emitted |
+| `union` | tagged union `{ tag: 'Escaped', at: number }`; `match ... with` compiled to a labelled block of pattern tests in arm order (guards fall through to the next arm), ending in `rt.unreachable()` <!-- changed: M5, item 60 --> |
 | `sealed` | constructor function not exported; `test module` output receives it via a compiler-emitted internal export |
 | refinements | no runtime representation; a check is inserted at the obligation site iff `checked` |
 | effects | erased; the type system already enforced them |
 | capabilities | typed handles from the runtime; erased mode/index parameters |
-| `inout` | the argument object is mutated in place and the variable reassigned after the call (value semantics preserved because nothing else holds it) |
-| `try` | `const r = expr; if (r.tag === 'Err') return r;` (or the `else` conversion) |
+| `inout` | the callee returns `[result, ...inout parameters]` and the caller reassigns its variables; grids are mutated in place inside the runtime because nothing else holds them <!-- changed: M5, docs/CHANGES.md item 59 --> |
+| `try` | `rt.unwrap(expr)` throws `EarlyReturn`, caught by the enclosing function, which returns its value; `else` converts through `rt.unwrapElse(expr, e => ...)` <!-- changed: M5, item 60 --> |
 | `recover` | `runtime.recover(() => { ... })` |
 | `for` over range | `for (let i = a; i < b; i++)` |
 | `loop while` + `decreases` | `while` plus, where the `decreases` obligation is *checked*, a runtime assertion that the measure decreased |

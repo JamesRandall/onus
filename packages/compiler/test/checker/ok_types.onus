@@ -42,7 +42,8 @@ fn swap[T, U](p: Pair[T, U]) -> Pair[U, T] {
   return Pair { first: p.second, second: p.first }
 }
 
-fn depth[T](t: Tree[T]) -> Int {
+-- Structural recursion has no Int measure in v0 (see CHANGES.md), so it declares `diverge`.
+fn depth[T](t: Tree[T]) -> Int ! diverge {
   match t with
   | Leaf -> return 0
   | Node(_, left, right) -> {
@@ -55,7 +56,7 @@ fn depth[T](t: Tree[T]) -> Int {
   }
 }
 
-fn generics(xs: List[Int]) -> Int ! alloc {
+fn generics(xs: List[Int]) -> Int ! alloc, diverge {
   let p: Pair[Int, Text] = Pair { first: 1, second: "one" }
   let q: Pair[Text, Int] = swap(p: p)
   let t: Tree[Int] = Node(value: 1, left: Leaf, right: Leaf)
@@ -97,7 +98,7 @@ fn options(o: Option[Int]) -> Option[Int] {
   return Some(value: a + 1)
 }
 
-fn closures(xs: List[Int]) -> Int {
+fn closures(xs: List[Int]) -> Int ! alloc {
   let add: fn(a: Int, b: Int) -> Int = fn(x: Int, y: Int) -> Int {
     return x + y
   }
@@ -148,7 +149,7 @@ fn fallible_inner(r: Result[Int, Text]) -> Int {
   | Err(..) -> return 0
 }
 
-fn literals(d: Duration) -> Bool {
+fn literals(d: Duration) -> Bool ! alloc {
   let a: Bool = 1 < 2 and 1.5 <= 2.5 and 50ms < 1s
   let b: Bool = "a" ++ "b" == "ab" and not (true implies false)
   let c: Int = -3 * 2 % 5

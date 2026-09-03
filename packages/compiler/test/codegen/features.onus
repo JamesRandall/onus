@@ -1,0 +1,114 @@
+module features
+
+record Point {
+  x: Int
+  y: Int where it >= x
+}
+
+union Shape =
+  | Circle of radius: Int where it > 0
+  | Dot
+
+interface Ord[T] {
+  fn compare(a: T, b: T) -> Int
+    ensures compare(a: a, b: a) == 0
+
+  law reflexive(a: T) {
+    compare(a: a, b: a) == 0
+  }
+}
+
+impl Ord[Int] {
+  fn compare(a: Int, b: Int) -> Int {
+    return a - b
+  }
+}
+
+fn smallest[T: Ord](a: T, b: T) -> T {
+  if Ord.compare(a: a, b: b) < 0 {
+    return a
+  }
+  return b
+}
+
+fn bump(v: inout Int, by: Int) -> Unit ! mutate {
+  v = v + by
+  return Unit
+}
+
+fn twice(n: Int) -> Int {
+  var v: Int = n
+  bump(v: inout v, by: n)
+  return v
+}
+
+fn safe_div(a: Int, b: Int) -> Result[Int, Text] {
+  if b == 0 {
+    return Err(error: "zero")
+  }
+  return Ok(value: a / b)
+}
+
+fn chain(a: Int, b: Int) -> Result[Int, Text] ! alloc {
+  let q: Int = try safe_div(a: a, b: b)
+  let r: Int = try safe_div(a: q, b: 2) else e: e ++ "!"
+  return Ok(value: r)
+}
+
+fn area(s: Shape) -> Int {
+  match s with
+  | Circle(radius) when radius > 100 -> return 0
+  | Circle(radius) -> return 3 * radius * radius
+  | Dot -> return 1
+}
+
+fn recovered(a: Int, b: Int) -> Result[Int, Panicked] {
+  let r: Result[Int, Panicked] = recover {
+    a / b
+  }
+  return r
+}
+
+fn sum(xs: List[Int]) -> Int {
+  var total: Int = 0
+  for x: Int in xs {
+    total = total + x
+  }
+  return total
+}
+
+fn apply[T, U, e](x: T, f: fn(v: T) -> U ! e) -> U ! e {
+  return f(v: x)
+}
+
+example arithmetic {
+  smallest(a: 3, b: 2) == 2
+  twice(n: 4) == 8
+  chain(a: 10, b: 2) == Ok(value: 2)
+  chain(a: 1, b: 0) == Err(error: "zero")
+  chain(a: 1, b: 1) == Ok(value: 0)
+  area(s: Circle(radius: 2)) == 12
+  area(s: Dot) == 1
+  sum(xs: [1, 2, 3]) == 6
+  apply(
+    x: 2,
+    f: fn(v: Int) -> Int {
+      return v * 10
+    }
+  ) == 20
+  forall i: Int in 0 ..< 3: i < 3
+  Point { x: 1, y: 2 }.y == 2
+}
+
+example panics_recover {
+  recovered(a: 1, b: 0) is Err
+  recovered(a: 4, b: 2) == Ok(value: 2)
+}
+
+property smallest_is_one_of(a: Int, b: Int) {
+  smallest(a: a, b: b) == a or smallest(a: a, b: b) == b
+}
+
+property sums_of_positive(xs: List[Int where it >= 0]) {
+  sum(xs: xs) >= 0
+}

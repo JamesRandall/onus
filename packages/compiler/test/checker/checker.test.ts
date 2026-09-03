@@ -25,6 +25,8 @@ describe('checker fixtures', () => {
     it(f.name, () => {
       const { diagnostics } = pipeline(f.path, f.text, here);
       for (const d of diagnostics) seen.add(d.code);
+      // A positive fixture never expects a diagnostic, whatever its expectation file says.
+      if (f.name.startsWith('ok_')) expect(diagnostics.map((d) => `${d.code} ${d.context.join(' ')}`)).toEqual([]);
       expect(checkExpectation(f.path, diagnostics)).toBeNull();
     });
   }
