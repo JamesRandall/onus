@@ -1,0 +1,15 @@
+module cl
+
+pub claim Pure := effects == {}
+
+claim Total := not diverge and not panic
+
+claim RealtimeSafe := Total and not alloc
+
+claim Either := alloc or (Total and mutate)
+
+claim Nested := (alloc or panic) and not (diverge or nondet)
+
+claim Idempotent "Calling twice with the same arguments has the same observable effect as calling once."
+
+pub claim Audited "Every write is logged."

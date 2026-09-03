@@ -1,0 +1,5 @@
+module e
+
+fn f() -> Text {
+  return "abc
+}

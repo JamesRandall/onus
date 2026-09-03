@@ -1,0 +1,12 @@
+module st
+
+fn f(a: Int) -> Int {
+  let x: Int = a + 1
+  var y: Int where it >= 0 = 0
+  y = y + x
+  let z: Float = Float.of(x: y)
+  var name: Text = "start"
+  name = name ++ "!"
+  io.write(file: out, text: name)
+  return y
+}

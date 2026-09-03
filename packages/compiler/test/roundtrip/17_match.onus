@@ -1,0 +1,46 @@
+module mt
+
+fn shade(p: Pixel, limit: Iter) -> Int {
+  match p with
+  | Inside -> return 0
+  | Escaped(at) when at < 10 -> return 16
+  | Escaped(at) -> return 255 * at / limit
+  | Skipped(..) -> return 128
+}
+
+fn describe(n: Int) -> Text {
+  match n with
+  | 0 -> return "zero"
+  | 1 -> return "one"
+  | -1 -> return "minus one"
+  | _ -> return "many"
+}
+
+fn on_text(t: Text, flag: Bool) -> Int {
+  match t with
+  | "yes" -> return 1
+  | other -> {
+    let n: Int = Text.len(t: other)
+    return n
+  }
+}
+
+fn on_bool(b: Bool) -> Int {
+  match b with
+  | true -> return 1
+  | false -> return 0
+}
+
+fn qualified(e: sql.Error) -> Int {
+  match e with
+  | sql.Refinement(row, _) -> return row
+  | sql.Timeout(_, ..) -> return -1
+  | sql.Other -> return 0
+}
+
+fn duration_pattern(d: Duration) -> Int {
+  match d with
+  | 50ms -> return 1
+  | 1.5 -> return 2
+  | _ -> return 0
+}

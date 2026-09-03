@@ -1,0 +1,21 @@
+module lg
+
+fn f(a: Bool, b: Bool, c: Bool, x: Int, y: Int) -> Bool {
+  let p: Bool = a and b and c
+  let q: Bool = a or b or c
+  let r: Bool = (a and b) or c
+  let s: Bool = a and (b or c)
+  let t: Bool = not a and b
+  let u: Bool = not (a and b)
+  let v: Bool = not (not a)
+  let w: Bool = x < y and y <= 10
+  let n: Bool = not x == y
+  let m: Bool = (x == y) == a
+  let i: Bool = a implies b
+  let j: Bool = (a implies b) implies c
+  let k: Bool = a implies (b implies c)
+  let l: Bool = a or b implies c and not a
+  let o: Bool = (a and b) and c
+  let z: Bool = x != y or x >= y
+  return p or q
+}

@@ -1,0 +1,7 @@
+module e
+
+return 1
+
+fn f(x: Int) -> Int {
+  return x
+}

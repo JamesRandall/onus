@@ -1,0 +1,13 @@
+module t
+
+type Iter = Int where 0 <= it and it <= 10000
+
+pub type Coord = Int where 0 <= it
+
+type Step = fn(Int) -> Int
+
+type Handler = fn(Text, Int where it > 0) -> Result[Unit, Error] ! io.file, alloc
+
+type Ratio = Float where 0.0 <= it and it <= 1.0
+
+type Byte = Int where 0 <= it and it <= 255

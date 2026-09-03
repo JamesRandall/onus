@@ -1,0 +1,14 @@
+module ex
+
+example escape_count {
+  escape_count(cx: 0.0, cy: 0.0, limit: 100) == 100
+  escape_count(cx: 2.0, cy: 2.0, limit: 100) == 1
+}
+
+property escape_bounded(cx: Float, cy: Float, limit: Iter where it > 0) {
+  escape_count(cx: cx, cy: cy, limit: limit) <= limit
+}
+
+property trivial() {
+  true
+}

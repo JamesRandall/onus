@@ -1,0 +1,14 @@
+module u
+
+union Pixel =
+  | Inside
+  | Escaped of at: Iter where it > 0
+  | Skipped of reason: Text
+
+pub union Result[T, E] =
+  | Ok of value: T
+  | Err of error: E
+
+pub sealed union Token =
+  | Fresh of issued: Duration, holder: Text
+  | Revoked

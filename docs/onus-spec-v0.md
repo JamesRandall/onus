@@ -44,7 +44,7 @@ The grammar is designed to be prefix-decidable so that a constrained decoder can
 - Identifiers: `[a-z][a-z0-9_]*` for values and functions; `[A-Z][A-Za-z0-9]*` for types, unions, variants, claims, capabilities and modules.
 - Keywords are reserved and cannot be shadowed.
 - Blocks are `{ ... }`. Statements are newline-terminated; a statement cannot span lines except inside parentheses or brackets.
-- Comments: `--` to end of line. Comments carry no semantics and are excluded from the canonical hash of a definition.
+- Comments: `--` to end of line. Comments carry no semantics and are excluded from the canonical hash of a definition. <!-- changed: M1 — the canonical printer preserves comments, attached to the line-level construct they precede or follow; see docs/grammar-v0.md --> The canonical printer preserves them.
 
 ### 2.1 Operators
 
@@ -59,14 +59,16 @@ Comparison operators (`==` `!=` `<` `<=` `>` `>=`) are non-associative: `a < b <
 
 ### 2.2 Canonical form
 
-The compiler owns formatting. `onus check` reports non-canonical source as diagnostic `E0001` with the canonical text as its fix. Indentation is two spaces; one declaration per top-level item; one blank line between items; named arguments always on the call line unless the call exceeds 100 columns, in which case one argument per line. Every definition has a canonical byte sequence and a content hash used for proof caching.
+<!-- changed: M1 — the layout rules are made precise in docs/grammar-v0.md ("Canonical form"); see docs/CHANGES.md items 17–20 -->
+The precise layout rules are in `docs/grammar-v0.md`. The compiler owns formatting. `onus check` reports non-canonical source as diagnostic `E0001` with the canonical text as its fix. Indentation is two spaces; one declaration per top-level item; one blank line between items; named arguments always on the call line unless the call exceeds 100 columns, in which case one argument per line. Every definition has a canonical byte sequence and a content hash used for proof caching.
 
 ### 2.3 Grammar (**provisional**)
 
-EBNF. `NL` is a newline token; the lexer emits one per line end outside brackets. Every production is intended to be LL(1); where it is not, that is a bug in this section, not a feature of the language.
+<!-- changed: M1 — the grammar as implemented is docs/grammar-v0.md; the productions below are patched where implementation showed them unworkable or inconsistent with the examples (docs/CHANGES.md items 1–16). Notable: continuation newlines before `->` `else` `{` `claims` `requires` `ensures` `invariant` `decreases` are not significant; `{ stmt }` on one line is accepted and canonicalised; soft keywords. -->
+The grammar as implemented, with the canonical form, is `docs/grammar-v0.md`; the EBNF below is patched to agree with it. EBNF. `NL` is a newline token; the lexer emits one per line end outside brackets. Every production is intended to be LL(1); where it is not, that is a bug in this section, not a feature of the language.
 
 ```
-module      = "module" QNAME NL { "import" QNAME NL } { item } ;
+module      = [ "test" ] "module" QNAME NL { "import" QNAME NL } { item } ;   (* changed: M1, test modules §8.4 *)
 
 item        = fn_decl | type_alias | record_decl | union_decl | interface_decl
             | impl_decl | claim_decl | capability_decl | path_decl | policy_decl
@@ -74,14 +76,14 @@ item        = fn_decl | type_alias | record_decl | union_decl | interface_decl
 
 visibility  = [ "pub" ] [ "sealed" ] ;
 
-fn_decl     = visibility "fn" NAME [ tparams ] "(" [ params ] ")" "->" type [ "!" effects ]
-              [ "claims" claim_list ] NL { contract NL } block ;
+fn_decl     = visibility [ "const" ] "fn" NAME [ tparams ] "(" [ params ] ")" "->" type [ "!" effects ]
+              [ "claims" claim_list ] { contract } block ;      (* changed: M1, newlines before contracts and `{` are not significant *)
 tparams     = "[" tparam { "," tparam } "]" ;
 tparam      = TNAME [ ":" TNAME ]                       (* type parameter, optional bound *)
             | "const" NAME ":" type                     (* compile-time value parameter *)
             | NAME ;                                    (* effect parameter *)
 params      = param { "," param } ;
-param       = [ "inout" ] NAME ":" type ;
+param       = NAME ":" [ "inout" ] type ;               (* changed: M1, matches §4.1 and the call site *)
 effects     = effect { "," effect } ;
 effect      = QNAME | NAME ;                            (* primitive, claim, or effect parameter *)
 contract    = "requires" [ "proved" ] expr
@@ -89,7 +91,7 @@ contract    = "requires" [ "proved" ] expr
 
 type        = QTNAME [ "[" targ { "," targ } "]" ] [ "where" expr ]
             | "fn" "(" [ types ] ")" "->" type [ "!" effects ] ;
-targ        = type | expr ;                             (* expr must be constant, §3.8 *)
+targ        = [ NAME ":" ] ( type | expr ) ;            (* expr must be constant, §3.8; changed: M1, labelled per §8.2 *)
 
 type_alias  = visibility "type" TNAME "=" type NL ;
 const_decl  = visibility "const" NAME ":" type "=" expr NL ;
@@ -103,40 +105,42 @@ iface_item  = "fn" NAME "(" [ params ] ")" "->" type [ "!" effects ] NL { contra
             | "law" NAME "(" [ params ] ")" block ;
 impl_decl   = "impl" TNAME "[" type "]" "{" NL { fn_decl } "}" NL ;
 
-claim_decl  = visibility "claim" TNAME ( ":=" expr | STRING ) NL ;
+claim_decl  = visibility "claim" TNAME ( ":=" claim_pred | STRING ) NL ;   (* changed: M1, claim_pred is the §6.3 effect-predicate language *)
 capability_decl = visibility "capability" TNAME [ tparams ] NL { "grants" effect [ "when" expr ] NL } ;
 path_decl   = "path" NAME NL "entry" NAME NL { path_clause NL } ;
 path_clause = "effects" "<=" "{" [ effects ] "}"
             | "forbid" "{" effects "}"
             | "require" "{" claim_list "}"
             | "policy" NAME [ "except" "{" QNAME { "," QNAME } "}" ] ;
-policy_decl = "policy" NAME NL "forbid" "assume" "outside" "{" QNAME { "," QNAME } "}" NL ;
+policy_decl = "policy" NAME NL "forbid" "assume" "outside" "{" scope { "," scope } "}" NL ;
+scope       = "self" | QNAME [ "." "*" ] ;                (* changed: M1 *)
 
 example_decl  = "example" NAME block ;
 property_decl = "property" NAME "(" [ params ] ")" block ;
 
-block       = "{" NL { stmt NL } "}" ;
+block       = "{" ( NL { stmt NL } | [ stmt ] ) "}" ;   (* changed: M1, one-line form canonicalises to multi-line *)
 stmt        = "let" NAME ":" type "=" expr
             | "var" NAME ":" type "=" expr
             | NAME "=" expr
             | "return" expr
             | "if" expr block [ "else" ( block | if_stmt ) ]
             | "match" expr "with" NL { "|" pattern [ "when" expr ] "->" ( stmt | block ) NL }
-            | "loop" "while" expr NL { loop_clause NL } block
-            | "for" NAME ":" type "in" expr block
+            | "loop" "while" expr { loop_clause } block       (* changed: M1 *)
+            | "for" NAME ":" type "in" domain block           (* changed: M1 *)
             | "assume" TNAME STRING
             | expr ;                                    (* call for effect *)
 loop_clause = "invariant" expr | "decreases" expr ;
+domain      = expr [ "..<" expr ] ;                      (* changed: M1, ranges §5.1 §5.3 *)
 
-expr        = or_expr ;
+expr        = or_expr [ "implies" or_expr ] ;           (* changed: M1, non-associative; §3.6 *)
 or_expr     = and_expr [ "or" and_expr { "or" and_expr } ] ;
 and_expr    = not_expr [ "and" not_expr { "and" not_expr } ] ;
 not_expr    = [ "not" ] cmp_expr ;
-cmp_expr    = add_expr [ CMP_OP add_expr ] ;               (* non-associative *)
+cmp_expr    = add_expr [ CMP_OP add_expr | "is" pattern ] ;   (* non-associative; changed: M1, `is` §3.8.1 *)
 add_expr    = mul_expr { ( "+" | "-" | "++" ) mul_expr } ;
 mul_expr    = unary { ( "*" | "/" | "%" ) unary } ;
 unary       = [ "-" ] postfix ;
-postfix     = primary { "." NAME | call_args } ;
+postfix     = primary { "." NAME | [ "[" targ { "," targ } "]" ] call_args } ;   (* changed: M1, explicit args §18.2 *)
 primary     = LITERAL | NAME | "it" | "result"
             | QTNAME [ call_args ] [ "{" [ field_init { "," field_init } ] "}" ]   (* record ctor / variant ctor *)
             | "{" expr "with" field_init { "," field_init } "}"                    (* record update *)
@@ -144,9 +148,10 @@ primary     = LITERAL | NAME | "it" | "result"
             | "try" expr [ "else" NAME ":" expr ]
             | "recover" block
             | "old" "(" NAME ")"
-            | ( "forall" | "exists" ) NAME ":" type [ "in" expr ] [ "where" expr ] ":" expr
-            | "fn" "(" [ params ] ")" "->" type [ "!" effects ] block ;   (* closure *)
-call_args   = "(" [ NAME ":" expr { "," NAME ":" expr } ] ")" ;
+            | ( "forall" | "exists" ) NAME ":" type [ "in" domain ] [ "where" expr ] ":" expr   (* changed: M1; the binder type has no where of its own *)
+            | "fn" "(" [ params ] ")" "->" type [ "!" effects ] block    (* closure *)
+            | "fake" QTNAME "{" [ field_init { "," field_init } ] "}" ;  (* changed: M1, §8.4; syntax error outside a test module *)
+call_args   = "(" [ NAME ":" [ "inout" ] expr { "," NAME ":" [ "inout" ] expr } ] ")" ;   (* changed: M1, §4.1 *)
 field_init  = NAME ":" expr ;
 pattern     = "_" | NAME | LITERAL
             | QTNAME [ "(" pat_field { "," pat_field } ")" ] ;
@@ -166,7 +171,7 @@ Notes: `or_expr` and `and_expr` cannot nest without parentheses, so mixed `and`/
 | `Int` | 64-bit signed. Overflow is a contract violation, not wraparound. Refinements narrow it. |
 | `Float` | IEEE 754 double. `NaN` and infinities are values that must be excluded by refinement or handled by `match` on `Float.classify`. |
 | `Bool` | |
-| `Text` | UTF-8, immutable, no character indexing. Grapheme and byte views via the standard library. |
+| `Text` | UTF-8, immutable, no character indexing. Grapheme and byte views via the standard library. Literals are single-line; a newline is written `\n`. <!-- changed: M1, one canonical spelling per value --> |
 | `Unit` | The single value `Unit`. |
 | `Byte` | `Int where 0 <= it and it <= 255`; a refinement alias, not a distinct representation. |
 | `Bytes` | Immutable byte sequence. Indexed by `Int where 0 <= it and it < len`. |
@@ -528,12 +533,12 @@ fn map[T, U, e](xs: List[T], f: fn(T) -> U ! e) -> List[U] ! e, alloc
 
 ### 6.3 Derived effect predicates
 
-Named predicates over the primitive set are definable anywhere and are fully checked:
+Named predicates over the primitive set are definable anywhere and are fully checked: <!-- changed: M1, claims are type names per §2 and the grammar -->
 
 ```
-claim pure          := effects == {}
-claim total         := not diverge and not panic
-claim realtime_safe := total and not alloc
+claim Pure := effects == {}
+claim Total := not diverge and not panic
+claim RealtimeSafe := Total and not alloc
 ```
 
 ---
@@ -581,12 +586,12 @@ This is how a critical path refuses to depend on a library's word.
 
 ## 8. Capabilities
 
-A capability is an unforgeable value that both grants access to a resource and carries the claims the resource has been configured to honour.
+A capability is an unforgeable value that both grants access to a resource and carries the claims the resource has been configured to honour. <!-- changed: M1, example rewritten per the tparams grammar; no set-membership expression in v0 -->
 
 ```
-capability Db[mode: DbMode]
-  grants sql.read            when mode in { ReadOnly, ReadWrite }
-  grants sql.write           when mode == ReadWrite
+capability Db[const mode: DbMode]
+  grants sql.read when mode == ReadOnly or mode == ReadWrite
+  grants sql.write when mode == ReadWrite
 ```
 
 - Capability types have no public constructor. They are created only by root-level functions in the standard library or by attenuation.
@@ -656,7 +661,7 @@ A path declares the guarantees a critical section of the program must satisfy, a
 path checkout
   entry   handle_checkout
   effects <= { sql.read, sql.write, io.net, io.clock, alloc }
-  require { total, Idempotent }
+  require { Total, Idempotent }
   policy  no_third_party_assumes
 ```
 
@@ -703,7 +708,7 @@ The report is the reviewer's primary artefact for a path. It has a human-readabl
 
 `Result[T, E]` and `Option[T]` are the only mechanism for expected failure. Error types are unions.
 
-`try e` unwraps a `Result[T, E]`: on `Ok(v)` it yields `v`; on `Err(x)` it returns from the enclosing function. Two forms:
+`try e` unwraps a `Result[T, E]`: on `Ok(value: v)` it yields `v`; on `Err(error: x)` it returns from the enclosing function. <!-- changed: M1, arguments are named at every call (§5); Result's fields are value and error --> Two forms:
 
 - `try e` — the enclosing function's return type must be `Result[_, E]` with the *same* `E`. The error is returned as-is.
 - `try e else name: expr` — `name` binds the error value; `expr` produces the enclosing function's error type. This is the only conversion mechanism; there is no implicit `From`.
@@ -906,13 +911,16 @@ Recorded rather than resolved.
 
 ### 18.1 Mandelbrot
 
+<!-- changed: M1, the code below is examples/mandelbrot/… in canonical form: named arguments, single-line literals, layout -->
+
 Demonstrates: refinements, dependent records, contracts, loop invariants and termination, indexed types, examples and properties, the effect boundary.
 
 ```
 module mandelbrot
 import std.io
 
-type Iter  = Int where 0 <= it and it <= 10_000
+type Iter = Int where 0 <= it and it <= 10000
+
 type Coord = Int where 0 <= it
 
 record Viewport {
@@ -924,19 +932,19 @@ record Viewport {
 
 pub fn escape_count(cx: Float, cy: Float, limit: Iter) -> Iter
   requires limit > 0
-  ensures  result <= limit
+  ensures result <= limit
 {
   var zx: Float = 0.0
   var zy: Float = 0.0
-  var i:  Iter  = 0
-  loop while i < limit and zx*zx + zy*zy <= 4.0
+  var i: Iter = 0
+  loop while i < limit and zx * zx + zy * zy <= 4.0
     invariant i <= limit
     decreases limit - i
   {
-    let nx: Float = zx*zx - zy*zy + cx
-    zy = 2.0*zx*zy + cy
+    let nx: Float = zx * zx - zy * zy + cx
+    zy = 2.0 * zx * zy + cy
     zx = nx
-    i  = i + 1
+    i = i + 1
   }
   return i
 }
@@ -950,9 +958,12 @@ property escape_bounded(cx: Float, cy: Float, limit: Iter where it > 0) {
   escape_count(cx: cx, cy: cy, limit: limit) <= limit
 }
 
-pub fn render(view: Viewport, width: Coord where it > 0, height: Coord where it > 0, limit: Iter where it > 0)
-  -> Grid[Iter, width, height] ! alloc
-{
+pub fn render(
+  view: Viewport,
+  width: Coord where it > 0,
+  height: Coord where it > 0,
+  limit: Iter where it > 0
+) -> Grid[Iter, width, height] ! alloc {
   var grid: Grid[Iter, width, height] = Grid.filled(value: 0, width: width, height: height)
   for py: Int in 0 ..< height {
     for px: Int in 0 ..< width {
@@ -976,13 +987,15 @@ pub fn main(args: List[Text], files: io.Files) -> Result[Unit, io.Error] ! io.fi
     }
     try io.write(file: out, text: "\n")
   }
-  return Ok(Unit)
+  return Ok(value: Unit)
 }
 ```
 
 **Ledger, abridged.** `escape_count.ensures result <= limit`: proved from the invariant. `render` index bounds on `Grid.set`: proved from the `for` ranges against the grid's indices. The `Viewport` refinements at construction in `main`: proved (constants). The loop condition `zx*zx + zy*zy <= 4.0` is a `Float` expression and generates no obligation; it is simply evaluated. `Int.to_text` and `Float.of` are total. No obligation is *checked*, so no function needs `panic`.
 
 ### 18.2 Monthly report (SQL)
+
+<!-- changed: M1, the code below is examples/reporting/… in canonical form: named arguments, single-line literals, layout -->
 
 Demonstrates: capabilities, construction from configuration, attenuation, the assumed leaf at the root, a path that forbids writes.
 
@@ -998,41 +1011,51 @@ record MonthlyTotal {
 }
 
 union AppError =
-  | Config  of detail: config.Error
+  | Config of detail: config.Error
   | Storage of detail: sql.Error
-  | Io      of detail: io.Error
+  | Io of detail: io.Error
 
-pub fn monthly_totals(db: sql.Db[ReadOnly, schema: "orders"], year: Int where 2000 <= it and it <= 2100)
-  -> Result[List[MonthlyTotal], sql.Error] ! sql.read, alloc
+pub fn monthly_totals(
+  db: sql.Db[ReadOnly, schema: "orders"],
+  year: Int where 2000 <= it and it <= 2100
+) -> Result[List[MonthlyTotal], sql.Error] ! sql.read, alloc
   ensures forall t: MonthlyTotal in result: t.total_pence >= 0
 {
   -- text is a const parameter (§3.8.1): std.sql's own parse_select runs at check time and rejects anything but a single SELECT.
   let stmt: sql.Select[MonthlyTotal] = sql.select[
-    text: "select to_char(created, 'YYYY-MM') as month, sum(amount_pence) as total_pence
-           from orders where extract(year from created) = $1 group by 1 order by 1"
+    text: "select to_char(created, 'YYYY-MM') as month, sum(amount_pence) as total_pence from orders where extract(year from created) = $1 group by 1 order by 1"
   ](params: [sql.int(x: year)], row: MonthlyTotal)
   return sql.query(db: db, statement: stmt)
 }
 
 -- Root capabilities are supplied by the runtime to main and nowhere else (§8.3).
-pub fn main(args: List[Text], env: io.Env, files: io.Files, net: io.Net)
-  -> Result[Unit, AppError] ! io.env, io.file, io.net, sql.read, alloc
-{
+pub fn main(
+  args: List[Text],
+  env: io.Env,
+  files: io.Files,
+  net: io.Net
+) -> Result[Unit, AppError] ! io.env, io.file, io.net, sql.read, alloc {
   let cfg: config.Config = try config.load(env: env) else e: Config(detail: e)
-  let reporting: sql.Db[ReadOnly] = try sql.connect(net: net, dsn: cfg.reporting_dsn, mode: ReadOnly) else e: Storage(detail: e)
+  let reporting: sql.Db[ReadOnly] = try sql.connect(
+    net: net,
+    dsn: cfg.reporting_dsn,
+    mode: ReadOnly
+  ) else e: Storage(detail: e)
   let orders: sql.Db[ReadOnly, schema: "orders"] = sql.restrict(db: reporting, schema: "orders")
-  let rows: List[MonthlyTotal] = try monthly_totals(db: orders, year: 2026) else e: Storage(detail: e)
+  let rows: List[MonthlyTotal] = try monthly_totals(db: orders, year: 2026)
+    else e: Storage(detail: e)
   let out: io.File = try io.create(files: files, path: "report.csv") else e: Io(detail: e)
   for row: MonthlyTotal in rows {
-    try io.write(file: out, text: row.month ++ "," ++ Int.to_text(x: row.total_pence) ++ "\n") else e: Io(detail: e)
+    try io.write(file: out, text: row.month ++ "," ++ Int.to_text(x: row.total_pence) ++ "\n")
+      else e: Io(detail: e)
   }
-  return Ok(Unit)
+  return Ok(value: Unit)
 }
 
 path monthly_report
-  entry   monthly_totals
+  entry monthly_totals
   effects <= { sql.read, alloc }
-  forbid  { sql.write, io.net, io.file }
+  forbid { sql.write, io.net, io.file }
 ```
 
 **What the compiler establishes.** `sql.select` takes its statement as a `const` parameter and requires `sql.parse_select` — a `const fn` shipped by the library, not a compiler feature — to accept it as a single `SELECT`, so `Select[T]` cannot carry a write. The same `const fn` projects the column list and checks it against `MonthlyTotal`'s fields, so a typo in a column name is a compile error at the character in the string. `sql.query` requires a `Db[ReadOnly, ...]` and therefore satisfies `sql.read` only. The path check confirms nothing reachable from `monthly_totals` can write or perform other IO. The `ensures` on `monthly_totals` is *checked*, not proved: it depends on database contents, and the library inserts a row-level refinement check when decoding `MonthlyTotal` (`total_pence: Int where it >= 0`), so `monthly_totals` must declare `panic` or — as written — the library's decode returns `sql.Error.Refinement` instead, keeping the function panic-free.
@@ -1040,6 +1063,8 @@ path monthly_report
 **Ledger, the interesting entry.** `sql.read` on path `monthly_report` rests on one assumption, at `main`, line 18: *the role in `cfg.reporting_dsn` is read-only.* `sql.connect(mode: ReadOnly)` sets the session read-only and verifies the role's privileges at connect time; what remains assumed is that the privileges are not changed afterwards. The reviewer reads that one line and knows where the guarantee ends.
 
 ### 18.3 Checkout endpoint
+
+<!-- changed: M1, the code below is examples/checkout/… in canonical form: named arguments, single-line literals, layout -->
 
 Demonstrates: typestate for ordering ("auth before data"), asserted claims and their `assume` leaves, a path with a policy, `Result` error composition.
 
@@ -1052,9 +1077,10 @@ import vendor.payments
 
 -- auth.AuthedCustomer is `pub sealed` (§3.10): readable anywhere, constructible only inside app.auth.
 -- The only producer is auth.require, so any function demanding one is callable only after a successful auth check.
-
-pub fn recent_orders(db: sql.Db[ReadOnly, schema: "orders"], who: auth.AuthedCustomer)
-  -> Result[List[Order], sql.Error] ! sql.read, alloc
+pub fn recent_orders(
+  db: sql.Db[ReadOnly, schema: "orders"],
+  who: auth.AuthedCustomer
+) -> Result[List[Order], sql.Error] ! sql.read, alloc
   ensures forall o: Order in result: o.customer == who.id
 {
   let stmt: sql.Select[Order] = sql.select[
@@ -1065,39 +1091,45 @@ pub fn recent_orders(db: sql.Db[ReadOnly, schema: "orders"], who: auth.AuthedCus
 
 union CheckoutError =
   | Unauthorised of detail: auth.Error
-  | Storage      of detail: sql.Error
-  | Payment      of detail: payments.Error
+  | Storage of detail: sql.Error
+  | Payment of detail: payments.Error
   | Empty
 
 pub fn handle_checkout(
-  req:   Request,
+  req: Request,
   clock: io.Clock,
-  db:    sql.Db[ReadWrite, schema: "orders"],
-  pay:   payments.Client,
-  auth:  auth.Service
+  db: sql.Db[ReadWrite, schema: "orders"],
+  pay: payments.Client,
+  auth: auth.Service
 ) -> Result[Receipt, CheckoutError] ! sql.read, sql.write, io.net, io.clock, alloc
   claims Idempotent
 {
-  let who: auth.AuthedCustomer = try auth.require(service: auth, caller: req.caller, customer: req.customer, clock: clock)
-    else e: Unauthorised(detail: e)
-
+  let who: auth.AuthedCustomer = try auth.require(
+    service: auth,
+    caller: req.caller,
+    customer: req.customer,
+    clock: clock
+  ) else e: Unauthorised(detail: e)
   let basket: Basket = try load_basket(db: sql.narrow(db: db, to: ReadOnly), who: who)
     else e: Storage(detail: e)
-  if List.is_empty(xs: basket.items) { return Err(Empty) }
-
-  let receipt: Receipt = try payments.charge(client: pay, key: req.idempotency_key, amount: basket.total, who: who)
-    else e: Payment(detail: e)
-
-  try record_order(db: db, who: who, basket: basket, receipt: receipt)
-    else e: Storage(detail: e)
-  return Ok(receipt)
+  if List.is_empty(xs: basket.items) {
+    return Err(error: Empty)
+  }
+  let receipt: Receipt = try payments.charge(
+    client: pay,
+    key: req.idempotency_key,
+    amount: basket.total,
+    who: who
+  ) else e: Payment(detail: e)
+  try record_order(db: db, who: who, basket: basket, receipt: receipt) else e: Storage(detail: e)
+  return Ok(value: receipt)
 }
 
 path checkout
-  entry   handle_checkout
+  entry handle_checkout
   effects <= { sql.read, sql.write, io.net, io.clock, alloc }
   require { Idempotent }
-  policy  no_third_party_assumes except { vendor.payments.charge }
+  policy no_third_party_assumes except { vendor.payments.charge }
 ```
 
 **Ordering without a trace property.** `recent_orders`, `load_basket` and `record_order` all take an `auth.AuthedCustomer`. That type is produced only by `auth.require`, so the compiler cannot type a call to any of them before a successful auth check has run. "Auth before data" is not a rule anyone has to remember; it is not expressible otherwise.

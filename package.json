@@ -1,0 +1,21 @@
+{
+  "name": "onus",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Onus: a language in which a model writes function bodies, a human reviews contracts, and the compiler is the only checker.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "onus": "node packages/compiler/dist/cli/main.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "~5.9.3",
+    "vitest": "^4.1.11"
+  },
+  "packageManager": "pnpm@10.26.0"
+}

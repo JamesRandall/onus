@@ -1,0 +1,56 @@
+module reporting
+import std.sql
+import std.io
+import app.config
+
+record MonthlyTotal {
+  month: Text
+  total_pence: Int where it >= 0
+}
+
+union AppError =
+  | Config of detail: config.Error
+  | Storage of detail: sql.Error
+  | Io of detail: io.Error
+
+pub fn monthly_totals(
+  db: sql.Db[ReadOnly, schema: "orders"],
+  year: Int where 2000 <= it and it <= 2100
+) -> Result[List[MonthlyTotal], sql.Error] ! sql.read, alloc
+  ensures forall t: MonthlyTotal in result: t.total_pence >= 0
+{
+  -- text is a const parameter (§3.8.1): std.sql's own parse_select runs at check time and rejects anything but a single SELECT.
+  let stmt: sql.Select[MonthlyTotal] = sql.select[
+    text: "select to_char(created, 'YYYY-MM') as month, sum(amount_pence) as total_pence from orders where extract(year from created) = $1 group by 1 order by 1"
+  ](params: [sql.int(x: year)], row: MonthlyTotal)
+  return sql.query(db: db, statement: stmt)
+}
+
+-- Root capabilities are supplied by the runtime to main and nowhere else (§8.3).
+pub fn main(
+  args: List[Text],
+  env: io.Env,
+  files: io.Files,
+  net: io.Net
+) -> Result[Unit, AppError] ! io.env, io.file, io.net, sql.read, alloc {
+  let cfg: config.Config = try config.load(env: env) else e: Config(detail: e)
+  let reporting: sql.Db[ReadOnly] = try sql.connect(
+    net: net,
+    dsn: cfg.reporting_dsn,
+    mode: ReadOnly
+  ) else e: Storage(detail: e)
+  let orders: sql.Db[ReadOnly, schema: "orders"] = sql.restrict(db: reporting, schema: "orders")
+  let rows: List[MonthlyTotal] = try monthly_totals(db: orders, year: 2026)
+    else e: Storage(detail: e)
+  let out: io.File = try io.create(files: files, path: "report.csv") else e: Io(detail: e)
+  for row: MonthlyTotal in rows {
+    try io.write(file: out, text: row.month ++ "," ++ Int.to_text(x: row.total_pence) ++ "\n")
+      else e: Io(detail: e)
+  }
+  return Ok(value: Unit)
+}
+
+path monthly_report
+  entry monthly_totals
+  effects <= { sql.read, alloc }
+  forbid { sql.write, io.net, io.file }

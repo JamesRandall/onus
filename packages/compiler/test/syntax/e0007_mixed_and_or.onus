@@ -1,0 +1,7 @@
+module e
+
+fn f(a: Bool, b: Bool, c: Bool) -> Bool {
+  let x: Bool = a and b or c
+  let y: Bool = a or b and c
+  return x
+}

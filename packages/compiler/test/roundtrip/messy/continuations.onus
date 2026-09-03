@@ -1,0 +1,28 @@
+module co
+
+pub fn render(view: Viewport, width: Coord where it > 0, height: Coord where it > 0, limit: Iter where it > 0)
+  -> Grid[Iter, width, height] ! alloc
+{
+  let who: auth.AuthedCustomer = try auth.require(service: auth)
+    else e: Unauthorised(detail: e)
+  let stmt: sql.Select[MonthlyTotal] = sql.select[
+    text: "select 1"
+  ](params: [sql.int(x: year)], row: MonthlyTotal)
+  let view: Viewport = Viewport {
+    x_min: -2.5,
+    x_max: 1.0
+  }
+  if x < 0 {
+    return 0
+  }
+  else {
+    return 1
+  }
+  return grid
+}
+
+pub fn handle(req: Request) -> Result[Receipt, CheckoutError] ! sql.read
+  claims Idempotent
+{
+  return Ok(value: r)
+}

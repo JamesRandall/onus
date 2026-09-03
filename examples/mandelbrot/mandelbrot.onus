@@ -1,0 +1,73 @@
+module mandelbrot
+import std.io
+
+type Iter = Int where 0 <= it and it <= 10000
+
+type Coord = Int where 0 <= it
+
+record Viewport {
+  x_min: Float
+  x_max: Float where it > x_min
+  y_min: Float
+  y_max: Float where it > y_min
+}
+
+pub fn escape_count(cx: Float, cy: Float, limit: Iter) -> Iter
+  requires limit > 0
+  ensures result <= limit
+{
+  var zx: Float = 0.0
+  var zy: Float = 0.0
+  var i: Iter = 0
+  loop while i < limit and zx * zx + zy * zy <= 4.0
+    invariant i <= limit
+    decreases limit - i
+  {
+    let nx: Float = zx * zx - zy * zy + cx
+    zy = 2.0 * zx * zy + cy
+    zx = nx
+    i = i + 1
+  }
+  return i
+}
+
+example escape_count {
+  escape_count(cx: 0.0, cy: 0.0, limit: 100) == 100
+  escape_count(cx: 2.0, cy: 2.0, limit: 100) == 1
+}
+
+property escape_bounded(cx: Float, cy: Float, limit: Iter where it > 0) {
+  escape_count(cx: cx, cy: cy, limit: limit) <= limit
+}
+
+pub fn render(
+  view: Viewport,
+  width: Coord where it > 0,
+  height: Coord where it > 0,
+  limit: Iter where it > 0
+) -> Grid[Iter, width, height] ! alloc {
+  var grid: Grid[Iter, width, height] = Grid.filled(value: 0, width: width, height: height)
+  for py: Int in 0 ..< height {
+    for px: Int in 0 ..< width {
+      let cx: Float = view.x_min + (view.x_max - view.x_min) * Float.of(x: px) / Float.of(x: width)
+      let cy: Float = view.y_min + (view.y_max - view.y_min) * Float.of(x: py) / Float.of(x: height)
+      Grid.set(grid: inout grid, x: px, y: py, value: escape_count(cx: cx, cy: cy, limit: limit))
+    }
+  }
+  return grid
+}
+
+pub fn main(args: List[Text], files: io.Files) -> Result[Unit, io.Error] ! io.file, alloc {
+  -- files is a root capability supplied by the runtime (§8.3)
+  let view: Viewport = Viewport { x_min: -2.5, x_max: 1.0, y_min: -1.0, y_max: 1.0 }
+  let grid: Grid[Iter, 800, 600] = render(view: view, width: 800, height: 600, limit: 255)
+  let out: io.File = try io.create(files: files, path: "mandelbrot.pgm")
+  try io.write(file: out, text: "P2\n800 600\n255\n")
+  for py: Int in 0 ..< 600 {
+    for px: Int in 0 ..< 800 {
+      try io.write(file: out, text: Int.to_text(x: Grid.get(grid: grid, x: px, y: py)) ++ " ")
+    }
+    try io.write(file: out, text: "\n")
+  }
+  return Ok(value: Unit)
+}

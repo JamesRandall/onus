@@ -1,0 +1,21 @@
+module i
+
+pub interface Codec[T] {
+  fn encode(value: T) -> Text ! alloc
+
+  fn decode(text: Text) -> Result[T, CodecError] ! alloc
+
+  law round_trip(value: T) {
+    decode(text: encode(value: value)) == Ok(value: value)
+  }
+}
+
+interface Ord[T] {
+  fn compare(a: T, b: T) -> Ordering
+    ensures compare(a: a, b: a) == Equal
+    ensures compare(a: a, b: b) == Less implies compare(a: b, b: a) == Greater
+
+  law transitive(a: T, b: T, c: T) {
+    compare(a: a, b: b) == Less and compare(a: b, b: c) == Less implies compare(a: a, b: c) == Less
+  }
+}

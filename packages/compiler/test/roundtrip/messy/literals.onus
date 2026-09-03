@@ -1,0 +1,15 @@
+module li
+
+fn f() -> Unit {
+  let a: Int = 10_000
+  let b: Int = 1_000_000
+  let c: Float = 1.50
+  let d: Float = 1_000.25
+  let e: Duration = 2000ms
+  let g: Duration = 1_500us
+  let h: Duration = 3000000ns
+  let i: Float = 1E3
+  let j: Float = 0.5e1
+  let k: Text = "tab\tand\"quote"
+  return Unit
+}

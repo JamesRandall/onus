@@ -1,0 +1,24 @@
+module r
+
+record Viewport {
+  x_min: Float
+  x_max: Float where it > x_min
+  y_min: Float
+  y_max: Float where it > y_min
+}
+
+pub record Pair[T, U] {
+  first: T
+  second: U
+}
+
+pub sealed record AuthedCustomer {
+  id: Text
+}
+
+record Grid[T, const width: Int where it > 0, const height: Int where it > 0] {
+  cells: List[T]
+}
+
+record Empty {
+}

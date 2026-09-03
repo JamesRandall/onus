@@ -1,0 +1,11 @@
+module cap
+
+pub capability Db[const mode: DbMode]
+  grants sql.read when mode == ReadOnly or mode == ReadWrite
+  grants sql.write when mode == ReadWrite
+
+capability Clock
+  grants io.clock
+  grants nondet
+
+capability Nothing

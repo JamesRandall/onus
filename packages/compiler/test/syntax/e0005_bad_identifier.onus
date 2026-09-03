@@ -1,0 +1,5 @@
+module e
+
+fn f(xValue: Int) -> Int {
+  return xValue
+}

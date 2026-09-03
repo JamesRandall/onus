@@ -1,0 +1,17 @@
+module oir
+
+fn set(g: inout Grid[T, w, h], x: Int where it < w, y: Int where it < h, v: T) -> Unit ! mutate
+  ensures g.get(x: x, y: y) == v
+  ensures forall px: Int in 0 ..< w where px != x: g.get(x: px, y: y) == old(g).get(x: px, y: y)
+{
+  return Unit
+}
+
+fn abs(x: Int) -> Int where it >= 0
+  ensures result == x or result == -x
+{
+  if x < 0 {
+    return -x
+  }
+  return x
+}

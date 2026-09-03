@@ -1,0 +1,15 @@
+test module checkout_tests
+import app.checkout
+
+example handle_checkout_empty_basket {
+  let db: sql.Db[ReadWrite, schema: "orders"] = fake sql.Db {
+    query: fn(q: Text) -> List[Row] ! alloc {
+      return []
+    },
+    execute: fn(q: Text) -> Unit {
+      return Unit
+    }
+  }
+  let clock: io.Clock = fake io.Clock {}
+  handle_checkout(req: empty_request, clock: clock, db: db) == Err(error: Empty)
+}

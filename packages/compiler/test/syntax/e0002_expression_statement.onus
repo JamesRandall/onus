@@ -1,0 +1,13 @@
+module e
+
+fn f(x: Int) -> Int {
+  x + 1
+  g(y: x)
+  try h(y: x)
+  x
+  return x
+}
+
+example ok_here {
+  f(x: 1) == 2
+}

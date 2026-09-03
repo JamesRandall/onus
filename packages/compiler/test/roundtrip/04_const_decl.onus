@@ -1,0 +1,13 @@
+module c
+
+pub const max_iter: Iter = 10000
+
+const origin: Float = 0.0
+
+const greeting: Text = "hello"
+
+const timeout: Duration = 50ms
+
+const enabled: Bool = true
+
+const derived: Int = max_iter * 2 + 1

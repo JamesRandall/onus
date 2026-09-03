@@ -1,0 +1,22 @@
+module cb
+
+fn f(view: Viewport, mode: DbMode) -> Int {
+  if view == (Viewport { x_min: 0.0 }) {
+    return 1
+  }
+  if mode == ReadOnly {
+    return 2
+  }
+  match (Viewport { x_min: 0.0 }) with
+  | _ -> return 3
+  loop while view != ({ view with x_min: 1.0 })
+    invariant view == (Viewport { x_min: 0.0 })
+    decreases 0
+  {
+    return 4
+  }
+  for v: Viewport in [Viewport { x_min: 0.0 }] {
+    return 5
+  }
+  return 0
+}

@@ -1,0 +1,17 @@
+module tr
+
+fn f(files: io.Files) -> Result[Unit, AppError] ! io.file, alloc {
+  let cfg: config.Config = try config.load(env: env) else e: Config(detail: e)
+  let out: io.File = try io.create(files: files, path: "report.csv")
+  try io.write(file: out, text: "x")
+  try io.write(file: out, text: "y") else e: Io(detail: e)
+  let n: Int = (try count()) + 1
+  let m: Int = try count() + 1
+  let p: Option[Int] = try lookup(key: "k") else u: Missing
+  let q: Int = try (try inner()) else e: 0
+  let r: Int = try 1 + (try inner()) else e: 0
+  let s: Int = try try inner() else e: 0
+  let t: Int = try (forall x: Int in xs: try check(x: x)) else e: 0
+  let v: Int = try try inner() else e: 1 else e: 0
+  return Ok(value: Unit)
+}

@@ -1,0 +1,67 @@
+-- A file-level comment before the module header.
+module cm
+-- After the header, before imports.
+import std.io -- trailing on an import
+
+-- Leading comment on a type alias.
+type Iter = Int where 0 <= it -- trailing on the alias
+
+record Viewport {
+  -- leading on a field
+  x_min: Float
+  x_max: Float -- trailing on a field
+  -- dangling at the end of the record
+}
+
+union Pixel =
+  -- leading on a variant
+  | Inside
+  | Escaped of at: Iter -- trailing on a variant
+
+-- Leading on a function.
+pub fn escape_count(cx: Float, limit: Iter) -> Iter -- trailing on the signature
+  -- leading on a contract
+  requires limit > 0 -- trailing on a contract
+  ensures result <= limit
+{
+  -- leading on the first statement
+  var i: Iter = 0 -- trailing on a statement
+  loop while i < limit
+    -- leading on a clause
+    invariant i <= limit -- trailing on a clause
+    decreases limit - i
+  {
+    i = i + 1
+    -- dangling at the end of a block
+  }
+  match i with
+  -- leading on an arm
+  | 0 -> return 0 -- trailing on an arm
+  | _ -> {
+    -- inside an arm block
+    return i
+  }
+}
+
+fn empty() -> Unit {
+  -- only a comment in this block
+}
+
+fn args(
+  -- leading on a parameter
+  a: Int,
+  b: Int -- trailing on a parameter
+) -> Int {
+  return f(
+    -- leading on an argument
+    x: a,
+    y: b -- trailing on an argument
+  )
+}
+
+path p
+  entry main
+  -- leading on a clause
+  effects <= { alloc } -- trailing on a clause
+
+-- Dangling at the end of the module.

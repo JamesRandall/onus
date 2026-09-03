@@ -1,0 +1,5 @@
+module e
+
+fn f(a: Bool, b: Bool, c: Bool) -> Bool {
+  return a implies b implies c
+}

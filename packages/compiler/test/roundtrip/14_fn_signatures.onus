@@ -1,0 +1,44 @@
+module sig
+
+fn pure_fn(x: Int) -> Int {
+  return x
+}
+
+pub fn effectful(files: io.Files, path: Text) -> Result[Unit, io.Error] ! io.file, alloc {
+  return Ok(value: Unit)
+}
+
+pub fn generic[T: Ord, U, const n: Int, e](xs: List[T], f: fn(T) -> U ! e) -> List[U] ! e, alloc {
+  return []
+}
+
+fn mutating(grid: inout Grid[T, w, h], x: Int, value: T) -> Unit ! mutate
+  requires x < w
+  ensures grid.get(x: x) == value
+{
+  return Unit
+}
+
+fn contracted(limit: Iter) -> Iter
+  requires proved limit > 0
+  ensures proved result <= limit
+{
+  return limit
+}
+
+pub const fn parse_select(text: Text) -> Result[SelectAst, ConstError]
+  ensures result is Ok
+{
+  return Err(error: ConstError { offset: 0 })
+}
+
+pub fn claiming(pay: Payments) -> Result[Receipt, ChargeError] ! io.net
+  claims Idempotent, audit.Audited
+{
+  assume Idempotent "Vendor API deduplicates on req.key for 24h; see contract §4.2"
+  return Err(error: Declined)
+}
+
+pub sealed fn sealed_fn() -> Unit {
+  return Unit
+}

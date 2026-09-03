@@ -1,0 +1,11 @@
+module qf
+
+fn f(xs: List[Int], g: Grid[Int, 4, 4], target: Int, n: Int) -> Result[List[Order], Error]
+  ensures forall o: Order in result: o.customer == who.id
+  ensures forall px: Int in 0 ..< w: forall py: Int in 0 ..< h where px != py: g.get(x: px) == 0
+  ensures exists i: Int in 0 ..< n: xs.get(i: i) == target
+  ensures forall b: Bool: b or not b
+  ensures forall t: MonthlyTotal in result where t.total_pence > 0: t.month != ""
+{
+  return Ok(value: [])
+}

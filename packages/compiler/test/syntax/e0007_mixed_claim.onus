@@ -1,0 +1,3 @@
+module e
+
+claim Mixed := alloc and panic or diverge

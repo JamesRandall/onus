@@ -1,0 +1,26 @@
+module lit
+
+fn f() -> Unit {
+  let a: Int = 0
+  let b: Int = 10000
+  let c: Float = 0.0
+  let d: Float = 2.5
+  let e: Float = 1e+21
+  let f: Float = 1e-7
+  let g: Float = 123456.789
+  let h: Text = "P2\n800 600\n255\n"
+  let i: Text = "quote \" backslash \\ tab \t cr \r nul \0"
+  let j: Text = ""
+  let k: Text = "unicode ünïcödé 🙂"
+  let l: Duration = 50ms
+  let m: Duration = 2s
+  let n: Duration = 1500us
+  let o: Duration = 7ns
+  let p: Duration = 0s
+  let q: Bool = true
+  let r: Bool = false
+  let s: Float = 100.0
+  let t: Int = -5
+  let u: Float = -2.5
+  return Unit
+}

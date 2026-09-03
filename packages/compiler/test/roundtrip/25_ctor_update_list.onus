@@ -1,0 +1,15 @@
+module cu
+
+fn f(view: Viewport) -> Viewport {
+  let a: Viewport = Viewport { x_min: -2.5, x_max: 1.0, y_min: -1.0, y_max: 1.0 }
+  let b: Viewport = { view with x_max: 2.0 }
+  let c: Viewport = { view with x_max: 2.0, y_max: 3.0 }
+  let d: Viewport = { { view with x_max: 2.0 } with y_max: 3.0 }
+  let e: Empty = Empty {}
+  let g: List[Int] = []
+  let h: List[Int] = [1, 2, 3]
+  let i: List[List[Int]] = [[1], [], [2, 3]]
+  let j: List[Text] = [Int.to_text(x: 1), "b" ++ "c"]
+  let k: Box = Box { inner: Box { inner: Leaf {} } }
+  return b
+}

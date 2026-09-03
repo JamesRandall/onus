@@ -1,0 +1,20 @@
+module ar
+
+fn f(a: Int, b: Int, c: Int) -> Int {
+  let p: Int = a + b * c
+  let q: Int = (a + b) * c
+  let r: Int = a - b - c
+  let s: Int = a - (b - c)
+  let t: Int = a * b / c % 2
+  let u: Int = a * (b / c)
+  let v: Int = -a * b
+  let w: Int = -(a * b)
+  let x: Int = -a.b
+  let y: Int = (-a).b
+  let z: Int = -(-a)
+  let m: Int = (a + b).c
+  let n: Int = f(x: 1).y + g(x: 2).z
+  let o: Text = "a" ++ "b" ++ Int.to_text(x: a)
+  let big: Int = 9223372036854775807
+  return p + q + r + s + t + u + v + w + x + y + z + m + n
+}

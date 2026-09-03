@@ -1,0 +1,14 @@
+module e
+
+fn f(x: Int) -> Int {
+  let y: Int = = 1
+  return x
+}
+
+fn g(x: Int) -> Int {
+  return x +
+}
+
+fn h(x: Int) -> Int {
+  return x
+}

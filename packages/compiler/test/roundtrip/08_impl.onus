@@ -1,0 +1,23 @@
+module m
+
+impl Ord[Int] {
+  fn compare(a: Int, b: Int) -> Ordering {
+    if a < b {
+      return Less
+    }
+    if a > b {
+      return Greater
+    }
+    return Equal
+  }
+}
+
+impl Codec[MonthlyTotal] {
+  fn encode(value: MonthlyTotal) -> Text ! alloc {
+    return value.month ++ "," ++ Int.to_text(x: value.total_pence)
+  }
+
+  fn decode(text: Text) -> Result[MonthlyTotal, CodecError] ! alloc {
+    return Err(error: Malformed)
+  }
+}

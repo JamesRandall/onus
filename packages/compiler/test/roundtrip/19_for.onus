@@ -1,0 +1,18 @@
+module fr
+
+fn sum(rows: List[Order]) -> Int {
+  var total: Int = 0
+  for row: Order in rows {
+    total = total + row.amount_pence
+  }
+  for i: Int in 0 ..< 10 {
+    total = total + i
+  }
+  for j: Int in lo + 1 ..< hi * 2 {
+    total = total - j
+  }
+  for item: Text in List.stream(xs: names) {
+    io.write(file: out, text: item)
+  }
+  return total
+}

@@ -1,0 +1,18 @@
+module p
+
+path checkout
+  entry handle_checkout
+  effects <= { sql.read, sql.write, io.net, io.clock, alloc }
+  forbid { recover }
+  require { Total, Idempotent }
+  policy no_third_party_assumes except { vendor.payments.charge, vendor.mail.send }
+
+path minimal
+  entry main
+
+path empty_sets
+  entry f
+  effects <= {}
+  forbid {}
+  require {}
+  policy strict

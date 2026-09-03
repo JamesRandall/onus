@@ -1,0 +1,11 @@
+module pa
+
+fn f(a: Int, b: Int, c: Bool, d: Bool) -> Int {
+  let x: Int = a + b * c
+  let y: Int = a * b + c
+  let z: Bool = c and d
+  let w: Bool = (c and d) or not d
+  let v: Int = f(x: 1)
+  let u: Int = -a
+  return x
+}

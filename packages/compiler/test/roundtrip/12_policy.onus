@@ -1,0 +1,10 @@
+module pol
+
+policy no_third_party_assumes
+  forbid assume outside { self, std.* }
+
+policy only_here
+  forbid assume outside { self }
+
+policy vendors
+  forbid assume outside { vendor.payments, vendor.mail.* }

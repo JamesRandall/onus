@@ -1,0 +1,15 @@
+module cls
+
+fn f(xs: List[Int]) -> List[Int] ! alloc {
+  let step: fn(Int where it >= 0) -> Int = fn(n: Int where it >= 0) -> Int where it >= 0 {
+    return n + 1
+  }
+  let noisy: fn(Int) -> Unit ! io.file, alloc = fn(n: Int) -> Unit ! io.file, alloc {
+    io.write(file: out, text: Int.to_text(x: n))
+    return Unit
+  }
+  let nothing: fn() -> Unit = fn() -> Unit {
+    return Unit
+  }
+  return map(xs: xs, f: step)
+}

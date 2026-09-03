@@ -1,0 +1,16 @@
+module ar
+
+fn charge(pay: Payments, req: ChargeRequest) -> Result[Receipt, ChargeError] ! io.net
+  claims Idempotent
+{
+  assume Idempotent "Vendor API deduplicates on req.key for 24h; see contract §4.2"
+  assume vendor.Audited "The vendor logs every call."
+  return pay.send(req: req)
+}
+
+fn serve(req: Request) -> Result[Receipt, Panicked] ! alloc {
+  let outcome: Result[Receipt, Panicked] = recover {
+    handle_checkout(req: req)
+  }
+  return outcome
+}

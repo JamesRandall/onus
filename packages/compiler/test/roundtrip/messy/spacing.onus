@@ -1,0 +1,30 @@
+module   sp
+
+
+import    std.io
+
+
+
+type   Iter  =  Int   where   0<=it and it<=10_000
+record   Viewport   {
+
+  x_min :   Float
+
+  x_max:Float where it>x_min
+}
+pub   fn   f ( cx : Float ,   limit : Iter )   ->   Iter
+  requires   limit>0
+  ensures    result<=limit
+{
+
+  var i : Iter = 0
+
+  loop while i<limit and cx*cx<=4.0
+    invariant i<=limit
+    decreases limit-i
+  {
+    i=i+1
+  }
+  return   i
+
+}

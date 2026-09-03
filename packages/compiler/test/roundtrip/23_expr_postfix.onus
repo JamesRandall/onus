@@ -1,0 +1,20 @@
+module pf
+
+fn f(view: Viewport, grid: Grid[Iter, 800, 600], db: sql.Db[ReadOnly]) -> Int {
+  let a: Float = view.x_min
+  let b: Float = view.inner.deep.value
+  let c: Int = Grid.get(grid: grid, x: 1, y: 2)
+  Grid.set(grid: inout grid, x: 3, y: 4, value: 0)
+  let d: Int = f(x: 1)(y: 2)
+  let e: sql.Select[Order] = sql.select[text: "select 1"](params: [], row: Order)
+  let g: Int = sql.Db.default_port
+  let h: Pixel = Escaped(at: 12)
+  let i: Pixel = Inside
+  let j: sql.Error = sql.Refinement(row: 3, column: "x")
+  let k: Value = Ctor(a: 1) { b: 2 }
+  let l: Unit = Ok(value: Unit).value
+  let m: Int = (try f(x: 1)).y
+  let n: Int = f(x: g(y: h(z: 1)))
+  let o: Int = noargs()
+  return a
+}

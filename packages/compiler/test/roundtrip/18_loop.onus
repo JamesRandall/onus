@@ -1,0 +1,34 @@
+module lp
+
+fn count(limit: Iter) -> Iter
+  requires limit > 0
+  ensures result <= limit
+{
+  var i: Iter = 0
+  loop while i < limit
+    invariant i <= limit
+    decreases limit - i
+  {
+    i = i + 1
+  }
+  return i
+}
+
+fn spin() -> Unit ! diverge {
+  loop while true {
+    step()
+  }
+  return Unit
+}
+
+fn two_invariants(n: Int) -> Int {
+  var i: Int = 0
+  loop while i < n
+    invariant i >= 0
+    invariant i <= n
+    decreases n - i
+  {
+    i = i + 1
+  }
+  return i
+}

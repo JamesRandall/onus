@@ -1,0 +1,13 @@
+module ty
+
+fn f(
+  a: sql.Db[ReadOnly, schema: "orders", deadline: 50ms],
+  b: Grid[Iter, width, height],
+  c: Map[Text, List[Option[Int]]],
+  d: fn(Int, Text) -> Bool ! alloc,
+  e: fn() -> Unit,
+  g: Int where it > 0 and it < 10,
+  h: List[Int where it >= 0]
+) -> fn(Int) -> Int ! e {
+  return e
+}

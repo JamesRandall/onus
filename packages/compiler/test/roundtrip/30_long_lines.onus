@@ -1,0 +1,44 @@
+module ll
+
+pub fn handle_checkout(
+  req: Request,
+  clock: io.Clock,
+  db: sql.Db[ReadWrite, schema: "orders"],
+  pay: payments.Client,
+  auth: auth.Service
+) -> Result[Receipt, CheckoutError] ! sql.read, sql.write, io.net, io.clock, alloc {
+  let who: auth.AuthedCustomer = try auth.require(
+    service: auth,
+    caller: req.caller,
+    customer: req.customer,
+    clock: clock
+  ) else e: Unauthorised(detail: e)
+  let rows: List[MonthlyTotal] = try monthly_totals(db: orders, year: 2026, month: 11, day: 3)
+    else e: Storage(detail: e)
+  let stmt: sql.Select[MonthlyTotal] = sql.select[
+    text: "select to_char(created, 'YYYY-MM') as month, sum(amount_pence) as total_pence from orders"
+  ](params: [sql.int(x: year)], row: MonthlyTotal)
+  let view: Viewport = Viewport {
+    x_min: -2.5,
+    x_max: 1.0,
+    y_min: -1.0,
+    y_max: 1.0,
+    label: "a fairly long label so that the constructor does not fit"
+  }
+  let names: List[Text] = [
+    "alpha_alpha_alpha_alpha",
+    "beta_beta_beta_beta_beta",
+    "gamma_gamma_gamma_gamma",
+    "delta_delta_delta_delta"
+  ]
+  let updated: Viewport = { view with
+    x_max: 2.0,
+    label: "another fairly long label so that the update does not fit on one line"
+  }
+  let nested: Int = outer(
+    a: inner(x: 1, y: 2, z: 3, w: 4, label: "a long argument string that overflows"),
+    b: 2
+  )
+  let overflowing_binary: Int = aaaaaaaaaaaaaaaaaaaa + bbbbbbbbbbbbbbbbbbbbbbbb + cccccccccccccccccccc + dddddddddddddddddd
+  return Ok(value: receipt)
+}

@@ -1,0 +1,7 @@
+module e
+
+const a: Duration = 5h
+
+const b: Int = 12abc
+
+const c: Duration = 1.5ms

@@ -1,0 +1,20 @@
+module sl
+
+fn f(x: Int) -> Int {
+  if x < 0 {
+    return 0
+  }
+  if x > 10 {
+    return 10
+  } else {
+    return x
+  }
+  match x with
+  | 1 -> {
+    return 1
+  }
+  | _ -> return x
+}
+
+fn g() -> Unit {
+}

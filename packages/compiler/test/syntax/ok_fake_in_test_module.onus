@@ -1,0 +1,5 @@
+test module t
+
+fn f() -> io.Clock {
+  return fake io.Clock {}
+}
