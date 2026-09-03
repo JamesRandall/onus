@@ -1,0 +1,6 @@
+module e0600_test_import
+import lib.doubles
+
+pub fn run() -> Int {
+  return doubles.one()
+}

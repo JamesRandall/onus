@@ -93,11 +93,12 @@ describe('interface documents (§11.1)', () => {
   it('checkout: the assumption is listed with its function and justification', () => {
     const path = join(examplesDir, 'checkout', 'checkout.onus');
     const doc = entryInterface(pipeline(path, readFileSync(path, 'utf8'), null));
-    expect(doc.assumes.length).toBe(1);
-    expect(doc.assumes[0]?.claim).toBe('Idempotent');
-    expect(doc.assumes[0]?.def).toBe('record_order');
-    expect(doc.assumes[0]?.justification.length).toBeGreaterThan(0);
-    const owner = doc.items.find((i) => i.name === doc.assumes[0]?.def);
+    expect(doc.assumes.map((a) => [a.def, a.claim])).toEqual([
+      ['load_basket', 'Idempotent'],
+      ['record_order', 'Idempotent'],
+    ]);
+    expect(doc.assumes.every((a) => a.justification.length > 0)).toBe(true);
+    const owner = doc.items.find((i) => i.name === 'record_order');
     expect(owner?.assumes.length).toBe(1);
   });
 

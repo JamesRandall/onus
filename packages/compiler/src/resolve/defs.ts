@@ -139,6 +139,8 @@ export class ResolveTables {
   readonly nodes = new Map<A.NodeId, A.Node>();
   /** Resource effect names (`sql.read`) granted by each module's capabilities. */
   readonly granted = new Map<ModuleId, Set<string>>();
+  /** Claims named by a `claims` clause (keyed by the FnDecl) or a path `require` clause (keyed by the clause). */
+  readonly claimLists = new Map<A.NodeId, readonly DefId[]>();
 
   def(id: DefId): Def {
     const d = this.defs[id];

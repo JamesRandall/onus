@@ -14,6 +14,7 @@ import { toJson, toText } from '../report/diagnostic.js';
 import { defaultStdlibRoot } from '../resolve/loader.js';
 import { build, runLauncher } from '../codegen/build.js';
 import { interfaceOf, interfaceText } from '../report/interface.js';
+import { pathReport, pathText } from '../report/path.js';
 
 const USAGE = `usage:
   onus check <file.onus>... [--json] [--root <dir>] [--stdlib <dir>] [--to <pass>] [--budget <ms>] [--ledger] [--no-cache]
@@ -26,7 +27,9 @@ const USAGE = `usage:
       build, then run the entry module's main
   onus interface <file.onus> [--json] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]
       check, then print the entry module's interface: canonical source with bodies elided, or the §11.1 JSON
-  onus path | next   (later milestones)
+  onus path <file.onus> [<name>] [--json] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]
+      check, then print the §9.1 report of the entry module's paths (or of the named one)
+  onus next   (later milestone)
 `;
 
 interface Args {
@@ -111,7 +114,7 @@ function check(args: Args): number {
     process.stderr.write(USAGE);
     return 2;
   }
-  const to = args.values.get('to') ?? 'verify';
+  const to = args.values.get('to') ?? 'paths';
   if (!isPass(to)) {
     process.stderr.write(`onus: unknown pass \`${to}\`; expected one of ${PASSES.join(', ')}\n`);
     return 2;
@@ -183,7 +186,7 @@ function interfaceCommand(args: Args): number {
   }
   const ctx = newContext(args);
   if (!readFiles(ctx, [entry])) return 2;
-  runPipeline(ctx, 'verify');
+  runPipeline(ctx, 'paths');
   emitDiagnostics(ctx, args.flags.has('json'));
   if (ctx.sink.hasErrors()) return 1;
   const file = ctx.files[0];
@@ -194,6 +197,30 @@ function interfaceCommand(args: Args): number {
   }
   process.stdout.write(args.flags.has('json') ? `${JSON.stringify(interfaceOf(ctx, rec.id), null, 2)}\n` : interfaceText(ctx, rec.id));
   return 0;
+}
+
+function pathCommand(args: Args): number {
+  const entry = args.files[0];
+  if (entry === undefined) {
+    process.stderr.write(USAGE);
+    return 2;
+  }
+  const wanted = args.files[1] ?? null;
+  const ctx = newContext(args);
+  if (!readFiles(ctx, [entry])) return 2;
+  runPipeline(ctx, 'paths');
+  emitDiagnostics(ctx, args.flags.has('json'));
+  const file = ctx.files[0];
+  const reports = [...ctx.paths.analyses.values()]
+    .filter((a) => file !== undefined && ctx.resolve.moduleOf(a.module).file === file.id)
+    .filter((a) => wanted === null || ctx.resolve.def(a.def).name === wanted)
+    .map((a) => pathReport(ctx, a));
+  if (wanted !== null && reports.length === 0 && !ctx.sink.hasErrors()) {
+    process.stderr.write(`onus path: no path \`${wanted}\` in ${entry}\n`);
+    return 2;
+  }
+  for (const r of reports) process.stdout.write(args.flags.has('json') ? `${JSON.stringify(r, null, 2)}\n` : pathText(r));
+  return ctx.sink.hasErrors() ? 1 : 0;
 }
 
 function main(argv: readonly string[]): number {
@@ -210,6 +237,7 @@ function main(argv: readonly string[]): number {
     case 'interface':
       return interfaceCommand(args);
     case 'path':
+      return pathCommand(args);
     case 'next':
       process.stderr.write(`onus ${args.command}: not available until a later milestone\n`);
       return 2;

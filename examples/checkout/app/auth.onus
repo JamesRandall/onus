@@ -1,5 +1,6 @@
 module app.auth
 import std.io
+import app.contracts
 
 -- AuthedCustomer is evidence: only `require` produces one (§3.10).
 pub sealed record AuthedCustomer {
@@ -19,6 +20,7 @@ pub fn require(
   customer: Text,
   clock: io.Clock
 ) -> Result[AuthedCustomer, Error] ! io.net, io.clock
+  claims Idempotent
   ensures result is Ok implies caller == customer
 {
   if caller == customer {

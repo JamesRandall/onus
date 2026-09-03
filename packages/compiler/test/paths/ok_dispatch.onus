@@ -1,0 +1,18 @@
+module ok_dispatch
+
+interface Show[T] {
+  fn show(x: T) -> Text
+}
+
+impl Show[Int] {
+  fn show(x: Int) -> Text {
+    return "int"
+  }
+}
+
+pub fn run() -> Text {
+  return Show.show(x: 1)
+}
+
+path p
+  entry run

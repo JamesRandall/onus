@@ -1,0 +1,3 @@
+module app.contracts
+
+pub claim Idempotent "Calling twice with the same arguments has the same observable effect as calling once."

@@ -1,0 +1,202 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://onus-lang.dev/schema/v0/path.json",
+  "title": "Onus path report (language spec \u00a79.1)",
+  "type": "object",
+  "required": [
+    "path",
+    "entry",
+    "reachable",
+    "effects",
+    "claims",
+    "assumes",
+    "obligations",
+    "unresolvable_calls",
+    "capabilities",
+    "ok"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "path": {
+      "type": "string"
+    },
+    "entry": {
+      "type": "string"
+    },
+    "reachable": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "effects": {
+      "type": "object",
+      "required": [
+        "bound",
+        "forbid",
+        "actual"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "bound": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "forbid": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "actual": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "claims": {
+      "type": "object",
+      "required": [
+        "required",
+        "satisfied"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "required": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "satisfied": {
+          "type": "boolean"
+        }
+      }
+    },
+    "assumes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "claim",
+          "at",
+          "justification",
+          "permitted_by"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "claim": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string"
+          },
+          "justification": {
+            "type": "string"
+          },
+          "permitted_by": {
+            "enum": [
+              "scope",
+              "except",
+              null
+            ]
+          }
+        }
+      }
+    },
+    "obligations": {
+      "type": "object",
+      "required": [
+        "proved",
+        "checked",
+        "assumed",
+        "failed",
+        "checked_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "proved": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "checked": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "assumed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "checked_at": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "unresolvable_calls": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "at",
+          "reason"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "type",
+          "constructed_at",
+          "assumes"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "constructed_at": {
+            "type": "string"
+          },
+          "assumes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "ok": {
+      "type": "boolean"
+    }
+  }
+}

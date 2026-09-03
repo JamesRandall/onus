@@ -59,4 +59,6 @@ export class TypeTables {
   readonly refinementFlows: RefinementFlow[] = [];
   /** Variants of each union, in declaration order. */
   readonly variants = new Map<DefId, readonly DefId[]>();
+  /** Implementations of each interface: the target type and the impl's definition, for dispatch resolution on paths (§9). */
+  readonly impls = new Map<DefId, readonly { readonly target: Type; readonly def: DefId }[]>();
 }

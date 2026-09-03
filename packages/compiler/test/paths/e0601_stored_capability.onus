@@ -1,0 +1,7 @@
+module e0601_stored_capability
+import std.io
+
+record Holder {
+  name: Text
+  clock: io.Clock
+}

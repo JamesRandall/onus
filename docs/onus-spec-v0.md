@@ -600,7 +600,7 @@ fn charge(pay: Payments, req: ChargeRequest) -> Result[Receipt, ChargeError] ! i
 }
 ```
 
-An asserted claim is sound relative to its `assume` leaves and nowhere else. The compiler propagates it exactly as it propagates effects — a function may claim `Idempotent` only if every function it calls that participates in the relevant effect also claims it — but records every `assume` in the ledger with its justification text and location.
+An asserted claim is sound relative to its `assume` leaves and nowhere else. The compiler propagates it exactly as it propagates effects — a function may claim `Idempotent` only if every function it calls that participates in the relevant effect also claims it — but records every `assume` in the ledger with its justification text and location. <!-- changed: M8, docs/CHANGES.md item 76 — v0 participation: a callee participates when it has an observable effect (`io.file`, `io.net`, or a resource effect); `alloc`, `mutate`, `panic`, `diverge`, `nondet`, `io.env`, `io.clock` and `io.rand` are quiet. An `assume` in a function covers everything it calls. A function whose body assumes the claim need not propagate it (`E0204`); `assume` is only for asserted claims the function declares (`E0205`, `E0206`); a declared derived claim whose predicate fails is `E0203`. -->
 
 Claims are namespaced by module. Two modules may define claims with the same short name; they are distinct.
 
@@ -629,7 +629,7 @@ capability Db[const mode: DbMode]
 
 - Capability types have no public constructor. They are created only by root-level functions in the standard library or by attenuation.
 - An effect that names a resource (`sql.read`, `io.file`, ...) is only satisfiable if a capability granting it is in scope as a parameter.
-- Capabilities are ordinary parameters. They may not be stored in records or captured by closures; they are threaded explicitly. This is deliberate: the flow of authority is visible in every signature it passes through.
+- Capabilities are ordinary parameters. They may not be stored in records or captured by closures; they are threaded explicitly. This is deliberate: the flow of authority is visible in every signature it passes through. <!-- changed: M8, docs/CHANGES.md item 77 — a record field of capability type is `E0601`; closure capture is `E0330`; a union payload (`Result[Db[..], Error]`) is allowed, since that is how constructors return them -->
 
 ### 8.1 Construction and the ledger
 
@@ -662,7 +662,7 @@ Root capabilities are constructed by the runtime, not by code. `main` is the onl
 pub fn main(args: List[Text], env: io.Env, files: io.Files, net: io.Net) -> Result[Unit, AppError] ! io.env, io.file, io.net, alloc
 ```
 
-A program whose `main` does not name `io.Net` cannot, anywhere, open a socket — there is no other source of a `Net` capability. The runtime closes every root capability's underlying resources when `main` returns. Library functions that produce capabilities (`sql.connect`) take a root capability as an argument (`net: io.Net`) so the derivation is visible; the `sql` example in §18.2 shows this.
+A program whose `main` does not name `io.Net` cannot, anywhere, open a socket — there is no other source of a `Net` capability. The runtime closes every root capability's underlying resources when `main` returns. <!-- changed: M8, docs/CHANGES.md item 77 — a `main` parameter of a non-root capability type is `E0602`, since nothing could supply it --> Library functions that produce capabilities (`sql.connect`) take a root capability as an argument (`net: io.Net`) so the derivation is visible; the `sql` example in §18.2 shows this.
 
 ### 8.4 Test doubles
 
@@ -698,7 +698,7 @@ path checkout
   policy  no_third_party_assumes
 ```
 
-Checking: the compiler computes the reachable set from `entry`. Every function in it must have effects within the declared bound and must carry every required claim. Calls through function values are resolved where the value's provenance is known; where it is not, the path check fails closed with diagnostic `E0410 unresolvable call on path checkout`.
+Checking: the compiler computes the reachable set from `entry`. Every function in it must have effects within the declared bound and must carry every required claim. Calls through function values are resolved where the value's provenance is known; where it is not, the path check fails closed with diagnostic `E0410 unresolvable call on path checkout`. <!-- changed: M8, docs/CHANGES.md item 78 — v0 tracks no provenance: every call through a function value, and every interface call dispatched on a type parameter, is `E0410`; interface calls on concrete receivers resolve to the implementation. A function outside the bound is `E0412`, a forbidden effect `E0413`, a missing required claim `E0414`, an `assume` the policy does not permit `E0415`. A required asserted claim is checked on reachable functions with observable effects that are not under an `assume` of it; a required derived claim on every reachable function. -->
 
 Clauses (grammar in §2.3):
 
@@ -731,7 +731,7 @@ Clauses (grammar in §2.3):
 }
 ```
 
-The report is the reviewer's primary artefact for a path. It has a human-readable rendering with the same content; the JSON is normative.
+The report is the reviewer's primary artefact for a path. It has a human-readable rendering with the same content; the JSON is normative. <!-- changed: M8, docs/CHANGES.md item 79 — the v0 report also carries `effects.forbid`, `obligations.failed`, `ok`, and `permitted_by` is `"scope"`, `"except"` or null; `unresolvable_calls` entries are `{ at, reason }`; a capability's `assumes` list is empty until construction-site assumptions exist -->
 
 ---
 
@@ -1100,6 +1100,7 @@ path monthly_report
 ### 18.3 Checkout endpoint
 
 <!-- changed: M1, the code below is examples/checkout/… in canonical form: named arguments, single-line literals, layout -->
+<!-- changed: M8, docs/CHANGES.md item 80 — `Idempotent` is declared in `app.contracts` (imported by checkout, app.auth and vendor.payments), `auth.require` claims it, and `load_basket` claims it with an `assume` that a select reads only; the path passes with three assumptions, of which exactly one is external -->
 
 Demonstrates: typestate for ordering ("auth before data"), asserted claims and their `assume` leaves, a path with a policy, `Result` error composition.
 

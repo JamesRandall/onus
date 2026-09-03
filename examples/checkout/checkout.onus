@@ -2,6 +2,7 @@ module checkout
 import std.sql
 import std.io
 import app.auth
+import app.contracts
 import vendor.payments
 
 record Request {
@@ -37,7 +38,10 @@ pub fn recent_orders(
 fn load_basket(
   db: sql.Db[ReadOnly],
   who: auth.AuthedCustomer
-) -> Result[Basket, sql.Error] ! sql.read, alloc {
+) -> Result[Basket, sql.Error] ! sql.read, alloc
+  claims Idempotent
+{
+  assume Idempotent "A select reads only; it has no observable effect."
   let stmt: sql.Select[Order] = sql.select[text: "select * from baskets where customer_id = $1"](
     params: [sql.text(x: who.id)],
     row: Order

@@ -1,0 +1,11 @@
+module e0411_inconsistent
+import std.io
+
+pub fn run(files: io.Files) -> Unit ! io.file {
+  return Unit
+}
+
+path p
+  entry run
+  effects <= { io.file }
+  forbid { io.file }

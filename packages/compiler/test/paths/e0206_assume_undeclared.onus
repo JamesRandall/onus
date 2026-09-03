@@ -1,0 +1,8 @@
+module e0206_assume_undeclared
+
+claim Quiet "Writes nothing."
+
+fn f() -> Int {
+  assume Quiet "Nothing here writes."
+  return 1
+}

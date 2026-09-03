@@ -1,0 +1,14 @@
+module e0204_not_propagated
+import std.io
+
+claim Quiet "Writes nothing."
+
+fn leaf(files: io.Files) -> Unit ! io.file {
+  return Unit
+}
+
+fn mid(files: io.Files) -> Unit ! io.file
+  claims Quiet
+{
+  return leaf(files: files)
+}

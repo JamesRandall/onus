@@ -1,0 +1,46 @@
+module ok_claims
+import std.io
+
+claim Pure := effects == {}
+
+claim Total := not diverge and not panic
+
+claim Quiet "Writes nothing an observer could see twice."
+
+fn add(a: Int, b: Int) -> Int
+  claims Total
+{
+  return a + b
+}
+
+fn leaf(files: io.Files) -> Unit ! io.file
+  claims Quiet
+{
+  assume Quiet "The file is opened read-only."
+  return Unit
+}
+
+fn mid(files: io.Files) -> Unit ! io.file
+  claims Quiet
+{
+  return leaf(files: files)
+}
+
+fn pure(x: Int) -> Int
+  claims Pure
+{
+  return x
+}
+
+pub fn main(args: List[Text], files: io.Files) -> Result[Unit, io.Error] ! io.file
+  claims Quiet
+{
+  mid(files: files)
+  return Ok(value: Unit)
+}
+
+path all
+  entry main
+  effects <= { io.file }
+  forbid { io.net }
+  require { Quiet, Total }

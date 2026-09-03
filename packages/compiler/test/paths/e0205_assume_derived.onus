@@ -1,0 +1,10 @@
+module e0205_assume_derived
+
+claim Total := not diverge and not panic
+
+fn f() -> Int
+  claims Total
+{
+  assume Total "It terminates."
+  return 1
+}

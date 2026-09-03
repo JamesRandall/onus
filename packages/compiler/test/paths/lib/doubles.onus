@@ -1,0 +1,5 @@
+test module lib.doubles
+
+pub fn one() -> Int {
+  return 1
+}

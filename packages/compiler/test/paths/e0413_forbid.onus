@@ -1,0 +1,14 @@
+module e0413_forbid
+import std.io
+
+fn log(files: io.Files, msg: Text) -> Unit ! io.file {
+  return Unit
+}
+
+pub fn run(files: io.Files) -> Unit ! io.file {
+  return log(files: files, msg: "x")
+}
+
+path p
+  entry run
+  forbid { io.file }

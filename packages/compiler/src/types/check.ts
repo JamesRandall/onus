@@ -553,6 +553,7 @@ class Checker {
           if (list.some((x) => sameBase(x.target, target))) this.report('E0107', item.iface.span, `\`${item.iface.text}\` is already implemented for ${this.show(target)}`);
           list.push({ target, node: item });
           this.impls.set(iface.def, list);
+          this.ty.impls.set(iface.def, [...(this.ty.impls.get(iface.def) ?? []), { target, def: this.defOf(item) }]);
         }
         for (const f of item.fns) this.signatureOf(this.t.def(this.defOf(f)));
         break;

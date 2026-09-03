@@ -1,8 +1,7 @@
 module vendor.payments
 import std.io
 import app.auth
-
-pub claim Idempotent "Calling twice with the same arguments has the same observable effect as calling once."
+import app.contracts
 
 pub capability Client
   grants io.net

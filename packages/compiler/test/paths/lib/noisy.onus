@@ -1,0 +1,11 @@
+module lib.noisy
+import std.io
+
+pub claim Quiet "Writes nothing."
+
+pub fn leaf(files: io.Files) -> Unit ! io.file
+  claims Quiet
+{
+  assume Quiet "The file is opened read-only."
+  return Unit
+}

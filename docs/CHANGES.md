@@ -362,6 +362,49 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     `packages/compiler/src/report/schema/`; the test suite validates every
     fixture's diagnostics and the three examples' interfaces against them.
 
+## M8 — claims, capabilities, paths
+
+76. **Claim participation (§7.1).** "Participates in the relevant effect" is
+    given a definition: a callee participates in an asserted claim when it has
+    an observable effect — `io.file`, `io.net` or a resource effect. The quiet
+    effects (`alloc`, `mutate`, `panic`, `diverge`, `nondet`, `io.env`,
+    `io.clock`, `io.rand`) change nothing an observer could see twice, so a
+    callee with only those never has to carry the claim. An `assume` covers
+    the function and everything beneath it. Intrinsics carry only what they
+    declare, like their contracts (§3.12). Codes: `E0203` derived claim not
+    satisfied, `E0204` asserted claim not propagated, `E0205` `assume` of a
+    derived claim, `E0206` `assume` of an undeclared claim.
+77. **Capability rules (§8, §8.3).** A record field of capability type is
+    `E0601`; a `pub fn main` parameter of a non-root capability type is
+    `E0602`; a non-test module importing a `test module` is `E0600`. `fake`
+    outside a test module was already the parser's `E0012`.
+78. **Paths (§9).** Reachability is breadth-first over calls in bodies,
+    closures included, with interface calls resolved on concrete receivers
+    through the impl table. Function values and dispatch on type parameters
+    are `E0410`. New codes `E0412`–`E0415` for the bound, `forbid`, `require`
+    and `policy` clauses; `E0411` for a bound that allows a forbidden effect.
+    Policy scopes: `self` is the path's module; `std.*` matches `std` and
+    every module beneath it.
+79. **Path report (§9.1).** Adds `effects.forbid`, `obligations.failed`, `ok`,
+    and `permitted_by` ∈ { `"scope"`, `"except"`, null }. `checked_at` and
+    `constructed_at` are `module.fn:line:col`. Capability construction sites
+    are every reachable call returning a capability, including attenuation;
+    their `assumes` are empty until the stdlib records connect-time
+    assumptions. `onus path <file> [<name>] --json`.
+80. **Checkout example (§18.3).** Under item 76, `handle_checkout`'s claim
+    requires `auth.require` (network) and `load_basket` (`sql.read`) to carry
+    `Idempotent`. `Idempotent` moves to a shared `app.contracts` module
+    (vendor.payments already imports app.auth, so app.auth cannot import
+    vendor.payments); `auth.require` claims it, justified by having no
+    participating callees; `load_basket` claims it with an `assume` that a
+    select reads only. The path therefore lists three assumptions —
+    `load_basket` and `record_order` in the module's own scope, `charge`
+    permitted by `except` — and "exactly one assumption" (impl spec §9, M8)
+    is read as exactly one external assumption, which is what the reviewer
+    is trusting on another party's word. The spec's "1 assumed" presumed
+    `std.sql` derives `record_order`'s idempotency from the statement (item
+    53), which v0 does not do.
+
 ### Deferred, not changed
 
 - `Stream[T] ! e` as a type (§3.11) is not parsed: `-> Stream[T] ! e` is

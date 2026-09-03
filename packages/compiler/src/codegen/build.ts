@@ -81,7 +81,7 @@ export function emitAll(ctx: Context, opts: BuildOptions): BuildResult {
  * Effects: those of the pipeline and `emitAll`.
  */
 export function build(ctx: Context, opts: BuildOptions): BuildResult | null {
-  runPipeline(ctx, 'verify');
+  runPipeline(ctx, 'paths');
   if (ctx.sink.hasErrors()) return null;
   return emitAll(ctx, opts);
 }

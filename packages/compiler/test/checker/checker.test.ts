@@ -14,7 +14,8 @@ import { CODES } from '../../src/report/codes.js';
 const here = dirname(fileURLToPath(import.meta.url));
 
 /** Codes of later milestones (verification) that no fixture can produce yet. */
-const LATER = new Set<string>([]);
+/** Reported by the claims pass; fixtures live in test/paths. */
+const LATER = new Set<string>(['E0203', 'E0204', 'E0205', 'E0206']);
 /** Reported by the parser; its fixture lives in test/syntax. */
 const PARSER_REPORTED = new Set(['E0102']);
 /** Reported by the verifier; fixtures live in test/verify. */

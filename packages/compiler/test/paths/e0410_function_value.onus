@@ -1,0 +1,17 @@
+module e0410_function_value
+
+fn apply(f: fn(x: Int) -> Int, x: Int) -> Int {
+  return f(x: x)
+}
+
+pub fn run(x: Int) -> Int ! alloc {
+  return apply(
+    f: fn(y: Int) -> Int {
+      return y
+    },
+    x: x
+  )
+}
+
+path p
+  entry run

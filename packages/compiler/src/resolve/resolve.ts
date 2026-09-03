@@ -535,7 +535,12 @@ class ModuleResolver {
       for (const c of f.contracts) {
         this.withFlags({ inEnsures: c.clause === 'ensures' }, () => this.expr(c.expr, scope));
       }
-      for (const cl of f.claims) this.claimRef(cl);
+      const claims: DefId[] = [];
+      for (const cl of f.claims) {
+        const c = this.claimRef(cl);
+        if (c !== null) claims.push(c);
+      }
+      this.t.claimLists.set(f.id, claims);
       if (f.body) this.block(f.body, this.child(scope));
     });
   }
@@ -602,7 +607,14 @@ class ModuleResolver {
     for (const c of p.clauses) {
       if (c.kind === 'PathEffects') this.effects(c.effects, this.moduleScope);
       if (c.kind === 'PathForbid') this.effects(c.effects, this.moduleScope, true);
-      if (c.kind === 'PathRequire') for (const cl of c.claims) this.claimRef(cl);
+      if (c.kind === 'PathRequire') {
+        const claims: DefId[] = [];
+        for (const cl of c.claims) {
+          const d = this.claimRef(cl);
+          if (d !== null) claims.push(d);
+        }
+        this.t.claimLists.set(c.id, claims);
+      }
       if (c.kind === 'PathPolicy') {
         const pol = this.t.membersOf(this.m.id).policies.get(c.name.text);
         if (pol === undefined || this.t.def(pol).kind !== 'policy') this.report('E0105', c.name.span, `no policy \`${c.name.text}\` in this module`);
@@ -633,10 +645,10 @@ class ModuleResolver {
     }
   }
 
-  /** Resolves a claim name (`Idempotent` or `payments.Idempotent`). */
-  private claimRef(q: A.QName, at?: A.NodeId): void {
+  /** Resolves a claim name (`Idempotent` or `payments.Idempotent`) to its definition, recording it at `at` when given. */
+  private claimRef(q: A.QName, at?: A.NodeId): DefId | null {
     const last = q.segments[q.segments.length - 1];
-    if (last === undefined) return;
+    if (last === undefined) return null;
     let found: DefId | undefined;
     if (q.segments.length === 1) {
       found = this.t.membersOf(this.m.id).claims.get(last.text);
@@ -648,15 +660,16 @@ class ModuleResolver {
       }
     } else {
       const mod = this.moduleOfPath(q.segments.slice(0, -1));
-      if (mod === null) return;
+      if (mod === null) return null;
       found = this.t.membersOf(mod).claims.get(last.text);
-      if (found !== undefined && !this.visible(this.t.def(found), q.span, 'claim')) return;
+      if (found !== undefined && !this.visible(this.t.def(found), q.span, 'claim')) return null;
     }
     if (found === undefined) {
       this.report('E0105', q.span, `unknown claim \`${q.segments.map((s) => s.text).join('.')}\``);
-      return;
+      return null;
     }
     if (at !== undefined) this.t.refs.set(at, { k: 'def', def: found });
+    return found;
   }
 
   private moduleOfPath(segments: readonly A.Ident[]): ModuleId | null {

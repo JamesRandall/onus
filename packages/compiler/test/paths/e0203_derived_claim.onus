@@ -1,0 +1,9 @@
+module e0203_derived_claim
+
+claim Total := not diverge and not panic
+
+fn f(x: Int) -> Int ! panic
+  claims Total
+{
+  return x
+}
