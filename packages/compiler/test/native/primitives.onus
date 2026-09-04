@@ -1,0 +1,87 @@
+module primitives
+import std.io
+
+record Point {
+  x: Int
+  y: Int
+}
+
+union Shape =
+  | Dot of at: Point
+  | Line of from: Point, to: Point
+
+fn manhattan(p: Point) -> Int {
+  return Int.abs(x: p.x) + Int.abs(x: p.y)
+}
+
+fn describe(s: Shape) -> Text may alloc {
+  match s with
+  | Dot(at) -> return "dot " ++ Int.to_text(x: manhattan(p: at))
+  | Line(from, to) -> return "line " ++ Int.to_text(x: manhattan(p: from) + manhattan(p: to))
+}
+
+fn safe_div(a: Int, b: Int) -> Result[Int, Text] {
+  if b == 0 {
+    return Err(error: "zero")
+  }
+  return Ok(value: a / b)
+}
+
+fn chain(a: Int, b: Int) -> Result[Int, Text] {
+  let q: Int = try safe_div(a: a, b: b)
+  return Ok(value: q + 1)
+}
+
+fn count_up(limit: Int where 0 <= it and it <= 1000) -> Int
+  ensures result == limit
+{
+  var i: Int = 0
+  loop while i < limit
+    invariant 0 <= i and i <= limit
+    decreases limit - i
+  {
+    i = i + 1
+  }
+  return i
+}
+
+fn total(xs: List[Int]) -> Int may alloc {
+  var sum: Int = 0
+  for x: Int in xs {
+    sum = sum + x
+  }
+  return sum
+}
+
+fn scale(p: inout Point, k: Int) -> Unit may mutate {
+  p = Point { x: p.x * k, y: p.y * k }
+  return Unit
+}
+
+example text_and_ints {
+  Int.to_text(x: 42) == "42"
+  Int.to_text(x: -7) == "-7"
+  "a" ++ "b" == "ab"
+  Float.to_text(x: 1.5) == "1.5"
+  Float.to_text(x: 0.1) == "0.1"
+}
+
+example shapes {
+  describe(s: Dot(at: Point { x: 3, y: -4 })) == "dot 7"
+  describe(s: Line(from: Point { x: 1, y: 1 }, to: Point { x: 2, y: 2 })) == "line 6"
+}
+
+example results {
+  chain(a: 10, b: 2) is Ok
+  chain(a: 1, b: 0) is Err
+  count_up(limit: 10) == 10
+  total(xs: [1, 2, 3]) == 6
+}
+
+example inout_and_update {
+  var p: Point = Point { x: 2, y: 3 }
+  let done: Unit = scale(p: inout p, k: 2)
+  p.x == 4
+  let q: Point = { p with y: 0 }
+  q.y == 0
+}

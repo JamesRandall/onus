@@ -94,6 +94,8 @@ export const CODES = {
   E0701: 'const evaluation failed',
   E0702: 'example failed',
   E0703: 'const fn obligation not proved',
+  E0800: 'primitive unavailable on target',
+  E0801: 'target disagreement',
   E0999: 'internal error',
 } as const;
 

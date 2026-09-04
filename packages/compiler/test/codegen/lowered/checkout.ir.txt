@@ -1,0 +1,29 @@
+module checkout
+record Request { caller: Text, customer: Text, idempotency_key: Text }
+record Order { customer: Text, amount_pence: Int where … }
+record Basket { items: List[Order], total: Int where … }
+fn recent_orders(db: Db[ReadOnly, schema: "orders"], who: AuthedCustomer) -> Result[List[Order], Error]
+  body:
+    let stmt: Select[Order] = select(const const text, [text(who.id)], typeinfo Order)
+    return query(db, stmt)
+fn load_basket(db: Db[ReadOnly], who: AuthedCustomer) -> Result[Basket, Error] early-return
+  body:
+    -- assume Idempotent "A select reads only; it has no observable effect."
+    let stmt: Select[Order] = select(const const text, [text(who.id)], typeinfo Order)
+    let items: List[Order] = try query(db, stmt)
+    return Ok(value: Basket { items: items, total: 0 })
+fn record_order(db: Db[ReadWrite, schema: "orders"], who: AuthedCustomer, basket: Basket, receipt: Receipt) -> Result[Unit, Error]
+  body:
+    -- assume Idempotent "The insert is `on conflict (receipt_id) do nothing`."
+    let stmt: Statement = statement(const const text, [text(who.id), text(receipt.id), int(basket.total)])
+    return execute(db, stmt)
+union CheckoutError = Unauthorised(detail: Error) | Storage(detail: Error) | Payment(detail: Error) | Empty()
+fn handle_checkout(req: Request, clock: Clock, db: Db[ReadWrite, schema: "orders"], pay: Client, auth: Service) -> Result[Receipt, CheckoutError] early-return
+  body:
+    let who: AuthedCustomer = try require(auth, req.caller, req.customer, clock) else e: Unauthorised(detail: e)
+    let basket: Basket = try load_basket(narrow(const const variant, db, ReadOnly()), who) else e: Storage(detail: e)
+    if is_empty(basket.items):
+      return Err(error: Empty())
+    let receipt: Receipt = try charge(pay, req.idempotency_key, basket.total, who) else e: Payment(detail: e)
+    try record_order(db, who, basket, receipt) else e: Storage(detail: e)
+    return Ok(value: receipt)

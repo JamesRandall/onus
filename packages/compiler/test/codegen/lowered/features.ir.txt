@@ -1,0 +1,76 @@
+module features
+record Point { x: Int, y: Int where … }
+union Shape = Circle(radius: Int where …) | Dot()
+interface Ord
+impl Ord[Int] dict Ord$Int { compare: Ord$Int$compare }
+fn Ord$Int$compare(a: Int, b: Int) -> Int
+  body:
+    return (a -? b)
+fn smallest(dict $dict_T, a: T, b: T) -> T
+  body:
+    if ($dict_T.compare(a, b) < 0):
+      return a
+    return b
+fn bump(inout v: Int, by: Int) -> Unit
+  body:
+    v = (v +? by)
+    return unit
+    return unit
+fn twice(n: Int) -> Int
+  body:
+    var v: Int = n
+    bump(v, n) inout v
+    return v
+fn safe_div(a: Int, b: Int) -> Result[Int, Text]
+  body:
+    if (b == 0):
+      return Err(error: "zero")
+    return Ok(value: (a / b))
+fn chain(a: Int, b: Int) -> Result[Int, Text] early-return
+  body:
+    let q: Int = try safe_div(a, b)
+    let r: Int = try safe_div(q, 2) else e: (e ++ "!")
+    return Ok(value: r)
+fn area(s: Shape) -> Int
+  body:
+    match $m4 = s:
+      arm ($m4 is Circle) when (radius > 100) bind radius = $m4.radius:
+        return 0
+      arm ($m4 is Circle) bind radius = $m4.radius:
+        return ((3 *? radius) *? radius)
+      arm ($m4 is Dot):
+        return 1
+fn recovered(a: Int, b: Int) -> Result[Int, Panicked]
+  body:
+    let r: Result[Int, Panicked] = recover { ... (a /? b) }
+    return r
+fn sum(xs: List[Int]) -> Int
+  body:
+    var total: Int = 0
+    for x: Int in xs:
+      total = (total +? x)
+    return total
+fn apply(x: T, f: fn(v: T) -> U may e) -> U
+  body:
+    return f(x)
+example arithmetic:
+  assert (smallest(dict dict Ord$Int, 3, 2) == 2)
+  assert (twice(4) == 8)
+  assert (chain(10, 2) ==deep Ok(value: 2))
+  assert (chain(1, 0) ==deep Err(error: "zero"))
+  assert (chain(1, 1) ==deep Ok(value: 0))
+  assert (area(Circle(radius: 2)) == 12)
+  assert (area(Dot()) == 1)
+  assert (sum([1, 2, 3]) == 6)
+  assert (apply(2, fn(v) { ... }) == 20)
+  assert forall i: (i < 3)
+  assert (Point { x: 1, y: 2 }.y == 2)
+example panics_recover:
+  assert (recovered(1, 0) is Err)
+  assert (recovered(4, 2) ==deep Ok(value: 2))
+law Ord[Int].reflexive(a):
+  assert (Ord$Int$compare(a, a) == 0)
+property smallest_is_one_of(a, b):
+  assert ((smallest(dict dict Ord$Int, a, b) == a) or (smallest(dict dict Ord$Int, a, b) == b))
+property sums_of_positive(xs):
+  assert (sum(xs) >= 0)

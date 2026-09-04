@@ -1183,7 +1183,7 @@ path checkout
 
 ## 19. Targets
 
-<!-- changed: 2026-09-03, docs/CHANGE-LOG.md "Targets: dual backends as a design goal"; implemented from M11 -->
+<!-- changed: 2026-09-03, docs/CHANGE-LOG.md "Targets: dual backends as a design goal"; implemented from M11 — 2026-09-04: M11 done for the subset in docs/CHANGES.md item 95; `E0800` and `E0801` exist; host claims, `Int` representation obligations, `sql` and WebAssembly are M12 -->
 
 An Onus program compiles unchanged to every supported target. Observable behaviour is defined by this specification, never by the host. Where this specification is silent on something a program can observe, that is a defect in the specification.
 

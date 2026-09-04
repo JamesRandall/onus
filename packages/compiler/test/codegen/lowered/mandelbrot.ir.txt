@@ -1,0 +1,41 @@
+module mandelbrot
+alias Iter
+alias Coord
+record Viewport { x_min: Float, x_max: Float where …, y_min: Float, y_max: Float where … }
+fn escape_count(cx: Float, cy: Float, limit: Iter) -> Iter
+  body:
+    var zx: Float = 0
+    var zy: Float = 0
+    var i: Iter = 0
+    loop ((i < limit) and (((zx *. zx) +. (zy *. zy)) <= 4)):
+      let nx: Float = (((zx *. zx) -. (zy *. zy)) +. cx)
+      zy = (((2 *. zx) *. zy) +. cy)
+      zx = nx
+      i = (i + 1)
+    return i
+fn render(view: Viewport, width: Coord where …, height: Coord where …, limit: Iter where …) -> Grid[Iter, width, height]
+  body:
+    var grid: Grid[Iter, width, height] = filled(0, width, height)
+    for py in 0 ..< height:
+      for px in 0 ..< width:
+        let cx: Float = (view.x_min +. (((view.x_max -. view.x_min) *. of(px)) /. of(width)))
+        let cy: Float = (view.y_min +. (((view.y_max -. view.y_min) *. of(py)) /. of(height)))
+        set(const width, const height, grid, px, py, escape_count(cx, cy, limit)) inout grid
+    return grid
+fn main(args: List[Text], files: Files) -> Result[Unit, Error] early-return
+  body:
+    let view: Viewport = Viewport { x_min: (-2.5), x_max: 1, y_min: (-1), y_max: 1 }
+    let grid: Grid[Iter, 800, 600] = render(view, 800, 600, 255)
+    let out: File = try create(files, "mandelbrot.pgm")
+    try write(out, "P2\n800 600\n255\n")
+    for py in 0 ..< 600:
+      for px in 0 ..< 800:
+        try write(out, (to_text(get(const const int, const const int, grid, px, py)) ++ " "))
+      try write(out, "\n")
+    return Ok(value: unit)
+example escape_count:
+  assert (escape_count(0, 0, 100) == 100)
+  assert (escape_count(2, 2, 100) == 1)
+property escape_bounded(cx, cy, limit):
+  assert (escape_count(cx, cy, limit) <= limit)
+main roots { files: Files } args args

@@ -513,6 +513,39 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     `verify`, the block's canonical text or null, and the review page shows
     it under the assumption in the path, interface and ledger views.
 
+## M11 — native backend
+
+93. **One lowering, two emitters (impl spec §6).** Code generation is now
+    `lower.ts` (checked AST plus obligation statuses → the target-neutral form
+    in `ir.ts`) and two renderers, `js.ts` and `native.ts`. Every decision
+    about what generated code does is made once in the lowering; the form is
+    printed by `onus build --emit ir` and pinned for the fixture suite in
+    `test/codegen/lowered/`. The JavaScript output is unchanged in behaviour.
+94. **Native representation (§19.1).** `Int`/`Duration` are `i64`, `Float`
+    is `double`, `Bool` is `i1`, and everything else is a pointer to an array
+    of 64-bit slots (a variant's tag first), so generic code and runtime
+    primitives move slots and callers convert at the boundary. `inout`
+    parameters are pointers. `proved` obligations emit nothing; `checked`
+    ones branch to `onus_panic`, whose message matches the JavaScript
+    runtime's; `Int` arithmetic uses the overflow intrinsics; `try` is a
+    branch that returns the error. The runtime is `packages/runtime/native/`
+    (`onus.c`, `onus.h`), compiled and linked by `clang` from the emitted
+    `.ll`. `Float` to `Text` follows JavaScript's shortest round-trip layout
+    (§19.4).
+95. **The v0 native subset.** Programs reaching closures or function values,
+    interfaces, runtime quantifiers, `recover`, `fake`, `TypeInfo`,
+    `old(...)` in a checked postcondition, structural equality on aggregates,
+    `Map`, `Bytes`, `sql`, or `Text` operations needing grapheme tables are
+    refused with `E0800 primitive unavailable on target`, as §19.1 allows.
+    Allocation is never freed (free-at-scope-exit is deferred). `recover` via
+    `setjmp`/`longjmp` and the `Int` representation obligations are M12.
+96. **Differential testing (§19.5).** `onus test --target all` runs the
+    examples on both targets and reports each disagreement as `E0801`;
+    properties and laws run on JavaScript only. `onus build --target native`
+    writes `<out>/native/<module>` and `onus run --target native` runs it.
+    The C runtime's `-DONUS_BROKEN_INT_TO_TEXT` exists for the acceptance
+    test that E0801 fires on a broken primitive.
+
 ### Deferred, not changed
 
 - `Stream[T] ! e` as a type (§3.11) is not parsed: `-> Stream[T] ! e` is

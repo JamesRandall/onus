@@ -26,23 +26,28 @@ import { readConfig } from '../config.js';
 import { readLedger, writeLedger } from '../report/ledger.js';
 import { checkAssumptionPlan, parseOutcomes, planAssumptions, writeAssumptionsLauncher } from '../codegen/assumptions.js';
 import { emitAll, runtimeEntry } from '../codegen/build.js';
+import { buildNative, compareTargets, runJsExamples, runNativeExamples } from '../codegen/native-build.js';
+import { lowerModule } from '../codegen/lower.js';
+import { printIr } from '../codegen/irtext.js';
 
 const USAGE = `usage:
   onus check <file.onus>... [--json] [--root <dir>] [--stdlib <dir>] [--to <pass>] [--budget <ms>] [--ledger] [--no-cache]
       report every diagnostic; exit 1 if any. Passes: ${PASSES.join(', ')}
   onus fmt <file.onus>... [--stdout]
       rewrite files in canonical form
-  onus build <entry.onus> [--out <dir>] [--emit js|ts] [--root <dir>] [--stdlib <dir>]
-      check, then emit JavaScript for every module into <dir> (default: <root>/out)
-  onus run <entry.onus> [--out <dir>] [-- args...]
+  onus build <entry.onus> [--out <dir>] [--emit js|ts|ir] [--target js|native] [--root <dir>] [--stdlib <dir>]
+      check, then emit JavaScript for every module into <dir> (default: <root>/out); --target native compiles
+      an executable with clang into <dir>/native (§19); --emit ir prints the target-neutral form (fixture oracle)
+  onus run <entry.onus> [--out <dir>] [--target js|native] [-- args...]
       build, then run the entry module's main
   onus interface <file.onus> [--json] [--diff <old-interface.json>] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]
       check, then print the entry module's interface: canonical source with bodies elided, or the §11.1 JSON;
       with --diff, the changes since a previous interface document (§11.1, §15.1)
   onus review <entry.onus> [--out <dir>] [--against <old-interface.json>] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]
       check, then write the review page (§15) and its data to <dir> (default: <entry dir>/review)
-  onus test <entry.onus> [--out <dir>] [--root <dir>] [--stdlib <dir>]
-      build, then run the generated example, property and law tests (§20.6)
+  onus test <entry.onus> [--out <dir>] [--target js|native|all] [--root <dir>] [--stdlib <dir>]
+      build, then run the generated example, property and law tests (§20.6); --target all runs the examples on
+      both targets and reports any disagreement as E0801 (§19.5)
   onus test <entry.onus> --assumptions [--env <test_module.onus>] [--target <name>] [--out <dir>]
       run every verify block against capabilities from the environment module and record the results in .onus/ledger/ (§20.2–§20.3)
   onus path <file.onus> [<name>] [--json] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]
@@ -59,6 +64,7 @@ interface Args {
 }
 
 const VALUE_FLAGS: ReadonlySet<string> = new Set(['root', 'stdlib', 'to', 'out', 'emit', 'budget', 'offset', 'diff', 'against', 'env', 'target']);
+const TARGETS: ReadonlySet<string> = new Set(['js', 'native', 'all']);
 
 function parseArgs(argv: readonly string[]): Args {
   const files: string[] = [];
@@ -192,13 +198,43 @@ function buildCommand(args: Args, run: boolean): number {
     return 2;
   }
   const emit = args.values.get('emit') ?? 'js';
-  if (emit !== 'js' && emit !== 'ts') {
-    process.stderr.write(`onus: --emit takes js or ts\n`);
+  if (emit !== 'js' && emit !== 'ts' && emit !== 'ir') {
+    process.stderr.write(`onus: --emit takes js, ts or ir\n`);
+    return 2;
+  }
+  const target = args.values.get('target') ?? 'js';
+  if (!TARGETS.has(target) || target === 'all') {
+    process.stderr.write(`onus: --target takes js or native\n`);
     return 2;
   }
   const ctx = newContext(args);
   if (!readFiles(ctx, [entry])) return 2;
   const outDir = args.values.get('out') ?? join(dirname(entry), 'out');
+  if (emit === 'ir') {
+    runPipeline(ctx, 'paths');
+    emitDiagnostics(ctx, args.flags.has('json'));
+    if (ctx.sink.hasErrors()) return 1;
+    for (const m of ctx.resolve.modules) if (!m.isStd) process.stdout.write(printIr(lowerModule(ctx, m, { verify: false }), ctx.resolve));
+    return 0;
+  }
+  if (target === 'native') {
+    runPipeline(ctx, 'paths');
+    if (!ctx.sink.hasErrors()) {
+      const native = buildNative(ctx, { outDir });
+      emitDiagnostics(ctx, args.flags.has('json'));
+      if (ctx.sink.hasErrors() || native.exe === null) return 1;
+      process.stderr.write(`onus build: wrote ${native.exe}\n`);
+      if (!run) return 0;
+      if (!native.hasMain) {
+        process.stderr.write(`onus run: ${entry} declares no \`pub fn main\`\n`);
+        return 2;
+      }
+      const r = spawnSync(native.exe, args.files.slice(1), { stdio: 'inherit' });
+      return r.status ?? 1;
+    }
+    emitDiagnostics(ctx, args.flags.has('json'));
+    return 1;
+  }
   const result = build(ctx, { outDir, ts: emit === 'ts' });
   emitDiagnostics(ctx, args.flags.has('json'));
   if (result === null) return 1;
@@ -341,17 +377,36 @@ function testCommand(args: Args): number {
   const config = readConfig(root);
   const outDir = args.values.get('out') ?? join(dirname(entry), 'out');
   const ctx = newContext(args);
+  const target = args.values.get('target') ?? 'js';
+  if (!TARGETS.has(target)) {
+    process.stderr.write(`onus: --target takes js, native or all\n`);
+    return 2;
+  }
   if (!args.flags.has('assumptions')) {
     if (!readFiles(ctx, [entry])) return 2;
     const result = build(ctx, { outDir, ts: false });
     emitDiagnostics(ctx, args.flags.has('json'));
     if (result === null) return 1;
-    if (!result.emitted.some((m) => m.tests !== null)) {
-      process.stdout.write('onus test: no example, property or law to run\n');
-      return 0;
+    if (target === 'js') {
+      if (!result.emitted.some((m) => m.tests !== null)) {
+        process.stdout.write('onus test: no example, property or law to run\n');
+        return 0;
+      }
+      const r = spawnSync('npx', ['vitest', 'run', '--root', outDir, '--config', join(outDir, 'vitest.config.mjs')], { stdio: 'inherit' });
+      return r.status ?? 1;
     }
-    const r = spawnSync('npx', ['vitest', 'run', '--root', outDir, '--config', join(outDir, 'vitest.config.mjs')], { stdio: 'inherit' });
-    return r.status ?? 1;
+    const native = buildNative(ctx, { outDir });
+    emitDiagnostics(ctx, args.flags.has('json'));
+    if (native.exe === null) return 1;
+    const nativeRun = runNativeExamples(native.exe);
+    process.stdout.write(nativeRun.output);
+    if (target === 'native') return [...nativeRun.results.values()].every((ok) => ok) ? 0 : 1;
+    const js = runJsExamples(outDir);
+    for (const [name, ok] of js) process.stdout.write(`${ok ? 'ok' : 'FAIL'} ${name} (js)\n`);
+    const disagreements = compareTargets(ctx, js, nativeRun.results);
+    emitDiagnostics(ctx, args.flags.has('json'));
+    const allOk = [...nativeRun.results.values()].every((ok) => ok) && [...js.values()].every((ok) => ok);
+    return disagreements > 0 || !allOk ? 1 : 0;
   }
   const envPath = args.values.get('env') ?? (config.test.env === null ? null : join(root, config.test.env));
   if (!readFiles(ctx, envPath === null ? [entry] : [entry, envPath])) return 2;
@@ -375,18 +430,18 @@ function testCommand(args: Args): number {
     return 2;
   }
   const outcomes = parseOutcomes(r.stdout);
-  const target = args.values.get('target') ?? config.test.target;
+  const verifyTarget = args.values.get('target') ?? config.test.target;
   const at = new Date().toISOString();
   const ledgerDir = join(root, '.onus', 'ledger');
   const ledger = { ...readLedger(ledgerDir) };
   let failed = 0;
   for (const o of outcomes) {
-    ledger[o.key] = { at, target, result: o.result, claim: o.claim, def: o.def };
+    ledger[o.key] = { at, target: verifyTarget, result: o.result, claim: o.claim, def: o.def };
     if (o.result === 'failed') failed += 1;
     process.stdout.write(`${o.result.padEnd(7)} ${o.def}: ${o.claim}${o.detail === '' ? '' : ` (${o.detail})`}\n`);
   }
   writeLedger(ledgerDir, ledger);
-  process.stdout.write(`${outcomes.length} assumption${outcomes.length === 1 ? '' : 's'} verified against ${target}: ${outcomes.length - failed} passed, ${failed} failed\n`);
+  process.stdout.write(`${outcomes.length} assumption${outcomes.length === 1 ? '' : 's'} verified against ${verifyTarget}: ${outcomes.length - failed} passed, ${failed} failed\n`);
   return failed > 0 ? 1 : 0;
 }
 
