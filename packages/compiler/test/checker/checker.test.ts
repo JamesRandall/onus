@@ -15,7 +15,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 
 /** Codes of later milestones (verification) that no fixture can produce yet. */
 /** Reported by the claims pass; fixtures live in test/paths. */
-const LATER = new Set<string>(['E0203', 'E0204', 'E0205', 'E0206']);
+const LATER = new Set<string>(['E0203', 'E0204', 'E0205', 'E0206', 'E0207', 'E0208']);
 /** Reported by the parser; its fixture lives in test/syntax. */
 const PARSER_REPORTED = new Set(['E0102']);
 /** Reported by the verifier; fixtures live in test/verify. */

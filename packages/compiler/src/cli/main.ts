@@ -21,6 +21,11 @@ import { reviewData } from '../report/review.js';
 import { renderPage } from '@onus/review';
 import type { InterfaceDocument } from '../report/interface.js';
 import { mkdirSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { readConfig } from '../config.js';
+import { readLedger, writeLedger } from '../report/ledger.js';
+import { checkAssumptionPlan, parseOutcomes, planAssumptions, writeAssumptionsLauncher } from '../codegen/assumptions.js';
+import { emitAll, runtimeEntry } from '../codegen/build.js';
 
 const USAGE = `usage:
   onus check <file.onus>... [--json] [--root <dir>] [--stdlib <dir>] [--to <pass>] [--budget <ms>] [--ledger] [--no-cache]
@@ -36,6 +41,10 @@ const USAGE = `usage:
       with --diff, the changes since a previous interface document (§11.1, §15.1)
   onus review <entry.onus> [--out <dir>] [--against <old-interface.json>] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]
       check, then write the review page (§15) and its data to <dir> (default: <entry dir>/review)
+  onus test <entry.onus> [--out <dir>] [--root <dir>] [--stdlib <dir>]
+      build, then run the generated example, property and law tests (§20.6)
+  onus test <entry.onus> --assumptions [--env <test_module.onus>] [--target <name>] [--out <dir>]
+      run every verify block against capabilities from the environment module and record the results in .onus/ledger/ (§20.2–§20.3)
   onus path <file.onus> [<name>] [--json] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]
       check, then print the §9.1 report of the entry module's paths (or of the named one)
   onus next <file.onus> --offset <n> [--json] [--root <dir>] [--stdlib <dir>]
@@ -49,7 +58,7 @@ interface Args {
   readonly values: ReadonlyMap<string, string>;
 }
 
-const VALUE_FLAGS: ReadonlySet<string> = new Set(['root', 'stdlib', 'to', 'out', 'emit', 'budget', 'offset', 'diff', 'against']);
+const VALUE_FLAGS: ReadonlySet<string> = new Set(['root', 'stdlib', 'to', 'out', 'emit', 'budget', 'offset', 'diff', 'against', 'env', 'target']);
 
 function parseArgs(argv: readonly string[]): Args {
   const files: string[] = [];
@@ -98,13 +107,26 @@ function isPass(s: string): s is PassName {
   return (PASSES as readonly string[]).includes(s);
 }
 
+/** The project root: `--root`, else the entry file's directory. */
+function rootOf(args: Args): string {
+  const entry = args.files[0];
+  return args.values.get('root') ?? (entry === undefined ? '.' : dirname(entry));
+}
+
 function newContext(args: Args): Context {
   const here = dirname(fileURLToPath(import.meta.url));
   const stdlib = args.values.get('stdlib') ?? defaultStdlibRoot(join(here, '..', '..'));
   const budget = Number(args.values.get('budget') ?? '500');
-  const entry = args.files[0];
-  const cacheDir = args.flags.has('no-cache') ? null : join(args.values.get('root') ?? (entry === undefined ? '.' : dirname(entry)), '.onus', 'cache');
-  return new Context({ root: args.values.get('root') ?? null, stdlib, verify: { budgetMs: Number.isFinite(budget) && budget > 0 ? budget : 500, cacheDir, z3Path: null } });
+  const root = rootOf(args);
+  const cacheDir = args.flags.has('no-cache') ? null : join(root, '.onus', 'cache');
+  const config = readConfig(root);
+  return new Context({
+    root: args.values.get('root') ?? null,
+    stdlib,
+    verify: { budgetMs: Number.isFinite(budget) && budget > 0 ? budget : 500, cacheDir, z3Path: null },
+    assumptions: readLedger(join(root, '.onus', 'ledger')),
+    assumptionMaxAgeMs: config.test.maxAssumptionAgeDays * 24 * 60 * 60 * 1000,
+  });
 }
 
 /** Prints one line per obligation of the entry file's modules: the ledger (§11, §12.2). */
@@ -305,6 +327,69 @@ function nextCommand(args: Args): number {
   return 0;
 }
 
+function testCommand(args: Args): number {
+  const entry = args.files[0];
+  if (entry === undefined) {
+    process.stderr.write(USAGE);
+    return 2;
+  }
+  if (args.flags.has('mutate')) {
+    process.stderr.write('onus test --mutate: not available until milestone 13\n');
+    return 2;
+  }
+  const root = rootOf(args);
+  const config = readConfig(root);
+  const outDir = args.values.get('out') ?? join(dirname(entry), 'out');
+  const ctx = newContext(args);
+  if (!args.flags.has('assumptions')) {
+    if (!readFiles(ctx, [entry])) return 2;
+    const result = build(ctx, { outDir, ts: false });
+    emitDiagnostics(ctx, args.flags.has('json'));
+    if (result === null) return 1;
+    if (!result.emitted.some((m) => m.tests !== null)) {
+      process.stdout.write('onus test: no example, property or law to run\n');
+      return 0;
+    }
+    const r = spawnSync('npx', ['vitest', 'run', '--root', outDir, '--config', join(outDir, 'vitest.config.mjs')], { stdio: 'inherit' });
+    return r.status ?? 1;
+  }
+  const envPath = args.values.get('env') ?? (config.test.env === null ? null : join(root, config.test.env));
+  if (!readFiles(ctx, envPath === null ? [entry] : [entry, envPath])) return 2;
+  runPipeline(ctx, 'paths');
+  if (ctx.sink.hasErrors()) {
+    emitDiagnostics(ctx, args.flags.has('json'));
+    return 1;
+  }
+  const envFile = envPath === null ? undefined : ctx.files.find((f) => f.path === envPath);
+  const env = envFile === undefined ? null : (ctx.resolve.modules.find((m) => m.file === envFile.id) ?? null);
+  const plan = planAssumptions(ctx, env);
+  const built = emitAll(ctx, { outDir, ts: false, verify: true });
+  if (!checkAssumptionPlan(ctx, plan, built.emitted)) {
+    emitDiagnostics(ctx, args.flags.has('json'));
+    return 1;
+  }
+  const launcher = writeAssumptionsLauncher(ctx, outDir, built.emitted, plan, runtimeEntry());
+  const r = spawnSync(process.execPath, [launcher], { encoding: 'utf8' });
+  if (r.status !== 0) {
+    process.stderr.write(`onus test: the assumptions launcher failed\n${r.stderr}`);
+    return 2;
+  }
+  const outcomes = parseOutcomes(r.stdout);
+  const target = args.values.get('target') ?? config.test.target;
+  const at = new Date().toISOString();
+  const ledgerDir = join(root, '.onus', 'ledger');
+  const ledger = { ...readLedger(ledgerDir) };
+  let failed = 0;
+  for (const o of outcomes) {
+    ledger[o.key] = { at, target, result: o.result, claim: o.claim, def: o.def };
+    if (o.result === 'failed') failed += 1;
+    process.stdout.write(`${o.result.padEnd(7)} ${o.def}: ${o.claim}${o.detail === '' ? '' : ` (${o.detail})`}\n`);
+  }
+  writeLedger(ledgerDir, ledger);
+  process.stdout.write(`${outcomes.length} assumption${outcomes.length === 1 ? '' : 's'} verified against ${target}: ${outcomes.length - failed} passed, ${failed} failed\n`);
+  return failed > 0 ? 1 : 0;
+}
+
 function main(argv: readonly string[]): number {
   const args = parseArgs(argv);
   switch (args.command) {
@@ -324,6 +409,8 @@ function main(argv: readonly string[]): number {
       return nextCommand(args);
     case 'review':
       return reviewCommand(args);
+    case 'test':
+      return testCommand(args);
     default:
       process.stderr.write(USAGE);
       return 2;

@@ -80,6 +80,12 @@ class ContractsPass {
   /** Walks a body: statements and their expressions, closures included (their returns check their own contracts). */
   private body(b: A.Block, def: Def, fn: A.FnDecl | null): void {
     walk(b, (n) => {
+      if (n.kind === 'VerifyBlock') {
+        // A verify block is a function of its own (§20.2): its obligations belong to its definition.
+        const vd = this.ctx.resolve.defOf.get(n.id);
+        if (vd !== undefined) this.body(n.body, this.ctx.resolve.def(vd), null);
+        return false;
+      }
       switch (n.kind) {
         case 'Return':
           if (fn !== null) this.returnSite(n, fn, def);

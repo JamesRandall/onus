@@ -113,7 +113,9 @@ export function children(n: A.Node): A.Node[] {
     case 'InDomain':
       return [n.expr];
     case 'Assume':
-      return [];
+      return n.verify ? [n.verify] : [];
+    case 'VerifyBlock':
+      return [...n.params, ...n.effects, n.body];
     case 'ExprStmt':
       return [n.expr];
     case 'IntLit':

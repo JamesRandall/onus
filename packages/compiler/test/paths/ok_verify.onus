@@ -1,0 +1,15 @@
+module ok_verify
+import std.io
+
+claim Quiet "Writes nothing."
+
+pub fn touch(files: io.Files, env: io.Env) -> Bool may io.file, io.env, alloc
+  claims Quiet
+{
+  assume Quiet "Nothing here writes."
+    verify(env: io.Env) may io.env, alloc {
+      let home: Text = try io.get_env(env: env, name: "HOME") else _: false
+      home != ""
+    }
+  return true
+}

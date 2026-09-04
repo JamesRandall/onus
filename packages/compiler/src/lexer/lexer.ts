@@ -21,7 +21,7 @@ export interface LexResult {
 }
 
 /** Tokens before which a newline is not emitted (multi-line signatures, `try ... else`, blocks on their own line). */
-export const CONTINUATION: ReadonlySet<TokenKind> = new Set<TokenKind>(['->', 'else', '{', 'claims', 'requires', 'ensures', 'invariant', 'decreases']);
+export const CONTINUATION: ReadonlySet<TokenKind> = new Set<TokenKind>(['->', 'else', '{', 'claims', 'requires', 'ensures', 'invariant', 'decreases', 'verify']);
 
 const INT_MAX = (1n << 63n) - 1n;
 

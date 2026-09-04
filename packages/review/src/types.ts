@@ -29,11 +29,19 @@ export interface ContractEntry {
   readonly checked_at?: string;
 }
 
+export interface Verified {
+  readonly at: string;
+  readonly target: string;
+  readonly result: 'passed' | 'failed';
+}
+
 export interface AssumeEntry {
   readonly def: string;
   readonly claim: string;
   readonly justification: string;
   readonly at: Location;
+  readonly verifiable: boolean;
+  readonly last_verified: Verified | null;
 }
 
 export interface RecoverEntry {
@@ -121,7 +129,7 @@ export interface PathReport {
   readonly reachable: readonly string[];
   readonly effects: { readonly bound: readonly string[] | null; readonly forbid: readonly string[]; readonly actual: readonly string[] };
   readonly claims: { readonly required: readonly string[]; readonly satisfied: boolean };
-  readonly assumes: readonly { readonly claim: string; readonly at: string; readonly justification: string; readonly permitted_by: string | null }[];
+  readonly assumes: readonly { readonly claim: string; readonly at: string; readonly justification: string; readonly permitted_by: string | null; readonly verifiable: boolean; readonly last_verified: Verified | null }[];
   readonly obligations: ObligationCounts & { readonly checked_at: readonly string[] };
   readonly unresolvable_calls: readonly { readonly at: string; readonly reason: string }[];
   readonly capabilities: readonly { readonly type: string; readonly constructed_at: string; readonly assumes: readonly string[] }[];

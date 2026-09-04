@@ -51,6 +51,8 @@ interface FnCtx {
   readonly assertion: boolean;
   readonly recover: boolean;
   readonly frame: number;
+  /** A `verify` block (§20.2): assertions yield its Bool, and `try ... else` yields the else value. */
+  readonly verify?: boolean;
 }
 
 type Subst = Map<DefId, TypeArg>;
@@ -637,6 +639,21 @@ class Checker {
     }
   }
 
+  /** A `verify` block (§20.2): capability parameters, declared effects, an assertion body yielding Bool. */
+  private checkVerify(v: A.VerifyBlock): void {
+    const params: FnParam[] = [];
+    for (const p of v.params) {
+      const type = this.typeOf(p.type);
+      this.ty.declTypes.set(this.defOf(p), type);
+      params.push({ name: p.name.text, type, inout: false });
+      if (stripRefinements(type).k !== 'capability') {
+        this.report('E0208', p.span, `verify parameters are capabilities supplied by the environment (§20.2); \`${p.name.text}\` is ${this.show(type)}`);
+      }
+    }
+    this.ty.verifies.set(v.id, { params, effects: this.effectSetOf(v.effects) });
+    this.inFn({ ret: BOOL, assertion: true, recover: false, frame: 0, verify: true }, () => this.block(v.body));
+  }
+
   private checkAssertionBlock(b: A.Block): void {
     this.inFn({ ret: null, assertion: true, recover: false, frame: 0 }, () => this.block(b));
   }
@@ -785,6 +802,7 @@ class Checker {
         return;
       }
       case 'Assume':
+        if (s.verify !== null) this.checkVerify(s.verify);
         return;
       case 'ExprStmt': {
         const t = this.infer(s.expr);
@@ -1334,6 +1352,16 @@ class Checker {
       return ERROR;
     }
     const fn = this.fn;
+    if (fn !== null && fn.verify === true) {
+      // In a verify block the else value is the block's Bool result (§20.2).
+      if (e.else === null) {
+        this.report('E0321', e.span, '`try` in a verify block needs an `else` yielding the Bool result');
+        return fallible.value;
+      }
+      if (e.else.name.text !== '_') this.ty.declTypes.set(this.defOf(e.else), fallible.error);
+      this.expr(e.else.expr, BOOL);
+      return fallible.value;
+    }
     const outer = fn !== null && fn.ret !== null ? this.unwrapFallible(fn.ret) : null;
     if (outer === null) {
       this.report('E0321', e.span, fn === null || fn.ret === null ? '`try` is allowed only in a function returning Result or Option' : `\`try\` needs the enclosing function to return Result or Option, not ${this.show(fn.ret)}`);
@@ -1348,7 +1376,7 @@ class Checker {
       }
       return fallible.value;
     }
-    this.ty.declTypes.set(this.defOf(e.else), fallible.error);
+    if (e.else.name.text !== '_') this.ty.declTypes.set(this.defOf(e.else), fallible.error);
     this.expr(e.else.expr, outer.error);
     return fallible.value;
   }

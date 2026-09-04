@@ -12,6 +12,10 @@ export interface AssumeSite {
   readonly claim: DefId;
   readonly justification: string;
   readonly node: A.NodeId;
+  /** The `verify` block, when the assumption is verifiable (§20.2). */
+  readonly verify: A.NodeId | null;
+  /** Ledger key: module name and the BLAKE3 of the assumption's canonical text (§20.3). */
+  readonly key: string;
 }
 
 export class ClaimTables {

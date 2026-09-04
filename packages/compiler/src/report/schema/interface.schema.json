@@ -143,7 +143,9 @@
         "def",
         "claim",
         "justification",
-        "at"
+        "at",
+        "verifiable",
+        "last_verified"
       ],
       "additionalProperties": false,
       "properties": {
@@ -158,6 +160,39 @@
         },
         "at": {
           "$ref": "#/definitions/location"
+        },
+        "verifiable": {
+          "type": "boolean"
+        },
+        "last_verified": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": [
+                "at",
+                "target",
+                "result"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "at": {
+                  "type": "string"
+                },
+                "target": {
+                  "type": "string"
+                },
+                "result": {
+                  "enum": [
+                    "passed",
+                    "failed"
+                  ]
+                }
+              }
+            }
+          ]
         }
       }
     },

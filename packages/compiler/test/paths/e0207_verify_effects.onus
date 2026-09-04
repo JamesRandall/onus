@@ -1,0 +1,14 @@
+module e0207_verify_effects
+import std.io
+
+claim Quiet "Writes nothing."
+
+pub fn touch(env: io.Env) -> Bool may io.env
+  claims Quiet
+{
+  assume Quiet "Nothing here writes."
+    verify(files: io.Files) may io.file {
+      true
+    }
+  return true
+}

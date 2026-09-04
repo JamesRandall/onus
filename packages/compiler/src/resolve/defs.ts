@@ -42,7 +42,9 @@ export type DefKind =
   | 'for'
   | 'binder'
   | 'pattern'
-  | 'try-else';
+  | 'try-else'
+  /** A `verify` block on an `assume` (§20.2): a function of its own for obligations and effects. */
+  | 'verify';
 
 export interface Def {
   readonly id: DefId;

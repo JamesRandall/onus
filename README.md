@@ -25,7 +25,10 @@ capability rules and `path` checking with `onus path` reports (§9.1);
 `onus next` gives the legal next tokens, expected type and names in scope
 at an offset (§14); `onus review` writes the review page (§15) over the
 interface, path and diagnostics reports, and `onus interface --diff`
-compares two interface documents. Effects are declared with `may`
+compares two interface documents; `onus test` runs the generated tests, and
+`onus test --assumptions` runs `verify` blocks against an environment module
+and records the ledger the reports and `policy verified_assumptions_only`
+read (§20). Effects are declared with `may`
 (`-> Int may alloc`). `z3`
 must be on PATH for verification; without it every obligation is checked at
 runtime.
@@ -42,6 +45,8 @@ pnpm onus path <file.onus> [<name>] [--json]
 pnpm onus next <file.onus> --offset <n> [--json]
 pnpm onus interface <file.onus> --diff <old-interface.json> [--json]
 pnpm onus review <entry.onus> [--out <dir>] [--against <old-interface.json>]
+pnpm onus test <entry.onus> [--out <dir>]
+pnpm onus test <entry.onus> --assumptions [--env <test_module.onus>] [--target <name>]
 pnpm onus fmt <file.onus> [--stdout]
 pnpm onus build <entry.onus> [--out <dir>] [--emit js|ts]
 pnpm onus run <entry.onus> [--out <dir>] [-- args]

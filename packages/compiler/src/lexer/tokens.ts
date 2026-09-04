@@ -10,7 +10,7 @@ export const KEYWORDS = [
   'ensures', 'proved', 'claims', 'let', 'var', 'return', 'if', 'else', 'match', 'with', 'loop',
   'while', 'invariant', 'decreases', 'for', 'in', 'and', 'or', 'not', 'implies', 'is', 'it',
   'result', 'try', 'recover', 'old', 'forall', 'exists', 'fake', 'inout', 'where', 'true', 'false',
-  'self', 'intrinsic', 'may',
+  'self', 'intrinsic', 'may', 'verify',
 ] as const;
 
 export type Keyword = (typeof KEYWORDS)[number];

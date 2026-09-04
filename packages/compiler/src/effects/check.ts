@@ -266,6 +266,7 @@ class EffectChecker {
         this.block(s.body, frame, owner);
         return;
       case 'Assume':
+        if (s.verify !== null) this.verifyBlock(s.verify, owner);
         return;
       case 'ExprStmt':
         this.expr(s.expr, frame, owner);
@@ -348,6 +349,25 @@ class EffectChecker {
       case 'Is':
         this.expr(e.expr, frame, owner);
         return;
+    }
+  }
+
+  /**
+   * A `verify` block (§20.2) is checked like a function of its own: its body's
+   * effects must be declared on it, and its declared effects may not exceed
+   * those of the function containing the `assume` (E0207).
+   */
+  private verifyBlock(v: A.VerifyBlock, owner: DefId | null): void {
+    const declared = this.ty.verifies.get(v.id)?.effects ?? EffectSet.empty();
+    const frame: Frame = { inoutParams: new Set(), sites: new Sites() };
+    // The block is a definition of its own: its calls are not the enclosing function's (no false recursion).
+    this.block(v.body, frame, this.t.defOf.get(v.id) ?? owner);
+    this.containment(frame.sites.set(), declared, frame.sites, 'this verify block');
+    const sig = owner === null ? undefined : this.ty.signatures.get(owner);
+    if (sig === undefined) return;
+    const extra = declared.minus(sig.effects);
+    if (extra.length > 0) {
+      this.report('E0207', v.span, `this verify block declares ${this.show(EffectSet.of(extra))}, which \`${this.t.def(owner ?? sig.def).name}\` does not declare; a verify block may not exceed its function's effects (§20.2)`);
     }
   }
 

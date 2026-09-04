@@ -59,6 +59,8 @@ export class TypeTables {
   readonly refinementFlows: RefinementFlow[] = [];
   /** Variants of each union, in declaration order. */
   readonly variants = new Map<DefId, readonly DefId[]>();
+  /** Parameters and declared effects of each `verify` block (§20.2), keyed by the block. */
+  readonly verifies = new Map<A.NodeId, { readonly params: readonly FnParam[]; readonly effects: EffectSet }>();
   /** The expected type at a `Hole`, or null when it was inferred without one (`onus next`, §14). */
   readonly holes = new Map<A.NodeId, Type | null>();
   /** Implementations of each interface: the target type and the impl's definition, for dispatch resolution on paths (§9). */

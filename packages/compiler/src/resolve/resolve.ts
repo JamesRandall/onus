@@ -42,6 +42,9 @@ import {
   type TypeOwner,
 } from './defs.js';
 
+/** The one policy the compiler defines (§20.3): every reachable `assume` must have a current passing verification. */
+export const BUILTIN_POLICY = 'verified_assumptions_only';
+
 type ResolveCode = 'E0105' | 'E0106' | 'E0107' | 'E0108' | 'E0109' | 'E0110' | 'E0111' | 'E0113' | 'E0114' | 'E0115' | 'E0202' | 'E0330';
 
 interface Scope {
@@ -256,6 +259,8 @@ class ModuleResolver {
   private readonly t;
   private readonly moduleScope: Scope;
   private currentDef: string | null = null;
+  /** The function whose body is being resolved: the parent of `verify` definitions. */
+  private currentFnDef: DefId | null = null;
   private flags: Flags = NO_FLAGS;
   private readonly aliases = new Map<string, ModuleId>();
 
@@ -524,6 +529,16 @@ class ModuleResolver {
   }
 
   private fnDecl(f: A.FnDecl, outer: Scope): void {
+    const savedFn = this.currentFnDef;
+    this.currentFnDef = this.t.defOf.get(f.id) ?? null;
+    try {
+      this.fnDeclInner(f, outer);
+    } finally {
+      this.currentFnDef = savedFn;
+    }
+  }
+
+  private fnDeclInner(f: A.FnDecl, outer: Scope): void {
     const scope = this.child(outer, 0);
     this.tparams(f.tparams, scope);
     const inout = new Set<string>();
@@ -616,6 +631,7 @@ class ModuleResolver {
         this.t.claimLists.set(c.id, claims);
       }
       if (c.kind === 'PathPolicy') {
+        if (c.name.text === BUILTIN_POLICY) continue; // `verified_assumptions_only` (§20.3) is the compiler's own
         const pol = this.t.membersOf(this.m.id).policies.get(c.name.text);
         if (pol === undefined || this.t.def(pol).kind !== 'policy') this.report('E0105', c.name.span, `no policy \`${c.name.text}\` in this module`);
         else this.t.refs.set(c.id, { k: 'def', def: pol });
@@ -643,6 +659,20 @@ class ModuleResolver {
         for (const o of p.operands) this.claimPred(o);
         break;
     }
+  }
+
+  /**
+   * A `verify` block (§20.2) is a function of its own: it sees the module, its
+   * parameters and nothing of the enclosing function's locals.
+   */
+  private verifyBlock(v: A.VerifyBlock): void {
+    const id = defId(this.t.defs.length);
+    this.t.defs.push({ id, kind: 'verify', name: 'verify', module: this.m.id, node: v.id, span: v.span, pub: false, sealed: false, intrinsic: false, parent: this.currentFnDef, frame: 0, inout: false });
+    this.t.defOf.set(v.id, id);
+    const scope = this.child(this.moduleScope, 0);
+    this.params(v.params, scope, true);
+    this.effects(v.effects, scope);
+    this.block(v.body, this.child(scope));
   }
 
   /** Local bindings visible from `scope`, outermost first (`onus next`, §14). */
@@ -873,6 +903,7 @@ class ModuleResolver {
       }
       case 'Assume':
         this.claimRef(s.claim, s.id);
+        if (s.verify !== null) this.verifyBlock(s.verify);
         break;
       case 'ExprStmt':
         this.expr(s.expr, scope);
@@ -931,7 +962,7 @@ class ModuleResolver {
         this.expr(e.expr, scope);
         if (e.else) {
           const inner = this.child(scope);
-          this.bindValue(inner, 'try-else', e.else.name, e.else);
+          if (e.else.name.text !== '_') this.bindValue(inner, 'try-else', e.else.name, e.else);
           this.expr(e.else.expr, inner);
         }
         return;

@@ -67,6 +67,7 @@ export function isLineNode(n: A.Node): boolean {
     case 'Loop':
     case 'For':
     case 'Assume':
+    case 'VerifyBlock':
     case 'ExprStmt':
     case 'Arm':
     case 'LoopClause':

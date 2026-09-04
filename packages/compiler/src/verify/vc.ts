@@ -65,6 +65,7 @@ export function buildVCs(ctx: Context): VCs {
       if (node.kind === 'FnDecl' && node.body !== null) walker.fnBody(node);
       else if (node.kind === 'ExampleDecl' || node.kind === 'PropertyDecl') walker.assertionBody(node);
       else if (node.kind === 'ConstDecl') walker.constBody(node);
+      else if (node.kind === 'VerifyBlock') walker.verifyBody(node);
       else if (node.kind === 'ImplDecl') walker.skipAll('laws are run under generated inputs');
       else walker.skipAll('no body');
     } catch (err) {
@@ -146,6 +147,17 @@ class BodyWalker {
     this.skipAll('not reached by the walk');
   }
 
+  /** A `verify` block (§20.2): its capability parameters bound, then its body. */
+  verifyBody(node: A.VerifyBlock): void {
+    for (const p of node.params) {
+      const pd = this.t.defOf.get(p.id);
+      const type = pd === undefined ? undefined : this.ty.declTypes.get(pd);
+      if (pd !== undefined && type !== undefined) this.bind(pd, p.name.text, type, null);
+    }
+    this.block(node.body);
+    this.skipAll('not reached by the walk');
+  }
+
   constBody(node: A.ConstDecl): void {
     this.exprObligations(node.value);
     this.skipAll('not reached by the walk');
@@ -179,6 +191,7 @@ class BodyWalker {
   private assigned(n: A.Node): Set<DefId> {
     const out = new Set<DefId>();
     walk(n, (x) => {
+      if (x.kind === 'VerifyBlock') return false;
       if (x.kind === 'Assign') {
         const r = this.t.refs.get(x.id);
         if (r !== undefined && r.k === 'def') out.add(r.def);

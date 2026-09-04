@@ -1,0 +1,13 @@
+module e0208_verify_param
+
+claim Quiet "Writes nothing."
+
+pub fn touch() -> Bool
+  claims Quiet
+{
+  assume Quiet "Nothing here writes."
+    verify(n: Int) {
+      n == 1
+    }
+  return true
+}

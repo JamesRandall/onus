@@ -23,5 +23,18 @@ pub fn charge(
   claims Idempotent
 {
   assume Idempotent "Vendor API deduplicates on key for 24h; see contract §4.2"
+    verify(client: Client, service: auth.Service, clock: io.Clock) may io.net, alloc {
+      let who: auth.AuthedCustomer = try auth.require(
+        service: service,
+        caller: "verify",
+        customer: "verify",
+        clock: clock
+      ) else _: false
+      let a: Receipt = try charge(client: client, key: "verify-1", amount: 100, who: who)
+        else _: false
+      let b: Receipt = try charge(client: client, key: "verify-1", amount: 100, who: who)
+        else _: false
+      a.id == b.id
+    }
   return Ok(value: Receipt { id: key ++ "/" ++ who.id, amount: amount })
 }

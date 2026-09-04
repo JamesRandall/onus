@@ -17,7 +17,7 @@ const report: PathReport = {
   reachable: ['m.entry', 'm.gate', 'm.guarded', 'v.leaf'],
   effects: { bound: ['io.net'], forbid: [], actual: ['io.net'] },
   claims: { required: ['v.C'], satisfied: true },
-  assumes: [{ claim: 'v.C', at: 'v.leaf', justification: 'vendor <contract>', permitted_by: 'except' }],
+  assumes: [{ claim: 'v.C', at: 'v.leaf', justification: 'vendor <contract>', permitted_by: 'except', verifiable: true, last_verified: { at: '2026-09-04T00:00:00Z', target: 'staging', result: 'passed' } }],
   obligations: { ...counts, checked_at: [] },
   unresolvable_calls: [{ at: 'm.guarded:9:3', reason: 'function value' }],
   capabilities: [],

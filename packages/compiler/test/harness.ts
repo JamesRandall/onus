@@ -9,7 +9,7 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Context } from '../src/context.js';
+import { Context, type ContextOptions } from '../src/context.js';
 import { runFrontEnd, runPipeline, type PassName } from '../src/driver.js';
 import { toJson, type DiagnosticJson } from '../src/report/diagnostic.js';
 import { lineColOf } from '../src/source.js';
@@ -48,8 +48,8 @@ export function frontEnd(path: string, text: string): PipelineResult {
 }
 
 /** Runs the pipeline up to `to` over one entry file with the given project root. Effects: reads imported files. */
-export function pipeline(path: string, text: string, root: string | null, to: PassName = 'paths', budgetMs = 500): PipelineResult {
-  const ctx = new Context({ root, stdlib: STDLIB_ROOT, verify: { budgetMs, cacheDir: join(here, '..', '.onus-tmp', 'cache'), z3Path: null }, log: () => undefined });
+export function pipeline(path: string, text: string, root: string | null, to: PassName = 'paths', budgetMs = 500, extra: Partial<ContextOptions> = {}): PipelineResult {
+  const ctx = new Context({ root, stdlib: STDLIB_ROOT, verify: { budgetMs, cacheDir: join(here, '..', '.onus-tmp', 'cache'), z3Path: null }, log: () => undefined, ...extra });
   ctx.addFile(path, text);
   runPipeline(ctx, to);
   return { ctx, diagnostics: ctx.sink.all().map((d) => toJson(ctx, d)) };

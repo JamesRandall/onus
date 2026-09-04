@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { CODES } from '../../src/report/codes.js';
 import { pathReport, pathText, type PathReport } from '../../src/report/path.js';
 import { checkExpectation, fixturesIn, pipeline, type PipelineResult } from '../harness.js';
+import { readFileSync as readSource } from 'node:fs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const examplesDir = join(here, '..', '..', '..', '..', 'examples');
@@ -46,8 +47,27 @@ describe('claims, capabilities and paths fixtures', () => {
       const { diagnostics } = pipeline(f.path, f.text, here);
       for (const d of diagnostics) covered.add(d.code);
     }
-    const codes = Object.keys(CODES).filter((c) => /^E0(20[3-9]|41|60)/.test(c));
+    // E0603 is reported by `onus test --assumptions`, not the pipeline; its test lives in test/test.
+    const codes = Object.keys(CODES).filter((c) => /^E0(20[3-9]|41|60)/.test(c) && c !== 'E0603');
     expect(codes.filter((c) => !covered.has(c))).toEqual([]);
+  });
+});
+
+describe('policy verified_assumptions_only (§20.3)', () => {
+  const path = join(here, 'e0416_unverified.onus');
+  const text = readSource(path, 'utf8');
+  it('passes with a current passing verification and fails with a stale one', () => {
+    const first = pipeline(path, text, here);
+    const key = first.ctx.claims.assumes[0]?.key;
+    if (key === undefined) throw new Error('no assumption');
+    const now = Date.parse('2026-09-04T12:00:00Z');
+    const record = { target: 'staging', result: 'passed' as const, claim: 'e0416_unverified.Quiet', def: 'e0416_unverified.leaf' };
+    const fresh = pipeline(path, text, here, 'paths', 500, { assumptions: { [key]: { ...record, at: '2026-09-03T12:00:00Z' } }, now: () => now });
+    expect(fresh.diagnostics).toEqual([]);
+    const stale = pipeline(path, text, here, 'paths', 500, { assumptions: { [key]: { ...record, at: '2026-08-01T12:00:00Z' } }, now: () => now });
+    expect(stale.diagnostics.map((d) => d.code)).toEqual(['E0416']);
+    const failed = pipeline(path, text, here, 'paths', 500, { assumptions: { [key]: { ...record, result: 'failed', at: '2026-09-04T00:00:00Z' } }, now: () => now });
+    expect(failed.diagnostics.map((d) => d.code)).toEqual(['E0416']);
   });
 });
 

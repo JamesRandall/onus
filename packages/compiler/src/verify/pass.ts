@@ -146,12 +146,13 @@ class Verifier {
     }
     for (const [defId, obligations] of byDef) {
       const def = t.def(defId);
-      if (def.kind !== 'fn') continue;
-      const sig = this.ctx.types.signatures.get(defId);
-      if (sig === undefined) continue;
+      if (def.kind !== 'fn' && def.kind !== 'verify') continue;
       const node = t.node(def.node);
-      if (node.kind !== 'FnDecl' || node.body === null) continue;
-      const hasPanic = sig.effects.values().some((e) => e.k === 'prim' && e.name === 'panic');
+      const effects = node.kind === 'VerifyBlock' ? this.ctx.types.verifies.get(node.id)?.effects : this.ctx.types.signatures.get(defId)?.effects;
+      if (effects === undefined) continue;
+      if (node.kind === 'FnDecl' && node.body === null) continue;
+      const sig = { constFn: node.kind === 'FnDecl' && node.constFn };
+      const hasPanic = effects.values().some((e) => e.k === 'prim' && e.name === 'panic');
       this.currentDef = def.name;
       for (const o of obligations) {
         if (o.status !== 'checked' || o.kind === 'law' || o.kind === 'property') continue;

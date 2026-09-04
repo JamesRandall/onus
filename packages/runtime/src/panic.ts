@@ -60,6 +60,18 @@ export function unwrapElse<T, E, F>(r: Result<T, E>, convert: (e: E) => F): T {
   throw new EarlyReturn({ tag: 'Err', error: convert(r.error) });
 }
 
+/** `try e else _: value` inside a `verify` block (§20.2): the else value is the block's result. */
+export function unwrapOr<T, E, V>(r: Result<T, E>, convert: (e: E) => V): T {
+  if (r.tag === 'Ok') return r.value;
+  throw new EarlyReturn(convert(r.error));
+}
+
+/** `try e else _: value` on an Option inside a `verify` block. */
+export function unwrapOptionOr<T, V>(o: Option<T>, convert: (u: undefined) => V): T {
+  if (o.tag === 'Some') return o.value;
+  throw new EarlyReturn(convert(undefined));
+}
+
 /** `try e else name: expr` on an Option: `None` becomes the converted error. */
 export function unwrapOptionElse<T, F>(o: Option<T>, convert: (u: undefined) => F): T {
   if (o.tag === 'Some') return o.value;

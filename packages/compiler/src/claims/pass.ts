@@ -24,6 +24,8 @@ import type { Def, DefId } from '../resolve/defs.js';
 import type { Span } from '../source.js';
 import type * as A from '../syntax/ast.js';
 import { walk } from '../syntax/walk.js';
+import { printStmt } from '../syntax/printer.js';
+import { b3 } from '../report/hash.js';
 import { calleeEffects, calleeOf, effectsOfFn, valueEffects } from './calls.js';
 
 export const QUIET_EFFECTS: ReadonlySet<string> = new Set(['alloc', 'mutate', 'panic', 'diverge', 'nondet', 'io.env', 'io.clock', 'io.rand']);
@@ -66,9 +68,12 @@ class ClaimChecker {
       cl.carried.set(def.id, new Set(t.claimLists.get(node.id) ?? []));
       if (node.body === null) continue;
       walk(node.body, (n) => {
+        if (n.kind === 'VerifyBlock') return false;
         if (n.kind === 'Assume') {
           const res = t.refs.get(n.id);
-          if (res !== undefined && res.k === 'def') cl.assumes.push({ fn: def.id, claim: res.def, justification: n.justification, node: n.id });
+          if (res !== undefined && res.k === 'def') {
+            cl.assumes.push({ fn: def.id, claim: res.def, justification: n.justification, node: n.id, verify: n.verify === null ? null : n.verify.id, key: `${t.moduleOf(def.module).name}#${b3(printStmt(n))}` });
+          }
         }
         return true;
       });
@@ -155,6 +160,7 @@ class ClaimChecker {
     const t = this.ctx.resolve;
     const name = t.def(claim).name;
     walk(f.body, (n) => {
+      if (n.kind === 'VerifyBlock') return false;
       if (n.kind !== 'Call') return true;
       const callee = calleeOf(this.ctx, n);
       switch (callee.k) {

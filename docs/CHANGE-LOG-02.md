@@ -4,7 +4,7 @@ Follows `CHANGES.md`. Apply after it. Adds the testing model to `onus-spec-v0.md
 
 ---
 
-## 2026-09-03 — Testing model **(applied to docs; code pending: the M8 and M10 additions, then M13)**
+## 2026-09-03 — Testing model **(applied; M13 — contract mutation and coverage — pending)**
 
 **Principle.** Behaviour is established by contracts (proved) or by examples and properties (checked); dependencies are supplied as capabilities and faked in test modules; only `assume` leaves need testing against reality. There is no assertion library, no mocking library, and no separate test runner: the assertion language is the contract language, the mock mechanism is `fake`, and the runner is the compiler.
 

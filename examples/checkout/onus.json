@@ -1,0 +1,7 @@
+{
+  "test": {
+    "env": "test_env.onus",
+    "target": "local",
+    "max_assumption_age_days": 7
+  }
+}

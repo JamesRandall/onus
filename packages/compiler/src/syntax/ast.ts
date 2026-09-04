@@ -494,6 +494,16 @@ export interface Assume extends NodeBase {
   readonly kind: 'Assume';
   readonly claim: QName;
   readonly justification: string;
+  /** `verify(...) { ... }`: exercises the assumption against the real resource (§20.2). */
+  readonly verify: VerifyBlock | null;
+}
+
+/** A `verify` block: capability parameters, declared effects, and an assertion body yielding Bool (§20.2). */
+export interface VerifyBlock extends NodeBase {
+  readonly kind: 'VerifyBlock';
+  readonly params: readonly Param[];
+  readonly effects: readonly EffectRef[];
+  readonly body: Block;
 }
 
 export interface ExprStmt extends NodeBase {
@@ -768,6 +778,7 @@ export type Node =
   | Expr
   | FieldInit
   | TryElse
+  | VerifyBlock
   | Arg
   | Pattern
   | PatField;

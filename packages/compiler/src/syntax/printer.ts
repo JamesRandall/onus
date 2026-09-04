@@ -59,6 +59,11 @@ export function printSignature(f: A.FnDecl): string {
   return render(new Printer(NO_COMMENTS, DEFAULT_OPTIONS).fnHead(f, false), LINE_WIDTH);
 }
 
+/** Prints a statement in canonical form (used to key assumptions in the ledger, §20.3). Effects: none. */
+export function printStmt(s: A.Stmt): string {
+  return render(new Printer(NO_COMMENTS, DEFAULT_OPTIONS).stmt(s), LINE_WIDTH);
+}
+
 /** Prints an expression in canonical form (used in reports and diagnostics). Effects: none. */
 export function printExpr(e: A.Expr): string {
   return render(new Printer(NO_COMMENTS, DEFAULT_OPTIONS).expr(e, false), LINE_WIDTH);
@@ -360,7 +365,7 @@ class Printer {
     return concat('{', indent(concat(...b.stmts.map((s) => concat(hardline, this.stmt(s))), this.dangling(b))), hardline, '}');
   }
 
-  private stmt(s: A.Stmt): Doc {
+  stmt(s: A.Stmt): Doc {
     return this.lineNode(s, this.stmtBody(s));
   }
 
@@ -386,8 +391,12 @@ class Printer {
       }
       case 'For':
         return concat('for ', s.name.text, ': ', this.type(s.type), ' in ', this.domain(s.domain, true), ' ', this.block(s.body));
-      case 'Assume':
-        return concat('assume ', qn(s.claim), ' ', quote(s.justification));
+      case 'Assume': {
+        const head = concat('assume ', qn(s.claim), ' ', quote(s.justification));
+        if (s.verify === null) return head;
+        const v = s.verify;
+        return concat(head, indent(concat(hardline, 'verify', this.params(v.params), this.effects(v.effects), ' ', this.block(v.body))));
+      }
       case 'ExprStmt':
         return this.expr(s.expr, false);
     }

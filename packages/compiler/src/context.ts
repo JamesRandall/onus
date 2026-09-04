@@ -10,6 +10,7 @@ import { PathTables } from './paths/tables.js';
 import { EffectTables } from './effects/tables.js';
 import { DiagnosticSink, type FileLookup } from './report/diagnostic.js';
 import { b3 } from './report/hash.js';
+import type { AssumptionLedger } from './report/ledger.js';
 import { ResolveTables } from './resolve/defs.js';
 import { fileId, makeSourceFile, type FileId, type SourceFile, type Span } from './source.js';
 import type { ParseResult } from './syntax/parser.js';
@@ -34,6 +35,12 @@ export interface ContextOptions {
   readonly verify: VerifyOptions;
   /** Informational output that is not a diagnostic (e.g. "z3 not found"). */
   readonly log: (line: string) => void;
+  /** Verification records for assumptions (§20.3), as read from `.onus/ledger/`. */
+  readonly assumptions: AssumptionLedger;
+  /** Age beyond which a passing verification no longer satisfies `policy verified_assumptions_only`. */
+  readonly assumptionMaxAgeMs: number;
+  /** The clock the paths pass judges freshness by, for reproducible tests. */
+  readonly now: () => number;
 }
 
 /** Reads a file from disk, or null if it cannot be read. Effects: reads the file system. */
@@ -77,6 +84,9 @@ export class Context implements FileLookup {
       readFile: options.readFile ?? readFileOrNull,
       verify: options.verify ?? { budgetMs: 500, cacheDir: null, z3Path: null },
       log: options.log ?? ((line) => process.stderr.write(`${line}\n`)),
+      assumptions: options.assumptions ?? {},
+      assumptionMaxAgeMs: options.assumptionMaxAgeMs ?? 7 * 24 * 60 * 60 * 1000,
+      now: options.now ?? (() => Date.now()),
     };
   }
 

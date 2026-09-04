@@ -50,4 +50,7 @@ export { pathReport, pathText, type PathReport } from './report/path.js';
 export { next, tokenName, type NextResult } from './next/next.js';
 export { interfaceDiff, diffText, type InterfaceDiff, type ItemChange } from './report/diff.js';
 export { reviewData, type ReviewData } from './report/review.js';
+export { readLedger, writeLedger, isCurrent, type AssumptionLedger, type VerificationRecord } from './report/ledger.js';
+export { readConfig, DEFAULT_CONFIG, type OnusConfig } from './config.js';
+export { planAssumptions, checkAssumptionPlan, writeAssumptionsLauncher, parseOutcomes, type AssumptionPlan, type VerifyOutcome } from './codegen/assumptions.js';
 export { legalTokensAt, parseWithHole } from './syntax/parser.js';

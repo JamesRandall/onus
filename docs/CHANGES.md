@@ -468,6 +468,45 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     or contract edits flowing back as tasks (§15.1); an invalid program's
     page shows its diagnostics only.
 
+## Testing model (docs/CHANGE-LOG-02.md, applied 2026-09-04)
+
+87. **`_` in `try ... else` (§2.3).** The verify example in §20.2 writes
+    `else _: false`; the binder may now be `_`, which binds nothing. The
+    printer keeps it.
+88. **`verify` blocks (§20.2).** `verify` is a reserved word and a
+    continuation token, so `verify(...)` on the line after an `assume`
+    attaches to it. A block is a definition of its own (kind `verify`, parent
+    the function): it sees the module and its parameters, not the function's
+    locals; its calls are not the function's (no false recursion); its
+    obligations are its own and the `panic` rule applies to it; it yields
+    Bool, each bare expression being an assertion and `try ... else _: v`
+    yielding `v`. Its declared effects must contain its body's and may not
+    exceed its function's (`E0207`); its parameters must be capabilities
+    (`E0208`).
+89. **The environment (§20.2, §20.6).** `onus test --assumptions` supplies
+    each parameter from a `test module` whose public zero-parameter functions
+    return capabilities — `fake`s in practice — named by `onus.json`
+    (`test.env`) or `--env`; `io.Files`, `io.Env`, `io.Net` and `io.Clock`
+    come from the runtime when the environment gives none. A parameter with
+    no source is `E0603`. Generated code exports each block as
+    `verify$<n>` only in that mode, and a generated launcher runs them and
+    prints the outcomes.
+90. **The ledger (§20.3).** `.onus/ledger/assumptions.json`, keyed by module
+    name and the BLAKE3 of the assumption's canonical text; each record has
+    `at`, `target`, `result`, `claim`, `def`. The interface and path
+    reports carry `verifiable` and `last_verified` per assumption; the
+    review page shows *assumed, verified <when> against <target>* or
+    *unverified*. `policy verified_assumptions_only` is the compiler's own
+    policy name: `E0416` when a reachable assumption has no passing record
+    younger than `onus.json` `test.max_assumption_age_days` (default 7).
+91. **`onus test` (§20.6) and the checkout example.** Without flags it
+    builds and runs the generated vitest suite; `--mutate` waits for M13.
+    `charge`'s assumption gained a `verify` block that calls `charge` twice
+    with one key; `auth.require` no longer declares `io.clock` it never
+    used, so the block's effects fit `charge`'s; `examples/checkout/test_env.onus`
+    and `onus.json` supply the fakes. The block passes, and the path report
+    lists it as verified.
+
 ### Deferred, not changed
 
 - `Stream[T] ! e` as a type (§3.11) is not parsed: `-> Stream[T] ! e` is

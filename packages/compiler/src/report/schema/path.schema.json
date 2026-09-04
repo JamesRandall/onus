@@ -96,7 +96,9 @@
           "claim",
           "at",
           "justification",
-          "permitted_by"
+          "permitted_by",
+          "verifiable",
+          "last_verified"
         ],
         "additionalProperties": false,
         "properties": {
@@ -114,6 +116,39 @@
               "scope",
               "except",
               null
+            ]
+          },
+          "verifiable": {
+            "type": "boolean"
+          },
+          "last_verified": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "at",
+                  "target",
+                  "result"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "at": {
+                    "type": "string"
+                  },
+                  "target": {
+                    "type": "string"
+                  },
+                  "result": {
+                    "enum": [
+                      "passed",
+                      "failed"
+                    ]
+                  }
+                }
+              }
             ]
           }
         }

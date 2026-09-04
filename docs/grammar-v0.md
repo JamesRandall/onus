@@ -23,7 +23,7 @@ this grammar and prints the canonical form described at the end.
   are excluded from definition hashes, but the canonical printer preserves
   them, attached to the line-level construct they precede or follow.
 - `NL` is emitted at a line end outside `(`/`[` brackets, never twice in a
-  row, and never before a continuation token: `->`, `else`, `{`, `claims`,
+  row, and never before a continuation token: `->`, `else`, `{`, `verify`, `claims`,
   `requires`, `ensures`, `invariant`, `decreases`. This is what lets a
   signature, a `try ... else` and a loop header span lines while the grammar
   below stays LL(1).
@@ -97,7 +97,7 @@ stmt        = "let" NAME ":" type "=" expr
             | "match" cond "with" NL { "|" pattern [ "when" expr ] "->" ( block | stmt ) NL }
             | "loop" "while" cond { ( "invariant" | "decreases" ) cond } block
             | "for" NAME ":" type "in" domain block
-            | "assume" CLAIM TEXT [ NL verify_block ]                (* CHANGE-LOG-02: §20.2; `verify` reserved; not yet parsed *)
+            | "assume" CLAIM TEXT [ verify_block ]                   (* CHANGE-LOG-02: §20.2; the newline before `verify` is a continuation *)
             | expr ;                                     (* must be a call or `try` of a call: E0002 *)
 verify_block = "verify" "(" [ params ] ")" [ "may" effects ] block ;
 cond        = expr ;                                     (* `{` never begins a record constructor here *)
@@ -116,7 +116,7 @@ primary     = INT | FLOAT | TEXT | DURATION | "true" | "false" | NAME | "it" | "
             | TNAME ctor_rest
             | "{" expr "with" field_init { "," field_init } "}"
             | "(" expr ")" | "[" [ expr { "," expr } ] "]"
-            | "try" expr [ "else" NAME ":" expr ]
+            | "try" expr [ "else" ( NAME | "_" ) ":" expr ]      (* `_` discards the error: CHANGES item 87 *)
             | "recover" block
             | "old" "(" NAME ")"
             | ( "forall" | "exists" ) NAME ":" binder_type [ "in" domain ] [ "where" expr ] ":" expr

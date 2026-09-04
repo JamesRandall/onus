@@ -1,0 +1,26 @@
+module e0416_unverified
+import std.io
+
+claim Quiet "Writes nothing."
+
+fn leaf(env: io.Env) -> Bool may io.env, alloc
+  claims Quiet
+{
+  assume Quiet "Nothing here writes."
+    verify(env: io.Env) may io.env, alloc {
+      let home: Text = try io.get_env(env: env, name: "HOME") else _: false
+      home != ""
+    }
+  return true
+}
+
+pub fn run(env: io.Env) -> Bool may io.env, alloc
+  claims Quiet
+{
+  return leaf(env: env)
+}
+
+path p
+  entry run
+  require { Quiet }
+  policy verified_assumptions_only

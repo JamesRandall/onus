@@ -15,6 +15,8 @@ import { emitModule, type EmittedModule } from './emit.js';
 export interface BuildOptions {
   readonly outDir: string;
   readonly ts: boolean;
+  /** Also emit every `verify` block as a function (`onus test --assumptions`). */
+  readonly verify?: boolean;
 }
 
 export interface BuildResult {
@@ -57,7 +59,7 @@ export function emitAll(ctx: Context, opts: BuildOptions): BuildResult {
   let launcher: string | null = null;
   const entry = ctx.resolve.modules[0] ?? null;
   for (const m of ctx.resolve.modules) {
-    const out = emitModule(ctx, m, { ts: opts.ts, runtime });
+    const out = emitModule(ctx, m, opts.verify === true ? { ts: opts.ts, runtime, verify: true } : { ts: opts.ts, runtime });
     emitted.push(out);
     const path = join(opts.outDir, ...m.name.split('.')) + `.${ext}`;
     mkdirSync(dirname(path), { recursive: true });

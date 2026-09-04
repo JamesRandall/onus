@@ -147,7 +147,7 @@ primary     = LITERAL | NAME | "it" | "result"
             | QTNAME [ call_args ] [ "{" [ field_init { "," field_init } ] "}" ]   (* record ctor / variant ctor *)
             | "{" expr "with" field_init { "," field_init } "}"                    (* record update *)
             | "(" expr ")" | "[" [ expr { "," expr } ] "]"
-            | "try" expr [ "else" NAME ":" expr ]
+            | "try" expr [ "else" ( NAME | "_" ) ":" expr ]   (* changed: 2026-09-04, docs/CHANGES.md item 87 — `_` discards the error *)
             | "recover" block
             | "old" "(" NAME ")"
             | ( "forall" | "exists" ) NAME ":" type [ "in" domain ] [ "where" expr ] ":" expr   (* changed: M1; the binder type has no where of its own *)
@@ -1259,6 +1259,8 @@ assume Idempotent "Vendor API deduplicates on req.key for 24h; see contract §4.
 - `verify` blocks are never run by `onus check`; they run only under `onus test --assumptions`, which is expected to be pointed at a staging or test environment.
 - An `assume` without a `verify` block is permitted and is reported as *unverifiable* in the ledger.
 
+<!-- changed: 2026-09-04, docs/CHANGES.md items 87–89 — as implemented: the newline before `verify` is a continuation like the one before `requires`; a `verify` block is a definition of its own (its own obligations, its own `panic` rule), sees the module and its parameters but not the enclosing function's locals, and yields Bool: each bare expression is an assertion and `try ... else _: v` yields `v`; the environment is a `test module` whose public zero-parameter functions return the capabilities the blocks name (`onus.json` `test.env`, or `onus test --env`), with `io.Files`, `io.Env`, `io.Net` and `io.Clock` supplied by the runtime when the environment does not; a block exceeding its function's effects is `E0207`, a non-capability parameter `E0208`, a parameter with no source `E0603` -->
+
 ### 20.3 Ledger fields
 
 Each `assume` entry in the ledger (§9.1, §11.1) gains:
@@ -1266,7 +1268,7 @@ Each `assume` entry in the ledger (§9.1, §11.1) gains:
 - `verifiable: bool` — whether a `verify` block exists.
 - `last_verified: { at: timestamp, target: string, result: "passed" | "failed" } | null` — recorded by `onus test --assumptions`, persisted in `.onus/ledger/`.
 
-The review tool shows assumptions as *assumed, verified <when> against <target>* or *assumed, unverified*. A `path` may require `policy verified_assumptions_only`, which fails the build if any reachable `assume` lacks a passing verification within a repository-configured age.
+The review tool shows assumptions as *assumed, verified <when> against <target>* or *assumed, unverified*. A `path` may require `policy verified_assumptions_only`, which fails the build if any reachable `assume` lacks a passing verification within a repository-configured age. <!-- changed: 2026-09-04, docs/CHANGES.md item 90 — the key is the module name and the BLAKE3 of the assumption's canonical text, so a record survives moves and lapses when the assumption changes; the file is `.onus/ledger/assumptions.json`; the age is `onus.json` `test.max_assumption_age_days` (default 7); the policy is `E0416` -->
 
 ### 20.4 Contract mutation
 
@@ -1287,7 +1289,7 @@ Line coverage is not reported and cannot be enabled.
 
 ### 20.6 The runner
 
-`onus test` evaluates `example` and `property` blocks (already done by `onus check`), runs `test module`s, and on multi-target builds runs everything on each target, reporting disagreement as `E0801` (§19.5). `onus test --assumptions` runs `verify` blocks against supplied capabilities. `onus test --mutate` runs contract mutation. There is no plugin mechanism and no configuration file beyond the repository's target and environment settings.
+`onus test` evaluates `example` and `property` blocks (already done by `onus check`), runs `test module`s, and on multi-target builds runs everything on each target, reporting disagreement as `E0801` (§19.5). `onus test --assumptions` runs `verify` blocks against supplied capabilities. `onus test --mutate` runs contract mutation. There is no plugin mechanism and no configuration file beyond the repository's target and environment settings. <!-- changed: 2026-09-04, docs/CHANGES.md item 91 — v0: `onus test <entry>` builds and runs the generated example, property and law tests; `--assumptions [--env] [--target]` records the ledger; `--mutate` waits for M13; the settings file is `onus.json` at the root -->
 
 ---
 

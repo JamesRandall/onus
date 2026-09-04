@@ -10,11 +10,21 @@ import { effectName } from '../paths/pass.js';
 import { effectsOfFn } from '../claims/calls.js';
 import { EffectSet } from '../effects/set.js';
 
+export interface VerifiedJson {
+  readonly at: string;
+  readonly target: string;
+  readonly result: 'passed' | 'failed';
+}
+
 export interface PathAssumeJson {
   readonly claim: string;
   readonly at: string;
   readonly justification: string;
   readonly permitted_by: 'scope' | 'except' | null;
+  /** Whether a `verify` block exists (§20.3). */
+  readonly verifiable: boolean;
+  /** The last `onus test --assumptions` record, or null. */
+  readonly last_verified: VerifiedJson | null;
 }
 
 export interface GraphNodeJson {
@@ -119,7 +129,7 @@ export function pathReport(ctx: Context, analysis: PathAnalysis): PathReport {
     reachable: analysis.reachable.map((d) => t.qualifiedName(d)),
     effects: { bound: analysis.bound === null ? null : names(analysis.bound), forbid: names(analysis.forbid), actual: names(analysis.actual) },
     claims: { required: analysis.required.map((c) => t.qualifiedName(c)), satisfied: analysis.satisfied },
-    assumes: analysis.assumes.map((a) => ({ claim: t.qualifiedName(a.claim), at: t.qualifiedName(a.fn), justification: a.justification, permitted_by: a.permittedBy })),
+    assumes: analysis.assumes.map((a) => ({ claim: t.qualifiedName(a.claim), at: t.qualifiedName(a.fn), justification: a.justification, permitted_by: a.permittedBy, verifiable: a.verify !== null, last_verified: verifiedOf(ctx, a.key) })),
     obligations: { ...counts, checked_at: checkedAt },
     unresolvable_calls: analysis.unresolvable.map((u) => ({ at: `${t.qualifiedName(u.fn)}:${lineCol(ctx, t.node(u.at).span)}`, reason: u.reason })),
     capabilities: analysis.capabilities.map((c) => ({ type: c.typeText, constructed_at: `${t.qualifiedName(c.fn)}:${lineCol(ctx, t.node(c.at).span)}`, assumes: [] })),
@@ -131,13 +141,19 @@ export function pathReport(ctx: Context, analysis: PathAnalysis): PathReport {
   };
 }
 
+/** `verified <when> against <target>`, `verification failed ...`, `verifiable, not yet verified` or `unverifiable`. Effects: none. */
+export function verifiedText(a: { readonly verifiable: boolean; readonly last_verified: VerifiedJson | null }): string {
+  if (a.last_verified !== null) return `${a.last_verified.result === 'passed' ? 'verified' : 'verification failed'} ${a.last_verified.at} against ${a.last_verified.target}`;
+  return a.verifiable ? 'verifiable, not yet verified' : 'unverifiable';
+}
+
 /** The text rendering of a report. Effects: none. */
 export function pathText(r: PathReport): string {
   const lines: string[] = [`path ${r.path} (${r.ok ? 'ok' : 'failed'})`, `  entry ${r.entry}`, `  reachable (${r.reachable.length}): ${r.reachable.join(', ')}`];
   lines.push(`  effects: { ${r.effects.actual.join(', ')} }${r.effects.bound === null ? '' : ` within { ${r.effects.bound.join(', ')} }`}${r.effects.forbid.length > 0 ? `, forbidding { ${r.effects.forbid.join(', ')} }` : ''}`);
   if (r.claims.required.length > 0) lines.push(`  claims: { ${r.claims.required.join(', ')} } ${r.claims.satisfied ? 'satisfied' : 'NOT satisfied'}`);
   lines.push(r.assumes.length === 0 ? '  assumes: none' : '  assumes:');
-  for (const a of r.assumes) lines.push(`    ${a.at}: ${a.claim} "${a.justification}"${a.permitted_by === null ? '' : ` (permitted by ${a.permitted_by})`}`);
+  for (const a of r.assumes) lines.push(`    ${a.at}: ${a.claim} "${a.justification}"${a.permitted_by === null ? '' : ` (permitted by ${a.permitted_by})`} — ${verifiedText(a)}`);
   const o = r.obligations;
   lines.push(`  obligations: ${o.proved} proved, ${o.checked} checked, ${o.assumed} assumed${o.failed > 0 ? `, ${o.failed} failed` : ''}`);
   for (const c of o.checked_at) lines.push(`    checked at ${c}`);
@@ -148,6 +164,12 @@ export function pathText(r: PathReport): string {
   for (const g of r.gates) lines.push(`  gate: ${g.evidence} from ${g.producers.join(', ')} guards ${g.guarded.join(', ')}`);
   lines.push(`  graph: ${r.graph.nodes.length} nodes, ${r.graph.edges.length} edges`);
   return `${lines.join('\n')}\n`;
+}
+
+/** The ledger's record for an assumption, as the report shows it. Effects: none. */
+export function verifiedOf(ctx: Context, key: string): VerifiedJson | null {
+  const r = ctx.options.assumptions[key];
+  return r === undefined ? null : { at: r.at, target: r.target, result: r.result };
 }
 
 function lineCol(ctx: Context, span: Span): string {

@@ -1,0 +1,14 @@
+test module test_env
+import std.io
+import app.auth
+import vendor.payments
+
+-- The environment for `onus test --assumptions` (§20.2): how each capability a verify block needs is constructed.
+-- Root capabilities (io.Clock) come from the runtime unless a function here returns them.
+pub fn client() -> payments.Client {
+  return fake payments.Client {}
+}
+
+pub fn service() -> auth.Service {
+  return fake auth.Service {}
+}

@@ -12,6 +12,10 @@ export interface PathAssume {
   readonly node: A.NodeId;
   /** How the path's policy permits it, or null when it violates the policy (E0415) or there is no policy. */
   readonly permittedBy: 'scope' | 'except' | null;
+  /** The `verify` block, when there is one (§20.2). */
+  readonly verify: A.NodeId | null;
+  /** Ledger key (§20.3). */
+  readonly key: string;
 }
 
 export interface UnresolvableCall {

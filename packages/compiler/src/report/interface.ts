@@ -18,6 +18,7 @@ import { print, printExpr, printItem, printSignature, printType } from '../synta
 import { walk } from '../syntax/walk.js';
 import type { JsonSpan } from './diagnostic.js';
 import { b3 } from './hash.js';
+import { verifiedOf, type VerifiedJson } from './path.js';
 
 export type ItemKind = 'fn' | 'type' | 'const' | 'record' | 'union' | 'interface' | 'impl' | 'claim' | 'capability' | 'path' | 'policy' | 'example' | 'property';
 export type ItemVisibility = 'pub' | 'private';
@@ -58,6 +59,10 @@ export interface AssumeEntry {
   readonly claim: string;
   readonly justification: string;
   readonly at: Location;
+  /** Whether a `verify` block exists (§20.3). */
+  readonly verifiable: boolean;
+  /** The last `onus test --assumptions` record, or null. */
+  readonly last_verified: VerifiedJson | null;
 }
 
 export interface RecoverEntry {
@@ -262,6 +267,7 @@ class InterfaceBuilder {
     for (const c of f.contracts) out.push(this.contractEntry(c.clause, c.expr, c.proved, c.id));
     if (f.body !== null) {
       walk(f.body, (n) => {
+        if (n.kind === 'VerifyBlock') return false;
         if (n.kind === 'LoopClause') out.push(this.contractEntry(n.clause, n.expr, false, n.id));
         return true;
       });
@@ -292,7 +298,18 @@ class InterfaceBuilder {
   private assumesIn(item: A.Item): AssumeEntry[] {
     const out: AssumeEntry[] = [];
     walk(item, (n) => {
-      if (n.kind === 'Assume') out.push({ def: this.defNameAt(n.span), claim: n.claim.segments.map((s) => s.text).join('.'), justification: n.justification, at: this.location(n.span) });
+      if (n.kind === 'VerifyBlock') return false;
+      if (n.kind === 'Assume') {
+        const site = this.ctx.claims.assumes.find((a) => a.node === n.id);
+        out.push({
+          def: this.defNameAt(n.span),
+          claim: n.claim.segments.map((s) => s.text).join('.'),
+          justification: n.justification,
+          at: this.location(n.span),
+          verifiable: n.verify !== null,
+          last_verified: site === undefined ? null : verifiedOf(this.ctx, site.key),
+        });
+      }
       return true;
     });
     return out;
@@ -301,6 +318,7 @@ class InterfaceBuilder {
   private recoversIn(item: A.Item): RecoverEntry[] {
     const out: RecoverEntry[] = [];
     walk(item, (n) => {
+      if (n.kind === 'VerifyBlock') return false;
       if (n.kind === 'Recover') out.push({ def: this.defNameAt(n.span), at: this.location(n.span) });
       return true;
     });

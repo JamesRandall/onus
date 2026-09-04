@@ -1117,7 +1117,16 @@ class Parser {
         this.advance();
         const claim = this.dotted();
         const justification = this.textValue(this.expect('text'));
-        return { id: PLACEHOLDER, kind: 'Assume', span: this.spanFrom(s), claim, justification };
+        let verify: A.VerifyBlock | null = null;
+        if (this.at('verify')) {
+          const vs = this.here();
+          this.advance();
+          const params = this.paramList();
+          const effects = this.effectsOpt();
+          const body = this.parseAssertionBlock();
+          verify = { id: PLACEHOLDER, kind: 'VerifyBlock', span: this.spanFrom(vs), params, effects, body };
+        }
+        return { id: PLACEHOLDER, kind: 'Assume', span: this.spanFrom(s), claim, justification, verify };
       }
       default: {
         const expr = this.parseExpr();
@@ -1458,7 +1467,8 @@ class Parser {
         if (this.at('else')) {
           const es = this.here();
           this.advance();
-          const name = this.name();
+          // `else _: expr` discards the error (§20.2's verify blocks; docs/CHANGES.md item 87).
+          const name = this.at('_') ? this.ident(this.advance()) : this.name();
           this.expect(':');
           const eexpr = this.parseExpr();
           elseClause = { id: PLACEHOLDER, kind: 'TryElse', span: this.spanFrom(es), name, expr: eexpr };

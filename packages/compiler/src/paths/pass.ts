@@ -17,6 +17,8 @@ import { observable } from '../claims/pass.js';
 import type { Context } from '../context.js';
 import { EffectSet, type Effect } from '../effects/set.js';
 import { diagnostic } from '../report/diagnostic.js';
+import { isCurrent } from '../report/ledger.js';
+import { BUILTIN_POLICY } from '../resolve/resolve.js';
 import type { Code } from '../report/codes.js';
 import type { DefId, ModuleRecord } from '../resolve/defs.js';
 import type { Span } from '../source.js';
@@ -62,6 +64,7 @@ class PathChecker {
     let forbid = EffectSet.empty();
     const required: DefId[] = [];
     let policy: { def: DefId; except: readonly string[]; span: Span } | null = null;
+    let verifiedOnly: Span | null = null;
     const spans = { bound: this.path.span, forbid: this.path.span, require: this.path.span };
     for (const c of this.path.clauses) {
       switch (c.kind) {
@@ -78,6 +81,10 @@ class PathChecker {
           required.push(...(t.claimLists.get(c.id) ?? []));
           break;
         case 'PathPolicy': {
+          if (c.name.text === BUILTIN_POLICY) {
+            verifiedOnly = c.span;
+            break;
+          }
           const res = t.refs.get(c.id);
           if (res !== undefined && res.k === 'def') policy = { def: res.def, except: c.except.map((q) => q.segments.map((s) => s.text).join('.')), span: c.span };
           break;
@@ -126,7 +133,11 @@ class PathChecker {
           else if (policy.except.includes(t.qualifiedName(fn))) permittedBy = 'except';
           else this.report('E0415', policy.span, `\`${t.qualifiedName(fn)}\` assumes \`${t.def(a.claim).name}\` ("${a.justification}") outside the policy's scope and is not listed under \`except\``);
         }
-        assumes.push({ claim: a.claim, fn, justification: a.justification, node: a.node, permittedBy });
+        if (verifiedOnly !== null && !isCurrent(this.ctx.options.assumptions[a.key], this.ctx.options.now(), this.ctx.options.assumptionMaxAgeMs)) {
+          const days = Math.round(this.ctx.options.assumptionMaxAgeMs / 86400000);
+          this.report('E0416', verifiedOnly, `\`${t.qualifiedName(fn)}\` assumes \`${t.def(a.claim).name}\` ${a.verify === null ? 'with no `verify` block' : `without a passing verification in the last ${days} day${days === 1 ? '' : 's'}`}; \`policy ${BUILTIN_POLICY}\` requires one (§20.3)`);
+        }
+        assumes.push({ claim: a.claim, fn, justification: a.justification, node: a.node, permittedBy, verify: a.verify, key: a.key });
       }
     }
     this.ctx.paths.analyses.set(pathDef, {
@@ -186,6 +197,7 @@ class PathChecker {
       const node = t.node(t.def(fn).node);
       if (node.kind !== 'FnDecl' || node.body === null) continue;
       walk(node.body, (n) => {
+        if (n.kind === 'VerifyBlock') return false;
         if (n.kind === 'Recover') recovers.push({ fn, at: n.id });
         if (n.kind !== 'Call') return true;
         const callee = calleeOf(this.ctx, n);
@@ -246,6 +258,7 @@ class PathChecker {
       const node = t.node(t.def(fn).node);
       if (node.kind !== 'FnDecl' || node.body === null) continue;
       walk(node.body, (n) => {
+        if (n.kind === 'VerifyBlock') return false;
         if (n.kind !== 'Call') return true;
         const callee = calleeOf(this.ctx, n);
         if (callee.k === 'fn' || callee.k === 'impl') queue.push(callee.def);
