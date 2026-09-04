@@ -128,8 +128,9 @@ stmt        = "let" NAME ":" type "=" expr
             | "match" expr "with" NL { "|" pattern [ "when" expr ] "->" ( stmt | block ) NL }
             | "loop" "while" expr { loop_clause } block       (* changed: M1 *)
             | "for" NAME ":" type "in" domain block           (* changed: M1 *)
-            | "assume" TNAME STRING
+            | "assume" TNAME STRING [ NL verify_block ]   (* changed: 2026-09-03, docs/CHANGE-LOG-02.md; `verify` is a reserved word *)
             | expr ;                                    (* call for effect *)
+verify_block = "verify" "(" [ params ] ")" [ "may" effects ] block ;   (* changed: 2026-09-03, docs/CHANGE-LOG-02.md — §20.2 *)
 loop_clause = "invariant" expr | "decreases" expr ;
 domain      = expr [ "..<" expr ] ;                      (* changed: M1, ranges §5.1 §5.3 *)
 
@@ -1216,6 +1217,77 @@ The following are specified so that all targets agree: `Map` iteration is in key
 ### 19.5 Differential testing
 
 Every `example` and `property` runs on every built target. Any disagreement between targets on a program the compiler accepted is a backend defect, reported as `E0801 target disagreement` with the example, the two results and the targets.
+
+---
+
+## 20. Testing
+
+<!-- changed: 2026-09-03, docs/CHANGE-LOG-02.md "Testing model"; code pending (M8 and M10 additions, M13) -->
+
+### 20.1 What is tested and where
+
+| Concern | Mechanism | Lives in |
+|---|---|---|
+| Behaviour, all inputs | `requires` / `ensures` / `invariant`, proved | the function's interface |
+| Behaviour, specific inputs | `example` (§5.2) | the function's interface |
+| Behaviour, generated inputs | `property` (§5.2) | the function's interface |
+| Dependencies | capabilities passed as parameters; `fake` (§8.4) | `test module` |
+| Scenarios across modules | `example` blocks in a `test module`, with fakes at the edges | `test module` |
+| Contact with reality | `verify` blocks on `assume` leaves (20.2) | next to the assumption |
+| Regressions | `example` blocks pinned from counterexamples (loop spec §7) | the function's interface |
+| Strength of the contracts | regeneration audits (loop spec §8) and contract mutation (20.4) | `onus test` |
+
+There is no test tree parallel to the source. An example is attached to what it exemplifies.
+
+Functions with the `nondet` effect take their source of nondeterminism (`io.Clock`, `io.Rand`) as a capability, so a test supplies a fixed one. A test that could be flaky is not expressible.
+
+### 20.2 Assumption verification
+
+An `assume` may carry a `verify` block: an Onus function body that exercises the assumption against the real resource and yields `Bool`.
+
+```
+assume Idempotent "Vendor API deduplicates on req.key for 24h; see contract §4.2"
+  verify(client: payments.Client) may io.net, alloc {
+    let a: Receipt = try payments.charge(client: client, key: "verify-1", amount: 100) else _: false
+    let b: Receipt = try payments.charge(client: client, key: "verify-1", amount: 100) else _: false
+    a.id == b.id
+  }
+```
+
+- The block's parameters are capabilities, supplied by the environment running `onus test --assumptions`, never constructed by the block.
+- The block declares its effects like any function and may not exceed the effects of the function containing the `assume`.
+- `verify` blocks are never run by `onus check`; they run only under `onus test --assumptions`, which is expected to be pointed at a staging or test environment.
+- An `assume` without a `verify` block is permitted and is reported as *unverifiable* in the ledger.
+
+### 20.3 Ledger fields
+
+Each `assume` entry in the ledger (§9.1, §11.1) gains:
+
+- `verifiable: bool` — whether a `verify` block exists.
+- `last_verified: { at: timestamp, target: string, result: "passed" | "failed" } | null` — recorded by `onus test --assumptions`, persisted in `.onus/ledger/`.
+
+The review tool shows assumptions as *assumed, verified <when> against <target>* or *assumed, unverified*. A `path` may require `policy verified_assumptions_only`, which fails the build if any reachable `assume` lacks a passing verification within a repository-configured age.
+
+### 20.4 Contract mutation
+
+`onus test --mutate` weakens contracts one at a time and reports which weakenings no example or property detects. Mutations applied, per obligation: drop an `ensures` clause; replace a refinement bound with its base type; negate a guard in a `property`; drop a `law`. A mutation that survives — every example and property still passes — is reported as `M0001 undetected contract weakening` with the mutation and the function. It is not an error; it is the signal that the examples are not carrying the contract's meaning.
+
+Mutation never touches bodies. Bodies are the model's; weakening them is what the loop already does implicitly by regenerating.
+
+### 20.5 Obligation coverage
+
+The reported test metric is obligation coverage, per module and per path:
+
+- obligations proved;
+- obligations checked, and of those, how many are exercised by at least one `example` or `property`;
+- assumptions, and of those, how many are verifiable and how many have a current passing verification;
+- contract mutations detected versus surviving.
+
+Line coverage is not reported and cannot be enabled.
+
+### 20.6 The runner
+
+`onus test` evaluates `example` and `property` blocks (already done by `onus check`), runs `test module`s, and on multi-target builds runs everything on each target, reporting disagreement as `E0801` (§19.5). `onus test --assumptions` runs `verify` blocks against supplied capabilities. `onus test --mutate` runs contract mutation. There is no plugin mechanism and no configuration file beyond the repository's target and environment settings.
 
 ---
 

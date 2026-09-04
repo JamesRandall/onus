@@ -2,7 +2,7 @@
 
 Changes to `onus-spec-v0.md` forced by implementation, by milestone. Each is
 marked in the spec with `<!-- changed: reason -->` and pinned by a fixture.
-Changes the spec author makes are logged in `CHANGE-LOG.md`, dated, with
+Changes the spec author makes are logged in `CHANGE-LOG.md` and its sequels, dated, with
 what the codebase must do about each; this file records only what
 implementation forced.
 

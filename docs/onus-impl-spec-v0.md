@@ -160,12 +160,12 @@ The compiler is a pipeline; each pass takes the AST plus the side tables produce
 6. **effects** → effect set per definition, containment at every call, `alloc` inference.
 7. **flow** → path knowledge per node (§3.2.1): a list of `Formula` in scope, computed by walking each body with branch conditions, `match` arms, loop conditions, and killed on `var` assignment and `inout` passes.
 8. **contracts** → obligations (§3.5) for every site listed in §12.1. Also `decreases` obligations and recursion cycle detection (`E0320`).
-9. **claims** → tiers, `assume` sites recorded, derived claims expanded to effect predicates, propagation over the call graph.
+9. **claims** → tiers, `assume` sites recorded, derived claims expanded to effect predicates, propagation over the call graph. Records `verify` blocks on `assume` sites; they are type- and effect-checked like functions in passes 4 and 6 but excluded from codegen except under `onus test --assumptions`. <!-- changed: 2026-09-03, docs/CHANGE-LOG-02.md -->
 10. **capabilities** → capability parameter rules, root rules for `main`, attenuation typing, `fake` only in `test module`.
 11. **verify** → obligation statuses.
 12. **paths** → reachability, provenance, per-path checks, `E0410`/`E0411`.
 13. **codegen** → TS files into `out/`.
-14. **report** → `interface.json` per module, `path.json` per path, `diagnostics.json`.
+14. **report** → `interface.json` per module, `path.json` per path, `diagnostics.json`. Each assumption entry carries `verifiable` and `last_verified` (§20.3 of the language spec); each module and path carries an `obligation_coverage` block (§20.5). <!-- changed: 2026-09-03, docs/CHANGE-LOG-02.md -->
 
 Passes 5–12 can be skipped by `onus check --to <pass>` for development. Each pass has a single entry point `run(ctx: Context): void` and writes only to its own tables; a pass that needs another pass's output reads it from `ctx`.
 
@@ -186,6 +186,8 @@ Passes 5–12 can be skipped by `onus check --to <pass>` for development. Each p
 - `sql.ts` — `Db` capability over `pg`; `connect(mode: ReadOnly)` sets `default_transaction_read_only` and queries `pg_roles` for the privilege check; `narrow`, `restrict`, `deadline`; `query` returning `Result`, decoding rows through the generated row decoder which applies refinements and returns `Err(Refinement)`.
 
 Capabilities are ordinary objects at runtime. Every guarantee is static; the runtime only has to make forging inconvenient, not impossible.
+
+`.onus/ledger/assumptions.json`, keyed by module and `assume` location hash, holds each assumption's `last_verified` record as written by `onus test --assumptions` (§20.3 of the language spec). <!-- changed: 2026-09-03, docs/CHANGE-LOG-02.md -->
 
 ---
 
@@ -301,17 +303,21 @@ Each milestone has acceptance tests in `test/`. Do not start the next milestone 
 
 **M7 — Reports.** `interface.json` (§11.1), `diagnostics.json` (§13) complete, text renderers. Accept: JSON validates against schemas checked into `report/schema/`; the text rendering of an interface is valid Onus with bodies elided.
 
-**M8 — Claims, capabilities, paths.** Assume tracking, derived claims, policies, root rules, attenuation, `test module` and `fake`, reachability with provenance (v0: function values unresolvable), `path.json` (§9.1). Accept: reporting example's `path monthly_report` passes; checkout example's `path checkout` passes with exactly one assumption; removing the `except` fails the policy; adding a `sql.write` to a reachable function fails the bound.
+**M8 — Claims, capabilities, paths.** Assume tracking, derived claims, policies, root rules, attenuation, `test module` and `fake`, reachability with provenance (v0: function values unresolvable), `path.json` (§9.1). Accept: reporting example's `path monthly_report` passes; checkout example's `path checkout` passes with exactly one assumption; removing the `except` fails the policy; adding a `sql.write` to a reachable function fails the bound. Added 2026-09-03 (docs/CHANGE-LOG-02.md; outstanding, M8 having shipped without it): `verify` blocks parsed, checked, and stored; `onus test --assumptions` runs them against capabilities constructed from a repository config; ledger fields populated; `policy verified_assumptions_only`. Accept: the checkout example's `Idempotent` assumption has a `verify` block that passes against a fake payments service and the path report shows it as verified.
 
 **M9 — `onus next`.** Accept: for every fixture, the token set at every offset is a superset of the token actually present; expected types are correct at 20 hand-picked positions.
 
-**M10 — Review tool.** Static page in `packages/review` rendering `interface.json` and `path.json`: the path view (graph, ledger rows), interface view, ledger view, diff view. Reads files; computes nothing beyond layout. Accept: the checkout path renders with the assumed leaf highlighted and the gate region drawn.
+**M10 — Review tool.** Static page in `packages/review` rendering `interface.json` and `path.json`: the path view (graph, ledger rows), interface view, ledger view, diff view. Reads files; computes nothing beyond layout. Accept: the checkout path renders with the assumed leaf highlighted and the gate region drawn. Added 2026-09-03 (docs/CHANGE-LOG-02.md; outstanding): assumption freshness shown in the path and ledger views.
 
 <!-- changed: 2026-09-03, docs/CHANGE-LOG.md "Targets: dual backends as a design goal" — M11 and M12 added -->
 
 **M11 — Native backend.** LLVM IR emitter; C runtime for the §19.1 primitive surface (no `sql` yet); `onus build --target native` produces an executable via `clang`. `proved` obligations emit no code; `checked` obligations emit compare-and-branch to `onus_panic` with the obligation id; `recover` via `setjmp`/`longjmp`. `Int` is `i64` with `llvm.*.with.overflow` intrinsics. Accept: Mandelbrot builds natively and writes an identical PGM to the JS build; every `example` passes on both targets; `E0801` fires on a deliberately broken runtime primitive. Before emitting anything: the shared lowering in `codegen/` is the design constraint — if the JS emitter has lowering logic tangled into emission, separate it first, and add a fixture set for the target-neutral form.
 
 **M12 — Targets complete.** `sql` primitives in the C runtime over `libpq`; host claims; `Int` representation obligations in the JS backend; differential test harness running all fixtures on both targets; WebAssembly emission via the same LLVM path (`--target wasm`), with `io.*` mapped to WASI. Accept: all three examples build and agree on both native and JS; the reporting example runs natively against Postgres; a `path` with `forbid { host.js }` rejects a JS-only `assume` leaf.
+
+<!-- changed: 2026-09-03, docs/CHANGE-LOG-02.md "Testing model" — M13 added -->
+
+**M13 — Contract mutation and coverage.** `onus test --mutate` with the four mutation kinds; `M0001` reporting (a report row of the test run, not a diagnostic: there are no warnings); obligation coverage in `interface.json`, `path.json` and the review tool. Accept: dropping the `ensures` on `recent_orders` is detected by its property; dropping a deliberately unexercised refinement in a fixture survives and is reported.
 
 ---
 

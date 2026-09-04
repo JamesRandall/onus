@@ -7,7 +7,7 @@ reviews contracts, and the compiler is the only checker.
 - `docs/onus-impl-spec-v0.md` — the implementation plan and milestones
 - `docs/grammar-v0.md` — the grammar as implemented and the canonical form
 - `docs/CHANGES.md` — spec changes forced by implementation
-- `docs/CHANGE-LOG.md` — changes made by the spec author, dated, with what the codebase must do about each
+- `docs/CHANGE-LOG.md`, `docs/CHANGE-LOG-02.md` — changes made by the spec author, dated, with what the codebase must do about each; applied in file order
 - `docs/onus-loop-v0.md` — the regeneration loop, a candidate spec for the component that drives the model against the compiler
 - `docs/onus-pitch.md` — the pitch
 

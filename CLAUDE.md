@@ -6,7 +6,7 @@ Onus is a programming language in which a model writes function bodies, a human 
 
 - `docs/onus-spec-v0.md` — the language specification. **Normative.** If code and spec disagree, the spec wins unless a spec change is made explicitly (see below).
 - `docs/onus-impl-spec-v0.md` — the implementation plan: decisions, data structures, passes, milestones, acceptance tests. Follow the milestone order.
-- `docs/CHANGE-LOG.md` — dated changes the spec author makes to both documents, each saying what the codebase must do. Entries marked **(to apply)** are work; apply them in order and flip the marker when done.
+- `docs/CHANGE-LOG.md`, `docs/CHANGE-LOG-02.md`, … — dated changes the spec author makes to both documents, each saying what the codebase must do. Entries marked **(to apply)** are work; apply them in file order, then entry order, and flip the marker when done.
 
 Read both before writing any code. When a task touches a language rule, quote the spec section in the commit message.
 

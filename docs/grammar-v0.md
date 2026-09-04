@@ -97,8 +97,9 @@ stmt        = "let" NAME ":" type "=" expr
             | "match" cond "with" NL { "|" pattern [ "when" expr ] "->" ( block | stmt ) NL }
             | "loop" "while" cond { ( "invariant" | "decreases" ) cond } block
             | "for" NAME ":" type "in" domain block
-            | "assume" CLAIM TEXT
+            | "assume" CLAIM TEXT [ NL verify_block ]                (* CHANGE-LOG-02: §20.2; `verify` reserved; not yet parsed *)
             | expr ;                                     (* must be a call or `try` of a call: E0002 *)
+verify_block = "verify" "(" [ params ] ")" [ "may" effects ] block ;
 cond        = expr ;                                     (* `{` never begins a record constructor here *)
 domain      = expr [ "..<" expr ] ;
 
