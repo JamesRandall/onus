@@ -42,6 +42,8 @@ describe('review page (§15)', () => {
     expect(html).toContain('gate: app.auth.AuthedCustomer from app.auth.require');
     expect(html).toContain('ledger-row status-proved');
     expect(html).toContain('permitted by except');
+    expect(html).toContain('verify(client: Client, service: auth.Service, clock: io.Clock) may io.net, alloc {');
+    expect(html).toContain('assumed, unverified');
   });
 
   it('collapses bodies in the interface view and counts their opening', () => {

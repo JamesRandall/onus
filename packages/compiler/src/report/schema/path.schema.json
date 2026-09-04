@@ -98,7 +98,8 @@
           "justification",
           "permitted_by",
           "verifiable",
-          "last_verified"
+          "last_verified",
+          "verify"
         ],
         "additionalProperties": false,
         "properties": {
@@ -149,6 +150,12 @@
                   }
                 }
               }
+            ]
+          },
+          "verify": {
+            "type": [
+              "string",
+              "null"
             ]
           }
         }

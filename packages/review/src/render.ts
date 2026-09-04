@@ -84,7 +84,7 @@ export function renderPathView(r: PathReport): string {
   }
   const head = `<h2>path <code>${esc(r.path)}</code> <span class="status ${r.ok ? 'ok' : 'failed'}">${r.ok ? 'ok' : 'failed'}</span></h2>
 <p>entry <code>${esc(r.entry)}</code> · ${r.reachable.length} reachable · effects { ${esc(r.effects.actual.join(', '))} }${r.effects.bound === null ? '' : ` within { ${esc(r.effects.bound.join(', '))} }`}${r.effects.forbid.length > 0 ? ` · forbid { ${esc(r.effects.forbid.join(', '))} }` : ''}${r.claims.required.length > 0 ? ` · require { ${esc(r.claims.required.join(', '))} } ${r.claims.satisfied ? 'satisfied' : 'not satisfied'}` : ''}</p>`;
-  const assumes = r.assumes.length === 0 ? '<p>No assumptions on this path.</p>' : `<table><thead><tr><th>assume</th><th>at</th><th>justification</th><th>permitted by</th><th>verified</th></tr></thead><tbody>${r.assumes.map((a) => `<tr class="assumed"><td><code>${esc(a.claim)}</code></td><td><code>${esc(a.at)}</code></td><td>${esc(a.justification)}</td><td>${a.permitted_by === null ? 'not permitted' : `permitted by ${esc(a.permitted_by)}`}</td><td class="fresh ${a.last_verified?.result === 'passed' ? 'verified' : 'unverified'}">assumed, ${esc(freshness(a))}</td></tr>`).join('')}</tbody></table>`;
+  const assumes = r.assumes.length === 0 ? '<p>No assumptions on this path.</p>' : `<table><thead><tr><th>assume</th><th>at</th><th>justification</th><th>permitted by</th><th>verified</th></tr></thead><tbody>${r.assumes.map((a) => `<tr class="assumed"><td><code>${esc(a.claim)}</code></td><td><code>${esc(a.at)}</code></td><td>${esc(a.justification)}</td><td>${a.permitted_by === null ? 'not permitted' : `permitted by ${esc(a.permitted_by)}`}</td><td class="fresh ${a.last_verified?.result === 'passed' ? 'verified' : 'unverified'}">assumed, ${esc(freshness(a))}</td></tr>${a.verify === null ? '' : `<tr class="verify-row"><td colspan="5"><pre class="verify">${esc(a.verify)}</pre></td></tr>`}`).join('')}</tbody></table>`;
   const caps = r.capabilities.length === 0 ? '' : `<h3>Capabilities</h3><table><thead><tr><th>type</th><th>constructed at</th><th>assumes</th></tr></thead><tbody>${r.capabilities.map((c) => `<tr><td><code>${esc(c.type)}</code></td><td><code>${esc(c.constructed_at)}</code></td><td>${esc(c.assumes.join('; ') || 'none recorded')}</td></tr>`).join('')}</tbody></table>`;
   const recovers = r.recovers.length === 0 ? '' : `<h3>Recover sites</h3><ul>${r.recovers.map((x) => `<li class="recover"><code>${esc(x.def)}</code> at <code>${esc(x.at)}</code></li>`).join('')}</ul>`;
   return `<section class="path" data-path="${esc(r.path)}">${head}
@@ -128,7 +128,7 @@ export function renderInterfaceView(doc: InterfaceDocument, source: string | nul
       const sig = `<pre class="signature">${esc(item.kind === 'fn' ? `${item.visibility === 'pub' ? 'pub ' : ''}${item.signature}` : item.signature)}</pre>`;
       const meta = item.kind === 'fn' ? `<p class="meta">${item.effects.length > 0 ? `effects ${esc(item.effects.join(', '))}` : 'pure'}${item.claims.length > 0 ? ` · claims ${esc(item.claims.join(', '))}` : ''} · ${counts(item.obligations)}</p>` : '';
       const contracts = item.contracts.map(contractLine).join('');
-      const assumes = item.assumes.map((a) => `<div class="assumed">assume <code>${esc(a.claim)}</code> — ${esc(a.justification)} <span class="small">(${esc(locText(a.at))}; ${esc(freshness(a))})</span></div>`).join('');
+      const assumes = item.assumes.map((a) => `<div class="assumed">assume <code>${esc(a.claim)}</code> — ${esc(a.justification)} <span class="small">(${esc(locText(a.at))}; ${esc(freshness(a))})</span>${a.verify === null ? '' : `<pre class="verify">${esc(a.verify)}</pre>`}</div>`).join('');
       const recovers = item.recovers.map((x) => `<div class="recover">recover at ${esc(locText(x.at))}</div>`).join('');
       const tests = [...item.examples.map((e) => `<span class="test ${esc(e.status.replace(' ', '-'))}">example ${esc(e.name)}: ${esc(e.status)}</span>`), ...item.properties.map((p) => `<span class="test ${esc(p.status)}">property ${esc(p.name)}: ${esc(p.status)}</span>`)].join(' ');
       const bodyBlock = item.kind === 'fn' && body !== null ? `<details class="body" data-module="${esc(doc.module)}" data-item="${esc(item.name)}"><summary><code>{ ... }</code> <span class="small">expand body (counted)</span></summary><pre>${esc(body)}</pre></details>` : '';
@@ -149,7 +149,7 @@ ${items}</section>`;
 export function renderLedgerView(data: ReviewData): string {
   const rows = data.modules.flatMap((m) => m.ledger.map((l) => ({ ...l, def: `${m.module}.${l.def}`, at: locText(l.at) })));
   const filters = ['all', 'proved', 'checked', 'assumed', 'failed'].map((s) => `<button class="filter${s === 'all' ? ' active' : ''}" data-status="${s}">${s}</button>`).join(' ');
-  const assumes = data.modules.flatMap((m) => m.assumes.map((a) => `<tr class="assumed"><td><code>${esc(m.module)}.${esc(a.def)}</code></td><td><code>${esc(a.claim)}</code></td><td>${esc(a.justification)}</td><td><code>${esc(locText(a.at))}</code></td><td>${esc(freshness(a))}</td></tr>`));
+  const assumes = data.modules.flatMap((m) => m.assumes.map((a) => `<tr class="assumed"><td><code>${esc(m.module)}.${esc(a.def)}</code></td><td><code>${esc(a.claim)}</code></td><td>${esc(a.justification)}</td><td><code>${esc(locText(a.at))}</code></td><td>${esc(freshness(a))}</td></tr>${a.verify === null ? '' : `<tr class="verify-row"><td colspan="5"><pre class="verify">${esc(a.verify)}</pre></td></tr>`}`));
   const recovers = data.modules.flatMap((m) => m.recovers.map((x) => `<li class="recover"><code>${esc(m.module)}.${esc(x.def)}</code> at <code>${esc(locText(x.at))}</code></li>`));
   const caps = data.paths.flatMap((p) => p.capabilities.map((c) => `<tr><td><code>${esc(p.path)}</code></td><td><code>${esc(c.type)}</code></td><td><code>${esc(c.constructed_at)}</code></td><td>${esc(c.assumes.join('; ') || 'none recorded')}</td></tr>`));
   return `<section class="ledger-view"><h2>Ledger</h2><p>${filters}</p>${ledgerTable(rows)}
@@ -233,6 +233,7 @@ svg .edge-label { font-size: 10px; fill: var(--muted); text-anchor: middle; } sv
 .filter.active { background: var(--fg); color: var(--bg); } .filter { font: inherit; border: 1px solid var(--line); border-radius: 6px; background: none; padding: 2px 8px; cursor: pointer; }
 .test.passed, .test.proved { color: var(--muted); } .test.failed { font-weight: 600; }
 details.body summary { cursor: pointer; color: var(--muted); }
+pre.verify { margin: 6px 0 2px; background: #fff; } tr.verify-row td { background: var(--amber); border-top: none; padding-top: 0; }
 `;
 
 const SCRIPT = `

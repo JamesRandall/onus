@@ -59,6 +59,12 @@ export function printSignature(f: A.FnDecl): string {
   return render(new Printer(NO_COMMENTS, DEFAULT_OPTIONS).fnHead(f, false), LINE_WIDTH);
 }
 
+/** Prints a `verify` block in canonical form, for the reports (§20.2). Effects: none. */
+export function printVerify(v: A.VerifyBlock): string {
+  const p = new Printer(NO_COMMENTS, DEFAULT_OPTIONS);
+  return render(concat('verify', p.params(v.params), p.effects(v.effects), ' ', p.block(v.body)), LINE_WIDTH);
+}
+
 /** Prints a statement in canonical form (used to key assumptions in the ledger, §20.3). Effects: none. */
 export function printStmt(s: A.Stmt): string {
   return render(new Printer(NO_COMMENTS, DEFAULT_OPTIONS).stmt(s), LINE_WIDTH);
@@ -332,11 +338,11 @@ class Printer {
     }
   }
 
-  private params(ps: readonly A.Param[]): Doc {
+  params(ps: readonly A.Param[]): Doc {
     return bracketed('(', ')', ps.map((p) => this.lineNode(p, concat(p.name.text, ': ', p.inout ? 'inout ' : EMPTY, this.type(p.type)))), EMPTY, true);
   }
 
-  private effects(es: readonly A.EffectRef[]): Doc {
+  effects(es: readonly A.EffectRef[]): Doc {
     if (es.length === 0) return EMPTY;
     return concat(' may ', join(', ', es.map((e) => qn(e.name))));
   }
@@ -360,7 +366,7 @@ class Printer {
   // Statements
   // -------------------------------------------------------------------------
 
-  private block(b: A.Block): Doc {
+  block(b: A.Block): Doc {
     if (b.elided) return '{ ... }';
     return concat('{', indent(concat(...b.stmts.map((s) => concat(hardline, this.stmt(s))), this.dangling(b))), hardline, '}');
   }

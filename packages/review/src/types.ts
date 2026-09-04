@@ -41,6 +41,7 @@ export interface AssumeEntry {
   readonly justification: string;
   readonly at: Location;
   readonly verifiable: boolean;
+  readonly verify: string | null;
   readonly last_verified: Verified | null;
 }
 
@@ -129,7 +130,7 @@ export interface PathReport {
   readonly reachable: readonly string[];
   readonly effects: { readonly bound: readonly string[] | null; readonly forbid: readonly string[]; readonly actual: readonly string[] };
   readonly claims: { readonly required: readonly string[]; readonly satisfied: boolean };
-  readonly assumes: readonly { readonly claim: string; readonly at: string; readonly justification: string; readonly permitted_by: string | null; readonly verifiable: boolean; readonly last_verified: Verified | null }[];
+  readonly assumes: readonly { readonly claim: string; readonly at: string; readonly justification: string; readonly permitted_by: string | null; readonly verifiable: boolean; readonly verify: string | null; readonly last_verified: Verified | null }[];
   readonly obligations: ObligationCounts & { readonly checked_at: readonly string[] };
   readonly unresolvable_calls: readonly { readonly at: string; readonly reason: string }[];
   readonly capabilities: readonly { readonly type: string; readonly constructed_at: string; readonly assumes: readonly string[] }[];

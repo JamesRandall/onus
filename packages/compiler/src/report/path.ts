@@ -7,6 +7,8 @@ import type { DefId } from '../resolve/defs.js';
 import { lineColOf, type Span } from '../source.js';
 import type { PathAnalysis } from '../paths/tables.js';
 import { effectName } from '../paths/pass.js';
+import { printVerify } from '../syntax/printer.js';
+import type * as A from '../syntax/ast.js';
 import { effectsOfFn } from '../claims/calls.js';
 import { EffectSet } from '../effects/set.js';
 
@@ -23,6 +25,8 @@ export interface PathAssumeJson {
   readonly permitted_by: 'scope' | 'except' | null;
   /** Whether a `verify` block exists (§20.3). */
   readonly verifiable: boolean;
+  /** The `verify` block in canonical form (§20.2). */
+  readonly verify: string | null;
   /** The last `onus test --assumptions` record, or null. */
   readonly last_verified: VerifiedJson | null;
 }
@@ -129,7 +133,7 @@ export function pathReport(ctx: Context, analysis: PathAnalysis): PathReport {
     reachable: analysis.reachable.map((d) => t.qualifiedName(d)),
     effects: { bound: analysis.bound === null ? null : names(analysis.bound), forbid: names(analysis.forbid), actual: names(analysis.actual) },
     claims: { required: analysis.required.map((c) => t.qualifiedName(c)), satisfied: analysis.satisfied },
-    assumes: analysis.assumes.map((a) => ({ claim: t.qualifiedName(a.claim), at: t.qualifiedName(a.fn), justification: a.justification, permitted_by: a.permittedBy, verifiable: a.verify !== null, last_verified: verifiedOf(ctx, a.key) })),
+    assumes: analysis.assumes.map((a) => ({ claim: t.qualifiedName(a.claim), at: t.qualifiedName(a.fn), justification: a.justification, permitted_by: a.permittedBy, verifiable: a.verify !== null, verify: verifyText(ctx, a.verify), last_verified: verifiedOf(ctx, a.key) })),
     obligations: { ...counts, checked_at: checkedAt },
     unresolvable_calls: analysis.unresolvable.map((u) => ({ at: `${t.qualifiedName(u.fn)}:${lineCol(ctx, t.node(u.at).span)}`, reason: u.reason })),
     capabilities: analysis.capabilities.map((c) => ({ type: c.typeText, constructed_at: `${t.qualifiedName(c.fn)}:${lineCol(ctx, t.node(c.at).span)}`, assumes: [] })),
@@ -153,7 +157,10 @@ export function pathText(r: PathReport): string {
   lines.push(`  effects: { ${r.effects.actual.join(', ')} }${r.effects.bound === null ? '' : ` within { ${r.effects.bound.join(', ')} }`}${r.effects.forbid.length > 0 ? `, forbidding { ${r.effects.forbid.join(', ')} }` : ''}`);
   if (r.claims.required.length > 0) lines.push(`  claims: { ${r.claims.required.join(', ')} } ${r.claims.satisfied ? 'satisfied' : 'NOT satisfied'}`);
   lines.push(r.assumes.length === 0 ? '  assumes: none' : '  assumes:');
-  for (const a of r.assumes) lines.push(`    ${a.at}: ${a.claim} "${a.justification}"${a.permitted_by === null ? '' : ` (permitted by ${a.permitted_by})`} — ${verifiedText(a)}`);
+  for (const a of r.assumes) {
+    lines.push(`    ${a.at}: ${a.claim} "${a.justification}"${a.permitted_by === null ? '' : ` (permitted by ${a.permitted_by})`} — ${verifiedText(a)}`);
+    if (a.verify !== null) for (const l of a.verify.split('\n')) lines.push(`      ${l}`);
+  }
   const o = r.obligations;
   lines.push(`  obligations: ${o.proved} proved, ${o.checked} checked, ${o.assumed} assumed${o.failed > 0 ? `, ${o.failed} failed` : ''}`);
   for (const c of o.checked_at) lines.push(`    checked at ${c}`);
@@ -164,6 +171,13 @@ export function pathText(r: PathReport): string {
   for (const g of r.gates) lines.push(`  gate: ${g.evidence} from ${g.producers.join(', ')} guards ${g.guarded.join(', ')}`);
   lines.push(`  graph: ${r.graph.nodes.length} nodes, ${r.graph.edges.length} edges`);
   return `${lines.join('\n')}\n`;
+}
+
+/** The canonical text of a `verify` block, or null. Effects: none. */
+function verifyText(ctx: Context, node: A.NodeId | null): string | null {
+  if (node === null) return null;
+  const n = ctx.resolve.node(node);
+  return n.kind === 'VerifyBlock' ? printVerify(n) : null;
 }
 
 /** The ledger's record for an assumption, as the report shows it. Effects: none. */

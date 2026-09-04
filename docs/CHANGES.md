@@ -507,6 +507,12 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     and `onus.json` supply the fakes. The block passes, and the path report
     lists it as verified.
 
+92. **Verify blocks in the reports (§20.2).** Bodies are elided from the
+    interface, so the block a reviewer must read to judge a verification
+    travels with the assumption: interface and path assumption entries carry
+    `verify`, the block's canonical text or null, and the review page shows
+    it under the assumption in the path, interface and ledger views.
+
 ### Deferred, not changed
 
 - `Stream[T] ! e` as a type (§3.11) is not parsed: `-> Stream[T] ! e` is

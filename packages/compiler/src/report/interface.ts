@@ -14,7 +14,7 @@ import type { Effect } from '../effects/set.js';
 import type { ModuleId, ModuleRecord } from '../resolve/defs.js';
 import { lineColOf, type Span } from '../source.js';
 import type * as A from '../syntax/ast.js';
-import { print, printExpr, printItem, printSignature, printType } from '../syntax/printer.js';
+import { print, printExpr, printItem, printSignature, printType, printVerify } from '../syntax/printer.js';
 import { walk } from '../syntax/walk.js';
 import type { JsonSpan } from './diagnostic.js';
 import { b3 } from './hash.js';
@@ -61,6 +61,8 @@ export interface AssumeEntry {
   readonly at: Location;
   /** Whether a `verify` block exists (§20.3). */
   readonly verifiable: boolean;
+  /** The `verify` block in canonical form, for the reviewer to judge (§20.2). */
+  readonly verify: string | null;
   /** The last `onus test --assumptions` record, or null. */
   readonly last_verified: VerifiedJson | null;
 }
@@ -307,6 +309,7 @@ class InterfaceBuilder {
           justification: n.justification,
           at: this.location(n.span),
           verifiable: n.verify !== null,
+          verify: n.verify === null ? null : printVerify(n.verify),
           last_verified: site === undefined ? null : verifiedOf(this.ctx, site.key),
         });
       }
