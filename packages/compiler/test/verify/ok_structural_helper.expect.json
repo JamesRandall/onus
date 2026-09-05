@@ -1,0 +1,95 @@
+{
+  "diagnostics": [],
+  "obligations": [
+    {
+      "kind": "refinement",
+      "at": [
+        15,
+        26
+      ],
+      "text": "it >= 1",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        16,
+        32
+      ],
+      "text": "it >= 1",
+      "status": "proved"
+    },
+    {
+      "kind": "decreases",
+      "at": [
+        16,
+        32
+      ],
+      "text": "e at the call to add_size",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        23,
+        32
+      ],
+      "text": "it >= 1",
+      "status": "proved"
+    },
+    {
+      "kind": "overflow",
+      "at": [
+        23,
+        32
+      ],
+      "text": "1 + size(e: left) + size(e: right) within Int",
+      "status": "checked"
+    },
+    {
+      "kind": "overflow",
+      "at": [
+        23,
+        32
+      ],
+      "text": "1 + size(e: left) within Int",
+      "status": "checked"
+    },
+    {
+      "kind": "decreases",
+      "at": [
+        23,
+        36
+      ],
+      "text": "e at the call to size",
+      "status": "proved"
+    },
+    {
+      "kind": "decreases",
+      "at": [
+        23,
+        52
+      ],
+      "text": "e at the call to size",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        24,
+        17
+      ],
+      "text": "it >= 1",
+      "status": "proved"
+    },
+    {
+      "kind": "assertion",
+      "at": [
+        28,
+        3
+      ],
+      "text": "size(e: Add(left: Lit(value: 1), right: Lit(value: 2))) == 3",
+      "status": "checked"
+    }
+  ]
+}

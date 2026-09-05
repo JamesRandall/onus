@@ -21,7 +21,7 @@ import type { Context } from '../context.js';
 import type { Obligation } from '../contracts/obligations.js';
 import { diagnostic, type ObligationInfo } from '../report/diagnostic.js';
 import type { Code } from '../report/codes.js';
-import type { Def } from '../resolve/defs.js';
+import type { Def, DefId } from '../resolve/defs.js';
 import type { Span } from '../source.js';
 import { isNonlinear, smt, sortText, type Formula } from './formula.js';
 import { buildVCs, type VC } from './vc.js';
@@ -52,6 +52,7 @@ class Verifier {
     const opts = this.ctx.options.verify;
     const z3 = findZ3(opts.z3Path);
     const vcs = buildVCs(this.ctx);
+    this.equalMeasureCalls();
     if (z3 === null) {
       this.ctx.log('onus: z3 not found on PATH; every obligation is checked at runtime');
       for (const o of this.ctx.contracts.obligations) if (o.status === 'checked') o.by = 'z3 not available';
@@ -80,6 +81,53 @@ class Verifier {
       }
     }
     this.rules();
+  }
+
+  /**
+   * Settles the `decreases` obligations of calls that pass a structural measure on unchanged (§5.1).
+   * Sound when every cycle of the call graph takes a proper part somewhere, i.e. the calls passing the
+   * measure unchanged form no cycle of their own; a call on such a cycle is E0344.
+   * Preconditions: `buildVCs` has classified every structural `decreases` obligation.
+   * Effects: updates obligation statuses; reports E0344.
+   */
+  private equalMeasureCalls(): void {
+    const pending = this.ctx.contracts.obligations.filter((o) => o.kind === 'decreases' && o.status === 'checked' && o.by === 'equal argument' && o.callee !== null);
+    const edges = new Map<DefId, Set<DefId>>();
+    for (const o of pending) {
+      if (o.callee === null) continue;
+      let out = edges.get(o.def);
+      if (out === undefined) {
+        out = new Set();
+        edges.set(o.def, out);
+      }
+      out.add(o.callee);
+    }
+    const reaches = (from: DefId, to: DefId): boolean => {
+      const seen = new Set<DefId>();
+      const stack = [from];
+      while (stack.length > 0) {
+        const v = stack.pop();
+        if (v === undefined) break;
+        if (v === to) return true;
+        if (seen.has(v)) continue;
+        seen.add(v);
+        for (const w of edges.get(v) ?? []) stack.push(w);
+      }
+      return false;
+    };
+    for (const o of pending) {
+      if (o.callee === null) continue;
+      if (reaches(o.callee, o.def)) {
+        o.status = 'failed';
+        o.by = 'the calls passing the measure unchanged form a cycle';
+        this.currentDef = this.ctx.resolve.def(o.def).name;
+        const measure = o.text.replace(/ at the call to .*$/, '');
+        this.report('E0344', this.ctx.resolve.node(o.at).span, `this call passes the measure \`${measure}\` on unchanged, and the calls that do so form a cycle; one of them must pass a proper part (§5.1)`, { kind: o.kind, text: o.text, status: 'unprovable', counterexample: null });
+      } else {
+        o.status = 'proved';
+        o.by = 'structural order (passed on unchanged here; every cycle takes a proper part)';
+      }
+    }
   }
 
   private discharge(o: Obligation, vc: VC, z3Path: string, version: string, cache: ProofCache, budgetMs: number): void {

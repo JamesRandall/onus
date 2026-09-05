@@ -1,0 +1,237 @@
+module values
+import defs
+import types
+
+-- Check-time values (spec §3.8; `consteval/values.ts`). They mirror the
+-- runtime's representations so that check-time and run-time evaluation
+-- agree: records and variants are field lists, a type passed as a value
+-- is a `TypeInfo`.
+pub union Value =
+  | IntV of v: Int
+  | FloatV of v: Float
+  | BoolV of v: Bool
+  | TextV of v: Text
+  | DurationV of v: Int
+  | UnitV
+  | BytesV of bytes: List[Int]
+  | ListV of items: List[Value]
+  | RecordV of def: Int, fields: List[Field]
+  | VariantV of def: Int, fields: List[Field]
+  | TypeInfoV of owner: defs.TypeOwner
+
+pub record Field {
+  name: Text
+  value: Value
+}
+
+pub fn tag(v: Value) -> Int {
+  match v with
+  | IntV(_) -> return 0
+  | FloatV(_) -> return 1
+  | BoolV(_) -> return 2
+  | TextV(_) -> return 3
+  | DurationV(_) -> return 4
+  | UnitV -> return 5
+  | BytesV(_) -> return 6
+  | ListV(_) -> return 7
+  | RecordV(_, _) -> return 8
+  | VariantV(_, _) -> return 9
+  | TypeInfoV(_) -> return 10
+}
+
+pub fn int_of(c: Value) -> Int {
+  match c with
+  | IntV(v) -> return v
+  | DurationV(v) -> return v
+  | _ -> return 0
+}
+
+pub fn float_of(c: Value) -> Float {
+  match c with
+  | FloatV(v) -> return v
+  | _ -> return 0.0
+}
+
+pub fn bool_of(c: Value) -> Bool {
+  match c with
+  | BoolV(v) -> return v
+  | _ -> return false
+}
+
+pub fn text_of(c: Value) -> Text {
+  match c with
+  | TextV(v) -> return v
+  | _ -> return ""
+}
+
+pub fn bytes_of(c: Value) -> List[Int] may alloc {
+  match c with
+  | BytesV(bytes) -> return bytes
+  | _ -> return []
+}
+
+pub fn items_of(c: Value) -> List[Value] may alloc {
+  match c with
+  | ListV(items) -> return items
+  | _ -> return []
+}
+
+pub fn def_of(c: Value) -> Int {
+  match c with
+  | RecordV(def, _) -> return def
+  | VariantV(def, _) -> return def
+  | _ -> return -1
+}
+
+pub fn fields_of(c: Value) -> List[Field] may alloc {
+  match c with
+  | RecordV(_, fields) -> return fields
+  | VariantV(_, fields) -> return fields
+  | _ -> return []
+}
+
+pub fn owner_of(c: Value) -> defs.TypeOwner {
+  match c with
+  | TypeInfoV(owner) -> return owner
+  | _ -> return defs.PrimOwner(name: "")
+}
+
+pub fn field_of(fields: List[Field], name: Text) -> Option[Value] {
+  for f: Field in fields {
+    if f.name == name {
+      return Some(value: f.value)
+    }
+  }
+  return None
+}
+
+-- `fields` with `name` set to `value`, appended when absent.
+pub fn with_field(fields: List[Field], name: Text, value: Value) -> List[Field] may alloc, mutate {
+  var out: Builder[Field] = List.builder()
+  var replaced: Bool = false
+  for f: Field in fields {
+    if f.name == name {
+      List.push(b: inout out, x: Field { name: name, value: value })
+      replaced = true
+    } else {
+      List.push(b: inout out, x: f)
+    }
+  }
+  if not replaced {
+    List.push(b: inout out, x: Field { name: name, value: value })
+  }
+  return List.finish(b: out)
+}
+
+-- Structural equality (the meaning of `==`). Function values never reach here.
+pub fn equals(a: Value, b: Value) -> Bool may alloc
+  decreases a
+{
+  if tag(v: a) != tag(v: b) {
+    return false
+  }
+  match a with
+  | IntV(v) -> return v == int_of(c: b)
+  | DurationV(v) -> return v == int_of(c: b)
+  | FloatV(v) -> return v == float_of(c: b)
+  | BoolV(v) -> return v == bool_of(c: b)
+  | TextV(v) -> return v == text_of(c: b)
+  | UnitV -> return true
+  | BytesV(bytes) -> return bytes == bytes_of(c: b)
+  | ListV(items) -> return items_equal(xs: items, ys: items_of(c: b))
+  | RecordV(def, fields) -> return def == def_of(c: b) and fields_equal(
+    xs: fields,
+    ys: fields_of(c: b)
+  )
+  | VariantV(def, fields) -> return def == def_of(c: b) and fields_equal(
+    xs: fields,
+    ys: fields_of(c: b)
+  )
+  | TypeInfoV(owner) -> return owner == owner_of(c: b)
+}
+
+fn items_equal(xs: List[Value], ys: List[Value]) -> Bool may alloc
+  decreases xs
+{
+  if List.len(xs: xs) != List.len(xs: ys) {
+    return false
+  }
+  for i: Int in 0 ..< List.len(xs: xs) {
+    if not equals(a: List.get(xs: xs, i: i), b: List.get(xs: ys, i: i)) {
+      return false
+    }
+  }
+  return true
+}
+
+fn fields_equal(xs: List[Field], ys: List[Field]) -> Bool may alloc
+  decreases xs
+{
+  if List.len(xs: xs) != List.len(xs: ys) {
+    return false
+  }
+  for f: Field in xs {
+    match field_of(fields: ys, name: f.name) with
+    | None -> return false
+    | Some(value) -> {
+      if not equals(a: f.value, b: value) {
+        return false
+      }
+    }
+  }
+  return true
+}
+
+-- A type index as a value, or None for a symbolic index (a parameter).
+pub fn of_const(c: types.ConstValue) -> Option[Value] may alloc {
+  match c with
+  | types.IntV(v) -> return Some(value: IntV(v: v))
+  | types.FloatV(v) -> return Some(value: FloatV(v: v))
+  | types.BoolV(v) -> return Some(value: BoolV(v: v))
+  | types.TextV(v) -> return Some(value: TextV(v: v))
+  | types.DurationV(v) -> return Some(value: DurationV(v: v))
+  | types.UnitV -> return Some(value: UnitV)
+  | types.VariantV(def) -> return Some(value: VariantV(def: def, fields: []))
+  | types.SymV(_) -> return None
+  | types.ErrorV -> return None
+}
+
+-- A value as a type index, or None when it cannot be one.
+pub fn to_const(c: Value) -> Option[types.ConstValue] {
+  match c with
+  | IntV(v) -> return Some(value: types.IntV(v: v))
+  | FloatV(v) -> return Some(value: types.FloatV(v: v))
+  | BoolV(v) -> return Some(value: types.BoolV(v: v))
+  | TextV(v) -> return Some(value: types.TextV(v: v))
+  | DurationV(v) -> return Some(value: types.DurationV(v: v))
+  | UnitV -> return Some(value: types.UnitV)
+  | VariantV(def, fields) -> {
+    if List.len(xs: fields) == 0 {
+      return Some(value: types.VariantV(def: def))
+    }
+    return None
+  }
+  | _ -> return None
+}
+
+example equality {
+  equals(a: IntV(v: 1), b: IntV(v: 1))
+  not equals(a: IntV(v: 1), b: TextV(v: "1"))
+  equals(
+    a: ListV(items: [IntV(v: 1), BoolV(v: true)]),
+    b: ListV(items: [IntV(v: 1), BoolV(v: true)])
+  )
+  equals(
+    a: RecordV(
+      def: 3,
+      fields: [Field { name: "a", value: IntV(v: 1) }, Field { name: "b", value: UnitV }]
+    ),
+    b: RecordV(
+      def: 3,
+      fields: [Field { name: "b", value: UnitV }, Field { name: "a", value: IntV(v: 1) }]
+    )
+  )
+  field_of(fields: with_field(fields: [], name: "x", value: IntV(v: 2)), name: "x") == Some(
+    value: IntV(v: 2)
+  )
+}

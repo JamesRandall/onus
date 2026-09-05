@@ -1,0 +1,31 @@
+module report
+import ast
+
+-- Diagnostics of the checker in Onus (spec §13; `report/diagnostic.ts`): a
+-- code from the catalogue, a span in a file, the innermost definition and
+-- detail lines. Every diagnostic is an error.
+pub record Diagnostic {
+  code: Text
+  file: Int
+  span: ast.Span
+  def_name: Option[Text]
+  context: List[Text]
+}
+
+-- A source file: its text and the same text as code points, which spans index.
+pub record SourceFile {
+  id: Int
+  path: Text
+  text: Text
+  cps: List[Int]
+}
+
+pub fn diagnostic(
+  code: Text,
+  file: Int,
+  span: ast.Span,
+  def_name: Option[Text],
+  detail: Text
+) -> Diagnostic may alloc {
+  return Diagnostic { code: code, file: file, span: span, def_name: def_name, context: [detail] }
+}

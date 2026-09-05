@@ -424,6 +424,11 @@ export class Lowerer {
     return cur;
   }
 
+  /** Whether `term` is `whole` itself, through aliases: a measure passed on unchanged (§5.1). Effects: none. */
+  isSamePart(term: Formula, whole: Formula): boolean {
+    return formulaEquals(this.resolveAlias(term), this.resolveAlias(whole));
+  }
+
   /** Whether `term` is a proper part of `whole`: a chain of one or more projections or element reads from it. Effects: none. */
   isProperPart(term: Formula, whole: Formula): boolean {
     const target = this.resolveAlias(whole);

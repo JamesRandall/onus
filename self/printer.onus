@@ -20,6 +20,12 @@ pub fn print_module(m: ast.Module, tab: comments.Table) -> Text may alloc, mutat
   return doc.render(d: module(m: m, pr: pr), width: line_width)
 }
 
+-- Prints an expression in canonical form, for reports and diagnostics.
+pub fn print_expr(e: ast.Expr) -> Text may alloc, mutate {
+  let pr: Printer = Printer { tab: Map.empty(), elide: false }
+  return doc.render(d: expr_doc(e: e, nb: false, pr: pr), width: line_width)
+}
+
 -- Comments ---------------------------------------------------------------------
 fn line_node(k: Text, d: doc.Doc, pr: Printer) -> doc.Doc may alloc, mutate {
   let cs: comments.CommentSet = comments.lookup(table: pr.tab, k: k)

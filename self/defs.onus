@@ -1,0 +1,248 @@
+module defs
+import ast
+
+-- Definitions and resolutions (impl spec §4, pass 3; `resolve/defs.ts`).
+-- Every declaration gets a definition id, an index into the context's
+-- definition list; every use site is bound to a `Resolution`, keyed by the
+-- node's key (`node_key`).
+pub union DefKind =
+  | Fn
+  | IfaceFn
+  | Law
+  | Alias
+  | IntrinsicType
+  | Record
+  | Union
+  | Variant
+  | Field
+  | Interface
+  | Impl
+  | Claim
+  | Capability
+  | Path
+  | Policy
+  | Example
+  | Property
+  | Const
+  | TypeParam
+  | ConstParam
+  | EffectParam
+  | Param
+  | Let
+  | Var
+  | For
+  | Binder
+  | Pattern
+  | TryElse
+  | Verify
+
+pub fn kind_text(k: DefKind) -> Text {
+  match k with
+  | Fn -> return "fn"
+  | IfaceFn -> return "iface-fn"
+  | Law -> return "law"
+  | Alias -> return "alias"
+  | IntrinsicType -> return "intrinsic-type"
+  | Record -> return "record"
+  | Union -> return "union"
+  | Variant -> return "variant"
+  | Field -> return "field"
+  | Interface -> return "interface"
+  | Impl -> return "impl"
+  | Claim -> return "claim"
+  | Capability -> return "capability"
+  | Path -> return "path"
+  | Policy -> return "policy"
+  | Example -> return "example"
+  | Property -> return "property"
+  | Const -> return "const"
+  | TypeParam -> return "type-param"
+  | ConstParam -> return "const-param"
+  | EffectParam -> return "effect-param"
+  | Param -> return "param"
+  | Let -> return "let"
+  | Var -> return "var"
+  | For -> return "for"
+  | Binder -> return "binder"
+  | Pattern -> return "pattern"
+  | TryElse -> return "try-else"
+  | Verify -> return "verify"
+}
+
+-- The node that declares a definition.
+pub union DeclNode =
+  | FnNode of decl: ast.FnDecl
+  | AliasNode of decl: ast.TypeAlias
+  | IntrinsicTypeNode of decl: ast.IntrinsicType
+  | ConstNode of decl: ast.ConstDecl
+  | RecordNode of decl: ast.RecordDecl
+  | UnionNode of decl: ast.UnionDecl
+  | VariantNode of decl: ast.Variant
+  | FieldNode of decl: ast.Field
+  | InterfaceNode of decl: ast.InterfaceDecl
+  | IfaceFnNode of decl: ast.IfaceFn
+  | LawNode of decl: ast.Law
+  | ImplNode of decl: ast.ImplDecl
+  | ClaimNode of decl: ast.ClaimDecl
+  | CapabilityNode of decl: ast.CapabilityDecl
+  | PathNode of decl: ast.PathDecl
+  | PolicyNode of decl: ast.PolicyDecl
+  | ExampleNode of decl: ast.ExampleDecl
+  | PropertyNode of decl: ast.PropertyDecl
+  | TParamNode of decl: ast.TParam
+  | ParamNode of decl: ast.Param
+  | StmtNode of decl: ast.Stmt
+  | PatternNode of decl: ast.Pattern
+  | PatFieldNode of decl: ast.PatField
+  | ExprNode of decl: ast.Expr
+  | TryElseNode of decl: ast.TryElse
+  | VerifyNode of decl: ast.VerifyBlock
+  | NoNode
+
+pub record Def {
+  id: Int
+  kind: DefKind
+  name: Text
+  node: DeclNode
+  mod: Int
+  file: Int
+  -- The key of the declaring node.
+  key: Int
+  -- The span of the declared name.
+  span: ast.Span
+  is_pub: Bool
+  is_sealed: Bool
+  is_intrinsic: Bool
+  -- Enclosing definition: a variant's union, a field's record or variant, an impl fn's impl.
+  parent: Option[Int]
+  -- Closure nesting depth of a local (0 is the function's own frame); -1 for module-level definitions.
+  frame: Int
+  is_inout: Bool
+}
+
+-- Primitive types (§3.1) plus the two check-time-only types of §3.8.1.
+pub const prims: List[Text] = [
+  "Int",
+  "Float",
+  "Bool",
+  "Text",
+  "Unit",
+  "Bytes",
+  "Duration",
+  "TypeInfo",
+  "Spec"
+]
+
+pub fn is_prim_name(name: Text) -> Bool may alloc {
+  return List.contains(xs: prims, x: name)
+}
+
+-- The module holding a primitive type's companion functions (`Int.to_text` lives in `std.int`).
+pub fn companion_module_of(prim: Text) -> Text may alloc {
+  return "std." ++ Text.lower(t: prim)
+}
+
+pub const primitive_effects: List[Text] = [
+  "alloc",
+  "mutate",
+  "panic",
+  "diverge",
+  "nondet",
+  "io.file",
+  "io.net",
+  "io.env",
+  "io.clock",
+  "io.rand"
+]
+
+pub fn is_prim_effect(name: Text) -> Bool may alloc {
+  return List.contains(xs: primitive_effects, x: name)
+}
+
+pub union TypeOwner =
+  | DefOwner of def: Int
+  | PrimOwner of name: Text
+
+pub union Effect =
+  | PrimEffect of name: Text
+  | ResourceEffect of mod: Int, name: Text
+  | ParamEffect of def: Int
+
+-- What a use site denotes.
+pub union Resolution =
+  | DefRes of def: Int
+  | PrimRes of name: Text
+  | UnitRes
+  | ModuleRes of mod: Int
+  | TypeValueRes of owner: TypeOwner
+  | CompanionRes of owner: TypeOwner, fn_def: Int
+  | IfaceFnRes of iface: Int, fn_def: Int
+  | EffectRes of effect: Effect
+
+pub record ImportRecord {
+  alias: Text
+  mod: Int
+  span: ast.Span
+}
+
+pub record ModuleRecord {
+  id: Int
+  name: Text
+  file: Int
+  tree: ast.Module
+  is_std: Bool
+  imports: List[ImportRecord]
+  -- Prelude modules whose public types and variants are in scope unqualified.
+  implicit: List[Int]
+}
+
+pub record Members {
+  types: Dict[Text, Int]
+  values: Dict[Text, Int]
+  variants: Dict[Text, Int]
+  claim_table: Dict[Text, Int]
+  interfaces: Dict[Text, Int]
+  tests: Dict[Text, Int]
+  paths: Dict[Text, Int]
+  policies: Dict[Text, Int]
+}
+
+pub fn new_members() -> Members may alloc {
+  return Members {
+    types: Map.dict(),
+    values: Map.dict(),
+    variants: Map.dict(),
+    claim_table: Map.dict(),
+    interfaces: Map.dict(),
+    tests: Map.dict(),
+    paths: Map.dict(),
+    policies: Map.dict()
+  }
+}
+
+-- Node keys -------------------------------------------------------------------
+-- A node is identified by its file, its syntactic class and its span. Two
+-- nodes of one class never share a span, so the key is unique. Files are
+-- limited to `max_span` code points and a compilation to `max_files` files
+-- so that a key fits an `Int` exactly on every target.
+pub const max_span: Int = 1048576
+
+pub const max_files: Int = 1024
+
+pub const tag_expr: Int = 0
+
+pub const tag_type: Int = 1
+
+pub const tag_pattern: Int = 2
+
+pub const tag_stmt: Int = 3
+
+pub const tag_item: Int = 4
+
+pub const tag_sig: Int = 5
+
+pub const tag_misc: Int = 6
+
+pub fn node_key(file: Int, tag: Int, span: ast.Span) -> Int {
+  return ((file * 8 + tag) * max_span + span.start) * max_span + span.end
+}

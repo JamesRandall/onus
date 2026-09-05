@@ -45,7 +45,7 @@ describe('the standard library (M15.0)', () => {
     }
   });
 
-  for (const name of ['text_ops', 'list_ops', 'list_generic']) {
+  for (const name of ['text_ops', 'list_ops', 'list_generic', 'map_ops']) {
     it(`${name}: the examples pass as generated tests`, () => {
       const ctx = checked(join(here, `${name}.onus`));
       const out = fresh(name);

@@ -1,0 +1,2405 @@
+module evaluator
+import ast
+import parser
+import printer
+import report
+import defs
+import context
+import effectset
+import types
+import values
+import typecheck
+
+-- The check-time evaluator (spec §3.8, §3.8.1; `consteval/eval.ts`).
+-- Evaluates constant expressions, `const fn` bodies and pure function
+-- bodies over values under a step budget. It never runs anything with an
+-- effect beyond `alloc`, never calls an intrinsic it has no implementation
+-- for, and never sees a runtime binding: any such reference is `NotConstF`,
+-- which callers treat as "not evaluable at check time". A contract failing
+-- while evaluating is `PanicF`; running out of budget is `BudgetF`; a
+-- `return` unwinds as `ReturnF` to the enclosing call.
+pub union Fail =
+  | NotConstF of reason: Text, span: Option[ast.Span]
+  | PanicF of detail: Text, span: Option[ast.Span]
+  | BudgetF of fn_name: Text
+  | ReturnF of value: values.Value
+
+pub record Frame {
+  name: Text
+  ret: Option[types.Type]
+}
+
+pub record Ev {
+  steps: Int where it >= 0
+  budget: Int where it >= 0
+  frames: List[Frame]
+  -- The most recent `ConstError` constructed, for E0700 (§3.8.1).
+  last_const_error: Option[values.Value]
+  -- The file of the nodes being evaluated, for their keys.
+  file: Int
+  busy: Dict[Int, Bool]
+}
+
+pub record CallResult {
+  value: values.Value
+  inouts: Dict[Text, values.Value]
+}
+
+pub const default_budget: Int = 1000000
+
+-- The bound on nested evaluation depth.
+pub const max_depth: Int = 100000
+
+pub fn new_ev(file: Int) -> Ev may alloc {
+  return Ev {
+    steps: 0,
+    budget: default_budget,
+    frames: [],
+    last_const_error: None,
+    file: file,
+    busy: Map.dict()
+  }
+}
+
+-- Starts a fresh evaluation: resets the budget and the last ConstError.
+pub fn reset(ev: inout Ev) -> Unit may alloc, mutate {
+  ev = { ev with steps: 0, last_const_error: None, frames: [] }
+  return Unit
+}
+
+fn skip() -> Unit {
+  return Unit
+}
+
+fn key(ev: Ev, tag: Int, span: ast.Span) -> Int {
+  return defs.node_key(file: ev.file, tag: tag, span: span)
+}
+
+fn top_name(ev: Ev) -> Text {
+  let n: Int = List.len(xs: ev.frames)
+  if n == 0 {
+    return "constant expression"
+  }
+  return List.get(xs: ev.frames, i: n - 1).name
+}
+
+fn top_ret(ev: Ev) -> Option[types.Type] {
+  let n: Int = List.len(xs: ev.frames)
+  if n == 0 {
+    return None
+  }
+  return List.get(xs: ev.frames, i: n - 1).ret
+}
+
+fn step(ev: inout Ev) -> Result[Unit, Fail] may alloc, mutate {
+  ev = { ev with steps: ev.steps + 1 }
+  if ev.steps > ev.budget {
+    return Err(error: BudgetF(fn_name: top_name(ev: ev)))
+  }
+  return Ok(value: Unit)
+}
+
+fn not_const(reason: Text, span: ast.Span) -> Fail {
+  return NotConstF(reason: reason, span: Some(value: span))
+}
+
+fn panic_at(detail: Text, span: ast.Span) -> Fail {
+  return PanicF(detail: detail, span: Some(value: span))
+}
+
+pub const max_safe: Int = 9007199254740991
+
+fn safe_int(n: Int, span: ast.Span) -> Result[Int, Fail] may alloc {
+  if n > max_safe or n < 0 - max_safe {
+    return Err(
+      error: panic_at(
+        detail: Int.to_text(x: n) ++ " is outside the runtime's safe integer range (±2^53)",
+        span: span
+      )
+    )
+  }
+  return Ok(value: n)
+}
+
+fn copy_env(env: Dict[Int, values.Value]) -> Dict[Int, values.Value] may alloc, mutate {
+  var out: Dict[Int, values.Value] = Map.dict()
+  for k: Int in Map.keys(d: env) {
+    match Map.find(d: env, key: k) with
+    | Some(value) -> Map.set(d: inout out, key: k, value: value)
+    | None -> skip()
+  }
+  return out
+}
+
+fn env_set(env: Dict[Int, values.Value], k: Int, v: values.Value) -> Unit may mutate, alloc {
+  var d: Dict[Int, values.Value] = env
+  Map.set(d: inout d, key: k, value: v)
+  return Unit
+}
+
+fn or_neg(o: Option[Int]) -> Int {
+  match o with
+  | Some(value) -> return value
+  | None -> return -1
+}
+
+fn def_of_key(ctx: context.Context, k: Int) -> Int {
+  return or_neg(o: Map.find(d: ctx.def_of, key: k))
+}
+
+fn res_at(ctx: context.Context, k: Int) -> Option[defs.Resolution] {
+  return Map.find(d: ctx.refs, key: k)
+}
+
+fn res_def(res: Option[defs.Resolution]) -> Int {
+  match res with
+  | None -> return -1
+  | Some(value) -> {
+    match value with
+    | defs.DefRes(def) -> return def
+    | defs.CompanionRes(owner, fn_def) -> return fn_def
+    | _ -> return -1
+  }
+}
+
+fn std_type(
+  ctx: inout context.Context,
+  module_name: Text,
+  type_name: Text
+) -> Int may mutate, alloc {
+  match Map.find(d: ctx.by_name, key: module_name) with
+  | None -> return -1
+  | Some(value) -> return or_neg(
+    o: Map.find(d: context.members_of(ctx: inout ctx, module: value).types, key: type_name)
+  )
+}
+
+fn owner_name(ctx: context.Context, o: defs.TypeOwner) -> Text {
+  match o with
+  | defs.PrimOwner(name) -> return name
+  | defs.DefOwner(def) -> return context.get_def(ctx: ctx, id: def).name
+}
+
+-- The variant `variant_name` of the standard union `union_name`, as a value with `fields`.
+fn variant_named(
+  ctx: inout context.Context,
+  module_name: Text,
+  union_name: Text,
+  variant_name: Text,
+  fields: List[values.Field]
+) -> Result[values.Value, Fail] may mutate, alloc {
+  let union_def: Int = std_type(ctx: inout ctx, module_name: module_name, type_name: union_name)
+  if union_def >= 0 {
+    match Map.find(d: ctx.variants, key: union_def) with
+    | Some(value) -> {
+      for v: Int in value {
+        if context.get_def(ctx: ctx, id: v).name == variant_name {
+          return Ok(value: values.VariantV(def: v, fields: fields))
+        }
+      }
+    }
+    | None -> skip()
+  }
+  return Err(
+    error: NotConstF(reason: union_name ++ "." ++ variant_name ++ " is not available", span: None)
+  )
+}
+
+fn option_value(
+  ctx: inout context.Context,
+  o: Option[values.Value]
+) -> Result[values.Value, Fail] may mutate, alloc {
+  match o with
+  | Some(value) -> return variant_named(
+    ctx: inout ctx,
+    module_name: "std.option",
+    union_name: "Option",
+    variant_name: "Some",
+    fields: [values.Field { name: "value", value: value }]
+  )
+  | None -> return variant_named(
+    ctx: inout ctx,
+    module_name: "std.option",
+    union_name: "Option",
+    variant_name: "None",
+    fields: []
+  )
+}
+
+-- Constants ------------------------------------------------------------------------------
+fn report_failure(
+  ctx: inout context.Context,
+  file: Int,
+  def_name: Text,
+  what: Text,
+  f: Fail,
+  at: ast.Span
+) -> Unit may mutate, alloc {
+  match f with
+  | NotConstF(reason, span) -> context.report(
+    ctx: inout ctx,
+    d: report.diagnostic(
+      code: "E0701",
+      file: file,
+      span: span_or(o: span, dflt: at),
+      def_name: Some(value: def_name),
+      detail: what ++ " is not a constant expression: " ++ reason
+    )
+  )
+  | PanicF(detail, span) -> context.report(
+    ctx: inout ctx,
+    d: report.diagnostic(
+      code: "E0701",
+      file: file,
+      span: span_or(o: span, dflt: at),
+      def_name: Some(value: def_name),
+      detail: what ++ ": " ++ detail
+    )
+  )
+  | BudgetF(fn_name) -> context.report(
+    ctx: inout ctx,
+    d: report.diagnostic(
+      code: "E0501",
+      file: file,
+      span: at,
+      def_name: Some(value: def_name),
+      detail: "evaluating " ++ what ++ " exceeded the check-time step budget in `" ++ fn_name ++ "`"
+    )
+  )
+  | ReturnF(_) -> context.report(
+    ctx: inout ctx,
+    d: report.diagnostic(
+      code: "E0701",
+      file: file,
+      span: at,
+      def_name: Some(value: def_name),
+      detail: what ++ " is not a constant expression: a `return` outside a function"
+    )
+  )
+  return Unit
+}
+
+pub fn span_or(o: Option[ast.Span], dflt: ast.Span) -> ast.Span {
+  match o with
+  | Some(value) -> return value
+  | None -> return dflt
+}
+
+-- The value of a `const`, memoised; None (after a report) when it cannot be evaluated.
+pub fn const_of(
+  fuel: Int where it >= 0,
+  ev: inout Ev,
+  ctx: inout context.Context,
+  def: Int
+) -> Option[values.Value] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return None
+  }
+  match Map.find(d: ctx.const_values, key: def) with
+  | Some(value) -> return Some(value: value)
+  | None -> skip()
+  if Map.contains(d: ev.busy, key: def) {
+    return None
+  }
+  var busy: Dict[Int, Bool] = ev.busy
+  Map.set(d: inout busy, key: def, value: true)
+  let d: defs.Def = context.get_def(ctx: ctx, id: def)
+  var out: Option[values.Value] = None
+  match d.node with
+  | defs.ConstNode(decl) -> {
+    let saved_file: Int = ev.file
+    reset(ev: inout ev)
+    ev = { ev with file: d.file }
+    match eval_expr(
+      fuel: fuel - 1,
+      ev: inout ev,
+      ctx: inout ctx,
+      e: decl.value,
+      env: Map.dict()
+    ) with
+    | Ok(value) -> out = Some(value: value)
+    | Err(error) -> report_failure(
+      ctx: inout ctx,
+      file: d.file,
+      def_name: d.name,
+      what: "`" ++ d.name ++ "`",
+      f: error,
+      at: parser.span_of_expr(e: decl.value)
+    )
+    ev = { ev with file: saved_file }
+  }
+  | _ -> out = None
+  Map.remove(d: inout busy, key: def)
+  match out with
+  | Some(value) -> {
+    var table: Dict[Int, values.Value] = ctx.const_values
+    Map.set(d: inout table, key: def, value: value)
+  }
+  | None -> skip()
+  return out
+}
+
+-- Expressions -----------------------------------------------------------------------------
+pub fn eval_expr(
+  fuel: Int where it >= 0,
+  ev: inout Ev,
+  ctx: inout context.Context,
+  e: ast.Expr,
+  env: Dict[Int, values.Value]
+) -> Result[values.Value, Fail] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: BudgetF(fn_name: top_name(ev: ev)))
+  }
+  try step(ev: inout ev)
+  match e with
+  | ast.IntLit(value, _, span) -> return Ok(
+    value: values.IntV(v: try safe_int(n: value, span: span))
+  )
+  | ast.FloatLit(value, _) -> return Ok(value: values.FloatV(v: value))
+  | ast.TextLit(value, _) -> return Ok(value: values.TextV(v: value))
+  | ast.BoolLit(value, _) -> return Ok(value: values.BoolV(v: value))
+  | ast.DurationLit(nanos, span) -> return Ok(
+    value: values.DurationV(v: try safe_int(n: nanos, span: span))
+  )
+  | ast.Name(_, _) -> return name_value(
+    fuel: fuel - 1,
+    ev: inout ev,
+    ctx: inout ctx,
+    e: e,
+    env: env
+  )
+  | ast.It(span) -> return Err(
+    error: not_const(reason: "contract keywords have no value at check time", span: span)
+  )
+  | ast.ResultRef(span) -> return Err(
+    error: not_const(reason: "contract keywords have no value at check time", span: span)
+  )
+  | ast.Old(_, span) -> return Err(
+    error: not_const(reason: "contract keywords have no value at check time", span: span)
+  )
+  | ast.Ctor(_, _, _, _) -> return ctor(
+    fuel: fuel - 1,
+    ev: inout ev,
+    ctx: inout ctx,
+    e: e,
+    env: env
+  )
+  | ast.RecordUpdate(base, fields, span) -> {
+    let bv: values.Value = try eval_expr(
+      fuel: fuel - 1,
+      ev: inout ev,
+      ctx: inout ctx,
+      e: base,
+      env: env
+    )
+    if not bv is values.RecordV {
+      return Err(error: not_const(reason: "`with` on a non-record", span: span))
+    }
+    var fs: List[values.Field] = values.fields_of(c: bv)
+    for f: ast.FieldInit in fields {
+      let fv: values.Value = try eval_expr(
+        fuel: fuel - 1,
+        ev: inout ev,
+        ctx: inout ctx,
+        e: f.value,
+        env: env
+      )
+      fs = values.with_field(fields: fs, name: f.name.text, value: fv)
+    }
+    return Ok(value: values.RecordV(def: values.def_of(c: bv), fields: fs))
+  }
+  | ast.ListLit(elems, _) -> {
+    var items: Builder[values.Value] = List.builder()
+    for x: ast.Expr in elems {
+      List.push(
+        b: inout items,
+        x: try eval_expr(fuel: fuel - 1, ev: inout ev, ctx: inout ctx, e: x, env: env)
+      )
+    }
+    return Ok(value: values.ListV(items: List.finish(b: items)))
+  }
+  | ast.Try(_, _, _) -> return try_expr(
+    fuel: fuel - 1,
+    ev: inout ev,
+    ctx: inout ctx,
+    e: e,
+    env: env
+  )
+  | ast.Recover(_, span) -> return Err(
+    error: not_const(reason: "`recover` is not evaluated at check time", span: span)
+  )
+  | ast.Quantifier(_, _, _, _, _, _, _) -> return quantifier(
+    fuel: fuel - 1,
+    ev: inout ev,
+    ctx: inout ctx,
+    e: e,
+    env: env
+  )
+  | ast.Closure(_, _, _, _, span) -> return Err(
+    error: not_const(reason: "closures are not values at check time", span: span)
+  )
+  | ast.Fake(_, _, span) -> return Err(
+    error: not_const(reason: "`fake` capabilities exist only in generated tests", span: span)
+  )
+  | ast.Hole(span) -> return Err(error: not_const(reason: "a hole has no value", span: span))
+  | ast.FieldAccess(_, _, _) -> return field_access(
+    fuel: fuel - 1,
+    ev: inout ev,
+    ctx: inout ctx,
+    e: e,
+    env: env
+  )
+  | ast.Call(_, _, _, _) -> return call(
+    fuel: fuel - 1,
+    ev: inout ev,
+    ctx: inout ctx,
+    e: e,
+    env: env
+  )
+  | ast.Unary(op, operand, span) -> {
+    let v: values.Value = try eval_expr(
+      fuel: fuel - 1,
+      ev: inout ev,
+      ctx: inout ctx,
+      e: operand,
+      env: env
+    )
+    if op == "not" {
+      if not v is values.BoolV {
+        return Err(error: panic_at(detail: "`not` on a non-Bool", span: span))
+      }
+      return Ok(value: values.BoolV(v: not values.bool_of(c: v)))
+    }
+    if v is values.IntV {
+      return Ok(value: values.IntV(v: try safe_int(n: 0 - values.int_of(c: v), span: span)))
+    }
+    if v is values.FloatV {
+      return Ok(value: values.FloatV(v: 0.0 - values.float_of(c: v)))
+    }
+    if v is values.DurationV {
+      return Ok(value: values.DurationV(v: try safe_int(n: 0 - values.int_of(c: v), span: span)))
+    }
+    return Err(error: panic_at(detail: "unary `-` on a non-number", span: span))
+  }
+  | ast.Binary(_, _, _, _) -> return binary(
+    fuel: fuel - 1,
+    ev: inout ev,
+    ctx: inout ctx,
+    e: e,
+    env: env
+  )
+  | ast.And(operands, _) -> {
+    for o: ast.Expr in operands {
+      let v: values.Value = try eval_expr(
+        fuel: fuel - 1,
+        ev: inout ev,
+        ctx: inout ctx,
+        e: o,
+        env: env
+      )
+      if not v is values.BoolV {
+        return Err(error: panic_at(detail: "`and` on a non-Bool", span: parser.span_of_expr(e: o)))
+      }
+      if not values.bool_of(c: v) {
+        return Ok(value: values.BoolV(v: false))
+      }
+    }
+    return Ok(value: values.BoolV(v: true))
+  }
+  | ast.Or(operands, _) -> {
+    for o: ast.Expr in operands {
+      let v: values.Value = try eval_expr(
+        fuel: fuel - 1,
+        ev: inout ev,
+        ctx: inout ctx,
+        e: o,
+        env: env
+      )
+      if not v is values.BoolV {
+        return Err(error: panic_at(detail: "`or` on a non-Bool", span: parser.span_of_expr(e: o)))
+      }
+      if values.bool_of(c: v) {
+        return Ok(value: values.BoolV(v: true))
+      }
+    }
+    return Ok(value: values.BoolV(v: false))
+  }
+  | ast.Is(expr, pattern, _) -> {
+    let v: values.Value = try eval_expr(
+      fuel: fuel - 1,
+      ev: inout ev,
+      ctx: inout ctx,
+      e: expr,
+      env: env
+    )
+    let matched: Bool = try match_pattern(
+      fuel: fuel - 1,
+      ev: inout ev,
+      ctx: inout ctx,
+      p: pattern,
+      v: v,
+      env: copy_env(env: env)
+    )
+    return Ok(value: values.BoolV(v: matched))
+  }
+}
+
+fn name_value(
+  fuel: Int where it >= 0,
+  ev: inout Ev,
+  ctx: inout context.Context,
+  e: ast.Expr,
+  env: Dict[Int, values.Value]
+) -> Result[values.Value, Fail] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: BudgetF(fn_name: top_name(ev: ev)))
+  }
+  match e with
+  | ast.Name(name, span) -> {
+    let def: Int = res_def(res: res_at(ctx: ctx, k: key(ev: ev, tag: defs.tag_expr, span: span)))
+    if def < 0 {
+      return Err(error: not_const(reason: "`" ++ name.text ++ "` is unresolved", span: span))
+    }
+    let d: defs.Def = context.get_def(ctx: ctx, id: def)
+    if d.kind == defs.Const {
+      match const_of(fuel: fuel - 1, ev: inout ev, ctx: inout ctx, def: def) with
+      | Some(value) -> return Ok(value: value)
+      | None -> return Err(
+        error: not_const(reason: "`" ++ d.name ++ "` is not a constant", span: span)
+      )
+    }
+    if d.kind == defs.Fn {
+      return Err(error: not_const(reason: "`" ++ d.name ++ "` is a function value", span: span))
+    }
+    match Map.find(d: env, key: def) with
+    | Some(value) -> return Ok(value: value)
+    | None -> return Err(
+      error: not_const(reason: "`" ++ d.name ++ "` is not known at check time", span: span)
+    )
+  }
+  | _ -> return Err(error: NotConstF(reason: "not a name", span: None))
+}
+
+union CtorTarget =
+  | UnitTarget
+  | InfoTarget of owner: defs.TypeOwner
+  | DefTarget of def: Int
+
+fn ctor_target(ev: Ev, ctx: context.Context, span: ast.Span) -> Result[CtorTarget, Fail] may alloc {
+  match res_at(ctx: ctx, k: key(ev: ev, tag: defs.tag_expr, span: span)) with
+  | None -> return Err(error: not_const(reason: "unresolved constructor", span: span))
+  | Some(value) -> {
+    match value with
+    | defs.UnitRes -> return Ok(value: UnitTarget)
+    | defs.TypeValueRes(owner) -> return Ok(value: InfoTarget(owner: owner))
+    | defs.DefRes(def) -> return Ok(value: DefTarget(def: def))
+    | _ -> return Err(error: not_const(reason: "unresolved constructor", span: span))
+  }
+}
+
+fn ctor(
+  fuel: Int where it >= 0,
+  ev: inout Ev,
+  ctx: inout context.Context,
+  e: ast.Expr,
+  env: Dict[Int, values.Value]
+) -> Result[values.Value, Fail] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: BudgetF(fn_name: top_name(ev: ev)))
+  }
+  match e with
+  | ast.Ctor(_, args, fields, span) -> {
+    let target: CtorTarget = try ctor_target(ev: ev, ctx: ctx, span: span)
+    var target_def: Int = -1
+    match target with
+    | UnitTarget -> return Ok(value: values.UnitV)
+    | InfoTarget(owner) -> return Ok(value: values.TypeInfoV(owner: owner))
+    | DefTarget(def) -> target_def = def
+    var fs: List[values.Field] = []
+    match args with
+    | Some(value) -> {
+      for a: ast.Arg in value {
+        fs = values.with_field(
+          fields: fs,
+          name: a.name.text,
+          value: try eval_expr(fuel: fuel - 1, ev: inout ev, ctx: inout ctx, e: a.value, env: env)
+        )
+      }
+    }
+    | None -> skip()
+    match fields with
+    | Some(value) -> {
+      for f: ast.FieldInit in value {
+        fs = values.with_field(
+          fields: fs,
+          name: f.name.text,
+          value: try eval_expr(fuel: fuel - 1, ev: inout ev, ctx: inout ctx, e: f.value, env: env)
+        )
+      }
+    }
+    | None -> skip()
+    let d: defs.Def = context.get_def(ctx: ctx, id: target_def)
+    if d.kind == defs.Variant {
+      return Ok(value: values.VariantV(def: target_def, fields: fs))
+    }
+    let rv: values.Value = values.RecordV(def: target_def, fields: fs)
+    if target_def == std_type(ctx: inout ctx, module_name: "std.check", type_name: "ConstError") {
+      ev = { ev with last_const_error: Some(value: rv) }
+    }
+    return Ok(value: rv)
+  }
+  | _ -> return Err(error: NotConstF(reason: "not a constructor", span: None))
+}
+
+fn value_or_unit(o: Option[values.Value]) -> values.Value {
+  match o with
+  | Some(value) -> return value
+  | None -> return values.UnitV
+}
+
+fn try_expr(
+  fuel: Int where it >= 0,
+  ev: inout Ev,
+  ctx: inout context.Context,
+  e: ast.Expr,
+  env: Dict[Int, values.Value]
+) -> Result[values.Value, Fail] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: BudgetF(fn_name: top_name(ev: ev)))
+  }
+  match e with
+  | ast.Try(expr, else_, span) -> {
+    let v: values.Value = try eval_expr(
+      fuel: fuel - 1,
+      ev: inout ev,
+      ctx: inout ctx,
+      e: expr,
+      env: env
+    )
+    if not v is values.VariantV {
+      return Err(error: not_const(reason: "`try` on a non-union", span: span))
+    }
+    let vname: Text = context.get_def(ctx: ctx, id: values.def_of(c: v)).name
+    if vname == "Ok" or vname == "Some" {
+      let inner_value: Option[values.Value] = values.field_of(
+        fields: values.fields_of(c: v),
+        name: "value"
+      )
+      if inner_value is None {
+        return Err(error: not_const(reason: "malformed Ok/Some", span: span))
+      }
+      return Ok(value: value_or_unit(o: inner_value))
+    }
+    var ret: types.Type = types.ErrorT
+    match top_ret(ev: ev) with
+    | Some(value) -> ret = types.strip(t: value)
+    | None -> ret = types.ErrorT
+    if not ret is types.UnionT {
+      return Err(error: not_const(reason: "`try` outside a fallible function", span: span))
+    }
+    let returns_option: Bool = types.def_of(t: ret) == std_type(
+      ctx: inout ctx,
+      module_name: "std.option",
+      type_name: "Option"
+    )
+    match else_ with
+    | None -> return Err(error: ReturnF(value: v))
+    | Some(value) -> {
+      var err_value: values.Value = values.UnitV
+      if vname == "Err" {
+        err_value = value_or_unit(o: values.field_of(fields: values.fields_of(c: v), name: "error"))
+      }
+      let inner: Dict[Int, values.Value] = copy_env(env: env)
+      let else_def: Int = def_of_key(ctx: ctx, k: key(ev: ev, tag: defs.tag_misc, span: value.span))
+      if else_def >= 0 {
+        env_set(env: inner, k: else_def, v: err_value)
+      }
+      let converted: values.Value = try eval_expr(
+        fuel: fuel - 1,
+        ev: inout ev,
+        ctx: inout ctx,
+        e: value.expr,
+        env: inner
+      )
+      if returns_option {
+        let none: values.Value = try variant_named(
+          ctx: inout ctx,
+          module_name: "std.option",
+          union_name: "Option",
+          variant_name: "None",
+          fields: []
+        )
+        return Err(error: ReturnF(value: none))
+      }
+      let err: values.Value = try variant_named(
+        ctx: inout ctx,
+        module_name: "std.results",
+        union_name: "Result",
+        variant_name: "Err",
+        fields: [values.Field { name: "error", value: converted }]
+      )
+      return Err(error: ReturnF(value: err))
+    }
+  }
+  | _ -> return Err(error: NotConstF(reason: "not a try", span: None))
+}
+
+fn quantifier(
+  fuel: Int where it >= 0,
+  ev: inout Ev,
+  ctx: inout context.Context,
+  e: ast.Expr,
+  env: Dict[Int, values.Value]
+) -> Result[values.Value, Fail] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: BudgetF(fn_name: top_name(ev: ev)))
+  }
+  match e with
+  | ast.Quantifier(quant, _, _, domain, where_, body, span) -> {
+    let binder: Int = def_of_key(ctx: ctx, k: key(ev: ev, tag: defs.tag_expr, span: span))
+    if binder < 0 {
+      return Err(error: not_const(reason: "unresolved binder", span: span))
+    }
+    var items: List[values.Value] = []
+    match domain with
+    | None -> items = [values.BoolV(v: true), values.BoolV(v: false)]
+    | Some(value) -> items = try domain_values(
+      fuel: fuel - 1,
+      ev: inout ev,
+      ctx: inout ctx,
+      d: value,
+      env: env,
+      at: span
+    )
+    let inner: Dict[Int, values.Value] = copy_env(env: env)
+    for x: values.Value in items {
+      try step(ev: inout ev)
+      env_set(env: inner, k: binder, v: x)
+      var keep: Bool = true
+      match where_ with
+      | Some(value) -> {
+        let w: values.Value = try eval_expr(
+          fuel: fuel - 1,
+          ev: inout ev,
+          ctx: inout ctx,
+          e: value,
+          env: inner
+        )
+        if not w is values.BoolV {
+          return Err(error: panic_at(detail: "`where` must be Bool", span: span))
+        }
+        keep = values.bool_of(c: w)
+      }
+      | None -> keep = true
+      if keep {
+        let b: values.Value = try eval_expr(
+          fuel: fuel - 1,
+          ev: inout ev,
+          ctx: inout ctx,
+          e: body,
+          env: inner
+        )
+        if not b is values.BoolV {
+          return Err(error: panic_at(detail: "quantifier body must be Bool", span: span))
+        }
+        if quant == "forall" and not values.bool_of(c: b) {
+          return Ok(value: values.BoolV(v: false))
+        }
+        if quant == "exists" and values.bool_of(c: b) {
+          return Ok(value: values.BoolV(v: true))
+        }
+      }
+    }
+    return Ok(value: values.BoolV(v: quant == "forall"))
+  }
+  | _ -> return Err(error: NotConstF(reason: "not a quantifier", span: None))
+}
+
+fn domain_values(
+  fuel: Int where it >= 0,
+  ev: inout Ev,
+  ctx: inout context.Context,
+  d: ast.Domain,
+  env: Dict[Int, values.Value],
+  at: ast.Span
+) -> Result[List[values.Value], Fail] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: BudgetF(fn_name: top_name(ev: ev)))
+  }
+  match d with
+  | ast.RangeDomain(lo, hi, _) -> {
+    let lv: values.Value = try eval_expr(
+      fuel: fuel - 1,
+      ev: inout ev,
+      ctx: inout ctx,
+      e: lo,
+      env: env
+    )
+    let hv: values.Value = try eval_expr(
+      fuel: fuel - 1,
+      ev: inout ev,
+      ctx: inout ctx,
+      e: hi,
+      env: env
+    )
+    if not lv is values.IntV or not hv is values.IntV {
+      return Err(error: panic_at(detail: "range bounds must be Int", span: at))
+    }
+    var out: Builder[values.Value] = List.builder()
+    let lo_i: Int = values.int_of(c: lv)
+    let hi_i: Int = values.int_of(c: hv)
+    if lo_i < hi_i {
+      for i: Int in lo_i ..< hi_i {
+        List.push(b: inout out, x: values.IntV(v: i))
+      }
+    }
+    return Ok(value: List.finish(b: out))
+  }
+  | ast.InDomain(expr, _) -> {
+    let dv: values.Value = try eval_expr(
+      fuel: fuel - 1,
+      ev: inout ev,
+      ctx: inout ctx,
+      e: expr,
+      env: env
+    )
+    if dv is values.ListV {
+      return Ok(value: values.items_of(c: dv))
+    }
+    if dv is values.VariantV {
+      let vname: Text = context.get_def(ctx: ctx, id: values.def_of(c: dv)).name
+      if vname == "Ok" or vname == "Some" {
+        match values.field_of(fields: values.fields_of(c: dv), name: "value") with
+        | Some(value) -> {
+          if value is values.ListV {
+            return Ok(value: values.items_of(c: value))
+          }
+          return Err(error: not_const(reason: "quantifier domain is not a list", span: at))
+        }
+        | None -> return Err(error: not_const(reason: "quantifier domain is not a list", span: at))
+      }
+      return Ok(value: [])
+    }
+    return Err(error: not_const(reason: "quantifier domain is not a list", span: at))
+  }
+}
+
+fn field_access(
+  fuel: Int where it >= 0,
+  ev: inout Ev,
+  ctx: inout context.Context,
+  e: ast.Expr,
+  env: Dict[Int, values.Value]
+) -> Result[values.Value, Fail] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: BudgetF(fn_name: top_name(ev: ev)))
+  }
+  match e with
+  | ast.FieldAccess(object, name, span) -> {
+    let res: Option[defs.Resolution] = res_at(
+      ctx: ctx,
+      k: key(ev: ev, tag: defs.tag_expr, span: span)
+    )
+    if res is Some {
+      let def: Int = res_def(res: res)
+      if def >= 0 and res_is_def(res: res) {
+        let d: defs.Def = context.get_def(ctx: ctx, id: def)
+        if d.kind == defs.Const {
+          let cv: Option[values.Value] = const_of(
+            fuel: fuel - 1,
+            ev: inout ev,
+            ctx: inout ctx,
+            def: def
+          )
+          if cv is None {
+            return Err(error: not_const(reason: "`" ++ d.name ++ "` is not a constant", span: span))
+          }
+          return Ok(value: value_or_unit(o: cv))
+        }
+        return Err(error: not_const(reason: "a function is not a value at check time", span: span))
+      }
+      if res_is_unit(res: res) {
+        return Ok(value: values.UnitV)
+      }
+      match res_owner(res: res) with
+      | Some(value) -> return Ok(value: values.TypeInfoV(owner: value))
+      | None -> return Err(
+        error: not_const(reason: "a function is not a value at check time", span: span)
+      )
+    }
+    let obj: values.Value = try eval_expr(
+      fuel: fuel - 1,
+      ev: inout ev,
+      ctx: inout ctx,
+      e: object,
+      env: env
+    )
+    if not obj is values.RecordV {
+      return Err(error: not_const(reason: "field access on a non-record", span: span))
+    }
+    match values.field_of(fields: values.fields_of(c: obj), name: name.text) with
+    | Some(value) -> return Ok(value: value)
+    | None -> return Err(error: not_const(reason: "no field `" ++ name.text ++ "`", span: span))
+  }
+  | _ -> return Err(error: NotConstF(reason: "not a field access", span: None))
+}
+
+fn res_is_def(res: Option[defs.Resolution]) -> Bool {
+  match res with
+  | Some(value) -> return value is defs.DefRes
+  | None -> return false
+}
+
+fn res_is_unit(res: Option[defs.Resolution]) -> Bool {
+  match res with
+  | Some(value) -> return value is defs.UnitRes
+  | None -> return false
+}
+
+fn res_owner(res: Option[defs.Resolution]) -> Option[defs.TypeOwner] {
+  match res with
+  | None -> return None
+  | Some(value) -> {
+    match value with
+    | defs.TypeValueRes(owner) -> return Some(value: owner)
+    | _ -> return None
+  }
+}
+
+fn overflow(a: Int, b: Int, op: Text, span: ast.Span) -> Fail may alloc {
+  var n: Float = Float.of(x: a) + Float.of(x: b)
+  if op == "-" {
+    n = Float.of(x: a) - Float.of(x: b)
+  }
+  if op == "*" {
+    n = Float.of(x: a) * Float.of(x: b)
+  }
+  return panic_at(
+    detail: Float.to_text(x: n) ++ " is outside the runtime's safe integer range (±2^53)",
+    span: span
+  )
+}
+
+fn int_arith(op: Text, a: Int, b: Int, span: ast.Span) -> Result[Int, Fail] may alloc {
+  if op == "+" {
+    match recover {
+      a + b
+    } with
+    | Ok(value) -> return Ok(value: value)
+    | Err(error) -> return Err(error: overflow(a: a, b: b, op: op, span: span))
+  }
+  if op == "-" {
+    match recover {
+      a - b
+    } with
+    | Ok(value) -> return Ok(value: value)
+    | Err(error) -> return Err(error: overflow(a: a, b: b, op: op, span: span))
+  }
+  if op == "*" {
+    match recover {
+      a * b
+    } with
+    | Ok(value) -> return Ok(value: value)
+    | Err(error) -> return Err(error: overflow(a: a, b: b, op: op, span: span))
+  }
+  if op == "/" {
+    if b == 0 {
+      return Err(error: panic_at(detail: "division by zero", span: span))
+    }
+    return Ok(value: a / b)
+  }
+  if b == 0 {
+    return Err(error: panic_at(detail: "remainder by zero", span: span))
+  }
+  return Ok(value: a % b)
+}
+
+fn int_compare(op: Text, a: Int, b: Int) -> Option[Bool] {
+  if op == "<" {
+    return Some(value: a < b)
+  }
+  if op == "<=" {
+    return Some(value: a <= b)
+  }
+  if op == ">" {
+    return Some(value: a > b)
+  }
+  if op == ">=" {
+    return Some(value: a >= b)
+  }
+  return None
+}
+
+fn float_binary(op: Text, a: Float, b: Float) -> Option[values.Value] {
+  if op == "+" {
+    return Some(value: values.FloatV(v: a + b))
+  }
+  if op == "-" {
+    return Some(value: values.FloatV(v: a - b))
+  }
+  if op == "*" {
+    return Some(value: values.FloatV(v: a * b))
+  }
+  if op == "/" {
+    return Some(value: values.FloatV(v: a / b))
+  }
+  if op == "%" {
+    return Some(value: values.FloatV(v: a % b))
+  }
+  if op == "<" {
+    return Some(value: values.BoolV(v: a < b))
+  }
+  if op == "<=" {
+    return Some(value: values.BoolV(v: a <= b))
+  }
+  if op == ">" {
+    return Some(value: values.BoolV(v: a > b))
+  }
+  if op == ">=" {
+    return Some(value: values.BoolV(v: a >= b))
+  }
+  return None
+}
+
+fn is_arith(op: Text) -> Bool {
+  return op == "+" or op == "-" or op == "*" or op == "/" or op == "%"
+}
+
+fn binary(
+  fuel: Int where it >= 0,
+  ev: inout Ev,
+  ctx: inout context.Context,
+  e: ast.Expr,
+  env: Dict[Int, values.Value]
+) -> Result[values.Value, Fail] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: BudgetF(fn_name: top_name(ev: ev)))
+  }
+  match e with
+  | ast.Binary(op, left, right, span) -> {
+    let l: values.Value = try eval_expr(
+      fuel: fuel - 1,
+      ev: inout ev,
+      ctx: inout ctx,
+      e: left,
+      env: env
+    )
+    let r: values.Value = try eval_expr(
+      fuel: fuel - 1,
+      ev: inout ev,
+      ctx: inout ctx,
+      e: right,
+      env: env
+    )
+    if op == "==" {
+      return Ok(value: values.BoolV(v: values.equals(a: l, b: r)))
+    }
+    if op == "!=" {
+      return Ok(value: values.BoolV(v: not values.equals(a: l, b: r)))
+    }
+    if op == "implies" {
+      if not l is values.BoolV or not r is values.BoolV {
+        return Err(error: panic_at(detail: "`implies` on non-Bool", span: span))
+      }
+      return Ok(value: values.BoolV(v: not values.bool_of(c: l) or values.bool_of(c: r)))
+    }
+    if op == "++" {
+      if l is values.TextV and r is values.TextV {
+        return Ok(value: values.TextV(v: values.text_of(c: l) ++ values.text_of(c: r)))
+      }
+      if l is values.ListV and r is values.ListV {
+        return Ok(value: values.ListV(items: values.items_of(c: l) ++ values.items_of(c: r)))
+      }
+      return Err(error: panic_at(detail: "`++` on mismatched operands", span: span))
+    }
+    let same_int: Bool = (l is values.IntV and r is values.IntV) or (l is values.DurationV and r is values.DurationV)
+    if same_int {
+      let a: Int = values.int_of(c: l)
+      let b: Int = values.int_of(c: r)
+      if is_arith(op: op) {
+        let n: Int = try int_arith(op: op, a: a, b: b, span: span)
+        if l is values.DurationV {
+          return Ok(value: values.DurationV(v: n))
+        }
+        return Ok(value: values.IntV(v: n))
+      }
+      match int_compare(op: op, a: a, b: b) with
+      | Some(value) -> return Ok(value: values.BoolV(v: value))
+      | None -> skip()
+    }
+    if l is values.FloatV and r is values.FloatV {
+      match float_binary(op: op, a: values.float_of(c: l), b: values.float_of(c: r)) with
+      | Some(value) -> return Ok(value: value)
+      | None -> skip()
+    }
+    return Err(error: panic_at(detail: "`" ++ op ++ "` on mismatched operands", span: span))
+  }
+  | _ -> return Err(error: NotConstF(reason: "not a binary expression", span: None))
+}
+
+-- Calls ------------------------------------------------------------------------------------
+fn call(
+  fuel: Int where it >= 0,
+  ev: inout Ev,
+  ctx: inout context.Context,
+  e: ast.Expr,
+  env: Dict[Int, values.Value]
+) -> Result[values.Value, Fail] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: BudgetF(fn_name: top_name(ev: ev)))
+  }
+  match e with
+  | ast.Call(callee, _, args, span) -> {
+    let callee_span: ast.Span = parser.span_of_expr(e: callee)
+    let res: Option[defs.Resolution] = res_at(
+      ctx: ctx,
+      k: key(ev: ev, tag: defs.tag_expr, span: callee_span)
+    )
+    let fn_id: Int = res_def(res: res)
+    if fn_id < 0 {
+      return Err(
+        error: not_const(reason: "only named functions are called at check time", span: callee_span)
+      )
+    }
+    let fn_def: defs.Def = context.get_def(ctx: ctx, id: fn_id)
+    if fn_def.kind != defs.Fn {
+      return Err(
+        error: not_const(reason: "`" ++ fn_def.name ++ "` is not a function", span: callee_span)
+      )
+    }
+    let sig: types.Signature = try sig_of(ctx: ctx, d: fn_def)
+    var arg_values: Dict[Text, values.Value] = Map.dict()
+    var inout_vars: Dict[Text, Int] = Map.dict()
+    for a: ast.Arg in args {
+      Map.set(
+        d: inout arg_values,
+        key: a.name.text,
+        value: try eval_expr(fuel: fuel - 1, ev: inout ev, ctx: inout ctx, e: a.value, env: env)
+      )
+      if a.is_inout and a.value is ast.Name {
+        let target: Int = res_def(
+          res: res_at(
+            ctx: ctx,
+            k: key(ev: ev, tag: defs.tag_expr, span: parser.span_of_expr(e: a.value))
+          )
+        )
+        if target >= 0 {
+          Map.set(d: inout inout_vars, key: a.name.text, value: target)
+        }
+      }
+    }
+    var subst: Dict[Int, types.TypeArg] = Map.dict()
+    var targs: List[types.TypeArg] = []
+    match Map.find(d: ctx.instantiations, key: key(ev: ev, tag: defs.tag_expr, span: span)) with
+    | Some(value) -> targs = value
+    | None -> targs = []
+    for i: Int in 0 ..< List.len(xs: sig.tparams) {
+      if i < List.len(xs: targs) {
+        Map.set(
+          d: inout subst,
+          key: types.tparam_def(p: List.get(xs: sig.tparams, i: i)),
+          value: List.get(xs: targs, i: i)
+        )
+      }
+    }
+    let r: CallResult = try call_fn(
+      fuel: fuel - 1,
+      ev: inout ev,
+      ctx: inout ctx,
+      d: fn_def,
+      sig: sig,
+      args: arg_values,
+      subst: subst,
+      span: Some(value: span)
+    )
+    for name: Text in Map.keys(d: inout_vars) {
+      match Map.find(d: r.inouts, key: name) with
+      | Some(value) -> env_set(env: env, k: or_neg(o: Map.find(d: inout_vars, key: name)), v: value)
+      | None -> skip()
+    }
+    return Ok(value: r.value)
+  }
+  | _ -> return Err(error: NotConstF(reason: "not a call", span: None))
+}
+
+fn sig_of(ctx: context.Context, d: defs.Def) -> Result[types.Signature, Fail] may alloc {
+  match Map.find(d: ctx.signatures, key: d.id) with
+  | Some(value) -> return Ok(value: value)
+  | None -> return Err(error: NotConstF(reason: "`" ++ d.name ++ "` has no signature", span: None))
+}
+
+-- Calls `d` with named arguments and type arguments.
+pub fn call_fn(
+  fuel: Int where it >= 0,
+  ev: inout Ev,
+  ctx: inout context.Context,
+  d: defs.Def,
+  sig: types.Signature,
+  args: Dict[Text, values.Value],
+  subst: Dict[Int, types.TypeArg],
+  span: Option[ast.Span]
+) -> Result[CallResult, Fail] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: BudgetF(fn_name: top_name(ev: ev)))
+  }
+  try step(ev: inout ev)
+  for eff: defs.Effect in effectset.values(s: sig.effects) {
+    if eff != defs.PrimEffect(name: "alloc") {
+      return Err(
+        error: NotConstF(
+          reason: "`" ++ d.name ++ "` has effects and cannot run at check time",
+          span: span
+        )
+      )
+    }
+  }
+  var env: Dict[Int, values.Value] = Map.dict()
+  for p: types.TParamInfo in sig.tparams {
+    if p is types.ConstP {
+      let pdef: Int = types.tparam_def(p: p)
+      var bound: Option[values.Value] = None
+      match Map.find(d: subst, key: pdef) with
+      | Some(value) -> {
+        if value is types.ConstA {
+          bound = values.of_const(c: types.arg_const(a: value))
+        }
+      }
+      | None -> bound = None
+      match bound with
+      | Some(value) -> Map.set(d: inout env, key: pdef, value: value)
+      | None -> return Err(
+        error: NotConstF(
+          reason: "type index `" ++ context.get_def(
+            ctx: ctx,
+            id: pdef
+          ).name ++ "` of `" ++ d.name ++ "` is not known at check time",
+          span: span
+        )
+      )
+    }
+  }
+  for i: Int in 0 ..< List.len(xs: sig.params) {
+    let p: types.FnParam = List.get(xs: sig.params, i: i)
+    if i >= List.len(xs: sig.param_defs) {
+      return Err(error: NotConstF(reason: "missing argument `" ++ p.name ++ "`", span: span))
+    }
+    match Map.find(d: args, key: p.name) with
+    | Some(value) -> Map.set(d: inout env, key: List.get(xs: sig.param_defs, i: i), value: value)
+    | None -> return Err(
+      error: NotConstF(reason: "missing argument `" ++ p.name ++ "`", span: span)
+    )
+  }
+  let saved_file: Int = ev.file
+  ev = { ev with
+    frames: List.append(xs: ev.frames, x: Frame { name: d.name, ret: Some(value: sig.ret) }),
+    file: d.file
+  }
+  let r: Result[CallResult, Fail] = call_body(
+    fuel: fuel - 1,
+    ev: inout ev,
+    ctx: inout ctx,
+    d: d,
+    sig: sig,
+    env: env,
+    subst: subst,
+    span: span
+  )
+  let n: Int = List.len(xs: ev.frames)
+  if n > 0 {
+    ev = { ev with frames: List.slice(xs: ev.frames, from: 0, to: n - 1) }
+  }
+  ev = { ev with file: saved_file }
+  return r
+}
+
+fn block_or_empty(o: Option[ast.Block]) -> ast.Block may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return ast.Block { stmts: [], elided: false, span: ast.Span { start: 0, end: 0 } }
+}
+
+fn body_of(d: defs.Def) -> Option[ast.Block] {
+  match d.node with
+  | defs.FnNode(decl) -> return decl.body
+  | _ -> return None
+}
+
+fn call_body(
+  fuel: Int where it >= 0,
+  ev: inout Ev,
+  ctx: inout context.Context,
+  d: defs.Def,
+  sig: types.Signature,
+  env: Dict[Int, values.Value],
+  subst: Dict[Int, types.TypeArg],
+  span: Option[ast.Span]
+) -> Result[CallResult, Fail] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: BudgetF(fn_name: top_name(ev: ev)))
+  }
+  for c: ast.Contract in sig.contracts {
+    if c.clause == "requires" {
+      let ok: values.Value = try eval_expr(
+        fuel: fuel - 1,
+        ev: inout ev,
+        ctx: inout ctx,
+        e: c.expr,
+        env: env
+      )
+      if not ok is values.BoolV or not values.bool_of(c: ok) {
+        return Err(
+          error: PanicF(
+            detail: "`requires " ++ printer.print_expr(
+              e: c.expr
+            ) ++ "` of `" ++ d.name ++ "` does not hold",
+            span: span
+          )
+        )
+      }
+    }
+  }
+  if sig.is_intrinsic {
+    let v: values.Value = try intrinsic(
+      ctx: inout ctx,
+      d: d,
+      sig: sig,
+      env: env,
+      subst: subst,
+      span: span
+    )
+    return Ok(value: CallResult { value: v, inouts: Map.dict() })
+  }
+  let body: Option[ast.Block] = body_of(d: d)
+  if body is None {
+    return Err(error: NotConstF(reason: "`" ++ d.name ++ "` has no body", span: span))
+  }
+  var out: values.Value = values.UnitV
+  match exec_block(
+    fuel: fuel - 1,
+    ev: inout ev,
+    ctx: inout ctx,
+    b: block_or_empty(o: body),
+    env: env
+  ) with
+  | Ok(_) -> out = values.UnitV
+  | Err(error) -> {
+    match error with
+    | ReturnF(value) -> out = value
+    | _ -> return Err(error: error)
+  }
+  var inouts: Dict[Text, values.Value] = Map.dict()
+  for i: Int in 0 ..< List.len(xs: sig.params) {
+    let p: types.FnParam = List.get(xs: sig.params, i: i)
+    if p.is_inout and i < List.len(xs: sig.param_defs) {
+      match Map.find(d: env, key: List.get(xs: sig.param_defs, i: i)) with
+      | Some(value) -> Map.set(d: inout inouts, key: p.name, value: value)
+      | None -> skip()
+    }
+  }
+  return Ok(value: CallResult { value: out, inouts: inouts })
+}
+
+-- Intrinsics -------------------------------------------------------------------------------
+pub const implemented: List[Text] = [
+  "std.int.to_text",
+  "std.int.floor",
+  "std.int.parse",
+  "std.float.of",
+  "std.float.classify",
+  "std.float.to_text",
+  "std.float.parse",
+  "std.bool.to_text",
+  "std.text.len",
+  "std.text.graphemes",
+  "std.text.bytes",
+  "std.text.starts_with",
+  "std.text.lower",
+  "std.text.trim",
+  "std.text.count",
+  "std.text.code_points",
+  "std.text.of_code_points",
+  "std.text.of_code_point",
+  "std.text.slice",
+  "std.text.index_of",
+  "std.text.contains",
+  "std.text.ends_with",
+  "std.text.split",
+  "std.text.join",
+  "std.text.repeat",
+  "std.text.replace",
+  "std.text.compare",
+  "std.text.upper",
+  "std.list.len",
+  "std.list.get",
+  "std.list.replicate",
+  "std.list.append",
+  "std.list.slice",
+  "std.bytes.len",
+  "std.bytes.get",
+  "std.duration.nanos",
+  "std.duration.of_millis"
+]
+
+pub fn has_impl(qualified: Text) -> Bool may alloc {
+  return List.contains(xs: implemented, x: qualified) or Text.starts_with(
+    t: qualified,
+    prefix: "std.typeinfo."
+  )
+}
+
+fn intrinsic(
+  ctx: inout context.Context,
+  d: defs.Def,
+  sig: types.Signature,
+  env: Dict[Int, values.Value],
+  subst: Dict[Int, types.TypeArg],
+  span: Option[ast.Span]
+) -> Result[values.Value, Fail] may mutate, alloc {
+  let qualified: Text = context.qualified_name(ctx: ctx, id: d.id)
+  if not sig.is_const_fn or not has_impl(qualified: qualified) {
+    return Err(
+      error: NotConstF(reason: "`" ++ qualified ++ "` is not evaluated at check time", span: span)
+    )
+  }
+  var args: Builder[values.Value] = List.builder()
+  for pd: Int in sig.param_defs {
+    match Map.find(d: env, key: pd) with
+    | Some(value) -> List.push(b: inout args, x: value)
+    | None -> List.push(b: inout args, x: values.UnitV)
+  }
+  let arg_list: List[values.Value] = List.finish(b: args)
+  if Text.starts_with(t: qualified, prefix: "std.typeinfo.") {
+    return typeinfo_intrinsic(ctx: inout ctx, qualified: qualified, args: arg_list, span: span)
+  }
+  return call_impl(ctx: inout ctx, qualified: qualified, args: arg_list, span: span)
+}
+
+fn typeinfo_intrinsic(
+  ctx: inout context.Context,
+  qualified: Text,
+  args: List[values.Value],
+  span: Option[ast.Span]
+) -> Result[values.Value, Fail] may mutate, alloc {
+  if List.len(xs: args) == 0 or not List.get(xs: args, i: 0) is values.TypeInfoV {
+    return Err(error: NotConstF(reason: "TypeInfo intrinsic without a type", span: span))
+  }
+  let owner: defs.TypeOwner = values.owner_of(c: List.get(xs: args, i: 0))
+  if qualified == "std.typeinfo.name" {
+    return Ok(value: values.TextV(v: owner_name(ctx: ctx, o: owner)))
+  }
+  if qualified == "std.typeinfo.fields" {
+    let field_def: Int = std_type(ctx: inout ctx, module_name: "std.typeinfo", type_name: "Field")
+    if field_def < 0 {
+      return Err(error: NotConstF(reason: "std.typeinfo.Field is not available", span: span))
+    }
+    var items: Builder[values.Value] = List.builder()
+    match owner with
+    | defs.DefOwner(def) -> {
+      match Map.find(d: ctx.fields, key: def) with
+      | Some(value) -> {
+        for f: types.FieldInfo in value {
+          List.push(
+            b: inout items,
+            x: values.RecordV(
+              def: field_def,
+              fields: [
+                values.Field { name: "name", value: values.TextV(v: f.name) },
+                values.Field {
+                  name: "type_name",
+                  value: values.TextV(v: typecheck.show(ctx: ctx, t: f.ty))
+                }
+              ]
+            )
+          )
+        }
+      }
+      | None -> skip()
+    }
+    | _ -> skip()
+    return Ok(value: values.ListV(items: List.finish(b: items)))
+  }
+  return Err(
+    error: NotConstF(reason: "`" ++ qualified ++ "` is not evaluated at check time", span: span)
+  )
+}
+
+fn conversion(what: Text, span: Option[ast.Span]) -> Fail may alloc {
+  return NotConstF(reason: "expected " ++ what, span: span)
+}
+
+fn arg_at(
+  args: List[values.Value],
+  i: Int,
+  span: Option[ast.Span]
+) -> Result[values.Value, Fail] may alloc {
+  if i < 0 or i >= List.len(xs: args) {
+    return Err(error: conversion(what: "an argument", span: span))
+  }
+  return Ok(value: List.get(xs: args, i: i))
+}
+
+fn arg_text(
+  args: List[values.Value],
+  i: Int,
+  span: Option[ast.Span]
+) -> Result[Text, Fail] may alloc {
+  let v: values.Value = try arg_at(args: args, i: i, span: span)
+  if not v is values.TextV {
+    return Err(error: conversion(what: "Text", span: span))
+  }
+  return Ok(value: values.text_of(c: v))
+}
+
+fn arg_int(
+  args: List[values.Value],
+  i: Int,
+  span: Option[ast.Span]
+) -> Result[Int, Fail] may alloc {
+  let v: values.Value = try arg_at(args: args, i: i, span: span)
+  if not v is values.IntV and not v is values.DurationV {
+    return Err(error: conversion(what: "a number", span: span))
+  }
+  return Ok(value: values.int_of(c: v))
+}
+
+fn arg_float(
+  args: List[values.Value],
+  i: Int,
+  span: Option[ast.Span]
+) -> Result[Float, Fail] may alloc {
+  let v: values.Value = try arg_at(args: args, i: i, span: span)
+  if not v is values.FloatV {
+    return Err(error: conversion(what: "a number", span: span))
+  }
+  return Ok(value: values.float_of(c: v))
+}
+
+fn arg_bool(
+  args: List[values.Value],
+  i: Int,
+  span: Option[ast.Span]
+) -> Result[Bool, Fail] may alloc {
+  let v: values.Value = try arg_at(args: args, i: i, span: span)
+  if not v is values.BoolV {
+    return Err(error: conversion(what: "Bool", span: span))
+  }
+  return Ok(value: values.bool_of(c: v))
+}
+
+fn arg_list(
+  args: List[values.Value],
+  i: Int,
+  span: Option[ast.Span]
+) -> Result[List[values.Value], Fail] may alloc {
+  let v: values.Value = try arg_at(args: args, i: i, span: span)
+  if not v is values.ListV {
+    return Err(error: conversion(what: "a List", span: span))
+  }
+  return Ok(value: values.items_of(c: v))
+}
+
+fn arg_bytes(
+  args: List[values.Value],
+  i: Int,
+  span: Option[ast.Span]
+) -> Result[List[Int], Fail] may alloc {
+  let v: values.Value = try arg_at(args: args, i: i, span: span)
+  if not v is values.BytesV {
+    return Err(error: conversion(what: "Bytes", span: span))
+  }
+  return Ok(value: values.bytes_of(c: v))
+}
+
+fn texts_of(
+  items: List[values.Value],
+  span: Option[ast.Span]
+) -> Result[List[Text], Fail] may alloc, mutate {
+  var out: Builder[Text] = List.builder()
+  for x: values.Value in items {
+    if not x is values.TextV {
+      return Err(error: conversion(what: "Text", span: span))
+    }
+    List.push(b: inout out, x: values.text_of(c: x))
+  }
+  return Ok(value: List.finish(b: out))
+}
+
+fn text_list(items: List[Text]) -> values.Value may alloc, mutate {
+  var out: Builder[values.Value] = List.builder()
+  for t: Text in items {
+    List.push(b: inout out, x: values.TextV(v: t))
+  }
+  return values.ListV(items: List.finish(b: out))
+}
+
+fn int_list(items: List[Int]) -> values.Value may alloc, mutate {
+  var out: Builder[values.Value] = List.builder()
+  for n: Int in items {
+    List.push(b: inout out, x: values.IntV(v: n))
+  }
+  return values.ListV(items: List.finish(b: out))
+}
+
+fn code_points_of(
+  items: List[values.Value],
+  span: Option[ast.Span]
+) -> Result[List[Int where 0 <= it and it <= 1114111], Fail] may alloc, mutate {
+  var out: Builder[Int where 0 <= it and it <= 1114111] = List.builder()
+  for x: values.Value in items {
+    if not x is values.IntV {
+      return Err(error: conversion(what: "a number", span: span))
+    }
+    let cp: Int = values.int_of(c: x)
+    if cp < 0 or cp > 1114111 {
+      return Err(
+        error: PanicF(
+          detail: "refinement `0 <= it and it <= 1114111` of std.text.of_code_points: " ++ Int.to_text(
+            x: cp
+          ) ++ " is not a code point",
+          span: span
+        )
+      )
+    }
+    List.push(b: inout out, x: cp)
+  }
+  return Ok(value: List.finish(b: out))
+}
+
+fn bytes_value(b: Bytes) -> values.Value may alloc, mutate {
+  var out: Builder[Int] = List.builder()
+  for i: Int in 0 ..< Bytes.len(b: b) {
+    List.push(b: inout out, x: Bytes.get(b: b, i: i))
+  }
+  return values.BytesV(bytes: List.finish(b: out))
+}
+
+fn precondition(what: Text, span: Option[ast.Span]) -> Fail may alloc {
+  return PanicF(detail: what, span: span)
+}
+
+fn call_impl(
+  ctx: inout context.Context,
+  qualified: Text,
+  args: List[values.Value],
+  span: Option[ast.Span]
+) -> Result[values.Value, Fail] may mutate, alloc {
+  if qualified == "std.int.to_text" {
+    return Ok(value: values.TextV(v: Int.to_text(x: try arg_int(args: args, i: 0, span: span))))
+  }
+  if qualified == "std.int.floor" {
+    match Int.floor(x: try arg_float(args: args, i: 0, span: span)) with
+    | Ok(value) -> return variant_named(
+      ctx: inout ctx,
+      module_name: "std.results",
+      union_name: "Result",
+      variant_name: "Ok",
+      fields: [values.Field { name: "value", value: values.IntV(v: value) }]
+    )
+    | Err(error) -> {
+      var vname: Text = "OutOfRange"
+      if error is NotFinite {
+        vname = "NotFinite"
+      }
+      let err: values.Value = try variant_named(
+        ctx: inout ctx,
+        module_name: "std.int",
+        union_name: "RangeError",
+        variant_name: vname,
+        fields: []
+      )
+      return variant_named(
+        ctx: inout ctx,
+        module_name: "std.results",
+        union_name: "Result",
+        variant_name: "Err",
+        fields: [values.Field { name: "error", value: err }]
+      )
+    }
+  }
+  if qualified == "std.int.parse" {
+    match Int.parse(t: try arg_text(args: args, i: 0, span: span)) with
+    | Some(value) -> return option_value(ctx: inout ctx, o: Some(value: values.IntV(v: value)))
+    | None -> return option_value(ctx: inout ctx, o: None)
+  }
+  if qualified == "std.float.of" {
+    return Ok(value: values.FloatV(v: Float.of(x: try arg_int(args: args, i: 0, span: span))))
+  }
+  if qualified == "std.float.classify" {
+    var vname: Text = "Finite"
+    match Float.classify(x: try arg_float(args: args, i: 0, span: span)) with
+    | Finite -> vname = "Finite"
+    | Infinite -> vname = "Infinite"
+    | NotANumber -> vname = "NotANumber"
+    return variant_named(
+      ctx: inout ctx,
+      module_name: "std.float",
+      union_name: "Class",
+      variant_name: vname,
+      fields: []
+    )
+  }
+  if qualified == "std.float.to_text" {
+    return Ok(value: values.TextV(v: Float.to_text(x: try arg_float(args: args, i: 0, span: span))))
+  }
+  if qualified == "std.float.parse" {
+    match Float.parse(t: try arg_text(args: args, i: 0, span: span)) with
+    | Some(value) -> return option_value(ctx: inout ctx, o: Some(value: values.FloatV(v: value)))
+    | None -> return option_value(ctx: inout ctx, o: None)
+  }
+  if qualified == "std.bool.to_text" {
+    return Ok(value: values.TextV(v: Bool.to_text(b: try arg_bool(args: args, i: 0, span: span))))
+  }
+  if qualified == "std.text.len" {
+    return Ok(value: values.IntV(v: Text.len(t: try arg_text(args: args, i: 0, span: span))))
+  }
+  if qualified == "std.text.graphemes" {
+    return Ok(
+      value: text_list(items: Text.graphemes(t: try arg_text(args: args, i: 0, span: span)))
+    )
+  }
+  if qualified == "std.text.bytes" {
+    return Ok(value: bytes_value(b: Text.bytes(t: try arg_text(args: args, i: 0, span: span))))
+  }
+  if qualified == "std.text.starts_with" {
+    return Ok(
+      value: values.BoolV(
+        v: Text.starts_with(
+          t: try arg_text(args: args, i: 0, span: span),
+          prefix: try arg_text(args: args, i: 1, span: span)
+        )
+      )
+    )
+  }
+  if qualified == "std.text.lower" {
+    return Ok(value: values.TextV(v: Text.lower(t: try arg_text(args: args, i: 0, span: span))))
+  }
+  if qualified == "std.text.trim" {
+    return Ok(value: values.TextV(v: Text.trim(t: try arg_text(args: args, i: 0, span: span))))
+  }
+  if qualified == "std.text.count" {
+    return Ok(value: values.IntV(v: Text.count(t: try arg_text(args: args, i: 0, span: span))))
+  }
+  if qualified == "std.text.code_points" {
+    return Ok(
+      value: int_list(items: Text.code_points(t: try arg_text(args: args, i: 0, span: span)))
+    )
+  }
+  if qualified == "std.text.of_code_points" {
+    return Ok(
+      value: values.TextV(
+        v: Text.of_code_points(
+          cps: try code_points_of(items: try arg_list(args: args, i: 0, span: span), span: span)
+        )
+      )
+    )
+  }
+  if qualified == "std.text.of_code_point" {
+    let cp: Int = try arg_int(args: args, i: 0, span: span)
+    if cp < 0 or cp > 1114111 {
+      return Err(
+        error: precondition(
+          what: "refinement `0 <= it and it <= 1114111` of std.text.of_code_point: " ++ Int.to_text(
+            x: cp
+          ) ++ " is not a code point",
+          span: span
+        )
+      )
+    }
+    return Ok(value: values.TextV(v: Text.of_code_point(cp: cp)))
+  }
+  if qualified == "std.text.slice" {
+    let t: Text = try arg_text(args: args, i: 0, span: span)
+    let from: Int = try arg_int(args: args, i: 1, span: span)
+    let to: Int = try arg_int(args: args, i: 2, span: span)
+    if from < 0 or to < from or to > Text.count(t: t) {
+      return Err(
+        error: precondition(
+          what: "refinement of std.text.slice: " ++ Int.to_text(x: from) ++ " ..< " ++ Int.to_text(
+            x: to
+          ) ++ " is outside the text",
+          span: span
+        )
+      )
+    }
+    return Ok(value: values.TextV(v: Text.slice(t: t, from: from, to: to)))
+  }
+  if qualified == "std.text.index_of" {
+    let t: Text = try arg_text(args: args, i: 0, span: span)
+    let needle: Text = try arg_text(args: args, i: 1, span: span)
+    let from: Int = try arg_int(args: args, i: 2, span: span)
+    if from < 0 or from > Text.count(t: t) {
+      return Err(
+        error: precondition(
+          what: "refinement of std.text.index_of: " ++ Int.to_text(
+            x: from
+          ) ++ " is outside the text",
+          span: span
+        )
+      )
+    }
+    match Text.index_of(t: t, needle: needle, from: from) with
+    | Some(value) -> return option_value(ctx: inout ctx, o: Some(value: values.IntV(v: value)))
+    | None -> return option_value(ctx: inout ctx, o: None)
+  }
+  if qualified == "std.text.contains" {
+    return Ok(
+      value: values.BoolV(
+        v: Text.contains(
+          t: try arg_text(args: args, i: 0, span: span),
+          needle: try arg_text(args: args, i: 1, span: span)
+        )
+      )
+    )
+  }
+  if qualified == "std.text.ends_with" {
+    return Ok(
+      value: values.BoolV(
+        v: Text.ends_with(
+          t: try arg_text(args: args, i: 0, span: span),
+          suffix: try arg_text(args: args, i: 1, span: span)
+        )
+      )
+    )
+  }
+  if qualified == "std.text.split" {
+    return Ok(
+      value: text_list(
+        items: Text.split(
+          t: try arg_text(args: args, i: 0, span: span),
+          sep: try arg_text(args: args, i: 1, span: span)
+        )
+      )
+    )
+  }
+  if qualified == "std.text.join" {
+    return Ok(
+      value: values.TextV(
+        v: Text.join(
+          parts: try texts_of(items: try arg_list(args: args, i: 0, span: span), span: span),
+          sep: try arg_text(args: args, i: 1, span: span)
+        )
+      )
+    )
+  }
+  if qualified == "std.text.repeat" {
+    let n: Int = try arg_int(args: args, i: 1, span: span)
+    if n < 0 {
+      return Err(
+        error: precondition(
+          what: "refinement `it >= 0` of std.text.repeat: " ++ Int.to_text(x: n),
+          span: span
+        )
+      )
+    }
+    return Ok(
+      value: values.TextV(v: Text.repeat(t: try arg_text(args: args, i: 0, span: span), n: n))
+    )
+  }
+  if qualified == "std.text.replace" {
+    return Ok(
+      value: values.TextV(
+        v: Text.replace(
+          t: try arg_text(args: args, i: 0, span: span),
+          from: try arg_text(args: args, i: 1, span: span),
+          to: try arg_text(args: args, i: 2, span: span)
+        )
+      )
+    )
+  }
+  if qualified == "std.text.compare" {
+    return Ok(
+      value: values.IntV(
+        v: Text.compare(
+          a: try arg_text(args: args, i: 0, span: span),
+          b: try arg_text(args: args, i: 1, span: span)
+        )
+      )
+    )
+  }
+  if qualified == "std.text.upper" {
+    return Ok(value: values.TextV(v: Text.upper(t: try arg_text(args: args, i: 0, span: span))))
+  }
+  if qualified == "std.list.len" {
+    return Ok(value: values.IntV(v: List.len(xs: try arg_list(args: args, i: 0, span: span))))
+  }
+  if qualified == "std.list.get" {
+    let xs: List[values.Value] = try arg_list(args: args, i: 0, span: span)
+    let i: Int = try arg_int(args: args, i: 1, span: span)
+    if i < 0 or i >= List.len(xs: xs) {
+      return Err(
+        error: precondition(
+          what: "refinement `0 <= it and it < len(xs: xs)` of std.list.get: " ++ Int.to_text(
+            x: i
+          ) ++ " is outside the list",
+          span: span
+        )
+      )
+    }
+    return Ok(value: List.get(xs: xs, i: i))
+  }
+  if qualified == "std.list.replicate" {
+    let n: Int = try arg_int(args: args, i: 1, span: span)
+    if n < 0 {
+      return Err(
+        error: precondition(
+          what: "refinement `it >= 0` of std.list.replicate: " ++ Int.to_text(x: n),
+          span: span
+        )
+      )
+    }
+    return Ok(
+      value: values.ListV(
+        items: List.replicate(value: try arg_at(args: args, i: 0, span: span), count: n)
+      )
+    )
+  }
+  if qualified == "std.list.append" {
+    return Ok(
+      value: values.ListV(
+        items: List.append(
+          xs: try arg_list(args: args, i: 0, span: span),
+          x: try arg_at(args: args, i: 1, span: span)
+        )
+      )
+    )
+  }
+  if qualified == "std.list.slice" {
+    let xs: List[values.Value] = try arg_list(args: args, i: 0, span: span)
+    let from: Int = try arg_int(args: args, i: 1, span: span)
+    let to: Int = try arg_int(args: args, i: 2, span: span)
+    if from < 0 or to < from or to > List.len(xs: xs) {
+      return Err(
+        error: precondition(
+          what: "refinement of std.list.slice: " ++ Int.to_text(x: from) ++ " ..< " ++ Int.to_text(
+            x: to
+          ) ++ " is outside the list",
+          span: span
+        )
+      )
+    }
+    return Ok(value: values.ListV(items: List.slice(xs: xs, from: from, to: to)))
+  }
+  if qualified == "std.bytes.len" {
+    return Ok(value: values.IntV(v: List.len(xs: try arg_bytes(args: args, i: 0, span: span))))
+  }
+  if qualified == "std.bytes.get" {
+    let bs: List[Int] = try arg_bytes(args: args, i: 0, span: span)
+    let i: Int = try arg_int(args: args, i: 1, span: span)
+    if i < 0 or i >= List.len(xs: bs) {
+      return Err(
+        error: precondition(
+          what: "refinement `0 <= it and it < len(b: b)` of std.bytes.get: " ++ Int.to_text(
+            x: i
+          ) ++ " is outside the bytes",
+          span: span
+        )
+      )
+    }
+    return Ok(value: values.IntV(v: List.get(xs: bs, i: i)))
+  }
+  if qualified == "std.duration.nanos" {
+    return Ok(value: values.IntV(v: try arg_int(args: args, i: 0, span: span)))
+  }
+  if qualified == "std.duration.of_millis" {
+    let ms: Int = try arg_int(args: args, i: 0, span: span)
+    if ms < 0 {
+      return Err(
+        error: precondition(
+          what: "refinement `it >= 0` of std.duration.of_millis: " ++ Int.to_text(x: ms),
+          span: span
+        )
+      )
+    }
+    match recover {
+      ms * 1000000
+    } with
+    | Ok(value) -> return Ok(value: values.DurationV(v: value))
+    | Err(error) -> return Err(error: precondition(what: "duration out of range", span: span))
+  }
+  return Err(
+    error: NotConstF(reason: "`" ++ qualified ++ "` is not evaluated at check time", span: span)
+  )
+}
+
+-- Statements and patterns --------------------------------------------------------------------
+pub fn exec_block(
+  fuel: Int where it >= 0,
+  ev: inout Ev,
+  ctx: inout context.Context,
+  b: ast.Block,
+  env: Dict[Int, values.Value]
+) -> Result[Unit, Fail] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: BudgetF(fn_name: top_name(ev: ev)))
+  }
+  for s: ast.Stmt in b.stmts {
+    try exec_stmt(fuel: fuel - 1, ev: inout ev, ctx: inout ctx, s: s, env: env)
+  }
+  return Ok(value: Unit)
+}
+
+pub fn exec_stmt(
+  fuel: Int where it >= 0,
+  ev: inout Ev,
+  ctx: inout context.Context,
+  s: ast.Stmt,
+  env: Dict[Int, values.Value]
+) -> Result[Unit, Fail] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: BudgetF(fn_name: top_name(ev: ev)))
+  }
+  try step(ev: inout ev)
+  match s with
+  | ast.Let(_, _, value, span) -> {
+    let def: Int = def_of_key(ctx: ctx, k: key(ev: ev, tag: defs.tag_stmt, span: span))
+    let v: values.Value = try eval_expr(
+      fuel: fuel - 1,
+      ev: inout ev,
+      ctx: inout ctx,
+      e: value,
+      env: env
+    )
+    if def >= 0 {
+      env_set(env: env, k: def, v: v)
+    }
+    return Ok(value: Unit)
+  }
+  | ast.Var(_, _, value, span) -> {
+    let def: Int = def_of_key(ctx: ctx, k: key(ev: ev, tag: defs.tag_stmt, span: span))
+    let v: values.Value = try eval_expr(
+      fuel: fuel - 1,
+      ev: inout ev,
+      ctx: inout ctx,
+      e: value,
+      env: env
+    )
+    if def >= 0 {
+      env_set(env: env, k: def, v: v)
+    }
+    return Ok(value: Unit)
+  }
+  | ast.Assign(_, value, span) -> {
+    let def: Int = res_def(res: res_at(ctx: ctx, k: key(ev: ev, tag: defs.tag_stmt, span: span)))
+    let v: values.Value = try eval_expr(
+      fuel: fuel - 1,
+      ev: inout ev,
+      ctx: inout ctx,
+      e: value,
+      env: env
+    )
+    if def >= 0 {
+      env_set(env: env, k: def, v: v)
+    }
+    return Ok(value: Unit)
+  }
+  | ast.Return(value, _) -> {
+    let v: values.Value = try eval_expr(
+      fuel: fuel - 1,
+      ev: inout ev,
+      ctx: inout ctx,
+      e: value,
+      env: env
+    )
+    return Err(error: ReturnF(value: v))
+  }
+  | ast.If(cond, then_block, else_block, _) -> {
+    let c: values.Value = try eval_expr(
+      fuel: fuel - 1,
+      ev: inout ev,
+      ctx: inout ctx,
+      e: cond,
+      env: env
+    )
+    if not c is values.BoolV {
+      return Err(error: panic_at(detail: "`if` on a non-Bool", span: parser.span_of_expr(e: cond)))
+    }
+    if values.bool_of(c: c) {
+      try exec_block(fuel: fuel - 1, ev: inout ev, ctx: inout ctx, b: then_block, env: env)
+    } else {
+      match else_block with
+      | Some(value) -> {
+        try exec_block(fuel: fuel - 1, ev: inout ev, ctx: inout ctx, b: value, env: env)
+      }
+      | None -> skip()
+    }
+    return Ok(value: Unit)
+  }
+  | ast.Match(scrutinee, arms, span) -> {
+    let v: values.Value = try eval_expr(
+      fuel: fuel - 1,
+      ev: inout ev,
+      ctx: inout ctx,
+      e: scrutinee,
+      env: env
+    )
+    for arm: ast.Arm in arms {
+      let arm_env: Dict[Int, values.Value] = copy_env(env: env)
+      var applies: Bool = try match_pattern(
+        fuel: fuel - 1,
+        ev: inout ev,
+        ctx: inout ctx,
+        p: arm.pattern,
+        v: v,
+        env: arm_env
+      )
+      if applies {
+        match arm.guard with
+        | Some(value) -> {
+          let g: values.Value = try eval_expr(
+            fuel: fuel - 1,
+            ev: inout ev,
+            ctx: inout ctx,
+            e: value,
+            env: arm_env
+          )
+          if not g is values.BoolV {
+            return Err(
+              error: panic_at(detail: "guard on a non-Bool", span: parser.span_of_expr(e: value))
+            )
+          }
+          applies = values.bool_of(c: g)
+        }
+        | None -> skip()
+      }
+      if applies {
+        match arm.body with
+        | ast.ArmBlock(block) -> {
+          try exec_block(fuel: fuel - 1, ev: inout ev, ctx: inout ctx, b: block, env: arm_env)
+        }
+        | ast.ArmStmt(stmt) -> {
+          try exec_stmt(fuel: fuel - 1, ev: inout ev, ctx: inout ctx, s: stmt, env: arm_env)
+        }
+        -- Assignments to enclosing vars inside the arm must be visible afterwards.
+        for k: Int in Map.keys(d: arm_env) {
+          if Map.contains(d: env, key: k) {
+            match Map.find(d: arm_env, key: k) with
+            | Some(value) -> env_set(env: env, k: k, v: value)
+            | None -> skip()
+          }
+        }
+        return Ok(value: Unit)
+      }
+    }
+    return Err(error: panic_at(detail: "no match arm applied", span: span))
+  }
+  | ast.Loop(cond, _, body, _) -> {
+    var guard: Int where it >= 0 = ev.budget
+    loop while guard > 0
+      invariant guard >= 0
+      decreases guard
+    {
+      guard = guard - 1
+      try step(ev: inout ev)
+      let c: values.Value = try eval_expr(
+        fuel: fuel - 1,
+        ev: inout ev,
+        ctx: inout ctx,
+        e: cond,
+        env: env
+      )
+      if not c is values.BoolV {
+        return Err(
+          error: panic_at(detail: "`loop while` on a non-Bool", span: parser.span_of_expr(e: cond))
+        )
+      }
+      if not values.bool_of(c: c) {
+        return Ok(value: Unit)
+      }
+      try exec_block(fuel: fuel - 1, ev: inout ev, ctx: inout ctx, b: body, env: env)
+    }
+    return Err(error: BudgetF(fn_name: top_name(ev: ev)))
+  }
+  | ast.For(_, _, domain, body, span) -> {
+    let def: Int = def_of_key(ctx: ctx, k: key(ev: ev, tag: defs.tag_stmt, span: span))
+    if def < 0 {
+      return Ok(value: Unit)
+    }
+    match domain with
+    | ast.RangeDomain(lo, hi, _) -> {
+      let lv: values.Value = try eval_expr(
+        fuel: fuel - 1,
+        ev: inout ev,
+        ctx: inout ctx,
+        e: lo,
+        env: env
+      )
+      let hv: values.Value = try eval_expr(
+        fuel: fuel - 1,
+        ev: inout ev,
+        ctx: inout ctx,
+        e: hi,
+        env: env
+      )
+      if not lv is values.IntV or not hv is values.IntV {
+        return Err(error: panic_at(detail: "range bounds must be Int", span: span))
+      }
+      let lo_i: Int = values.int_of(c: lv)
+      let hi_i: Int = values.int_of(c: hv)
+      if lo_i < hi_i {
+        for i: Int in lo_i ..< hi_i {
+          try step(ev: inout ev)
+          env_set(env: env, k: def, v: values.IntV(v: i))
+          try exec_block(fuel: fuel - 1, ev: inout ev, ctx: inout ctx, b: body, env: env)
+        }
+      }
+    }
+    | ast.InDomain(expr, _) -> {
+      let dv: values.Value = try eval_expr(
+        fuel: fuel - 1,
+        ev: inout ev,
+        ctx: inout ctx,
+        e: expr,
+        env: env
+      )
+      if not dv is values.ListV {
+        return Err(error: not_const(reason: "`for` over a non-list", span: span))
+      }
+      for x: values.Value in values.items_of(c: dv) {
+        try step(ev: inout ev)
+        env_set(env: env, k: def, v: x)
+        try exec_block(fuel: fuel - 1, ev: inout ev, ctx: inout ctx, b: body, env: env)
+      }
+    }
+    return Ok(value: Unit)
+  }
+  | ast.Assume(_, _, _, _) -> return Ok(value: Unit)
+  | ast.ExprStmt(expr, _) -> {
+    let v: values.Value = try eval_expr(
+      fuel: fuel - 1,
+      ev: inout ev,
+      ctx: inout ctx,
+      e: expr,
+      env: env
+    )
+    return Ok(value: Unit)
+  }
+}
+
+fn pat_field_tag(pf: ast.PatField) -> Int {
+  match pf with
+  | ast.PatFieldName(_, _) -> return 0
+  | ast.PatFieldSkip(_) -> return 1
+  | ast.PatFieldRest(_) -> return 2
+}
+
+fn pat_field_span(pf: ast.PatField) -> ast.Span {
+  match pf with
+  | ast.PatFieldName(_, span) -> return span
+  | ast.PatFieldSkip(span) -> return span
+  | ast.PatFieldRest(span) -> return span
+}
+
+fn field_infos_or_empty(o: Option[List[types.FieldInfo]]) -> List[types.FieldInfo] may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return []
+}
+
+-- Matches `v` against `p`, binding into `env`.
+pub fn match_pattern(
+  fuel: Int where it >= 0,
+  ev: inout Ev,
+  ctx: inout context.Context,
+  p: ast.Pattern,
+  v: values.Value,
+  env: Dict[Int, values.Value]
+) -> Result[Bool, Fail] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: BudgetF(fn_name: top_name(ev: ev)))
+  }
+  match p with
+  | ast.WildcardPat(_) -> return Ok(value: true)
+  | ast.BindPat(_, span) -> {
+    let def: Int = def_of_key(ctx: ctx, k: key(ev: ev, tag: defs.tag_pattern, span: span))
+    if def >= 0 {
+      env_set(env: env, k: def, v: v)
+    }
+    return Ok(value: true)
+  }
+  | ast.LitPat(literal, _) -> {
+    let lv: values.Value = try eval_expr(
+      fuel: fuel - 1,
+      ev: inout ev,
+      ctx: inout ctx,
+      e: literal,
+      env: env
+    )
+    return Ok(value: values.equals(a: lv, b: v))
+  }
+  | ast.VariantPat(_, fields, span) -> {
+    let vdef: Int = res_def(
+      res: res_at(ctx: ctx, k: key(ev: ev, tag: defs.tag_pattern, span: span))
+    )
+    if vdef < 0 {
+      return Ok(value: false)
+    }
+    if not v is values.VariantV or values.def_of(c: v) != vdef {
+      return Ok(value: false)
+    }
+    match fields with
+    | None -> return Ok(value: true)
+    | Some(value) -> {
+      let infos: List[types.FieldInfo] = field_infos_or_empty(o: Map.find(d: ctx.fields, key: vdef))
+      var i: Int where it >= 0 = 0
+      var stop: Bool = false
+      for pf: ast.PatField in value {
+        if not stop {
+          if pat_field_tag(pf: pf) == 2 {
+            stop = true
+          } else {
+            if i >= List.len(xs: infos) {
+              return Ok(value: false)
+            } else {
+              let f: types.FieldInfo = List.get(xs: infos, i: i)
+              if pat_field_tag(pf: pf) == 0 {
+                let def: Int = def_of_key(
+                  ctx: ctx,
+                  k: key(ev: ev, tag: defs.tag_pattern, span: pat_field_span(pf: pf))
+                )
+                let fv: Option[values.Value] = values.field_of(
+                  fields: values.fields_of(c: v),
+                  name: f.name
+                )
+                if def >= 0 and fv is Some {
+                  env_set(env: env, k: def, v: value_or_unit(o: fv))
+                }
+              }
+              i = i + 1
+            }
+          }
+        }
+      }
+      return Ok(value: true)
+    }
+  }
+}

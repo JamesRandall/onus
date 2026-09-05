@@ -1,0 +1,50 @@
+{
+  "diagnostics": [
+    {
+      "code": "E0344",
+      "span": [
+        [
+          14,
+          27
+        ],
+        [
+          14,
+          37
+        ]
+      ]
+    },
+    {
+      "code": "E0344",
+      "span": [
+        [
+          20,
+          10
+        ],
+        [
+          20,
+          20
+        ]
+      ]
+    }
+  ],
+  "obligations": [
+    {
+      "kind": "decreases",
+      "at": [
+        14,
+        27
+      ],
+      "text": "t at the call to pong",
+      "status": "failed"
+    },
+    {
+      "kind": "decreases",
+      "at": [
+        20,
+        10
+      ],
+      "text": "t at the call to ping",
+      "status": "failed"
+    }
+  ]
+}

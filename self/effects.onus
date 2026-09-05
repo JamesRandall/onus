@@ -1,0 +1,1470 @@
+module effects
+import ast
+import parser
+import printer
+import comments
+import report
+import defs
+import context
+import effectset
+import types
+
+-- The effects pass (impl spec §4, pass 6; spec §5.1, §6; `effects/check.ts`).
+-- A function's body may only have the effects its signature declares:
+--   - a call contributes the callee's declared effects with effect
+--     parameters substituted, except `mutate`, which propagates only when one
+--     of the caller's own `inout` parameters is passed on;
+--   - assigning to an `inout` parameter or passing it `inout` is `mutate`;
+--   - a list literal, `++` and creating a closure are `alloc`;
+--   - a `loop while` without `decreases` is `diverge`, and a recursive cycle
+--     whose functions lack a `decreases` clause or `diverge` is E0320;
+--   - `recover` absorbs `panic` from its block;
+--   - a function value flowing into a function-typed position must have no
+--     more effects than the position declares;
+--   - a `const fn` is pure and a contract or refinement may only allocate;
+--   - an impl function declares no effects beyond its interface's.
+pub const alloc_e: defs.Effect = defs.PrimEffect(name: "alloc")
+
+pub const mutate_e: defs.Effect = defs.PrimEffect(name: "mutate")
+
+pub const diverge_e: defs.Effect = defs.PrimEffect(name: "diverge")
+
+pub const panic_e: defs.Effect = defs.PrimEffect(name: "panic")
+
+-- The bound on the depth of the call graph walk.
+const max_graph: Int = 1000000
+
+-- Where each effect first arose in a body, for the diagnostic.
+record Site {
+  effect: defs.Effect
+  span: ast.Span
+  why: Text
+}
+
+record Sites {
+  table: Dict[Text, Site]
+}
+
+fn new_sites() -> Sites may alloc {
+  return Sites { table: Map.dict() }
+}
+
+fn add_site(sites: Sites, e: defs.Effect, span: ast.Span, why: Text) -> Unit may mutate, alloc {
+  let k: Text = effectset.effect_key(e: e)
+  if not Map.contains(d: sites.table, key: k) {
+    var t: Dict[Text, Site] = sites.table
+    Map.set(d: inout t, key: k, value: Site { effect: e, span: span, why: why })
+  }
+  return Unit
+}
+
+fn add_all(
+  sites: Sites,
+  set: effectset.EffectSet,
+  span: ast.Span,
+  why: Text
+) -> Unit may mutate, alloc {
+  for e: defs.Effect in effectset.values(s: set) {
+    add_site(sites: sites, e: e, span: span, why: why)
+  }
+  return Unit
+}
+
+fn set_of(sites: Sites) -> effectset.EffectSet may alloc, mutate {
+  var out: Builder[defs.Effect] = List.builder()
+  for s: Site in Map.values(d: sites.table) {
+    List.push(b: inout out, x: s.effect)
+  }
+  return effectset.of_list(effects: List.finish(b: out))
+}
+
+record Frame {
+  -- `inout` parameters of the function whose body is being walked.
+  inout_params: Dict[Int, Bool]
+  sites: Sites
+}
+
+fn fresh_frame() -> Frame may alloc {
+  return Frame { inout_params: Map.dict(), sites: new_sites() }
+}
+
+pub record Ec {
+  current_def: Option[Text]
+  current_file: Int
+  -- Direct named-call edges for recursion detection.
+  call_graph: Dict[Int, List[Int]]
+}
+
+fn skip() -> Unit {
+  return Unit
+}
+
+fn rep(
+  ec: Ec,
+  ctx: inout context.Context,
+  code: Text,
+  at: ast.Span,
+  detail: Text
+) -> Unit may mutate, alloc {
+  context.report(
+    ctx: inout ctx,
+    d: report.diagnostic(
+      code: code,
+      file: ec.current_file,
+      span: at,
+      def_name: ec.current_def,
+      detail: detail
+    )
+  )
+  return Unit
+}
+
+fn key(ec: Ec, tag: Int, span: ast.Span) -> Int {
+  return defs.node_key(file: ec.current_file, tag: tag, span: span)
+}
+
+fn show(ctx: context.Context, s: effectset.EffectSet) -> Text may alloc, mutate {
+  var names: Builder[Text] = List.builder()
+  for e: defs.Effect in effectset.values(s: s) {
+    match e with
+    | defs.PrimEffect(name) -> List.push(b: inout names, x: name)
+    | defs.ResourceEffect(mod, name) -> List.push(b: inout names, x: name)
+    | defs.ParamEffect(def) -> List.push(b: inout names, x: context.get_def(ctx: ctx, id: def).name)
+  }
+  return Text.join(parts: sort_texts(xs: List.finish(b: names)), sep: ", ")
+}
+
+fn sort_texts(xs: List[Text]) -> List[Text] may alloc, mutate {
+  var out: List[Text] = []
+  for x: Text in xs {
+    var inserted: Bool = false
+    var b: Builder[Text] = List.builder()
+    for y: Text in out {
+      if not inserted and Text.compare(a: x, b: y) < 0 {
+        List.push(b: inout b, x: x)
+        inserted = true
+      }
+      List.push(b: inout b, x: y)
+    }
+    if not inserted {
+      List.push(b: inout b, x: x)
+    }
+    out = List.finish(b: b)
+  }
+  return out
+}
+
+fn or_neg(o: Option[Int]) -> Int {
+  match o with
+  | Some(value) -> return value
+  | None -> return -1
+}
+
+fn def_of_key(ctx: context.Context, k: Int) -> Int {
+  return or_neg(o: Map.find(d: ctx.def_of, key: k))
+}
+
+fn res_def(ctx: context.Context, k: Int) -> Int {
+  match Map.find(d: ctx.refs, key: k) with
+  | None -> return -1
+  | Some(value) -> {
+    match value with
+    | defs.DefRes(def) -> return def
+    | defs.CompanionRes(owner, fn_def) -> return fn_def
+    | defs.IfaceFnRes(iface, fn_def) -> return fn_def
+    | _ -> return -1
+  }
+}
+
+fn is_plain_def_res(ctx: context.Context, k: Int) -> Bool {
+  match Map.find(d: ctx.refs, key: k) with
+  | None -> return false
+  | Some(value) -> return value is defs.DefRes
+}
+
+fn sig_of(ctx: context.Context, def: Int) -> Option[types.Signature] {
+  return Map.find(d: ctx.signatures, key: def)
+}
+
+fn empty_sig(def: Int) -> types.Signature may alloc {
+  return types.Signature {
+    def: def,
+    tparams: [],
+    params: [],
+    param_defs: [],
+    ret: types.ErrorT,
+    effects: effectset.empty(),
+    contracts: [],
+    is_const_fn: false,
+    is_intrinsic: false
+  }
+}
+
+fn sig_or(ctx: context.Context, def: Int) -> types.Signature may alloc {
+  match sig_of(ctx: ctx, def: def) with
+  | Some(value) -> return value
+  | None -> return empty_sig(def: def)
+}
+
+fn expr_type(ec: Ec, ctx: context.Context, e: ast.Expr) -> types.Type {
+  match Map.find(
+    d: ctx.expr_types,
+    key: key(ec: ec, tag: defs.tag_expr, span: parser.span_of_expr(e: e))
+  ) with
+  | Some(value) -> return value
+  | None -> return types.ErrorT
+}
+
+-- Reports every effect of `actual` that `declared` lacks, at the site that introduced it.
+fn containment(
+  ec: Ec,
+  ctx: inout context.Context,
+  actual: effectset.EffectSet,
+  declared: effectset.EffectSet,
+  sites: Sites,
+  what: Text
+) -> Unit may mutate, alloc {
+  for e: defs.Effect in effectset.minus(a: actual, b: declared) {
+    match Map.find(d: sites.table, key: effectset.effect_key(e: e)) with
+    | None -> skip()
+    | Some(value) -> rep(
+      ec: ec,
+      ctx: inout ctx,
+      code: "E0201",
+      at: value.span,
+      detail: value.why ++ " has effect `" ++ show(
+        ctx: ctx,
+        s: effectset.of_list(effects: [e])
+      ) ++ "`, which " ++ what ++ " does not declare"
+    )
+  }
+  return Unit
+}
+
+-- Refinement predicates -----------------------------------------------------------------
+fn check_where(ec: Ec, ctx: inout context.Context, pred: ast.Expr) -> Unit may mutate, alloc
+  decreases pred
+{
+  let frame: Frame = fresh_frame()
+  ef_expr(ec: ec, ctx: inout ctx, e: pred, frame: frame, owner: None)
+  containment(
+    ec: ec,
+    ctx: inout ctx,
+    actual: set_of(sites: frame.sites),
+    declared: effectset.of_list(effects: [alloc_e]),
+    sites: frame.sites,
+    what: "a `where` clause"
+  )
+  return Unit
+}
+
+-- Refinement predicates under a type may allocate but have no other effect.
+fn wheres_in_type(ec: Ec, ctx: inout context.Context, t: ast.Type) -> Unit may mutate, alloc
+  decreases t
+{
+  match t with
+  | ast.FnType(params, ret, _, _) -> {
+    wheres_in_params(ec: ec, ctx: inout ctx, ps: params)
+    wheres_in_type(ec: ec, ctx: inout ctx, t: ret)
+  }
+  | ast.NamedType(_, args, where_, _) -> {
+    for a: ast.TypeArg in args {
+      match a with
+      | ast.TypeArgType(_, ty, _) -> wheres_in_type(ec: ec, ctx: inout ctx, t: ty)
+      | ast.TypeArgConst(_, expr, _) -> wheres_in_expr(ec: ec, ctx: inout ctx, e: expr)
+    }
+    match where_ with
+    | Some(value) -> {
+      check_where(ec: ec, ctx: inout ctx, pred: value)
+      wheres_in_expr(ec: ec, ctx: inout ctx, e: value)
+    }
+    | None -> skip()
+  }
+  return Unit
+}
+
+fn wheres_in_params(
+  ec: Ec,
+  ctx: inout context.Context,
+  ps: List[ast.Param]
+) -> Unit may mutate, alloc
+  decreases ps
+{
+  for p: ast.Param in ps {
+    wheres_in_type(ec: ec, ctx: inout ctx, t: p.ty)
+  }
+  return Unit
+}
+
+-- Types under an expression, stopping at blocks.
+fn wheres_in_expr(ec: Ec, ctx: inout context.Context, e: ast.Expr) -> Unit may mutate, alloc
+  decreases e
+{
+  match e with
+  | ast.Ctor(_, args, fields, _) -> {
+    match args with
+    | Some(value) -> {
+      for a: ast.Arg in value {
+        wheres_in_expr(ec: ec, ctx: inout ctx, e: a.value)
+      }
+    }
+    | None -> skip()
+    match fields with
+    | Some(value) -> {
+      for f: ast.FieldInit in value {
+        wheres_in_expr(ec: ec, ctx: inout ctx, e: f.value)
+      }
+    }
+    | None -> skip()
+  }
+  | ast.RecordUpdate(base, fields, _) -> {
+    wheres_in_expr(ec: ec, ctx: inout ctx, e: base)
+    for f: ast.FieldInit in fields {
+      wheres_in_expr(ec: ec, ctx: inout ctx, e: f.value)
+    }
+  }
+  | ast.ListLit(elems, _) -> {
+    for x: ast.Expr in elems {
+      wheres_in_expr(ec: ec, ctx: inout ctx, e: x)
+    }
+  }
+  | ast.Try(expr, else_, _) -> {
+    wheres_in_expr(ec: ec, ctx: inout ctx, e: expr)
+    match else_ with
+    | Some(value) -> wheres_in_expr(ec: ec, ctx: inout ctx, e: value.expr)
+    | None -> skip()
+  }
+  | ast.Quantifier(_, _, ty, domain, where_, body, _) -> {
+    wheres_in_type(ec: ec, ctx: inout ctx, t: ty)
+    match domain with
+    | Some(value) -> {
+      match value with
+      | ast.RangeDomain(lo, hi, _) -> {
+        wheres_in_expr(ec: ec, ctx: inout ctx, e: lo)
+        wheres_in_expr(ec: ec, ctx: inout ctx, e: hi)
+      }
+      | ast.InDomain(expr, _) -> wheres_in_expr(ec: ec, ctx: inout ctx, e: expr)
+    }
+    | None -> skip()
+    match where_ with
+    | Some(value) -> wheres_in_expr(ec: ec, ctx: inout ctx, e: value)
+    | None -> skip()
+    wheres_in_expr(ec: ec, ctx: inout ctx, e: body)
+  }
+  | ast.Closure(params, ret, _, _, _) -> {
+    wheres_in_params(ec: ec, ctx: inout ctx, ps: params)
+    wheres_in_type(ec: ec, ctx: inout ctx, t: ret)
+  }
+  | ast.Fake(_, fields, _) -> {
+    for f: ast.FieldInit in fields {
+      wheres_in_expr(ec: ec, ctx: inout ctx, e: f.value)
+    }
+  }
+  | ast.FieldAccess(object, _, _) -> wheres_in_expr(ec: ec, ctx: inout ctx, e: object)
+  | ast.Call(callee, targs, args, _) -> {
+    wheres_in_expr(ec: ec, ctx: inout ctx, e: callee)
+    match targs with
+    | Some(value) -> {
+      for a: ast.TypeArg in value {
+        match a with
+        | ast.TypeArgType(_, ty, _) -> wheres_in_type(ec: ec, ctx: inout ctx, t: ty)
+        | ast.TypeArgConst(_, expr, _) -> wheres_in_expr(ec: ec, ctx: inout ctx, e: expr)
+      }
+    }
+    | None -> skip()
+    for a: ast.Arg in args {
+      wheres_in_expr(ec: ec, ctx: inout ctx, e: a.value)
+    }
+  }
+  | ast.Unary(_, operand, _) -> wheres_in_expr(ec: ec, ctx: inout ctx, e: operand)
+  | ast.Binary(_, left, right, _) -> {
+    wheres_in_expr(ec: ec, ctx: inout ctx, e: left)
+    wheres_in_expr(ec: ec, ctx: inout ctx, e: right)
+  }
+  | ast.And(operands, _) -> {
+    for o: ast.Expr in operands {
+      wheres_in_expr(ec: ec, ctx: inout ctx, e: o)
+    }
+  }
+  | ast.Or(operands, _) -> {
+    for o: ast.Expr in operands {
+      wheres_in_expr(ec: ec, ctx: inout ctx, e: o)
+    }
+  }
+  | ast.Is(expr, pattern, _) -> {
+    wheres_in_expr(ec: ec, ctx: inout ctx, e: expr)
+    wheres_in_pattern(ec: ec, ctx: inout ctx, p: pattern)
+  }
+  | _ -> skip()
+  return Unit
+}
+
+fn wheres_in_pattern(ec: Ec, ctx: inout context.Context, p: ast.Pattern) -> Unit may mutate, alloc
+  decreases p
+{
+  match p with
+  | ast.LitPat(literal, _) -> wheres_in_expr(ec: ec, ctx: inout ctx, e: literal)
+  | _ -> skip()
+  return Unit
+}
+
+fn wheres_in_tparams(
+  ec: Ec,
+  ctx: inout context.Context,
+  ps: List[ast.TParam]
+) -> Unit may mutate, alloc {
+  for p: ast.TParam in ps {
+    match p with
+    | ast.ConstParam(_, ty, _) -> wheres_in_type(ec: ec, ctx: inout ctx, t: ty)
+    | _ -> skip()
+  }
+  return Unit
+}
+
+fn wheres_in_fn(ec: Ec, ctx: inout context.Context, f: ast.FnDecl) -> Unit may mutate, alloc {
+  wheres_in_tparams(ec: ec, ctx: inout ctx, ps: f.tparams)
+  wheres_in_params(ec: ec, ctx: inout ctx, ps: f.params)
+  wheres_in_type(ec: ec, ctx: inout ctx, t: f.ret)
+  for c: ast.Contract in f.contracts {
+    wheres_in_expr(ec: ec, ctx: inout ctx, e: c.expr)
+  }
+  return Unit
+}
+
+-- Contracts may allocate (text in messages) but have no other effect.
+fn pure_contracts(
+  ec: Ec,
+  ctx: inout context.Context,
+  sig: types.Signature
+) -> Unit may mutate, alloc {
+  for c: ast.Contract in sig.contracts {
+    let frame: Frame = fresh_frame()
+    ef_expr(ec: ec, ctx: inout ctx, e: c.expr, frame: frame, owner: None)
+    containment(
+      ec: ec,
+      ctx: inout ctx,
+      actual: set_of(sites: frame.sites),
+      declared: effectset.of_list(effects: [alloc_e]),
+      sites: frame.sites,
+      what: "a `" ++ c.clause ++ "` clause"
+    )
+  }
+  return Unit
+}
+
+-- Items -----------------------------------------------------------------------------------
+fn item_name(item: ast.Item) -> Text {
+  match item with
+  | ast.FnItem(decl) -> return decl.name.text
+  | ast.TypeAliasItem(decl) -> return decl.name.text
+  | ast.IntrinsicTypeItem(decl) -> return decl.name.text
+  | ast.ConstItem(decl) -> return decl.name.text
+  | ast.RecordItem(decl) -> return decl.name.text
+  | ast.UnionItem(decl) -> return decl.name.text
+  | ast.InterfaceItem(decl) -> return decl.name.text
+  | ast.ImplItem(decl) -> return decl.iface.text
+  | ast.ClaimItem(decl) -> return decl.name.text
+  | ast.CapabilityItem(decl) -> return decl.name.text
+  | ast.PathItem(decl) -> return decl.name.text
+  | ast.PolicyItem(decl) -> return decl.name.text
+  | ast.ExampleItem(decl) -> return decl.name.text
+  | ast.PropertyItem(decl) -> return decl.name.text
+}
+
+fn iface_item_span(member: ast.IfaceItem) -> ast.Span {
+  match member with
+  | ast.IfaceFnItem(decl) -> return decl.span
+  | ast.LawItem(decl) -> return decl.span
+}
+
+fn or_error(o: Option[types.Type]) -> types.Type {
+  match o with
+  | Some(value) -> return value
+  | None -> return types.ErrorT
+}
+
+fn param_or(o: Option[types.FnParam]) -> types.FnParam may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return types.FnParam { name: "", is_inout: false, ty: types.ErrorT }
+}
+
+fn find_iface_fn(ctx: context.Context, iface: Int, name: Text) -> Option[defs.Def] {
+  for i: Int in 0 ..< context.def_count(ctx: ctx) {
+    let d: defs.Def = context.get_def(ctx: ctx, id: i)
+    if d.kind == defs.IfaceFn and d.name == name and d.parent == Some(value: iface) {
+      return Some(value: d)
+    }
+  }
+  return None
+}
+
+fn ef_item(ec: inout Ec, ctx: inout context.Context, item: ast.Item) -> Unit may mutate, alloc {
+  match item with
+  | ast.FnItem(decl) -> ef_fn(ec: inout ec, ctx: inout ctx, f: decl, iface_fn: None)
+  | ast.ImplItem(decl) -> {
+    let iface: Int = res_def(ctx: ctx, k: key(ec: ec, tag: defs.tag_item, span: decl.span))
+    for f: ast.FnDecl in decl.fns {
+      ec = { ec with current_def: Some(value: decl.iface.text ++ "." ++ f.name.text) }
+      var want: Option[defs.Def] = None
+      if iface >= 0 {
+        want = find_iface_fn(ctx: ctx, iface: iface, name: f.name.text)
+      }
+      ef_fn(ec: inout ec, ctx: inout ctx, f: f, iface_fn: want)
+    }
+  }
+  | ast.InterfaceItem(decl) -> {
+    for member: ast.IfaceItem in decl.items {
+      if member is ast.IfaceFnItem {
+        pure_contracts(
+          ec: ec,
+          ctx: inout ctx,
+          sig: sig_or(
+            ctx: ctx,
+            def: def_of_key(
+              ctx: ctx,
+              k: key(ec: ec, tag: defs.tag_sig, span: iface_item_span(member: member))
+            )
+          )
+        )
+      }
+    }
+  }
+  | ast.TypeAliasItem(decl) -> wheres_in_type(ec: ec, ctx: inout ctx, t: decl.ty)
+  | ast.RecordItem(decl) -> {
+    wheres_in_tparams(ec: ec, ctx: inout ctx, ps: decl.tparams)
+    for f: ast.Field in decl.fields {
+      wheres_in_type(ec: ec, ctx: inout ctx, t: f.ty)
+    }
+  }
+  | ast.UnionItem(decl) -> {
+    wheres_in_tparams(ec: ec, ctx: inout ctx, ps: decl.tparams)
+    for v: ast.Variant in decl.variants {
+      for f: ast.Field in v.fields {
+        wheres_in_type(ec: ec, ctx: inout ctx, t: f.ty)
+      }
+    }
+  }
+  | _ -> skip()
+  return Unit
+}
+
+fn ef_fn(
+  ec: inout Ec,
+  ctx: inout context.Context,
+  f: ast.FnDecl,
+  iface_fn: Option[defs.Def]
+) -> Unit may mutate, alloc {
+  let def: Int = def_of_key(ctx: ctx, k: key(ec: ec, tag: defs.tag_item, span: f.span))
+  let sig: types.Signature = sig_or(ctx: ctx, def: def)
+  if f.is_const and effectset.size(s: effectset.without(a: sig.effects, e: alloc_e)) > 0 {
+    rep(
+      ec: ec,
+      ctx: inout ctx,
+      code: "E0201",
+      at: f.name.span,
+      detail: "a `const fn` may only allocate; `" ++ f.name.text ++ "` declares " ++ show(
+        ctx: ctx,
+        s: effectset.without(a: sig.effects, e: alloc_e)
+      )
+    )
+  }
+  match iface_fn with
+  | Some(value) -> {
+    let extra: List[defs.Effect] = effectset.minus(
+      a: sig.effects,
+      b: sig_or(ctx: ctx, def: value.id).effects
+    )
+    if List.len(xs: extra) > 0 {
+      rep(
+        ec: ec,
+        ctx: inout ctx,
+        code: "E0334",
+        at: f.name.span,
+        detail: "`" ++ f.name.text ++ "` declares " ++ show(
+          ctx: ctx,
+          s: effectset.of_list(effects: extra)
+        ) ++ ", which the interface does not admit"
+      )
+    }
+  }
+  | None -> skip()
+  pure_contracts(ec: ec, ctx: inout ctx, sig: sig)
+  wheres_in_fn(ec: ec, ctx: inout ctx, f: f)
+  match f.body with
+  | None -> skip()
+  | Some(value) -> {
+    let frame: Frame = fresh_frame()
+    for pd: Int in sig.param_defs {
+      if context.get_def(ctx: ctx, id: pd).is_inout {
+        var ps: Dict[Int, Bool] = frame.inout_params
+        Map.set(d: inout ps, key: pd, value: true)
+      }
+    }
+    ef_block(ec: ec, ctx: inout ctx, b: value, frame: frame, owner: Some(value: def))
+    let inferred: effectset.EffectSet = set_of(sites: frame.sites)
+    var table: Dict[Int, effectset.EffectSet] = ctx.inferred
+    Map.set(d: inout table, key: def, value: inferred)
+    containment(
+      ec: ec,
+      ctx: inout ctx,
+      actual: inferred,
+      declared: sig.effects,
+      sites: frame.sites,
+      what: "`" ++ f.name.text ++ "`"
+    )
+  }
+  return Unit
+}
+
+-- Statements -------------------------------------------------------------------------------
+fn ef_block(
+  ec: Ec,
+  ctx: inout context.Context,
+  b: ast.Block,
+  frame: Frame,
+  owner: Option[Int]
+) -> Unit may mutate, alloc
+  decreases b
+{
+  for s: ast.Stmt in b.stmts {
+    ef_stmt(ec: ec, ctx: inout ctx, s: s, frame: frame, owner: owner)
+  }
+  return Unit
+}
+
+fn has_decreases(clauses: List[ast.LoopClause]) -> Bool {
+  for c: ast.LoopClause in clauses {
+    if c.clause == "decreases" {
+      return true
+    }
+  }
+  return false
+}
+
+fn ef_stmt(
+  ec: Ec,
+  ctx: inout context.Context,
+  s: ast.Stmt,
+  frame: Frame,
+  owner: Option[Int]
+) -> Unit may mutate, alloc
+  decreases s
+{
+  match s with
+  | ast.Let(name, _, value, span) -> {
+    ef_expr(ec: ec, ctx: inout ctx, e: value, frame: frame, owner: owner)
+    let declared: Option[types.Type] = Map.find(
+      d: ctx.decl_types,
+      key: def_of_key(ctx: ctx, k: key(ec: ec, tag: defs.tag_stmt, span: span))
+    )
+    if declared is Some {
+      flow(
+        ec: ec,
+        ctx: inout ctx,
+        value: value,
+        into: or_error(o: declared),
+        what: "`" ++ name.text ++ "`"
+      )
+    }
+  }
+  | ast.Var(name, _, value, span) -> {
+    ef_expr(ec: ec, ctx: inout ctx, e: value, frame: frame, owner: owner)
+    let declared: Option[types.Type] = Map.find(
+      d: ctx.decl_types,
+      key: def_of_key(ctx: ctx, k: key(ec: ec, tag: defs.tag_stmt, span: span))
+    )
+    if declared is Some {
+      flow(
+        ec: ec,
+        ctx: inout ctx,
+        value: value,
+        into: or_error(o: declared),
+        what: "`" ++ name.text ++ "`"
+      )
+    }
+  }
+  | ast.Assign(name, value, span) -> {
+    let target: Int = res_def(ctx: ctx, k: key(ec: ec, tag: defs.tag_stmt, span: span))
+    if target >= 0 and Map.contains(d: frame.inout_params, key: target) {
+      add_site(
+        sites: frame.sites,
+        e: mutate_e,
+        span: span,
+        why: "assigning to inout parameter `" ++ name.text ++ "`"
+      )
+    }
+    ef_expr(ec: ec, ctx: inout ctx, e: value, frame: frame, owner: owner)
+  }
+  | ast.Return(value, _) -> ef_expr(ec: ec, ctx: inout ctx, e: value, frame: frame, owner: owner)
+  | ast.If(cond, then_block, else_block, _) -> {
+    ef_expr(ec: ec, ctx: inout ctx, e: cond, frame: frame, owner: owner)
+    ef_block(ec: ec, ctx: inout ctx, b: then_block, frame: frame, owner: owner)
+    match else_block with
+    | Some(value) -> ef_block(ec: ec, ctx: inout ctx, b: value, frame: frame, owner: owner)
+    | None -> skip()
+  }
+  | ast.Match(scrutinee, arms, _) -> {
+    ef_expr(ec: ec, ctx: inout ctx, e: scrutinee, frame: frame, owner: owner)
+    for a: ast.Arm in arms {
+      match a.guard with
+      | Some(value) -> ef_expr(ec: ec, ctx: inout ctx, e: value, frame: frame, owner: owner)
+      | None -> skip()
+      match a.body with
+      | ast.ArmBlock(block) -> ef_block(
+        ec: ec,
+        ctx: inout ctx,
+        b: block,
+        frame: frame,
+        owner: owner
+      )
+      | ast.ArmStmt(stmt) -> ef_stmt(ec: ec, ctx: inout ctx, s: stmt, frame: frame, owner: owner)
+    }
+  }
+  | ast.Loop(cond, clauses, body, span) -> {
+    ef_expr(ec: ec, ctx: inout ctx, e: cond, frame: frame, owner: owner)
+    for c: ast.LoopClause in clauses {
+      ef_expr(ec: ec, ctx: inout ctx, e: c.expr, frame: frame, owner: owner)
+    }
+    if not has_decreases(clauses: clauses) {
+      add_site(
+        sites: frame.sites,
+        e: diverge_e,
+        span: span,
+        why: "a `loop while` without `decreases`"
+      )
+    }
+    ef_block(ec: ec, ctx: inout ctx, b: body, frame: frame, owner: owner)
+  }
+  | ast.For(_, _, domain, body, _) -> {
+    match domain with
+    | ast.RangeDomain(lo, hi, _) -> {
+      ef_expr(ec: ec, ctx: inout ctx, e: lo, frame: frame, owner: owner)
+      ef_expr(ec: ec, ctx: inout ctx, e: hi, frame: frame, owner: owner)
+    }
+    | ast.InDomain(expr, _) -> ef_expr(ec: ec, ctx: inout ctx, e: expr, frame: frame, owner: owner)
+    ef_block(ec: ec, ctx: inout ctx, b: body, frame: frame, owner: owner)
+  }
+  | ast.Assume(_, _, verify_block, _) -> {
+    match verify_block with
+    | Some(value) -> ef_verify(ec: ec, ctx: inout ctx, v: value, owner: owner)
+    | None -> skip()
+  }
+  | ast.ExprStmt(expr, _) -> ef_expr(ec: ec, ctx: inout ctx, e: expr, frame: frame, owner: owner)
+  return Unit
+}
+
+-- Expressions ------------------------------------------------------------------------------
+fn ef_expr(
+  ec: Ec,
+  ctx: inout context.Context,
+  e: ast.Expr,
+  frame: Frame,
+  owner: Option[Int]
+) -> Unit may mutate, alloc
+  decreases e
+{
+  match e with
+  | ast.Ctor(_, args, fields, _) -> {
+    match args with
+    | Some(value) -> {
+      for a: ast.Arg in value {
+        ef_expr(ec: ec, ctx: inout ctx, e: a.value, frame: frame, owner: owner)
+      }
+    }
+    | None -> skip()
+    match fields with
+    | Some(value) -> {
+      for f: ast.FieldInit in value {
+        ef_expr(ec: ec, ctx: inout ctx, e: f.value, frame: frame, owner: owner)
+      }
+    }
+    | None -> skip()
+  }
+  | ast.RecordUpdate(base, fields, _) -> {
+    ef_expr(ec: ec, ctx: inout ctx, e: base, frame: frame, owner: owner)
+    for f: ast.FieldInit in fields {
+      ef_expr(ec: ec, ctx: inout ctx, e: f.value, frame: frame, owner: owner)
+    }
+  }
+  | ast.ListLit(elems, span) -> {
+    add_site(sites: frame.sites, e: alloc_e, span: span, why: "a list literal")
+    for x: ast.Expr in elems {
+      ef_expr(ec: ec, ctx: inout ctx, e: x, frame: frame, owner: owner)
+    }
+  }
+  | ast.Try(expr, else_, _) -> {
+    ef_expr(ec: ec, ctx: inout ctx, e: expr, frame: frame, owner: owner)
+    match else_ with
+    | Some(value) -> ef_expr(ec: ec, ctx: inout ctx, e: value.expr, frame: frame, owner: owner)
+    | None -> skip()
+  }
+  | ast.Recover(body, span) -> {
+    let inner: Frame = fresh_frame()
+    ef_block(ec: ec, ctx: inout ctx, b: body, frame: inner, owner: owner)
+    add_all(
+      sites: frame.sites,
+      set: effectset.without(a: set_of(sites: inner.sites), e: panic_e),
+      span: span,
+      why: "this `recover` block"
+    )
+  }
+  | ast.Quantifier(_, _, _, domain, where_, body, _) -> {
+    match domain with
+    | Some(value) -> {
+      match value with
+      | ast.RangeDomain(lo, hi, _) -> {
+        ef_expr(ec: ec, ctx: inout ctx, e: lo, frame: frame, owner: owner)
+        ef_expr(ec: ec, ctx: inout ctx, e: hi, frame: frame, owner: owner)
+      }
+      | ast.InDomain(expr, _) -> ef_expr(
+        ec: ec,
+        ctx: inout ctx,
+        e: expr,
+        frame: frame,
+        owner: owner
+      )
+    }
+    | None -> skip()
+    match where_ with
+    | Some(value) -> ef_expr(ec: ec, ctx: inout ctx, e: value, frame: frame, owner: owner)
+    | None -> skip()
+    ef_expr(ec: ec, ctx: inout ctx, e: body, frame: frame, owner: owner)
+  }
+  | ast.Closure(_, _, _, _, span) -> {
+    ef_closure(ec: ec, ctx: inout ctx, e: e, owner: owner)
+    add_site(sites: frame.sites, e: alloc_e, span: span, why: "creating a closure")
+  }
+  | ast.FieldAccess(object, _, span) -> {
+    if not Map.contains(d: ctx.refs, key: key(ec: ec, tag: defs.tag_expr, span: span)) {
+      ef_expr(ec: ec, ctx: inout ctx, e: object, frame: frame, owner: owner)
+    }
+  }
+  | ast.Call(_, _, _, _) -> ef_call(ec: ec, ctx: inout ctx, e: e, frame: frame, owner: owner)
+  | ast.Unary(_, operand, _) -> ef_expr(
+    ec: ec,
+    ctx: inout ctx,
+    e: operand,
+    frame: frame,
+    owner: owner
+  )
+  | ast.Binary(op, left, right, span) -> {
+    if op == "++" {
+      add_site(sites: frame.sites, e: alloc_e, span: span, why: "`++`")
+    }
+    ef_expr(ec: ec, ctx: inout ctx, e: left, frame: frame, owner: owner)
+    ef_expr(ec: ec, ctx: inout ctx, e: right, frame: frame, owner: owner)
+  }
+  | ast.And(operands, _) -> {
+    for o: ast.Expr in operands {
+      ef_expr(ec: ec, ctx: inout ctx, e: o, frame: frame, owner: owner)
+    }
+  }
+  | ast.Or(operands, _) -> {
+    for o: ast.Expr in operands {
+      ef_expr(ec: ec, ctx: inout ctx, e: o, frame: frame, owner: owner)
+    }
+  }
+  | ast.Is(expr, _, _) -> ef_expr(ec: ec, ctx: inout ctx, e: expr, frame: frame, owner: owner)
+  | _ -> skip()
+  return Unit
+}
+
+-- A `verify` block (§20.2) is checked like a function of its own: its body's
+-- effects must be declared on it, and its declared effects may not exceed
+-- those of the function containing the `assume` (E0207).
+fn ef_verify(
+  ec: Ec,
+  ctx: inout context.Context,
+  v: ast.VerifyBlock,
+  owner: Option[Int]
+) -> Unit may mutate, alloc
+  decreases v
+{
+  let vkey: Int = key(ec: ec, tag: defs.tag_misc, span: v.span)
+  var declared: effectset.EffectSet = effectset.empty()
+  match Map.find(d: ctx.verifies, key: vkey) with
+  | Some(value) -> declared = value.effects
+  | None -> declared = effectset.empty()
+  let frame: Frame = fresh_frame()
+  -- The block is a definition of its own: its calls are not the enclosing function's.
+  var block_owner: Option[Int] = owner
+  let vdef: Int = def_of_key(ctx: ctx, k: vkey)
+  if vdef >= 0 {
+    block_owner = Some(value: vdef)
+  }
+  ef_block(ec: ec, ctx: inout ctx, b: v.body, frame: frame, owner: block_owner)
+  containment(
+    ec: ec,
+    ctx: inout ctx,
+    actual: set_of(sites: frame.sites),
+    declared: declared,
+    sites: frame.sites,
+    what: "this verify block"
+  )
+  match owner with
+  | None -> skip()
+  | Some(value) -> {
+    if sig_of(ctx: ctx, def: value) is Some {
+      let sig: types.Signature = sig_or(ctx: ctx, def: value)
+      let extra: List[defs.Effect] = effectset.minus(a: declared, b: sig.effects)
+      if List.len(xs: extra) > 0 {
+        rep(
+          ec: ec,
+          ctx: inout ctx,
+          code: "E0207",
+          at: v.span,
+          detail: "this verify block declares " ++ show(
+            ctx: ctx,
+            s: effectset.of_list(effects: extra)
+          ) ++ ", which `" ++ context.get_def(
+            ctx: ctx,
+            id: value
+          ).name ++ "` does not declare; a verify block may not exceed its function's effects (§20.2)"
+        )
+      }
+    }
+  }
+  return Unit
+}
+
+fn ef_closure(
+  ec: Ec,
+  ctx: inout context.Context,
+  e: ast.Expr,
+  owner: Option[Int]
+) -> Unit may mutate, alloc
+  decreases e
+{
+  match e with
+  | ast.Closure(params, _, _, body, span) -> {
+    let ckey: Int = key(ec: ec, tag: defs.tag_expr, span: span)
+    var declared: effectset.EffectSet = effectset.empty()
+    match Map.find(d: ctx.expr_types, key: ckey) with
+    | Some(value) -> {
+      if value is types.FnT {
+        declared = types.effects_of(t: value)
+      }
+    }
+    | None -> skip()
+    let frame: Frame = fresh_frame()
+    for p: ast.Param in params {
+      let pd: Int = def_of_key(ctx: ctx, k: key(ec: ec, tag: defs.tag_sig, span: p.span))
+      if pd >= 0 and p.is_inout {
+        var ps: Dict[Int, Bool] = frame.inout_params
+        Map.set(d: inout ps, key: pd, value: true)
+      }
+    }
+    ef_block(ec: ec, ctx: inout ctx, b: body, frame: frame, owner: owner)
+    let inferred: effectset.EffectSet = set_of(sites: frame.sites)
+    var table: Dict[Int, effectset.EffectSet] = ctx.closure_effects
+    Map.set(d: inout table, key: ckey, value: inferred)
+    containment(
+      ec: ec,
+      ctx: inout ctx,
+      actual: inferred,
+      declared: declared,
+      sites: frame.sites,
+      what: "this closure"
+    )
+  }
+  | _ -> skip()
+  return Unit
+}
+
+-- The callee's declared effects with its effect parameters bound at this call.
+fn callee_effects(
+  ctx: context.Context,
+  sig: types.Signature,
+  call_key: Int
+) -> effectset.EffectSet may alloc, mutate {
+  var bindings: Dict[Int, effectset.EffectSet] = Map.dict()
+  match Map.find(d: ctx.effect_bindings, key: call_key) with
+  | Some(value) -> bindings = value
+  | None -> bindings = Map.dict()
+  var out: Builder[defs.Effect] = List.builder()
+  for e: defs.Effect in effectset.values(s: sig.effects) {
+    match e with
+    | defs.ParamEffect(def) -> {
+      match Map.find(d: bindings, key: def) with
+      | Some(value) -> {
+        for x: defs.Effect in effectset.values(s: value) {
+          List.push(b: inout out, x: x)
+        }
+      }
+      | None -> List.push(b: inout out, x: e)
+    }
+    | _ -> List.push(b: inout out, x: e)
+  }
+  return effectset.of_list(effects: List.finish(b: out))
+}
+
+fn add_edge(ec: Ec, owner: Int, callee: Int) -> Unit may mutate, alloc {
+  var current: List[Int] = []
+  match Map.find(d: ec.call_graph, key: owner) with
+  | Some(value) -> current = value
+  | None -> current = []
+  if not List.contains(xs: current, x: callee) {
+    var g: Dict[Int, List[Int]] = ec.call_graph
+    Map.set(d: inout g, key: owner, value: List.append(xs: current, x: callee))
+  }
+  return Unit
+}
+
+fn subst_at(
+  ctx: context.Context,
+  call_key: Int,
+  sig: types.Signature
+) -> Dict[Int, types.TypeArg] may alloc, mutate {
+  var subst: Dict[Int, types.TypeArg] = Map.dict()
+  var args: List[types.TypeArg] = []
+  match Map.find(d: ctx.instantiations, key: call_key) with
+  | Some(value) -> args = value
+  | None -> args = []
+  for i: Int in 0 ..< List.len(xs: sig.tparams) {
+    if i < List.len(xs: args) {
+      Map.set(
+        d: inout subst,
+        key: types.tparam_def(p: List.get(xs: sig.tparams, i: i)),
+        value: List.get(xs: args, i: i)
+      )
+    }
+  }
+  return subst
+}
+
+fn find_param(params: List[types.FnParam], name: Text) -> Option[types.FnParam] {
+  for p: types.FnParam in params {
+    if p.name == name {
+      return Some(value: p)
+    }
+  }
+  return None
+}
+
+fn ef_call(
+  ec: Ec,
+  ctx: inout context.Context,
+  e: ast.Expr,
+  frame: Frame,
+  owner: Option[Int]
+) -> Unit may mutate, alloc
+  decreases e
+{
+  match e with
+  | ast.Call(callee, _, args, span) -> {
+    for a: ast.Arg in args {
+      ef_expr(ec: ec, ctx: inout ctx, e: a.value, frame: frame, owner: owner)
+      if a.is_inout and a.value is ast.Name {
+        let target: Int = res_def(
+          ctx: ctx,
+          k: key(ec: ec, tag: defs.tag_expr, span: parser.span_of_expr(e: a.value))
+        )
+        if target >= 0 and Map.contains(d: frame.inout_params, key: target) {
+          add_site(
+            sites: frame.sites,
+            e: mutate_e,
+            span: a.span,
+            why: "passing inout parameter `" ++ expr_name(e: a.value) ++ "` on"
+          )
+        }
+      }
+    }
+    let call_key: Int = key(ec: ec, tag: defs.tag_expr, span: span)
+    let callee_key: Int = key(ec: ec, tag: defs.tag_expr, span: parser.span_of_expr(e: callee))
+    let fn_id: Int = res_def(ctx: ctx, k: callee_key)
+    var effects: effectset.EffectSet = effectset.empty()
+    var callee_name: Text = "this call"
+    var sig: Option[types.Signature] = None
+    if fn_id >= 0 {
+      let fn_def: defs.Def = context.get_def(ctx: ctx, id: fn_id)
+      if fn_def.kind == defs.Fn or fn_def.kind == defs.IfaceFn {
+        let s: types.Signature = sig_or(ctx: ctx, def: fn_id)
+        sig = Some(value: s)
+        callee_name = "`" ++ fn_def.name ++ "`"
+        effects = callee_effects(ctx: ctx, sig: s, call_key: call_key)
+        if fn_def.kind == defs.Fn {
+          match owner with
+          | Some(value) -> add_edge(ec: ec, owner: value, callee: fn_id)
+          | None -> skip()
+        }
+      }
+    }
+    if sig is None {
+      ef_expr(ec: ec, ctx: inout ctx, e: callee, frame: frame, owner: owner)
+      let ct: types.Type = types.strip(t: expr_type(ec: ec, ctx: ctx, e: callee))
+      if ct is types.FnT {
+        effects = types.effects_of(t: ct)
+      }
+    }
+    -- `mutate` describes the callee's own parameters; the caller needs it only for its own inout parameters.
+    let contributed: effectset.EffectSet = effectset.without(a: effects, e: mutate_e)
+    var calls: Dict[Int, effectset.EffectSet] = ctx.effect_calls
+    Map.set(d: inout calls, key: call_key, value: contributed)
+    add_all(sites: frame.sites, set: contributed, span: span, why: "calling " ++ callee_name)
+    -- Function-typed arguments must stay within the effects their parameter admits.
+    match sig with
+    | Some(value) -> {
+      let subst: Dict[Int, types.TypeArg] = subst_at(ctx: ctx, call_key: call_key, sig: value)
+      for a: ast.Arg in args {
+        let fp: Option[types.FnParam] = find_param(params: value.params, name: a.name.text)
+        if fp is Some {
+          let p: types.FnParam = param_or(o: fp)
+          flow(
+            ec: ec,
+            ctx: inout ctx,
+            value: a.value,
+            into: types.substitute(t: p.ty, subst: subst),
+            what: "parameter `" ++ p.name ++ "`"
+          )
+        }
+      }
+    }
+    | None -> {
+      let ct: types.Type = types.strip(t: expr_type(ec: ec, ctx: ctx, e: callee))
+      if ct is types.FnT {
+        for a: ast.Arg in args {
+          let fp: Option[types.FnParam] = find_param(
+            params: types.params_of(t: ct),
+            name: a.name.text
+          )
+          if fp is Some {
+            let p: types.FnParam = param_or(o: fp)
+            flow(
+              ec: ec,
+              ctx: inout ctx,
+              value: a.value,
+              into: p.ty,
+              what: "parameter `" ++ p.name ++ "`"
+            )
+          }
+        }
+      }
+    }
+  }
+  | _ -> skip()
+  return Unit
+}
+
+fn expr_name(e: ast.Expr) -> Text {
+  match e with
+  | ast.Name(name, _) -> return name.text
+  | _ -> return ""
+}
+
+fn show_fn(ctx: context.Context, t: types.Type) -> Text may alloc, mutate {
+  if not t is types.FnT {
+    return "?"
+  }
+  var eff: Text = show(ctx: ctx, s: types.effects_of(t: t))
+  if eff == "" {
+    eff = "∅"
+  }
+  return "fn(...) -> … may " ++ eff
+}
+
+-- A function value flowing into a function-typed position may not exceed its effects.
+fn flow(
+  ec: Ec,
+  ctx: inout context.Context,
+  value: ast.Expr,
+  into: types.Type,
+  what: Text
+) -> Unit may mutate, alloc {
+  let target: types.Type = types.strip(t: into)
+  if not target is types.FnT {
+    return Unit
+  }
+  let actual: types.Type = types.strip(t: expr_type(ec: ec, ctx: ctx, e: value))
+  if not actual is types.FnT {
+    return Unit
+  }
+  let extra: List[defs.Effect] = effectset.minus(
+    a: types.effects_of(t: actual),
+    b: types.effects_of(t: target)
+  )
+  if List.len(xs: extra) > 0 {
+    rep(
+      ec: ec,
+      ctx: inout ctx,
+      code: "E0201",
+      at: parser.span_of_expr(e: value),
+      detail: "this function has effects " ++ show(
+        ctx: ctx,
+        s: effectset.of_list(effects: extra)
+      ) ++ " that " ++ what ++ " (" ++ show_fn(ctx: ctx, t: target) ++ ") does not admit"
+    )
+  }
+  return Unit
+}
+
+-- Recursion (§5.1) ---------------------------------------------------------------------------
+fn is_word_cp(c: Int) -> Bool {
+  return (c >= 48 and c <= 57) or (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c == 95
+}
+
+-- A measure's text with the parameters replaced by their positions, so measures compare across a cycle.
+pub fn measure_key(text: Text, params: List[types.FnParam]) -> Text may alloc, mutate {
+  let cps: List[Int] = Text.code_points(t: text)
+  let n: Int = List.len(xs: cps)
+  var out: Builder[Int] = List.builder()
+  var i: Int where it >= 0 = 0
+  loop while i < n
+    invariant i >= 0
+    decreases n - i
+  {
+    let c: Int = List.get(xs: cps, i: i)
+    if is_word_cp(c: c) {
+      var j: Int where it >= 0 = i
+      loop while j < n and is_word_cp(c: List.get(xs: cps, i: j))
+        invariant j >= i
+        decreases n - j
+      {
+        j = j + 1
+      }
+      let word: Text = Text.of_code_points(cps: List.slice(xs: cps, from: i, to: j))
+      var preceded_by_dot: Bool = false
+      if i > 0 {
+        preceded_by_dot = List.get(xs: cps, i: i - 1) == 46
+      }
+      var k: Int where it >= 0 = j
+      loop while k < n and List.get(xs: cps, i: k) == 32
+        invariant k >= j
+        decreases n - k
+      {
+        k = k + 1
+      }
+      var followed_by_colon: Bool = false
+      if k < n {
+        followed_by_colon = List.get(xs: cps, i: k) == 58
+      }
+      var replaced: Bool = false
+      if not preceded_by_dot and not followed_by_colon {
+        var idx: Int = 0
+        for p: types.FnParam in params {
+          if not replaced and p.name == word {
+            replaced = true
+            List.push(b: inout out, x: 36)
+            for d: Int in Text.code_points(t: Int.to_text(x: idx)) {
+              List.push(b: inout out, x: d)
+            }
+          }
+          idx = idx + 1
+        }
+      }
+      if not replaced {
+        for w: Int in List.slice(xs: cps, from: i, to: j) {
+          List.push(b: inout out, x: w)
+        }
+      }
+      i = j
+    } else {
+      List.push(b: inout out, x: c)
+      i = i + 1
+    }
+  }
+  return Text.of_code_points(cps: List.finish(b: out))
+}
+
+record Tarjan {
+  index: Dict[Int, Int]
+  low: Dict[Int, Int]
+  on_stack: Dict[Int, Bool]
+  stack: Builder[Int]
+  counter: Int
+  sccs: Builder[List[Int]]
+}
+
+fn get_or(d: Dict[Int, Int], k: Int) -> Int {
+  match Map.find(d: d, key: k) with
+  | Some(value) -> return value
+  | None -> return 0
+}
+
+fn min(a: Int, b: Int) -> Int {
+  if a < b {
+    return a
+  }
+  return b
+}
+
+fn strong(fuel: Int where it >= 0, ec: Ec, tj: inout Tarjan, v: Int) -> Unit may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Unit
+  }
+  var index: Dict[Int, Int] = tj.index
+  var low: Dict[Int, Int] = tj.low
+  var on_stack: Dict[Int, Bool] = tj.on_stack
+  Map.set(d: inout index, key: v, value: tj.counter)
+  Map.set(d: inout low, key: v, value: tj.counter)
+  tj = { tj with counter: tj.counter + 1 }
+  var stack: Builder[Int] = tj.stack
+  List.push(b: inout stack, x: v)
+  Map.set(d: inout on_stack, key: v, value: true)
+  var edges: List[Int] = []
+  match Map.find(d: ec.call_graph, key: v) with
+  | Some(value) -> edges = value
+  | None -> edges = []
+  for w: Int in edges {
+    if not Map.contains(d: index, key: w) {
+      strong(fuel: fuel - 1, ec: ec, tj: inout tj, v: w)
+      Map.set(d: inout low, key: v, value: min(a: get_or(d: low, k: v), b: get_or(d: low, k: w)))
+    } else {
+      if Map.contains(d: on_stack, key: w) {
+        Map.set(
+          d: inout low,
+          key: v,
+          value: min(a: get_or(d: low, k: v), b: get_or(d: index, k: w))
+        )
+      }
+    }
+  }
+  if get_or(d: low, k: v) == get_or(d: index, k: v) {
+    var scc: Builder[Int] = List.builder()
+    var done: Bool = false
+    var guard: Int where it >= 0 = List.built(b: stack)
+    loop while not done and guard > 0
+      invariant guard >= 0
+      decreases guard
+    {
+      guard = guard - 1
+      match List.pop(b: inout stack) with
+      | None -> done = true
+      | Some(value) -> {
+        Map.remove(d: inout on_stack, key: value)
+        List.push(b: inout scc, x: value)
+        if value == v {
+          done = true
+        }
+      }
+    }
+    var sccs: Builder[List[Int]] = tj.sccs
+    List.push(b: inout sccs, x: List.finish(b: scc))
+  }
+  return Unit
+}
+
+fn decreases_clause(sig: types.Signature) -> Option[ast.Contract] {
+  for c: ast.Contract in sig.contracts {
+    if c.clause == "decreases" {
+      return Some(value: c)
+    }
+  }
+  return None
+}
+
+fn recursion(ec: inout Ec, ctx: inout context.Context) -> Unit may mutate, alloc {
+  var tj: Tarjan = Tarjan {
+    index: Map.dict(),
+    low: Map.dict(),
+    on_stack: Map.dict(),
+    stack: List.builder(),
+    counter: 0,
+    sccs: List.builder()
+  }
+  for v: Int in Map.keys(d: ec.call_graph) {
+    if not Map.contains(d: tj.index, key: v) {
+      strong(fuel: max_graph, ec: ec, tj: inout tj, v: v)
+    }
+  }
+  var cycle: Int = 0
+  for scc: List[Int] in List.finish(b: tj.sccs) {
+    var cyclic: Bool = List.len(xs: scc) > 1
+    if List.len(xs: scc) == 1 {
+      let first: Int = List.get(xs: scc, i: 0)
+      match Map.find(d: ec.call_graph, key: first) with
+      | Some(value) -> cyclic = List.contains(xs: value, x: first)
+      | None -> cyclic = false
+    }
+    if cyclic {
+      cycle = cycle + 1
+      for f: Int in scc {
+        var cycles: Dict[Int, Int] = ctx.cycles
+        Map.set(d: inout cycles, key: f, value: cycle)
+      }
+      -- Mutual recursion shares one measure, up to renaming of the parameters by position (§5.1).
+      var measures: Dict[Text, Int] = Map.dict()
+      var first_key: Text = ""
+      var first_def: Int = -1
+      for f: Int in scc {
+        let d: defs.Def = context.get_def(ctx: ctx, id: f)
+        let sig: types.Signature = sig_or(ctx: ctx, def: f)
+        match decreases_clause(sig: sig) with
+        | None -> skip()
+        | Some(value) -> {
+          let k: Text = measure_key(text: printer.print_expr(e: value.expr), params: sig.params)
+          if not Map.contains(d: measures, key: k) {
+            if Map.count(d: measures) > 0 {
+              ec = { ec with current_def: Some(value: d.name), current_file: d.file }
+              rep(
+                ec: ec,
+                ctx: inout ctx,
+                code: "E0320",
+                at: value.span,
+                detail: "`" ++ d.name ++ "` and `" ++ context.get_def(
+                  ctx: ctx,
+                  id: first_def
+                ).name ++ "` are in one recursive cycle but declare different measures (`" ++ k ++ "` and `" ++ first_key ++ "`, parameters numbered by position); a cycle shares one measure"
+              )
+            } else {
+              first_key = k
+              first_def = f
+            }
+            Map.set(d: inout measures, key: k, value: f)
+          }
+        }
+      }
+      for f: Int in scc {
+        let d: defs.Def = context.get_def(ctx: ctx, id: f)
+        let sig: types.Signature = sig_or(ctx: ctx, def: f)
+        let measured: Bool = decreases_clause(sig: sig) is Some or effectset.has(
+          s: sig.effects,
+          e: diverge_e
+        )
+        if not measured {
+          ec = { ec with current_def: Some(value: d.name), current_file: d.file }
+          var others: Builder[Text] = List.builder()
+          for x: Int in scc {
+            if x != f {
+              List.push(b: inout others, x: "`" ++ context.get_def(ctx: ctx, id: x).name ++ "`")
+            }
+          }
+          var with_text: Text = ""
+          if List.built(b: others) > 0 {
+            with_text = " (with " ++ Text.join(parts: List.finish(b: others), sep: ", ") ++ ")"
+          }
+          rep(
+            ec: ec,
+            ctx: inout ctx,
+            code: "E0320",
+            at: d.span,
+            detail: "`" ++ d.name ++ "` is recursive" ++ with_text ++ " and declares neither `decreases` nor `diverge`"
+          )
+        }
+      }
+    }
+  }
+  return Unit
+}
+
+-- Entry -------------------------------------------------------------------------------------
+-- Pass 6: checks the effects of every body. Reports E0201, E0207, E0320 and E0334.
+pub fn effects_pass(ctx: inout context.Context) -> Unit may mutate, alloc {
+  var ec: Ec = Ec { current_def: None, current_file: 0, call_graph: Map.dict() }
+  for id: Int in 0 ..< ctx.module_count {
+    match Map.find(d: ctx.modules, key: id) with
+    | Some(value) -> {
+      ec = { ec with current_file: value.file }
+      for item: ast.Item in value.tree.items {
+        ec = { ec with current_def: Some(value: item_name(item: item)) }
+        ef_item(ec: inout ec, ctx: inout ctx, item: item)
+      }
+    }
+    | None -> skip()
+  }
+  ec = { ec with current_def: None }
+  recursion(ec: inout ec, ctx: inout ctx)
+  return Unit
+}

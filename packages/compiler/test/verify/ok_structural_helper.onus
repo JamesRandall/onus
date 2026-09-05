@@ -1,0 +1,29 @@
+module ok_structural_helper
+
+-- Structural recursion through a helper (§5.1): `size` hands the whole node
+-- to `add_size`, which recurses on its parts. The calls that pass the
+-- measure on unchanged form no cycle of their own, so every cycle takes a
+-- proper part somewhere.
+union Expr =
+  | Lit of value: Int
+  | Add of left: Expr, right: Expr
+
+fn size(e: Expr) -> Int where it >= 1
+  decreases e
+{
+  match e with
+  | Lit(value) -> return 1
+  | Add(left, right) -> return add_size(e: e)
+}
+
+fn add_size(e: Expr) -> Int where it >= 1
+  decreases e
+{
+  match e with
+  | Add(left, right) -> return 1 + size(e: left) + size(e: right)
+  | _ -> return 1
+}
+
+example sizes {
+  size(e: Add(left: Lit(value: 1), right: Lit(value: 2))) == 3
+}

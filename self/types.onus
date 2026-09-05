@@ -1,0 +1,667 @@
+module types
+import ast
+import defs
+import effectset
+
+-- Type representation (impl spec §3.3; `types/type.ts`). Subtyping is
+-- refinement subsumption only: `refined(base, p) <: base`, and a flow into a
+-- refined position is an obligation. Equality on generics is nominal on the
+-- definition. Capability types carry attenuation restrictions (§8.2).
+pub union Type =
+  | Prim of name: Text
+  -- `base where pred`; `pred` is the key of the predicate node and `alias` the `type` declaration that introduced it, for printing.
+  | Refined of base: Type, pred: Int, alias: Option[Int]
+  | RecordT of def: Int, args: List[TypeArg]
+  | UnionT of def: Int, args: List[TypeArg]
+  -- An `intrinsic type`.
+  | Opaque of def: Int, args: List[TypeArg]
+  | Capability of def: Int, args: List[TypeArg], restrictions: List[Restriction]
+  | FnT of params: List[FnParam], ret: Type, effects: effectset.EffectSet
+  | ParamT of def: Int
+  | TypeInfoT
+  | SpecT
+  -- Poison: produced after an error, compatible with everything, never reported again.
+  | ErrorT
+
+pub union TypeArg =
+  | TypeA of ty: Type
+  | ConstA of value: ConstValue
+  -- The binding of an effect parameter at an instantiation.
+  | EffectsA of effects: effectset.EffectSet
+
+pub union ConstValue =
+  | IntV of v: Int
+  | FloatV of v: Float
+  | BoolV of v: Bool
+  | TextV of v: Text
+  | DurationV of v: Int
+  | UnitV
+  | VariantV of def: Int
+  -- A parameter used as an index (`Grid[T, width, height]`), equal only to itself.
+  | SymV of def: Int
+  -- Poison after a reported error; equal to everything.
+  | ErrorV
+
+pub record FnParam {
+  name: Text
+  is_inout: Bool
+  ty: Type
+}
+
+pub record Restriction {
+  label: Text
+  value: ConstValue
+}
+
+pub union TParamInfo =
+  | TypeP of def: Int, bound: Option[Int]
+  | ConstP of def: Int, ty: Type
+  | EffectP of def: Int
+
+-- The elaborated signature of a function, interface function or law.
+pub record Signature {
+  def: Int
+  tparams: List[TParamInfo]
+  params: List[FnParam]
+  -- Defs of the parameters, positionally.
+  param_defs: List[Int]
+  ret: Type
+  effects: effectset.EffectSet
+  contracts: List[ast.Contract]
+  is_const_fn: Bool
+  is_intrinsic: Bool
+}
+
+pub record FieldInfo {
+  def: Int
+  name: Text
+  ty: Type
+}
+
+-- A flow of a value into a refined position: an obligation site.
+pub record RefinementFlow {
+  at: Int
+  from: Type
+  to: Type
+}
+
+pub record VerifyInfo {
+  params: List[FnParam]
+  effects: effectset.EffectSet
+}
+
+pub record ImplInfo {
+  target: Type
+  def: Int
+}
+
+pub const int_t: Type = Prim(name: "Int")
+
+pub const float_t: Type = Prim(name: "Float")
+
+pub const bool_t: Type = Prim(name: "Bool")
+
+pub const text_t: Type = Prim(name: "Text")
+
+pub const unit_t: Type = Prim(name: "Unit")
+
+pub const bytes_t: Type = Prim(name: "Bytes")
+
+pub const duration_t: Type = Prim(name: "Duration")
+
+-- Accessors ---------------------------------------------------------------------
+-- A small integer naming the variant, so two types can be compared without nested matches.
+pub fn kind_tag(t: Type) -> Int {
+  match t with
+  | Prim(_) -> return 0
+  | Refined(_, _, _) -> return 1
+  | RecordT(_, _) -> return 2
+  | UnionT(_, _) -> return 3
+  | Opaque(_, _) -> return 4
+  | Capability(_, _, _) -> return 5
+  | FnT(_, _, _) -> return 6
+  | ParamT(_) -> return 7
+  | TypeInfoT -> return 8
+  | SpecT -> return 9
+  | ErrorT -> return 10
+}
+
+pub fn prim_name(t: Type) -> Text {
+  match t with
+  | Prim(name) -> return name
+  | _ -> return ""
+}
+
+pub fn def_of(t: Type) -> Int {
+  match t with
+  | RecordT(def, _) -> return def
+  | UnionT(def, _) -> return def
+  | Opaque(def, _) -> return def
+  | Capability(def, _, _) -> return def
+  | ParamT(def) -> return def
+  | _ -> return -1
+}
+
+pub fn args_of(t: Type) -> List[TypeArg] may alloc {
+  match t with
+  | RecordT(_, args) -> return args
+  | UnionT(_, args) -> return args
+  | Opaque(_, args) -> return args
+  | Capability(_, args, _) -> return args
+  | _ -> return []
+}
+
+pub fn restrictions_of(t: Type) -> List[Restriction] may alloc {
+  match t with
+  | Capability(_, _, restrictions) -> return restrictions
+  | _ -> return []
+}
+
+pub fn params_of(t: Type) -> List[FnParam] may alloc {
+  match t with
+  | FnT(params, _, _) -> return params
+  | _ -> return []
+}
+
+pub fn ret_of(t: Type) -> Type {
+  match t with
+  | FnT(_, ret, _) -> return ret
+  | _ -> return ErrorT
+}
+
+pub fn effects_of(t: Type) -> effectset.EffectSet may alloc {
+  match t with
+  | FnT(_, _, effects) -> return effects
+  | _ -> return effectset.empty()
+}
+
+pub fn arg_tag(a: TypeArg) -> Int {
+  match a with
+  | TypeA(_) -> return 0
+  | ConstA(_) -> return 1
+  | EffectsA(_) -> return 2
+}
+
+pub fn arg_type(a: TypeArg) -> Type {
+  match a with
+  | TypeA(ty) -> return ty
+  | _ -> return ErrorT
+}
+
+pub fn arg_const(a: TypeArg) -> ConstValue {
+  match a with
+  | ConstA(value) -> return value
+  | _ -> return ErrorV
+}
+
+pub fn arg_effects(a: TypeArg) -> effectset.EffectSet may alloc {
+  match a with
+  | EffectsA(effects) -> return effects
+  | _ -> return effectset.empty()
+}
+
+pub fn const_tag(v: ConstValue) -> Int {
+  match v with
+  | IntV(_) -> return 0
+  | FloatV(_) -> return 1
+  | BoolV(_) -> return 2
+  | TextV(_) -> return 3
+  | DurationV(_) -> return 4
+  | UnitV -> return 5
+  | VariantV(_) -> return 6
+  | SymV(_) -> return 7
+  | ErrorV -> return 8
+}
+
+pub fn int_of(c: ConstValue) -> Int {
+  match c with
+  | IntV(v) -> return v
+  | _ -> return 0
+}
+
+pub fn float_of(c: ConstValue) -> Float {
+  match c with
+  | FloatV(v) -> return v
+  | _ -> return 0.0
+}
+
+pub fn text_of(c: ConstValue) -> Text {
+  match c with
+  | TextV(v) -> return v
+  | _ -> return ""
+}
+
+pub fn bool_of(c: ConstValue) -> Bool {
+  match c with
+  | BoolV(v) -> return v
+  | _ -> return false
+}
+
+pub fn variant_of(c: ConstValue) -> Int {
+  match c with
+  | VariantV(def) -> return def
+  | SymV(def) -> return def
+  | _ -> return -1
+}
+
+pub fn tparam_def(p: TParamInfo) -> Int {
+  match p with
+  | TypeP(def, _) -> return def
+  | ConstP(def, _) -> return def
+  | EffectP(def) -> return def
+}
+
+-- Refinements -------------------------------------------------------------------
+-- Removes every refinement layer.
+pub fn strip(t: Type) -> Type
+  decreases t
+{
+  match t with
+  | Refined(base, _, _) -> return strip(t: base)
+  | _ -> return t
+}
+
+-- True iff `t` is refined at the top, i.e. flowing into it needs an obligation.
+pub fn is_refined(t: Type) -> Bool {
+  return t is Refined
+}
+
+pub fn is_error(t: Type) -> Bool {
+  return t is ErrorT
+}
+
+pub fn is_numeric(t: Type) -> Bool {
+  let n: Text = prim_name(t: strip(t: t))
+  return n == "Int" or n == "Float" or n == "Duration"
+}
+
+pub fn pred_of(t: Type) -> Int {
+  match t with
+  | Refined(_, pred, _) -> return pred
+  | _ -> return -1
+}
+
+pub fn same_refinement(a: Type, b: Type) -> Bool {
+  return a is Refined and b is Refined and pred_of(t: a) == pred_of(t: b)
+}
+
+-- Equality ------------------------------------------------------------------------
+pub fn const_equals(a: ConstValue, b: ConstValue) -> Bool {
+  if a is ErrorV or b is ErrorV {
+    return true
+  }
+  if const_tag(v: a) != const_tag(v: b) {
+    return false
+  }
+  return a == b
+}
+
+fn restrictions_equal(a: List[Restriction], b: List[Restriction]) -> Bool {
+  if List.len(xs: a) != List.len(xs: b) {
+    return false
+  }
+  for r: Restriction in a {
+    if not has_restriction(rs: b, r: r) {
+      return false
+    }
+  }
+  return true
+}
+
+fn has_restriction(rs: List[Restriction], r: Restriction) -> Bool {
+  for s: Restriction in rs {
+    if s.label == r.label and const_equals(a: r.value, b: s.value) {
+      return true
+    }
+  }
+  return false
+}
+
+-- Equality of types after stripping refinements: the relation the type
+-- checker enforces; refinement predicates become obligations later.
+pub fn same_base(a: Type, b: Type) -> Bool may alloc
+  decreases a
+{
+  match a with
+  | Refined(base, _, _) -> return same_base(a: base, b: b)
+  | _ -> skip()
+  let y: Type = strip(t: b)
+  if a is ErrorT or y is ErrorT {
+    return true
+  }
+  if kind_tag(t: a) != kind_tag(t: y) {
+    return false
+  }
+  match a with
+  | Prim(name) -> return name == prim_name(t: y)
+  | RecordT(def, args) -> return def == def_of(t: y) and args_equal(xs: args, ys: args_of(t: y))
+  | UnionT(def, args) -> return def == def_of(t: y) and args_equal(xs: args, ys: args_of(t: y))
+  | Opaque(def, args) -> return def == def_of(t: y) and args_equal(xs: args, ys: args_of(t: y))
+  | Capability(def, args, restrictions) -> return def == def_of(t: y) and args_equal(
+    xs: args,
+    ys: args_of(t: y)
+  ) and restrictions_equal(a: restrictions, b: restrictions_of(t: y))
+  | FnT(params, ret, effects) -> return params_equal(ps: params, qs: params_of(t: y)) and same_base(
+    a: ret,
+    b: ret_of(t: y)
+  )
+  | ParamT(def) -> return def == def_of(t: y)
+  | _ -> return true
+}
+
+fn skip() -> Unit {
+  return Unit
+}
+
+fn args_equal(xs: List[TypeArg], ys: List[TypeArg]) -> Bool may alloc
+  decreases xs
+{
+  if List.len(xs: xs) != List.len(xs: ys) {
+    return false
+  }
+  for i: Int in 0 ..< List.len(xs: xs) {
+    let x: TypeArg = List.get(xs: xs, i: i)
+    let y: TypeArg = List.get(xs: ys, i: i)
+    if arg_tag(a: x) != arg_tag(a: y) {
+      return false
+    }
+    match x with
+    | TypeA(ty) -> {
+      if not same_base(a: ty, b: arg_type(a: y)) {
+        return false
+      }
+    }
+    | ConstA(value) -> {
+      if not const_equals(a: value, b: arg_const(a: y)) {
+        return false
+      }
+    }
+    | EffectsA(effects) -> {
+      if not effectset.equals(a: effects, b: arg_effects(a: y)) {
+        return false
+      }
+    }
+  }
+  return true
+}
+
+fn params_equal(ps: List[FnParam], qs: List[FnParam]) -> Bool may alloc
+  decreases ps
+{
+  if List.len(xs: ps) != List.len(xs: qs) {
+    return false
+  }
+  for i: Int in 0 ..< List.len(xs: ps) {
+    let p: FnParam = List.get(xs: ps, i: i)
+    let q: FnParam = List.get(xs: qs, i: i)
+    if p.is_inout != q.is_inout or not same_base(a: p.ty, b: q.ty) {
+      return false
+    }
+  }
+  return true
+}
+
+-- Whether a value of type `actual` may flow into a position of type
+-- `expected`, ignoring refinement predicates (obligations) and effects (the
+-- effects pass). A capability may carry restrictions the expected one lacks (§8.2).
+pub fn assignable(actual: Type, expected: Type) -> Bool may alloc {
+  let x: Type = strip(t: actual)
+  let y: Type = strip(t: expected)
+  if x is ErrorT or y is ErrorT {
+    return true
+  }
+  if x is Capability and y is Capability {
+    if def_of(t: x) != def_of(t: y) or not args_equal(xs: args_of(t: x), ys: args_of(t: y)) {
+      return false
+    }
+    for r: Restriction in restrictions_of(t: y) {
+      if not has_restriction(rs: restrictions_of(t: x), r: r) {
+        return false
+      }
+    }
+    return true
+  }
+  return same_base(a: x, b: y)
+}
+
+-- Substitution -------------------------------------------------------------------
+-- Replaces type and const parameters bound in `subst`.
+pub fn substitute(t: Type, subst: Dict[Int, TypeArg]) -> Type may alloc, mutate
+  decreases t
+{
+  if Map.count(d: subst) == 0 {
+    return t
+  }
+  match t with
+  | Refined(base, pred, alias) -> return Refined(
+    base: substitute(t: base, subst: subst),
+    pred: pred,
+    alias: alias
+  )
+  | RecordT(def, args) -> return RecordT(def: def, args: substitute_args(args: args, subst: subst))
+  | UnionT(def, args) -> return UnionT(def: def, args: substitute_args(args: args, subst: subst))
+  | Opaque(def, args) -> return Opaque(def: def, args: substitute_args(args: args, subst: subst))
+  | Capability(def, args, restrictions) -> return Capability(
+    def: def,
+    args: substitute_args(args: args, subst: subst),
+    restrictions: substitute_restrictions(rs: restrictions, subst: subst)
+  )
+  | FnT(params, ret, effects) -> return FnT(
+    params: substitute_params(ps: params, subst: subst),
+    ret: substitute(t: ret, subst: subst),
+    effects: substitute_effects(effects: effects, subst: subst)
+  )
+  | ParamT(def) -> {
+    match Map.find(d: subst, key: def) with
+    | Some(value) -> {
+      if value is TypeA {
+        return arg_type(a: value)
+      }
+      return t
+    }
+    | None -> return t
+  }
+  | _ -> return t
+}
+
+fn substitute_args(
+  args: List[TypeArg],
+  subst: Dict[Int, TypeArg]
+) -> List[TypeArg] may alloc, mutate
+  decreases args
+{
+  var out: Builder[TypeArg] = List.builder()
+  for a: TypeArg in args {
+    List.push(b: inout out, x: substitute_arg(a: a, subst: subst))
+  }
+  return List.finish(b: out)
+}
+
+pub fn substitute_arg(a: TypeArg, subst: Dict[Int, TypeArg]) -> TypeArg may alloc, mutate
+  decreases a
+{
+  match a with
+  | TypeA(ty) -> return TypeA(ty: substitute(t: ty, subst: subst))
+  | ConstA(value) -> return ConstA(value: substitute_const(v: value, subst: subst))
+  | EffectsA(_) -> return a
+}
+
+fn substitute_params(
+  ps: List[FnParam],
+  subst: Dict[Int, TypeArg]
+) -> List[FnParam] may alloc, mutate
+  decreases ps
+{
+  var out: Builder[FnParam] = List.builder()
+  for p: FnParam in ps {
+    List.push(
+      b: inout out,
+      x: FnParam { name: p.name, is_inout: p.is_inout, ty: substitute(t: p.ty, subst: subst) }
+    )
+  }
+  return List.finish(b: out)
+}
+
+fn substitute_restrictions(
+  rs: List[Restriction],
+  subst: Dict[Int, TypeArg]
+) -> List[Restriction] may alloc, mutate {
+  var out: Builder[Restriction] = List.builder()
+  for r: Restriction in rs {
+    List.push(
+      b: inout out,
+      x: Restriction { label: r.label, value: substitute_const(v: r.value, subst: subst) }
+    )
+  }
+  return List.finish(b: out)
+}
+
+pub fn substitute_const(v: ConstValue, subst: Dict[Int, TypeArg]) -> ConstValue {
+  match v with
+  | SymV(def) -> {
+    match Map.find(d: subst, key: def) with
+    | Some(value) -> {
+      if value is ConstA {
+        return arg_const(a: value)
+      }
+      return v
+    }
+    | None -> return v
+  }
+  | _ -> return v
+}
+
+-- Replaces effect parameters bound in `subst`; unbound parameters stay.
+pub fn substitute_effects(
+  effects: effectset.EffectSet,
+  subst: Dict[Int, TypeArg]
+) -> effectset.EffectSet may alloc, mutate {
+  var out: Builder[defs.Effect] = List.builder()
+  for e: defs.Effect in effectset.values(s: effects) {
+    match e with
+    | defs.ParamEffect(def) -> {
+      match Map.find(d: subst, key: def) with
+      | Some(value) -> {
+        if value is EffectsA {
+          for x: defs.Effect in effectset.values(s: arg_effects(a: value)) {
+            List.push(b: inout out, x: x)
+          }
+        } else {
+          List.push(b: inout out, x: e)
+        }
+      }
+      | None -> List.push(b: inout out, x: e)
+    }
+    | _ -> List.push(b: inout out, x: e)
+  }
+  return effectset.of_list(effects: List.finish(b: out))
+}
+
+-- Type variables ------------------------------------------------------------------
+-- True iff `t` mentions a type variable in `tvars` that `subst` has not bound.
+pub fn has_unbound(t: Type, tvars: Dict[Int, Bool], subst: Dict[Int, TypeArg]) -> Bool
+  decreases t
+{
+  match t with
+  | ParamT(def) -> return Map.contains(d: tvars, key: def) and not Map.contains(d: subst, key: def)
+  | Refined(base, _, _) -> return has_unbound(t: base, tvars: tvars, subst: subst)
+  | RecordT(_, args) -> return args_unbound(args: args, tvars: tvars, subst: subst)
+  | UnionT(_, args) -> return args_unbound(args: args, tvars: tvars, subst: subst)
+  | Opaque(_, args) -> return args_unbound(args: args, tvars: tvars, subst: subst)
+  | Capability(_, args, _) -> return args_unbound(args: args, tvars: tvars, subst: subst)
+  | FnT(params, ret, effects) -> {
+    for p: FnParam in params {
+      if has_unbound(t: p.ty, tvars: tvars, subst: subst) {
+        return true
+      }
+    }
+    if has_unbound(t: ret, tvars: tvars, subst: subst) {
+      return true
+    }
+    for e: defs.Effect in effectset.values(s: effects) {
+      match e with
+      | defs.ParamEffect(def) -> {
+        if Map.contains(d: tvars, key: def) and not Map.contains(d: subst, key: def) {
+          return true
+        }
+      }
+      | _ -> skip()
+    }
+    return false
+  }
+  | _ -> return false
+}
+
+fn args_unbound(args: List[TypeArg], tvars: Dict[Int, Bool], subst: Dict[Int, TypeArg]) -> Bool
+  decreases args
+{
+  for a: TypeArg in args {
+    match a with
+    | TypeA(ty) -> {
+      if has_unbound(t: ty, tvars: tvars, subst: subst) {
+        return true
+      }
+    }
+    | ConstA(value) -> {
+      match value with
+      | SymV(def) -> {
+        if Map.contains(d: tvars, key: def) and not Map.contains(d: subst, key: def) {
+          return true
+        }
+      }
+      | _ -> skip()
+    }
+    | EffectsA(_) -> skip()
+  }
+  return false
+}
+
+-- True iff `t` uses parameter `def` as a type index.
+pub fn mentions_sym(t: Type, def: Int) -> Bool
+  decreases t
+{
+  match t with
+  | Refined(base, _, _) -> return mentions_sym(t: base, def: def)
+  | RecordT(_, args) -> return args_mention(args: args, def: def)
+  | UnionT(_, args) -> return args_mention(args: args, def: def)
+  | Opaque(_, args) -> return args_mention(args: args, def: def)
+  | Capability(_, args, _) -> return args_mention(args: args, def: def)
+  | FnT(params, ret, _) -> {
+    for p: FnParam in params {
+      if mentions_sym(t: p.ty, def: def) {
+        return true
+      }
+    }
+    return mentions_sym(t: ret, def: def)
+  }
+  | _ -> return false
+}
+
+fn args_mention(args: List[TypeArg], def: Int) -> Bool
+  decreases args
+{
+  for a: TypeArg in args {
+    match a with
+    | TypeA(ty) -> {
+      if mentions_sym(t: ty, def: def) {
+        return true
+      }
+    }
+    | ConstA(value) -> {
+      if value == SymV(def: def) {
+        return true
+      }
+    }
+    | EffectsA(_) -> skip()
+  }
+  return false
+}
+
+example equality {
+  same_base(a: int_t, b: Refined(base: int_t, pred: 7, alias: None))
+  not same_base(a: int_t, b: text_t)
+  assignable(actual: ErrorT, expected: bool_t)
+  const_equals(a: IntV(v: 3), b: IntV(v: 3))
+  not const_equals(a: IntV(v: 3), b: TextV(v: "3"))
+  is_numeric(t: Refined(base: duration_t, pred: 1, alias: None))
+}

@@ -84,9 +84,10 @@ describe('codegen', () => {
   it('generated example, property and law tests pass under vitest', () => {
     const out = fresh('tests');
     buildTo(join(here, 'features.onus'), out, false);
+    buildTo(join(here, 'reserved_names.onus'), out, false);
     buildTo(join(examplesDir, 'mandelbrot', 'mandelbrot.onus'), out, false);
     const files = readdirSync(out).filter((f) => f.endsWith('.examples.test.js'));
-    expect(files.sort()).toEqual(['features.examples.test.js', 'mandelbrot.examples.test.js']);
+    expect(files.sort()).toEqual(['features.examples.test.js', 'mandelbrot.examples.test.js', 'reserved_names.examples.test.js']);
     const r = vitest(out);
     expect(r.stdout + r.stderr).toMatch(/Tests\s+\d+ passed/);
     expect(r.status).toBe(0);

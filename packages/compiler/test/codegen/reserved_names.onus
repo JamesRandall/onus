@@ -1,0 +1,25 @@
+module reserved_names
+
+-- Names that are reserved in JavaScript but not in Onus: the emitter must
+-- rename them wherever they are declared and referenced.
+fn eval(x: Int) -> Int {
+  return x + 1
+}
+
+fn delete(x: Int) -> Int {
+  return eval(x: x) * 2
+}
+
+fn new(arguments: Int, class: Int) -> Int {
+  let this: Int = arguments + class
+  return this
+}
+
+pub const yield: Int = eval(x: 41)
+
+example reserved_words_as_names {
+  eval(x: 1) == 2
+  delete(x: 1) == 4
+  new(arguments: 1, class: 2) == 3
+  yield == 42
+}

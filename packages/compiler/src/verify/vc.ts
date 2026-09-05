@@ -619,6 +619,11 @@ class BodyWalker {
         if (argTerm !== null && this.lowerer.isProperPart(argTerm, m0)) {
           o.status = 'proved';
           o.by = 'structural order';
+        } else if (argTerm !== null && this.lowerer.isSamePart(argTerm, m0)) {
+          // The measure passed on unchanged: sound when no cycle consists of such calls alone, which the
+          // verify pass settles once every function is lowered.
+          o.status = 'checked';
+          o.by = 'equal argument';
         } else {
           o.status = 'failed';
           o.by = 'not a part of the measure';

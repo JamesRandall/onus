@@ -1,0 +1,210 @@
+module context
+import ast
+import tokens
+import report
+import defs
+import effectset
+import types
+import values
+
+-- The compilation context (impl spec §4; `context.ts`). Passes read the
+-- tables of earlier passes and write their own. Dicts and builders share
+-- their storage, so a pass writes through the context it is given.
+pub record Parsed {
+  module: Option[ast.Module]
+  comment_list: List[tokens.Comment]
+}
+
+pub record Context {
+  root: Option[Text]
+  stdlib: Option[Text]
+  files: Builder[report.SourceFile]
+  parsed: Dict[Int, Parsed]
+  syntax_error_files: Dict[Int, Bool]
+  canonical: Dict[Int, Text]
+  diagnostics: Builder[report.Diagnostic]
+  -- Pass 3 (load and resolve)
+  modules: Dict[Int, defs.ModuleRecord]
+  module_count: Int
+  by_name: Dict[Text, Int]
+  defs: Builder[defs.Def]
+  def_of: Dict[Int, Int]
+  refs: Dict[Int, defs.Resolution]
+  members: Dict[Int, defs.Members]
+  granted: Dict[Int, List[Text]]
+  claim_lists: Dict[Int, List[Int]]
+  holes: Dict[Int, List[Text]]
+  -- Pass 4 (types)
+  expr_types: Dict[Int, types.Type]
+  decl_types: Dict[Int, types.Type]
+  signatures: Dict[Int, types.Signature]
+  type_params: Dict[Int, List[types.TParamInfo]]
+  fields: Dict[Int, List[types.FieldInfo]]
+  type_aliases: Dict[Int, types.Type]
+  instantiations: Dict[Int, List[types.TypeArg]]
+  effect_bindings: Dict[Int, Dict[Int, effectset.EffectSet]]
+  index_bindings: Dict[Int, Dict[Int, types.TypeArg]]
+  refinement_flows: Builder[types.RefinementFlow]
+  variants: Dict[Int, List[Int]]
+  verifies: Dict[Int, types.VerifyInfo]
+  type_holes: Dict[Int, Option[types.Type]]
+  impls: Dict[Int, List[types.ImplInfo]]
+  -- Pass 6 (effects)
+  inferred: Dict[Int, effectset.EffectSet]
+  effect_calls: Dict[Int, effectset.EffectSet]
+  closure_effects: Dict[Int, effectset.EffectSet]
+  cycles: Dict[Int, Int]
+  -- Pass 5 (constant evaluation)
+  const_values: Dict[Int, values.Value]
+  -- `requires proved` clauses discharged at check time, keyed by call then contract.
+  proved_at_check_time: Dict[Int, List[Int]]
+  -- Outcome of each `example` at check time: passed, failed or deferred.
+  examples: Dict[Int, Text]
+}
+
+pub fn new_context(root: Option[Text], stdlib: Option[Text]) -> Context may alloc {
+  return Context {
+    root: root,
+    stdlib: stdlib,
+    files: List.builder(),
+    parsed: Map.dict(),
+    syntax_error_files: Map.dict(),
+    canonical: Map.dict(),
+    diagnostics: List.builder(),
+    modules: Map.dict(),
+    module_count: 0,
+    by_name: Map.dict(),
+    defs: List.builder(),
+    def_of: Map.dict(),
+    refs: Map.dict(),
+    members: Map.dict(),
+    granted: Map.dict(),
+    claim_lists: Map.dict(),
+    holes: Map.dict(),
+    expr_types: Map.dict(),
+    decl_types: Map.dict(),
+    signatures: Map.dict(),
+    type_params: Map.dict(),
+    fields: Map.dict(),
+    type_aliases: Map.dict(),
+    instantiations: Map.dict(),
+    effect_bindings: Map.dict(),
+    index_bindings: Map.dict(),
+    refinement_flows: List.builder(),
+    variants: Map.dict(),
+    verifies: Map.dict(),
+    type_holes: Map.dict(),
+    impls: Map.dict(),
+    inferred: Map.dict(),
+    effect_calls: Map.dict(),
+    closure_effects: Map.dict(),
+    cycles: Map.dict(),
+    const_values: Map.dict(),
+    proved_at_check_time: Map.dict(),
+    examples: Map.dict()
+  }
+}
+
+pub fn report(ctx: inout Context, d: report.Diagnostic) -> Unit may mutate, alloc {
+  var ds: Builder[report.Diagnostic] = ctx.diagnostics
+  List.push(b: inout ds, x: d)
+}
+
+-- Whether any diagnostic other than E0001 has been reported.
+pub fn clean(ctx: Context) -> Bool may alloc {
+  for d: report.Diagnostic in List.finish(b: ctx.diagnostics) {
+    if d.code != "E0001" {
+      return false
+    }
+  }
+  return true
+}
+
+pub fn file_count(ctx: Context) -> Int
+  ensures result == List.built(b: ctx.files)
+{
+  return List.built(b: ctx.files)
+}
+
+pub fn file_at(
+  ctx: Context,
+  id: Int where 0 <= it and it < List.built(b: ctx.files)
+) -> report.SourceFile {
+  return List.at(b: ctx.files, i: id)
+}
+
+pub fn def_at(ctx: Context, id: Int where 0 <= it and it < List.built(b: ctx.defs)) -> defs.Def {
+  return List.at(b: ctx.defs, i: id)
+}
+
+-- A definition by id; a placeholder for an id that is not one, which no pass produces.
+pub fn get_def(ctx: Context, id: Int) -> defs.Def {
+  if id >= 0 and id < List.built(b: ctx.defs) {
+    return List.at(b: ctx.defs, i: id)
+  }
+  return defs.Def {
+    id: -1,
+    kind: defs.Fn,
+    name: "?",
+    node: defs.NoNode,
+    mod: -1,
+    file: 0,
+    key: -1,
+    span: ast.Span { start: 0, end: 0 },
+    is_pub: false,
+    is_sealed: false,
+    is_intrinsic: false,
+    parent: None,
+    frame: -1,
+    is_inout: false
+  }
+}
+
+pub fn def_count(ctx: Context) -> Int
+  ensures result == List.built(b: ctx.defs)
+{
+  return List.built(b: ctx.defs)
+}
+
+-- The members of a module, created on first use.
+pub fn members_of(ctx: inout Context, module: Int) -> defs.Members may mutate, alloc {
+  match Map.find(d: ctx.members, key: module) with
+  | Some(value) -> return value
+  | None -> {
+    let m: defs.Members = defs.new_members()
+    var table: Dict[Int, defs.Members] = ctx.members
+    Map.set(d: inout table, key: module, value: m)
+    return m
+  }
+}
+
+pub fn module_of(ctx: Context, id: Int) -> Option[defs.ModuleRecord] {
+  return Map.find(d: ctx.modules, key: id)
+}
+
+pub fn module_name(ctx: Context, id: Int) -> Text {
+  match Map.find(d: ctx.modules, key: id) with
+  | Some(value) -> return value.name
+  | None -> return "?"
+}
+
+-- Qualified name `module.name` of a definition, for diagnostics.
+pub fn qualified_name(ctx: Context, id: Int) -> Text may alloc {
+  if id < 0 or id >= List.built(b: ctx.defs) {
+    return "?"
+  }
+  let d: defs.Def = List.at(b: ctx.defs, i: id)
+  return module_name(ctx: ctx, id: d.mod) ++ "." ++ d.name
+}
+
+pub fn add_def(ctx: inout Context, d: defs.Def) -> Unit may mutate, alloc {
+  var ds: Builder[defs.Def] = ctx.defs
+  List.push(b: inout ds, x: d)
+  var table: Dict[Int, Int] = ctx.def_of
+  Map.set(d: inout table, key: d.key, value: d.id)
+}
+
+pub fn set_ref(ctx: inout Context, key: Int, res: defs.Resolution) -> Unit may mutate, alloc {
+  var table: Dict[Int, defs.Resolution] = ctx.refs
+  Map.set(d: inout table, key: key, value: res)
+}

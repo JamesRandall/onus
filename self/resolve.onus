@@ -1,0 +1,2944 @@
+module resolve
+import ast
+import parser
+import report
+import defs
+import context
+import loader
+
+-- Name resolution (impl spec §4, pass 3, second half; `resolve/resolve.ts`).
+-- Builds the definition table for every loaded module, then binds every use
+-- site to what it denotes. Rules (spec §3.10, §11):
+--   - a bare value name resolves through local scopes, then the module's
+--     functions and constants;
+--   - a dotted name whose head is an imported module alias denotes that
+--     module's public member, even if a local has the same name;
+--   - `Type.f` denotes function `f` of the module that declares `Type`; for
+--     a primitive that module is `std.<name>`;
+--   - a bare variant resolves in this module's unions, then the prelude's,
+--     then the imports'; more than one candidate is ambiguous;
+--   - a type name resolves through type parameters, this module's types, the
+--     prelude's public types, then the primitives;
+--   - locals may not shadow another local or parameter;
+--   - `sealed` types are constructed only in their module (or a test module);
+--   - `it` is legal only in a `where` clause, `result` and `old` only in
+--     `ensures`; `old` takes an `inout` parameter;
+--   - a closure may not refer to a `var` or an `inout` parameter of an
+--     enclosing frame.
+-- The one policy the compiler defines (§20.3).
+pub const builtin_policy: Text = "verified_assumptions_only"
+
+-- Scopes ----------------------------------------------------------------------
+pub record Scope {
+  parent: Option[Scope]
+  values: Dict[Text, Int]
+  types: Dict[Text, defs.TypeOwner]
+  effects: Dict[Text, Int]
+  frame: Int
+}
+
+fn new_scope(parent: Option[Scope], frame: Int) -> Scope may alloc {
+  return Scope {
+    parent: parent,
+    values: Map.dict(),
+    types: Map.dict(),
+    effects: Map.dict(),
+    frame: frame
+  }
+}
+
+fn child(parent: Scope) -> Scope may alloc {
+  return new_scope(parent: Some(value: parent), frame: parent.frame)
+}
+
+fn child_frame(parent: Scope, frame: Int) -> Scope may alloc {
+  return new_scope(parent: Some(value: parent), frame: frame)
+}
+
+fn lookup_value(s: Scope, name: Text) -> Option[Int]
+  decreases s
+{
+  match Map.find(d: s.values, key: name) with
+  | Some(value) -> return Some(value: value)
+  | None -> {
+    match s.parent with
+    | None -> return None
+    | Some(value) -> return lookup_value(s: value, name: name)
+  }
+}
+
+-- A type name through the scopes, then the primitives.
+fn lookup_type(s: Scope, name: Text) -> Option[defs.TypeOwner] may alloc
+  decreases s
+{
+  match Map.find(d: s.types, key: name) with
+  | Some(value) -> return Some(value: value)
+  | None -> {
+    match s.parent with
+    | None -> {
+      if defs.is_prim_name(name: name) {
+        return Some(value: defs.PrimOwner(name: name))
+      }
+      return None
+    }
+    | Some(value) -> return lookup_type(s: value, name: name)
+  }
+}
+
+fn lookup_effect_param(s: Scope, name: Text) -> Option[Int]
+  decreases s
+{
+  match Map.find(d: s.effects, key: name) with
+  | Some(value) -> return Some(value: value)
+  | None -> {
+    match s.parent with
+    | None -> return None
+    | Some(value) -> return lookup_effect_param(s: value, name: name)
+  }
+}
+
+fn scope_set_value(s: Scope, name: Text, id: Int) -> Unit may mutate, alloc {
+  var d: Dict[Text, Int] = s.values
+  Map.set(d: inout d, key: name, value: id)
+}
+
+fn scope_set_type(s: Scope, name: Text, owner: defs.TypeOwner) -> Unit may mutate, alloc {
+  var d: Dict[Text, defs.TypeOwner] = s.types
+  Map.set(d: inout d, key: name, value: owner)
+}
+
+fn scope_set_effect(s: Scope, name: Text, id: Int) -> Unit may mutate, alloc {
+  var d: Dict[Text, Int] = s.effects
+  Map.set(d: inout d, key: name, value: id)
+}
+
+-- Local bindings visible from `scope`, outermost first (`onus next`, §14).
+fn visible_locals(s: Scope) -> List[Text] may alloc, mutate
+  decreases s
+{
+  var outer: List[Text] = []
+  match s.parent with
+  | Some(value) -> outer = visible_locals(s: value)
+  | None -> outer = []
+  if s.frame < 0 {
+    return outer
+  }
+  var out: Builder[Text] = List.builder()
+  for n: Text in outer {
+    List.push(b: inout out, x: n)
+  }
+  for n: Text in Map.keys(d: s.values) {
+    if not List.contains(xs: outer, x: n) {
+      List.push(b: inout out, x: n)
+    }
+  }
+  return List.finish(b: out)
+}
+
+-- Helpers -----------------------------------------------------------------------
+fn or_neg(o: Option[Int]) -> Int {
+  match o with
+  | Some(value) -> return value
+  | None -> return -1
+}
+
+fn find_or(d: Dict[Text, Int], key: Text) -> Int {
+  match Map.find(d: d, key: key) with
+  | Some(value) -> return value
+  | None -> return -1
+}
+
+fn last_segment(name: Text) -> Text may alloc {
+  let parts: List[Text] = Text.split(t: name, sep: ".")
+  return List.get(xs: parts, i: List.len(xs: parts) - 1)
+}
+
+fn starts_upper(t: Text) -> Bool may alloc {
+  let cps: List[Int] = Text.code_points(t: t)
+  if List.len(xs: cps) == 0 {
+    return false
+  }
+  let c: Int = List.get(xs: cps, i: 0)
+  return c >= 65 and c <= 90
+}
+
+fn owner_def(o: defs.TypeOwner) -> Option[Int] {
+  match o with
+  | defs.DefOwner(def) -> return Some(value: def)
+  | defs.PrimOwner(name) -> return None
+}
+
+fn kind_of(ctx: context.Context, id: Int) -> defs.DefKind {
+  return context.get_def(ctx: ctx, id: id).kind
+}
+
+fn is_interface(ctx: context.Context, o: defs.TypeOwner) -> Bool {
+  match owner_def(o: o) with
+  | Some(value) -> return kind_of(ctx: ctx, id: value) == defs.Interface
+  | None -> return false
+}
+
+fn granted_has(ctx: context.Context, mod: Int, name: Text) -> Bool {
+  match Map.find(d: ctx.granted, key: mod) with
+  | Some(value) -> return List.contains(xs: value, x: name)
+  | None -> return false
+}
+
+fn item_name(item: ast.Item) -> Text {
+  match item with
+  | ast.FnItem(decl) -> return decl.name.text
+  | ast.TypeAliasItem(decl) -> return decl.name.text
+  | ast.IntrinsicTypeItem(decl) -> return decl.name.text
+  | ast.ConstItem(decl) -> return decl.name.text
+  | ast.RecordItem(decl) -> return decl.name.text
+  | ast.UnionItem(decl) -> return decl.name.text
+  | ast.InterfaceItem(decl) -> return decl.name.text
+  | ast.ImplItem(decl) -> return decl.iface.text
+  | ast.ClaimItem(decl) -> return decl.name.text
+  | ast.CapabilityItem(decl) -> return decl.name.text
+  | ast.PathItem(decl) -> return decl.name.text
+  | ast.PolicyItem(decl) -> return decl.name.text
+  | ast.ExampleItem(decl) -> return decl.name.text
+  | ast.PropertyItem(decl) -> return decl.name.text
+}
+
+fn iface_item_name(member: ast.IfaceItem) -> ast.Ident {
+  match member with
+  | ast.IfaceFnItem(decl) -> return decl.name
+  | ast.LawItem(decl) -> return decl.name
+}
+
+fn iface_item_node(member: ast.IfaceItem) -> defs.DeclNode {
+  match member with
+  | ast.IfaceFnItem(decl) -> return defs.IfaceFnNode(decl: decl)
+  | ast.LawItem(decl) -> return defs.LawNode(decl: decl)
+}
+
+fn iface_item_span(member: ast.IfaceItem) -> ast.Span {
+  match member with
+  | ast.IfaceFnItem(decl) -> return decl.span
+  | ast.LawItem(decl) -> return decl.span
+}
+
+-- Definition collection ------------------------------------------------------------
+fn add(
+  ctx: inout context.Context,
+  m: defs.ModuleRecord,
+  kind: defs.DefKind,
+  node: defs.DeclNode,
+  name: ast.Ident,
+  key: Int,
+  is_pub: Bool,
+  is_sealed: Bool,
+  is_intrinsic: Bool,
+  parent: Option[Int]
+) -> Int may mutate, alloc {
+  let id: Int = context.def_count(ctx: ctx)
+  context.add_def(
+    ctx: inout ctx,
+    d: defs.Def {
+      id: id,
+      kind: kind,
+      node: node,
+      name: name.text,
+      mod: m.id,
+      file: m.file,
+      key: key,
+      span: name.span,
+      is_pub: is_pub,
+      is_sealed: is_sealed,
+      is_intrinsic: is_intrinsic,
+      parent: parent,
+      frame: -1,
+      is_inout: false
+    }
+  )
+  return id
+}
+
+fn declare(
+  ctx: inout context.Context,
+  table: Dict[Text, Int],
+  id: Int,
+  what: Text
+) -> Unit may mutate, alloc {
+  let d: defs.Def = context.get_def(ctx: ctx, id: id)
+  if Map.contains(d: table, key: d.name) {
+    context.report(
+      ctx: inout ctx,
+      d: report.diagnostic(
+        code: "E0107",
+        file: d.file,
+        span: d.span,
+        def_name: Some(value: d.name),
+        detail: what ++ " `" ++ d.name ++ "` is already defined in this module"
+      )
+    )
+    return Unit
+  }
+  var t: Dict[Text, Int] = table
+  Map.set(d: inout t, key: d.name, value: id)
+  return Unit
+}
+
+fn declare_type(
+  ctx: inout context.Context,
+  table: Dict[Text, Int],
+  id: Int
+) -> Unit may mutate, alloc {
+  let d: defs.Def = context.get_def(ctx: ctx, id: id)
+  if defs.is_prim_name(name: d.name) {
+    context.report(
+      ctx: inout ctx,
+      d: report.diagnostic(
+        code: "E0107",
+        file: d.file,
+        span: d.span,
+        def_name: Some(value: d.name),
+        detail: "`" ++ d.name ++ "` is a primitive type"
+      )
+    )
+    return Unit
+  }
+  declare(ctx: inout ctx, table: table, id: id, what: "type")
+  return Unit
+}
+
+fn check_elided(
+  ctx: inout context.Context,
+  m: defs.ModuleRecord,
+  f: ast.FnDecl
+) -> Unit may mutate, alloc {
+  match f.body with
+  | None -> return Unit
+  | Some(value) -> {
+    if value.elided {
+      context.report(
+        ctx: inout ctx,
+        d: report.diagnostic(
+          code: "E0115",
+          file: m.file,
+          span: value.span,
+          def_name: Some(value: f.name.text),
+          detail: "`" ++ f.name.text ++ "` has an elided body `{ ... }`, which only an interface rendering may contain (§11.1)"
+        )
+      )
+    }
+    return Unit
+  }
+}
+
+fn collect_fields(
+  ctx: inout context.Context,
+  m: defs.ModuleRecord,
+  owner: Int,
+  owner_name: Text,
+  fields: List[ast.Field],
+  is_pub: Bool
+) -> Unit may mutate, alloc {
+  var seen: Dict[Text, Bool] = Map.dict()
+  for f: ast.Field in fields {
+    if Map.contains(d: seen, key: f.name.text) {
+      context.report(
+        ctx: inout ctx,
+        d: report.diagnostic(
+          code: "E0107",
+          file: m.file,
+          span: f.name.span,
+          def_name: Some(value: owner_name),
+          detail: "field `" ++ f.name.text ++ "` is declared twice"
+        )
+      )
+    }
+    Map.set(d: inout seen, key: f.name.text, value: true)
+    let fid: Int = add(
+      ctx: inout ctx,
+      m: m,
+      kind: defs.Field,
+      node: defs.FieldNode(decl: f),
+      name: f.name,
+      key: defs.node_key(file: m.file, tag: defs.tag_sig, span: f.span),
+      is_pub: is_pub,
+      is_sealed: false,
+      is_intrinsic: false,
+      parent: Some(value: owner)
+    )
+  }
+  return Unit
+}
+
+fn collect_grants(
+  ctx: inout context.Context,
+  m: defs.ModuleRecord,
+  decl: ast.CapabilityDecl
+) -> Unit may mutate, alloc {
+  let own: Text = last_segment(name: m.name)
+  for g: ast.Grant in decl.grant_list {
+    let name: Text = loader.qname_text(q: g.effect.name)
+    if not defs.is_prim_effect(name: name) {
+      let segs: List[ast.Ident] = g.effect.name.segments
+      var ok: Bool = List.len(xs: segs) == 2
+      if ok {
+        ok = List.get(xs: segs, i: 0).text == own
+      }
+      if not ok {
+        context.report(
+          ctx: inout ctx,
+          d: report.diagnostic(
+            code: "E0202",
+            file: m.file,
+            span: g.effect.span,
+            def_name: Some(value: decl.name.text),
+            detail: "a capability in module `" ++ m.name ++ "` may grant a primitive effect or a resource effect named `" ++ own ++ ".<name>`"
+          )
+        )
+      } else {
+        var current: List[Text] = []
+        match Map.find(d: ctx.granted, key: m.id) with
+        | Some(value) -> current = value
+        | None -> current = []
+        var table: Dict[Int, List[Text]] = ctx.granted
+        Map.set(d: inout table, key: m.id, value: List.append(xs: current, x: name))
+      }
+    }
+  }
+  return Unit
+}
+
+fn collect_item(
+  ctx: inout context.Context,
+  m: defs.ModuleRecord,
+  members: defs.Members,
+  item: ast.Item
+) -> Unit may mutate, alloc {
+  match item with
+  | ast.FnItem(decl) -> {
+    let id: Int = add(
+      ctx: inout ctx,
+      m: m,
+      kind: defs.Fn,
+      node: defs.FnNode(decl: decl),
+      name: decl.name,
+      key: defs.node_key(file: m.file, tag: defs.tag_item, span: decl.span),
+      is_pub: decl.vis.is_pub,
+      is_sealed: decl.vis.is_sealed,
+      is_intrinsic: decl.is_intrinsic,
+      parent: None
+    )
+    declare(ctx: inout ctx, table: members.values, id: id, what: "function")
+  }
+  | ast.ConstItem(decl) -> {
+    let id: Int = add(
+      ctx: inout ctx,
+      m: m,
+      kind: defs.Const,
+      node: defs.ConstNode(decl: decl),
+      name: decl.name,
+      key: defs.node_key(file: m.file, tag: defs.tag_item, span: decl.span),
+      is_pub: decl.vis.is_pub,
+      is_sealed: false,
+      is_intrinsic: false,
+      parent: None
+    )
+    declare(ctx: inout ctx, table: members.values, id: id, what: "constant")
+  }
+  | ast.TypeAliasItem(decl) -> {
+    let id: Int = add(
+      ctx: inout ctx,
+      m: m,
+      kind: defs.Alias,
+      node: defs.AliasNode(decl: decl),
+      name: decl.name,
+      key: defs.node_key(file: m.file, tag: defs.tag_item, span: decl.span),
+      is_pub: decl.vis.is_pub,
+      is_sealed: decl.vis.is_sealed,
+      is_intrinsic: false,
+      parent: None
+    )
+    declare_type(ctx: inout ctx, table: members.types, id: id)
+  }
+  | ast.IntrinsicTypeItem(decl) -> {
+    let id: Int = add(
+      ctx: inout ctx,
+      m: m,
+      kind: defs.IntrinsicType,
+      node: defs.IntrinsicTypeNode(decl: decl),
+      name: decl.name,
+      key: defs.node_key(file: m.file, tag: defs.tag_item, span: decl.span),
+      is_pub: decl.vis.is_pub,
+      is_sealed: false,
+      is_intrinsic: true,
+      parent: None
+    )
+    declare_type(ctx: inout ctx, table: members.types, id: id)
+  }
+  | ast.RecordItem(decl) -> {
+    let id: Int = add(
+      ctx: inout ctx,
+      m: m,
+      kind: defs.Record,
+      node: defs.RecordNode(decl: decl),
+      name: decl.name,
+      key: defs.node_key(file: m.file, tag: defs.tag_item, span: decl.span),
+      is_pub: decl.vis.is_pub,
+      is_sealed: decl.vis.is_sealed,
+      is_intrinsic: false,
+      parent: None
+    )
+    declare_type(ctx: inout ctx, table: members.types, id: id)
+    collect_fields(
+      ctx: inout ctx,
+      m: m,
+      owner: id,
+      owner_name: decl.name.text,
+      fields: decl.fields,
+      is_pub: decl.vis.is_pub
+    )
+  }
+  | ast.UnionItem(decl) -> {
+    let id: Int = add(
+      ctx: inout ctx,
+      m: m,
+      kind: defs.Union,
+      node: defs.UnionNode(decl: decl),
+      name: decl.name,
+      key: defs.node_key(file: m.file, tag: defs.tag_item, span: decl.span),
+      is_pub: decl.vis.is_pub,
+      is_sealed: decl.vis.is_sealed,
+      is_intrinsic: false,
+      parent: None
+    )
+    declare_type(ctx: inout ctx, table: members.types, id: id)
+    for v: ast.Variant in decl.variants {
+      let vid: Int = add(
+        ctx: inout ctx,
+        m: m,
+        kind: defs.Variant,
+        node: defs.VariantNode(decl: v),
+        name: v.name,
+        key: defs.node_key(file: m.file, tag: defs.tag_sig, span: v.span),
+        is_pub: decl.vis.is_pub,
+        is_sealed: decl.vis.is_sealed,
+        is_intrinsic: false,
+        parent: Some(value: id)
+      )
+      declare(ctx: inout ctx, table: members.variants, id: vid, what: "variant")
+      collect_fields(
+        ctx: inout ctx,
+        m: m,
+        owner: vid,
+        owner_name: decl.name.text,
+        fields: v.fields,
+        is_pub: decl.vis.is_pub
+      )
+    }
+  }
+  | ast.InterfaceItem(decl) -> {
+    let id: Int = add(
+      ctx: inout ctx,
+      m: m,
+      kind: defs.Interface,
+      node: defs.InterfaceNode(decl: decl),
+      name: decl.name,
+      key: defs.node_key(file: m.file, tag: defs.tag_item, span: decl.span),
+      is_pub: decl.vis.is_pub,
+      is_sealed: false,
+      is_intrinsic: false,
+      parent: None
+    )
+    declare(ctx: inout ctx, table: members.interfaces, id: id, what: "interface")
+    var seen: Dict[Text, Bool] = Map.dict()
+    for member: ast.IfaceItem in decl.items {
+      let mname: ast.Ident = iface_item_name(member: member)
+      if Map.contains(d: seen, key: mname.text) {
+        context.report(
+          ctx: inout ctx,
+          d: report.diagnostic(
+            code: "E0107",
+            file: m.file,
+            span: mname.span,
+            def_name: Some(value: decl.name.text),
+            detail: "`" ++ mname.text ++ "` is declared twice in this interface"
+          )
+        )
+      }
+      Map.set(d: inout seen, key: mname.text, value: true)
+      var kind: defs.DefKind = defs.Law
+      if member is ast.IfaceFnItem {
+        kind = defs.IfaceFn
+      }
+      let mid: Int = add(
+        ctx: inout ctx,
+        m: m,
+        kind: kind,
+        node: iface_item_node(member: member),
+        name: mname,
+        key: defs.node_key(file: m.file, tag: defs.tag_sig, span: iface_item_span(member: member)),
+        is_pub: decl.vis.is_pub,
+        is_sealed: false,
+        is_intrinsic: false,
+        parent: Some(value: id)
+      )
+    }
+  }
+  | ast.ImplItem(decl) -> {
+    let id: Int = add(
+      ctx: inout ctx,
+      m: m,
+      kind: defs.Impl,
+      node: defs.ImplNode(decl: decl),
+      name: decl.iface,
+      key: defs.node_key(file: m.file, tag: defs.tag_item, span: decl.span),
+      is_pub: false,
+      is_sealed: false,
+      is_intrinsic: false,
+      parent: None
+    )
+    var seen: Dict[Text, Bool] = Map.dict()
+    for f: ast.FnDecl in decl.fns {
+      if Map.contains(d: seen, key: f.name.text) {
+        context.report(
+          ctx: inout ctx,
+          d: report.diagnostic(
+            code: "E0107",
+            file: m.file,
+            span: f.name.span,
+            def_name: Some(value: decl.iface.text),
+            detail: "`" ++ f.name.text ++ "` is declared twice in this impl"
+          )
+        )
+      }
+      Map.set(d: inout seen, key: f.name.text, value: true)
+      let fid: Int = add(
+        ctx: inout ctx,
+        m: m,
+        kind: defs.Fn,
+        node: defs.FnNode(decl: f),
+        name: f.name,
+        key: defs.node_key(file: m.file, tag: defs.tag_item, span: f.span),
+        is_pub: true,
+        is_sealed: false,
+        is_intrinsic: f.is_intrinsic,
+        parent: Some(value: id)
+      )
+    }
+  }
+  | ast.ClaimItem(decl) -> {
+    let id: Int = add(
+      ctx: inout ctx,
+      m: m,
+      kind: defs.Claim,
+      node: defs.ClaimNode(decl: decl),
+      name: decl.name,
+      key: defs.node_key(file: m.file, tag: defs.tag_item, span: decl.span),
+      is_pub: decl.vis.is_pub,
+      is_sealed: false,
+      is_intrinsic: false,
+      parent: None
+    )
+    declare(ctx: inout ctx, table: members.claim_table, id: id, what: "claim")
+  }
+  | ast.CapabilityItem(decl) -> {
+    let id: Int = add(
+      ctx: inout ctx,
+      m: m,
+      kind: defs.Capability,
+      node: defs.CapabilityNode(decl: decl),
+      name: decl.name,
+      key: defs.node_key(file: m.file, tag: defs.tag_item, span: decl.span),
+      is_pub: decl.vis.is_pub,
+      is_sealed: false,
+      is_intrinsic: false,
+      parent: None
+    )
+    declare_type(ctx: inout ctx, table: members.types, id: id)
+    collect_grants(ctx: inout ctx, m: m, decl: decl)
+  }
+  | ast.PathItem(decl) -> {
+    let id: Int = add(
+      ctx: inout ctx,
+      m: m,
+      kind: defs.Path,
+      node: defs.PathNode(decl: decl),
+      name: decl.name,
+      key: defs.node_key(file: m.file, tag: defs.tag_item, span: decl.span),
+      is_pub: false,
+      is_sealed: false,
+      is_intrinsic: false,
+      parent: None
+    )
+    declare(ctx: inout ctx, table: members.paths, id: id, what: "path")
+  }
+  | ast.PolicyItem(decl) -> {
+    let id: Int = add(
+      ctx: inout ctx,
+      m: m,
+      kind: defs.Policy,
+      node: defs.PolicyNode(decl: decl),
+      name: decl.name,
+      key: defs.node_key(file: m.file, tag: defs.tag_item, span: decl.span),
+      is_pub: false,
+      is_sealed: false,
+      is_intrinsic: false,
+      parent: None
+    )
+    declare(ctx: inout ctx, table: members.policies, id: id, what: "policy")
+  }
+  | ast.ExampleItem(decl) -> {
+    let id: Int = add(
+      ctx: inout ctx,
+      m: m,
+      kind: defs.Example,
+      node: defs.ExampleNode(decl: decl),
+      name: decl.name,
+      key: defs.node_key(file: m.file, tag: defs.tag_item, span: decl.span),
+      is_pub: false,
+      is_sealed: false,
+      is_intrinsic: false,
+      parent: None
+    )
+    declare(ctx: inout ctx, table: members.tests, id: id, what: "example")
+  }
+  | ast.PropertyItem(decl) -> {
+    let id: Int = add(
+      ctx: inout ctx,
+      m: m,
+      kind: defs.Property,
+      node: defs.PropertyNode(decl: decl),
+      name: decl.name,
+      key: defs.node_key(file: m.file, tag: defs.tag_item, span: decl.span),
+      is_pub: false,
+      is_sealed: false,
+      is_intrinsic: false,
+      parent: None
+    )
+    declare(ctx: inout ctx, table: members.tests, id: id, what: "property")
+  }
+  return Unit
+}
+
+fn collect(ctx: inout context.Context, m: defs.ModuleRecord) -> Unit may mutate, alloc {
+  let members: defs.Members = context.members_of(ctx: inout ctx, module: m.id)
+  -- `{ ... }` is the interface rendering of a body (§11.1), not source.
+  for item: ast.Item in m.tree.items {
+    match item with
+    | ast.FnItem(decl) -> check_elided(ctx: inout ctx, m: m, f: decl)
+    | ast.ImplItem(decl) -> {
+      for f: ast.FnDecl in decl.fns {
+        check_elided(ctx: inout ctx, m: m, f: f)
+      }
+    }
+    | _ -> skip()
+  }
+  for item: ast.Item in m.tree.items {
+    collect_item(ctx: inout ctx, m: m, members: members, item: item)
+  }
+  return Unit
+}
+
+fn skip() -> Unit {
+  return Unit
+}
+
+-- Per-module resolution ----------------------------------------------------------
+pub record Resolver {
+  m: defs.ModuleRecord
+  module_scope: Scope
+  current_def: Option[Text]
+  -- The function whose body is being resolved: the parent of `verify` definitions.
+  current_fn_def: Option[Int]
+  in_where: Bool
+  in_ensures: Bool
+  inout_params: List[Text]
+  aliases: Dict[Text, Int]
+}
+
+fn rep(
+  r: Resolver,
+  ctx: inout context.Context,
+  code: Text,
+  at: ast.Span,
+  detail: Text
+) -> Unit may mutate, alloc {
+  context.report(
+    ctx: inout ctx,
+    d: report.diagnostic(
+      code: code,
+      file: r.m.file,
+      span: at,
+      def_name: r.current_def,
+      detail: detail
+    )
+  )
+  return Unit
+}
+
+fn key(r: Resolver, tag: Int, span: ast.Span) -> Int {
+  return defs.node_key(file: r.m.file, tag: tag, span: span)
+}
+
+fn members_of(ctx: inout context.Context, mod: Int) -> defs.Members may mutate, alloc {
+  return context.members_of(ctx: inout ctx, module: mod)
+}
+
+fn build_module_scope(r: inout Resolver, ctx: inout context.Context) -> Unit may mutate, alloc {
+  let s: Scope = r.module_scope
+  -- Prelude types and variants have the lowest priority; this module's override them.
+  for pre: Int in r.m.implicit {
+    let mem: defs.Members = members_of(ctx: inout ctx, mod: pre)
+    for name: Text in Map.keys(d: mem.types) {
+      let id: Int = find_or(d: mem.types, key: name)
+      if context.get_def(ctx: ctx, id: id).is_pub {
+        scope_set_type(s: s, name: name, owner: defs.DefOwner(def: id))
+      }
+    }
+    for name: Text in Map.keys(d: mem.interfaces) {
+      let id: Int = find_or(d: mem.interfaces, key: name)
+      if context.get_def(ctx: ctx, id: id).is_pub {
+        scope_set_type(s: s, name: name, owner: defs.DefOwner(def: id))
+      }
+    }
+  }
+  let mem: defs.Members = members_of(ctx: inout ctx, mod: r.m.id)
+  for name: Text in Map.keys(d: mem.types) {
+    scope_set_type(s: s, name: name, owner: defs.DefOwner(def: find_or(d: mem.types, key: name)))
+  }
+  for name: Text in Map.keys(d: mem.interfaces) {
+    scope_set_type(
+      s: s,
+      name: name,
+      owner: defs.DefOwner(def: find_or(d: mem.interfaces, key: name))
+    )
+  }
+  for name: Text in Map.keys(d: mem.values) {
+    let id: Int = find_or(d: mem.values, key: name)
+    let k: defs.DefKind = kind_of(ctx: ctx, id: id)
+    if k == defs.Fn or k == defs.Const {
+      scope_set_value(s: s, name: name, id: id)
+    }
+  }
+  for imp: defs.ImportRecord in r.m.imports {
+    if Map.contains(d: r.aliases, key: imp.alias) {
+      rep(
+        r: r,
+        ctx: inout ctx,
+        code: "E0107",
+        at: imp.span,
+        detail: "two imports end in `" ++ imp.alias ++ "`; the alias must be unique"
+      )
+    } else {
+      var aliases: Dict[Text, Int] = r.aliases
+      Map.set(d: inout aliases, key: imp.alias, value: imp.mod)
+    }
+  }
+  return Unit
+}
+
+-- Effects ---------------------------------------------------------------------
+fn effect_of(
+  r: Resolver,
+  ctx: inout context.Context,
+  e: ast.EffectRef,
+  scope: Scope,
+  allow_recover: Bool
+) -> Option[defs.Effect] may mutate, alloc {
+  let name: Text = loader.qname_text(q: e.name)
+  if defs.is_prim_effect(name: name) {
+    return Some(value: defs.PrimEffect(name: name))
+  }
+  let segs: List[ast.Ident] = e.name.segments
+  if List.len(xs: segs) == 0 {
+    return None
+  }
+  let head: ast.Ident = List.get(xs: segs, i: 0)
+  if List.len(xs: segs) == 1 {
+    if name == "recover" and allow_recover {
+      return None
+    }
+    match lookup_effect_param(s: scope, name: head.text) with
+    | Some(value) -> return Some(value: defs.ParamEffect(def: value))
+    | None -> skip()
+    rep(
+      r: r,
+      ctx: inout ctx,
+      code: "E0202",
+      at: e.span,
+      detail: "`" ++ name ++ "` is neither a primitive effect nor an effect parameter in scope"
+    )
+    return None
+  }
+  if List.len(xs: segs) == 2 {
+    let own: Text = last_segment(name: r.m.name)
+    var mod: Option[Int] = Map.find(d: r.aliases, key: head.text)
+    if head.text == own {
+      mod = Some(value: r.m.id)
+    }
+    match mod with
+    | Some(value) -> {
+      if granted_has(ctx: ctx, mod: value, name: name) {
+        return Some(value: defs.ResourceEffect(mod: value, name: name))
+      }
+      rep(
+        r: r,
+        ctx: inout ctx,
+        code: "E0202",
+        at: e.span,
+        detail: "no capability of module `" ++ context.module_name(
+          ctx: ctx,
+          id: value
+        ) ++ "` grants `" ++ name ++ "`"
+      )
+      return None
+    }
+    | None -> {
+      rep(
+        r: r,
+        ctx: inout ctx,
+        code: "E0202",
+        at: e.span,
+        detail: "`" ++ head.text ++ "` is not an imported module alias, so `" ++ name ++ "` names no effect"
+      )
+      return None
+    }
+  }
+  rep(r: r, ctx: inout ctx, code: "E0202", at: e.span, detail: "`" ++ name ++ "` is not an effect")
+  return None
+}
+
+-- Resolves an effect list: a primitive effect, an effect parameter in scope,
+-- or a resource effect `a.b` granted by a capability of the module aliased
+-- `a` (or of this module, when its name ends in `a`). `allow_recover` admits
+-- `recover` in a path's `forbid` clause (§10.2).
+fn res_effects(
+  r: Resolver,
+  ctx: inout context.Context,
+  refs: List[ast.EffectRef],
+  scope: Scope,
+  allow_recover: Bool
+) -> Unit may mutate, alloc {
+  for e: ast.EffectRef in refs {
+    match effect_of(r: r, ctx: inout ctx, e: e, scope: scope, allow_recover: allow_recover) with
+    | Some(value) -> context.set_ref(
+      ctx: inout ctx,
+      key: key(r: r, tag: defs.tag_sig, span: e.span),
+      res: defs.EffectRes(effect: value)
+    )
+    | None -> skip()
+  }
+  return Unit
+}
+
+-- Lookups ---------------------------------------------------------------------
+-- Bare variant lookup: this module, then the prelude, then imports. None when unknown; reports E0108 when ambiguous.
+fn lookup_variant(
+  r: Resolver,
+  ctx: inout context.Context,
+  name: Text,
+  at: ast.Span
+) -> Option[Int] may mutate, alloc {
+  match Map.find(d: members_of(ctx: inout ctx, mod: r.m.id).variants, key: name) with
+  | Some(value) -> return Some(value: value)
+  | None -> skip()
+  var found: Builder[Int] = List.builder()
+  for pre: Int in r.m.implicit {
+    let v: Int = find_or(d: members_of(ctx: inout ctx, mod: pre).variants, key: name)
+    if v >= 0 and context.get_def(ctx: ctx, id: v).is_pub {
+      List.push(b: inout found, x: v)
+    }
+  }
+  if List.built(b: found) == 1 {
+    return Some(value: List.at(b: found, i: 0))
+  }
+  for imp: defs.ImportRecord in r.m.imports {
+    let v: Int = find_or(d: members_of(ctx: inout ctx, mod: imp.mod).variants, key: name)
+    if v >= 0 and context.get_def(ctx: ctx, id: v).is_pub {
+      List.push(b: inout found, x: v)
+    }
+  }
+  if List.built(b: found) == 0 {
+    return None
+  }
+  if List.built(b: found) > 1 {
+    var owners: Builder[Text] = List.builder()
+    for v: Int in List.finish(b: found) {
+      var owner: Int = v
+      match context.get_def(ctx: ctx, id: v).parent with
+      | Some(value) -> owner = value
+      | None -> owner = v
+      List.push(b: inout owners, x: context.qualified_name(ctx: ctx, id: owner))
+    }
+    rep(
+      r: r,
+      ctx: inout ctx,
+      code: "E0108",
+      at: at,
+      detail: "`" ++ name ++ "` is a variant of " ++ Text.join(
+        parts: List.finish(b: owners),
+        sep: " and "
+      ) ++ "; qualify it with the module alias"
+    )
+  }
+  return Some(value: List.at(b: found, i: 0))
+}
+
+-- Adds a local value binding, rejecting shadowing of another local or
+-- parameter. Module-level functions and constants may be shadowed.
+fn bind_value(
+  r: Resolver,
+  ctx: inout context.Context,
+  scope: Scope,
+  kind: defs.DefKind,
+  node: defs.DeclNode,
+  name: ast.Ident,
+  key: Int,
+  is_inout: Bool
+) -> Int may mutate, alloc {
+  match lookup_value(s: scope, name: name.text) with
+  | Some(value) -> {
+    let prev: defs.Def = context.get_def(ctx: ctx, id: value)
+    if prev.frame >= 0 {
+      rep(
+        r: r,
+        ctx: inout ctx,
+        code: "E0113",
+        at: name.span,
+        detail: "`" ++ name.text ++ "` is already bound (" ++ defs.kind_text(
+          k: prev.kind
+        ) ++ "); choose another name"
+      )
+    }
+  }
+  | None -> skip()
+  let id: Int = context.def_count(ctx: ctx)
+  context.add_def(
+    ctx: inout ctx,
+    d: defs.Def {
+      id: id,
+      kind: kind,
+      node: node,
+      name: name.text,
+      mod: r.m.id,
+      file: r.m.file,
+      key: key,
+      span: name.span,
+      is_pub: false,
+      is_sealed: false,
+      is_intrinsic: false,
+      parent: None,
+      frame: scope.frame,
+      is_inout: is_inout
+    }
+  )
+  scope_set_value(s: scope, name: name.text, id: id)
+  return id
+}
+
+fn visible(
+  r: Resolver,
+  ctx: inout context.Context,
+  d: defs.Def,
+  at: ast.Span,
+  what: Text
+) -> Bool may mutate, alloc {
+  if d.is_pub or d.mod == r.m.id {
+    return true
+  }
+  rep(
+    r: r,
+    ctx: inout ctx,
+    code: "E0110",
+    at: at,
+    detail: what ++ " `" ++ context.qualified_name(
+      ctx: ctx,
+      id: d.id
+    ) ++ "` is private to module `" ++ context.module_name(ctx: ctx, id: d.mod) ++ "`"
+  )
+  return false
+}
+
+fn check_sealed(
+  r: Resolver,
+  ctx: inout context.Context,
+  d: defs.Def,
+  at: ast.Span
+) -> Unit may mutate, alloc {
+  var owner: defs.Def = d
+  if d.kind == defs.Variant {
+    match d.parent with
+    | Some(value) -> owner = context.get_def(ctx: ctx, id: value)
+    | None -> owner = d
+  }
+  if owner.is_sealed and owner.mod != r.m.id and not r.m.tree.is_test {
+    rep(
+      r: r,
+      ctx: inout ctx,
+      code: "E0111",
+      at: at,
+      detail: "`" ++ context.qualified_name(
+        ctx: ctx,
+        id: owner.id
+      ) ++ "` is sealed; only module `" ++ context.module_name(
+        ctx: ctx,
+        id: owner.mod
+      ) ++ "` may construct it"
+    )
+  }
+  return Unit
+}
+
+-- Claims ----------------------------------------------------------------------
+-- True iff `q` names a visible claim, without reporting.
+fn claim_exists(r: Resolver, ctx: inout context.Context, q: ast.QName) -> Bool may mutate, alloc {
+  let n: Int = List.len(xs: q.segments)
+  if n == 0 {
+    return false
+  }
+  let last: ast.Ident = List.get(xs: q.segments, i: n - 1)
+  if n == 1 {
+    if Map.contains(d: members_of(ctx: inout ctx, mod: r.m.id).claim_table, key: last.text) {
+      return true
+    }
+    for imp: defs.ImportRecord in r.m.imports {
+      let c: Int = find_or(d: members_of(ctx: inout ctx, mod: imp.mod).claim_table, key: last.text)
+      if c >= 0 and context.get_def(ctx: ctx, id: c).is_pub {
+        return true
+      }
+    }
+    return false
+  }
+  if n != 2 {
+    return false
+  }
+  let head: ast.Ident = List.get(xs: q.segments, i: 0)
+  for imp: defs.ImportRecord in r.m.imports {
+    if imp.alias == head.text {
+      let c: Int = find_or(d: members_of(ctx: inout ctx, mod: imp.mod).claim_table, key: last.text)
+      return c >= 0 and context.get_def(ctx: ctx, id: c).is_pub
+    }
+  }
+  return false
+}
+
+fn module_of_path(
+  r: Resolver,
+  ctx: inout context.Context,
+  segments: List[ast.Ident]
+) -> Option[Int] may mutate, alloc {
+  if List.len(xs: segments) != 1 {
+    var parts: Builder[Text] = List.builder()
+    for s: ast.Ident in segments {
+      List.push(b: inout parts, x: s.text)
+    }
+    let text: Text = Text.join(parts: List.finish(b: parts), sep: ".")
+    match Map.find(d: ctx.by_name, key: text) with
+    | Some(value) -> {
+      var imported: Bool = value == r.m.id
+      for imp: defs.ImportRecord in r.m.imports {
+        if imp.mod == value {
+          imported = true
+        }
+      }
+      if imported {
+        return Some(value: value)
+      }
+    }
+    | None -> skip()
+    var at: ast.Span = r.m.tree.span
+    if List.len(xs: segments) > 0 {
+      at = List.get(xs: segments, i: 0).span
+    }
+    rep(
+      r: r,
+      ctx: inout ctx,
+      code: "E0105",
+      at: at,
+      detail: "`" ++ text ++ "` is not an imported module"
+    )
+    return None
+  }
+  let head: ast.Ident = List.get(xs: segments, i: 0)
+  match Map.find(d: r.aliases, key: head.text) with
+  | Some(value) -> return Some(value: value)
+  | None -> {
+    rep(
+      r: r,
+      ctx: inout ctx,
+      code: "E0105",
+      at: head.span,
+      detail: "`" ++ head.text ++ "` is not an imported module alias"
+    )
+    return None
+  }
+}
+
+-- Resolves a claim name (`Idempotent` or `payments.Idempotent`) to its definition, recording it at `at` when given.
+fn claim_ref(
+  r: Resolver,
+  ctx: inout context.Context,
+  q: ast.QName,
+  at: Option[Int]
+) -> Option[Int] may mutate, alloc {
+  let n: Int = List.len(xs: q.segments)
+  if n == 0 {
+    return None
+  }
+  let last: ast.Ident = List.get(xs: q.segments, i: n - 1)
+  var found: Int = -1
+  if n == 1 {
+    found = find_or(d: members_of(ctx: inout ctx, mod: r.m.id).claim_table, key: last.text)
+    if found < 0 {
+      for imp: defs.ImportRecord in r.m.imports {
+        let c: Int = find_or(
+          d: members_of(ctx: inout ctx, mod: imp.mod).claim_table,
+          key: last.text
+        )
+        if c >= 0 and context.get_def(ctx: ctx, id: c).is_pub {
+          found = c
+        }
+      }
+    }
+  } else {
+    match module_of_path(
+      r: r,
+      ctx: inout ctx,
+      segments: List.slice(xs: q.segments, from: 0, to: n - 1)
+    ) with
+    | None -> return None
+    | Some(value) -> {
+      found = find_or(d: members_of(ctx: inout ctx, mod: value).claim_table, key: last.text)
+      if found >= 0 and not visible(
+        r: r,
+        ctx: inout ctx,
+        d: context.get_def(ctx: ctx, id: found),
+        at: q.span,
+        what: "claim"
+      ) {
+        return None
+      }
+    }
+  }
+  if found < 0 {
+    rep(
+      r: r,
+      ctx: inout ctx,
+      code: "E0105",
+      at: q.span,
+      detail: "unknown claim `" ++ loader.qname_text(q: q) ++ "`"
+    )
+    return None
+  }
+  match at with
+  | Some(value) -> context.set_ref(ctx: inout ctx, key: value, res: defs.DefRes(def: found))
+  | None -> skip()
+  return Some(value: found)
+}
+
+fn res_claim_pred(
+  r: Resolver,
+  ctx: inout context.Context,
+  p: ast.ClaimPred
+) -> Unit may mutate, alloc
+  decreases p
+{
+  match p with
+  | ast.ClaimAtom(name, span) -> {
+    let n: Int = List.len(xs: name.segments)
+    var is_claim: Bool = false
+    if n > 0 {
+      is_claim = starts_upper(t: List.get(xs: name.segments, i: n - 1).text)
+    }
+    if is_claim or claim_exists(r: r, ctx: inout ctx, q: name) {
+      let c: Option[Int] = claim_ref(
+        r: r,
+        ctx: inout ctx,
+        q: name,
+        at: Some(value: key(r: r, tag: defs.tag_misc, span: span))
+      )
+    } else {
+      match effect_of(
+        r: r,
+        ctx: inout ctx,
+        e: ast.EffectRef { name: name, span: span },
+        scope: r.module_scope,
+        allow_recover: false
+      ) with
+      | Some(value) -> context.set_ref(
+        ctx: inout ctx,
+        key: key(r: r, tag: defs.tag_misc, span: span),
+        res: defs.EffectRes(effect: value)
+      )
+      | None -> skip()
+    }
+  }
+  | ast.ClaimEffectsEq(effects, span) -> res_effects(
+    r: r,
+    ctx: inout ctx,
+    refs: effects,
+    scope: r.module_scope,
+    allow_recover: false
+  )
+  | ast.ClaimNot(operand, span) -> res_claim_pred(r: r, ctx: inout ctx, p: operand)
+  | ast.ClaimAnd(operands, span) -> {
+    for o: ast.ClaimPred in operands {
+      res_claim_pred(r: r, ctx: inout ctx, p: o)
+    }
+  }
+  | ast.ClaimOr(operands, span) -> {
+    for o: ast.ClaimPred in operands {
+      res_claim_pred(r: r, ctx: inout ctx, p: o)
+    }
+  }
+  return Unit
+}
+
+-- Signatures ---------------------------------------------------------------------
+fn bind_type_param(
+  r: Resolver,
+  ctx: inout context.Context,
+  scope: Scope,
+  name: ast.Ident,
+  key: Int,
+  node: defs.DeclNode,
+  parent: Option[Int]
+) -> Int may mutate, alloc {
+  let id: Int = context.def_count(ctx: ctx)
+  context.add_def(
+    ctx: inout ctx,
+    d: defs.Def {
+      id: id,
+      kind: defs.TypeParam,
+      node: node,
+      name: name.text,
+      mod: r.m.id,
+      file: r.m.file,
+      key: key,
+      span: name.span,
+      is_pub: false,
+      is_sealed: false,
+      is_intrinsic: false,
+      parent: parent,
+      frame: scope.frame,
+      is_inout: false
+    }
+  )
+  if Map.contains(d: scope.types, key: name.text) {
+    rep(
+      r: r,
+      ctx: inout ctx,
+      code: "E0107",
+      at: name.span,
+      detail: "type parameter `" ++ name.text ++ "` is declared twice"
+    )
+  }
+  scope_set_type(s: scope, name: name.text, owner: defs.DefOwner(def: id))
+  return id
+}
+
+fn interface_def(ctx: context.Context, owner: Option[defs.TypeOwner]) -> Option[Int] {
+  match owner with
+  | None -> return None
+  | Some(value) -> {
+    if is_interface(ctx: ctx, o: value) {
+      return owner_def(o: value)
+    }
+    return None
+  }
+}
+
+fn res_tparams(
+  r: Resolver,
+  ctx: inout context.Context,
+  ps: List[ast.TParam],
+  scope: Scope
+) -> Unit may mutate, alloc
+  decreases ps
+{
+  for p: ast.TParam in ps {
+    match p with
+    | ast.TypeParam(name, bound, span) -> {
+      let id: Int = bind_type_param(
+        r: r,
+        ctx: inout ctx,
+        scope: scope,
+        parent: None,
+        node: defs.TParamNode(decl: p),
+        name: name,
+        key: key(r: r, tag: defs.tag_sig, span: span)
+      )
+      match bound with
+      | Some(value) -> {
+        let iface: Int = or_neg(
+          o: interface_def(ctx: ctx, owner: lookup_type(s: scope, name: value.text))
+        )
+        if iface >= 0 {
+          context.set_ref(
+            ctx: inout ctx,
+            key: key(r: r, tag: defs.tag_sig, span: span),
+            res: defs.DefRes(def: iface)
+          )
+        } else {
+          rep(
+            r: r,
+            ctx: inout ctx,
+            code: "E0106",
+            at: value.span,
+            detail: "`" ++ value.text ++ "` is not an interface in scope"
+          )
+        }
+      }
+      | None -> skip()
+    }
+    | ast.ConstParam(name, ty, span) -> {
+      res_type(r: r, ctx: inout ctx, t: ty, scope: scope, as_arg: false)
+      let id: Int = bind_value(
+        r: r,
+        ctx: inout ctx,
+        scope: scope,
+        kind: defs.ConstParam,
+        node: defs.TParamNode(decl: p),
+        name: name,
+        key: key(r: r, tag: defs.tag_sig, span: span),
+        is_inout: false
+      )
+    }
+    | ast.EffectParam(name, span) -> {
+      let id: Int = context.def_count(ctx: ctx)
+      context.add_def(
+        ctx: inout ctx,
+        d: defs.Def {
+          id: id,
+          kind: defs.EffectParam,
+          node: defs.TParamNode(decl: p),
+          name: name.text,
+          mod: r.m.id,
+          file: r.m.file,
+          key: key(r: r, tag: defs.tag_sig, span: span),
+          span: name.span,
+          is_pub: false,
+          is_sealed: false,
+          is_intrinsic: false,
+          parent: None,
+          frame: scope.frame,
+          is_inout: false
+        }
+      )
+      if Map.contains(d: scope.effects, key: name.text) {
+        rep(
+          r: r,
+          ctx: inout ctx,
+          code: "E0107",
+          at: name.span,
+          detail: "effect parameter `" ++ name.text ++ "` is declared twice"
+        )
+      }
+      scope_set_effect(s: scope, name: name.text, id: id)
+    }
+  }
+  return Unit
+}
+
+-- Binds parameters as values when `bind` is true (function types only resolve
+-- the types). A parameter's refinement may reference earlier parameters.
+fn res_params(
+  r: Resolver,
+  ctx: inout context.Context,
+  ps: List[ast.Param],
+  scope: Scope,
+  bind: Bool
+) -> Unit may mutate, alloc
+  decreases ps
+{
+  var seen: Dict[Text, Bool] = Map.dict()
+  for p: ast.Param in ps {
+    res_type(r: r, ctx: inout ctx, t: p.ty, scope: scope, as_arg: false)
+    if Map.contains(d: seen, key: p.name.text) {
+      rep(
+        r: r,
+        ctx: inout ctx,
+        code: "E0107",
+        at: p.name.span,
+        detail: "parameter `" ++ p.name.text ++ "` is declared twice"
+      )
+    } else {
+      Map.set(d: inout seen, key: p.name.text, value: true)
+      if bind {
+        let id: Int = bind_value(
+          r: r,
+          ctx: inout ctx,
+          scope: scope,
+          kind: defs.Param,
+          node: defs.ParamNode(decl: p),
+          name: p.name,
+          key: key(r: r, tag: defs.tag_sig, span: p.span),
+          is_inout: p.is_inout
+        )
+      }
+    }
+  }
+  return Unit
+}
+
+fn owner_res(o: defs.TypeOwner) -> defs.Resolution {
+  match o with
+  | defs.DefOwner(def) -> return defs.DefRes(def: def)
+  | defs.PrimOwner(name) -> return defs.PrimRes(name: name)
+}
+
+-- Resolves a type. In argument position (`as_arg`) an uppercase name that is
+-- not a type may be a nullary variant used as a constant index (`Db[ReadOnly]`).
+fn res_type(
+  r: Resolver,
+  ctx: inout context.Context,
+  t: ast.Type,
+  scope: Scope,
+  as_arg: Bool
+) -> Unit may mutate, alloc
+  decreases t
+{
+  match t with
+  | ast.FnType(params, ret, effects, span) -> {
+    res_params(r: r, ctx: inout ctx, ps: params, scope: scope, bind: false)
+    res_type(r: r, ctx: inout ctx, t: ret, scope: scope, as_arg: false)
+    res_effects(r: r, ctx: inout ctx, refs: effects, scope: scope, allow_recover: false)
+  }
+  | ast.NamedType(name, args, where_, span) -> {
+    match type_name(
+      r: r,
+      ctx: inout ctx,
+      q: name,
+      scope: scope,
+      allow_variant: as_arg and List.len(xs: args) == 0 and where_ is None
+    ) with
+    | Some(value) -> context.set_ref(
+      ctx: inout ctx,
+      key: key(r: r, tag: defs.tag_type, span: span),
+      res: owner_res(o: value)
+    )
+    | None -> skip()
+    for a: ast.TypeArg in args {
+      match a with
+      | ast.TypeArgType(_, ty, _) -> res_type(
+        r: r,
+        ctx: inout ctx,
+        t: ty,
+        scope: scope,
+        as_arg: true
+      )
+      | ast.TypeArgConst(_, expr, _) -> res_expr(r: r, ctx: inout ctx, e: expr, scope: scope)
+    }
+    match where_ with
+    | Some(value) -> {
+      let inner: Resolver = { r with in_where: true }
+      res_expr(r: inner, ctx: inout ctx, e: value, scope: scope)
+    }
+    | None -> skip()
+  }
+  return Unit
+}
+
+fn type_name(
+  r: Resolver,
+  ctx: inout context.Context,
+  q: ast.QName,
+  scope: Scope,
+  allow_variant: Bool
+) -> Option[defs.TypeOwner] may mutate, alloc {
+  let n: Int = List.len(xs: q.segments)
+  if n == 0 {
+    return None
+  }
+  let last: ast.Ident = List.get(xs: q.segments, i: n - 1)
+  if n == 1 {
+    match lookup_type(s: scope, name: last.text) with
+    | Some(value) -> return Some(value: value)
+    | None -> skip()
+    if allow_variant {
+      match lookup_variant(r: r, ctx: inout ctx, name: last.text, at: last.span) with
+      | Some(value) -> return Some(value: defs.DefOwner(def: value))
+      | None -> skip()
+    }
+    rep(
+      r: r,
+      ctx: inout ctx,
+      code: "E0106",
+      at: last.span,
+      detail: "no type `" ++ last.text ++ "` in scope"
+    )
+    return None
+  }
+  match module_of_path(
+    r: r,
+    ctx: inout ctx,
+    segments: List.slice(xs: q.segments, from: 0, to: n - 1)
+  ) with
+  | None -> return None
+  | Some(value) -> {
+    let mem: defs.Members = members_of(ctx: inout ctx, mod: value)
+    var d: Int = find_or(d: mem.types, key: last.text)
+    if d < 0 {
+      d = find_or(d: mem.interfaces, key: last.text)
+    }
+    if d < 0 and allow_variant {
+      d = find_or(d: mem.variants, key: last.text)
+    }
+    if d < 0 {
+      rep(
+        r: r,
+        ctx: inout ctx,
+        code: "E0106",
+        at: last.span,
+        detail: "module `" ++ context.module_name(
+          ctx: ctx,
+          id: value
+        ) ++ "` has no type `" ++ last.text ++ "`"
+      )
+      return None
+    }
+    if not visible(
+      r: r,
+      ctx: inout ctx,
+      d: context.get_def(ctx: ctx, id: d),
+      at: last.span,
+      what: "type"
+    ) {
+      return None
+    }
+    return Some(value: defs.DefOwner(def: d))
+  }
+}
+
+-- Items ------------------------------------------------------------------------
+fn res_fields(
+  r: Resolver,
+  ctx: inout context.Context,
+  fields: List[ast.Field],
+  scope: Scope
+) -> Unit may mutate, alloc
+  decreases fields
+{
+  -- A field's refinement may reference earlier fields (§3.3).
+  for f: ast.Field in fields {
+    res_type(r: r, ctx: inout ctx, t: f.ty, scope: scope, as_arg: false)
+    match Map.find(d: ctx.def_of, key: key(r: r, tag: defs.tag_sig, span: f.span)) with
+    | Some(value) -> scope_set_value(s: scope, name: f.name.text, id: value)
+    | None -> skip()
+  }
+  return Unit
+}
+
+fn inout_names(ps: List[ast.Param]) -> List[Text] may alloc, mutate {
+  var out: Builder[Text] = List.builder()
+  for p: ast.Param in ps {
+    if p.is_inout {
+      List.push(b: inout out, x: p.name.text)
+    }
+  }
+  return List.finish(b: out)
+}
+
+fn res_contracts(
+  r: inout Resolver,
+  ctx: inout context.Context,
+  cs: List[ast.Contract],
+  scope: Scope
+) -> Unit may mutate, alloc
+  decreases cs
+{
+  for c: ast.Contract in cs {
+    let saved: Bool = r.in_ensures
+    r = { r with in_ensures: c.clause == "ensures" }
+    res_expr(r: r, ctx: inout ctx, e: c.expr, scope: scope)
+    r = { r with in_ensures: saved }
+  }
+  return Unit
+}
+
+fn res_fn_decl(
+  r: inout Resolver,
+  ctx: inout context.Context,
+  f: ast.FnDecl,
+  outer: Scope
+) -> Unit may mutate, alloc
+  decreases f
+{
+  let saved_fn: Option[Int] = r.current_fn_def
+  r = { r with
+    current_fn_def: Map.find(d: ctx.def_of, key: key(r: r, tag: defs.tag_item, span: f.span))
+  }
+  let scope: Scope = child_frame(parent: outer, frame: 0)
+  res_tparams(r: r, ctx: inout ctx, ps: f.tparams, scope: scope)
+  res_params(r: r, ctx: inout ctx, ps: f.params, scope: scope, bind: true)
+  res_effects(r: r, ctx: inout ctx, refs: f.effects, scope: scope, allow_recover: false)
+  let saved_inout: List[Text] = r.inout_params
+  r = { r with inout_params: inout_names(ps: f.params) }
+  res_type(r: r, ctx: inout ctx, t: f.ret, scope: scope, as_arg: false)
+  res_contracts(r: inout r, ctx: inout ctx, cs: f.contracts, scope: scope)
+  var claim_ids: Builder[Int] = List.builder()
+  for cl: ast.QName in f.claim_list {
+    match claim_ref(r: r, ctx: inout ctx, q: cl, at: None) with
+    | Some(value) -> List.push(b: inout claim_ids, x: value)
+    | None -> skip()
+  }
+  var lists: Dict[Int, List[Int]] = ctx.claim_lists
+  Map.set(
+    d: inout lists,
+    key: key(r: r, tag: defs.tag_item, span: f.span),
+    value: List.finish(b: claim_ids)
+  )
+  match f.body with
+  | Some(value) -> res_block(r: r, ctx: inout ctx, b: value, scope: child(parent: scope))
+  | None -> skip()
+  r = { r with inout_params: saved_inout, current_fn_def: saved_fn }
+  return Unit
+}
+
+fn res_interface(
+  r: inout Resolver,
+  ctx: inout context.Context,
+  d: ast.InterfaceDecl
+) -> Unit may mutate, alloc
+  decreases d
+{
+  let scope: Scope = child_frame(parent: r.module_scope, frame: 0)
+  let tp: Int = bind_type_param(
+    r: r,
+    ctx: inout ctx,
+    scope: scope,
+    parent: Map.find(d: ctx.def_of, key: key(r: r, tag: defs.tag_item, span: d.span)),
+    node: defs.InterfaceNode(decl: d),
+    name: d.tparam,
+    key: key(r: r, tag: defs.tag_sig, span: d.tparam.span)
+  )
+  for member: ast.IfaceItem in d.items {
+    match Map.find(
+      d: ctx.def_of,
+      key: key(r: r, tag: defs.tag_sig, span: iface_item_span(member: member))
+    ) with
+    | Some(value) -> scope_set_value(
+      s: scope,
+      name: iface_item_name(member: member).text,
+      id: value
+    )
+    | None -> skip()
+  }
+  for member: ast.IfaceItem in d.items {
+    r = { r with
+      current_def: Some(value: d.name.text ++ "." ++ iface_item_name(member: member).text)
+    }
+    let inner: Scope = child(parent: scope)
+    match member with
+    | ast.IfaceFnItem(decl) -> {
+      res_params(r: r, ctx: inout ctx, ps: decl.params, scope: inner, bind: true)
+      res_effects(r: r, ctx: inout ctx, refs: decl.effects, scope: inner, allow_recover: false)
+      let saved_inout: List[Text] = r.inout_params
+      r = { r with inout_params: inout_names(ps: decl.params) }
+      res_type(r: r, ctx: inout ctx, t: decl.ret, scope: inner, as_arg: false)
+      res_contracts(r: inout r, ctx: inout ctx, cs: decl.contracts, scope: inner)
+      r = { r with inout_params: saved_inout }
+    }
+    | ast.LawItem(decl) -> {
+      res_params(r: r, ctx: inout ctx, ps: decl.params, scope: inner, bind: true)
+      res_block(r: r, ctx: inout ctx, b: decl.body, scope: child(parent: inner))
+    }
+  }
+  return Unit
+}
+
+fn res_impl(
+  r: inout Resolver,
+  ctx: inout context.Context,
+  im: ast.ImplDecl
+) -> Unit may mutate, alloc
+  decreases im
+{
+  match interface_def(ctx: ctx, owner: lookup_type(s: r.module_scope, name: im.iface.text)) with
+  | Some(value) -> context.set_ref(
+    ctx: inout ctx,
+    key: key(r: r, tag: defs.tag_item, span: im.span),
+    res: defs.DefRes(def: value)
+  )
+  | None -> rep(
+    r: r,
+    ctx: inout ctx,
+    code: "E0106",
+    at: im.iface.span,
+    detail: "`" ++ im.iface.text ++ "` is not an interface in scope"
+  )
+  res_type(r: r, ctx: inout ctx, t: im.target, scope: r.module_scope, as_arg: false)
+  let scope: Scope = child_frame(parent: r.module_scope, frame: 0)
+  for f: ast.FnDecl in im.fns {
+    match Map.find(d: ctx.def_of, key: key(r: r, tag: defs.tag_item, span: f.span)) with
+    | Some(value) -> scope_set_value(s: scope, name: f.name.text, id: value)
+    | None -> skip()
+  }
+  for f: ast.FnDecl in im.fns {
+    r = { r with current_def: Some(value: im.iface.text ++ "." ++ f.name.text) }
+    res_fn_decl(r: inout r, ctx: inout ctx, f: f, outer: scope)
+  }
+  return Unit
+}
+
+fn res_path(r: Resolver, ctx: inout context.Context, p: ast.PathDecl) -> Unit may mutate, alloc {
+  let entry: Int = find_or(d: members_of(ctx: inout ctx, mod: r.m.id).values, key: p.entry_fn.text)
+  if entry < 0 or kind_of(ctx: ctx, id: entry) != defs.Fn {
+    rep(
+      r: r,
+      ctx: inout ctx,
+      code: "E0105",
+      at: p.entry_fn.span,
+      detail: "no function `" ++ p.entry_fn.text ++ "` in this module"
+    )
+  } else {
+    context.set_ref(
+      ctx: inout ctx,
+      key: key(r: r, tag: defs.tag_item, span: p.span),
+      res: defs.DefRes(def: entry)
+    )
+  }
+  for c: ast.PathClause in p.clauses {
+    match c with
+    | ast.PathEffects(effects, span) -> res_effects(
+      r: r,
+      ctx: inout ctx,
+      refs: effects,
+      scope: r.module_scope,
+      allow_recover: false
+    )
+    | ast.PathForbid(effects, span) -> {
+      -- `forbid` names effects, and claims such as `host.js` (§19.2).
+      for ref: ast.EffectRef in effects {
+        if claim_exists(r: r, ctx: inout ctx, q: ref.name) {
+          let c2: Option[Int] = claim_ref(
+            r: r,
+            ctx: inout ctx,
+            q: ref.name,
+            at: Some(value: key(r: r, tag: defs.tag_sig, span: ref.span))
+          )
+        } else {
+          res_effects(r: r, ctx: inout ctx, refs: [ref], scope: r.module_scope, allow_recover: true)
+        }
+      }
+    }
+    | ast.PathRequire(claim_list, span) -> {
+      var claim_ids: Builder[Int] = List.builder()
+      for cl: ast.QName in claim_list {
+        match claim_ref(r: r, ctx: inout ctx, q: cl, at: None) with
+        | Some(value) -> List.push(b: inout claim_ids, x: value)
+        | None -> skip()
+      }
+      var lists: Dict[Int, List[Int]] = ctx.claim_lists
+      Map.set(
+        d: inout lists,
+        key: key(r: r, tag: defs.tag_sig, span: span),
+        value: List.finish(b: claim_ids)
+      )
+    }
+    | ast.PathPolicy(name, except_list, span) -> {
+      if name.text != builtin_policy {
+        let pol: Int = find_or(d: members_of(ctx: inout ctx, mod: r.m.id).policies, key: name.text)
+        if pol < 0 or kind_of(ctx: ctx, id: pol) != defs.Policy {
+          rep(
+            r: r,
+            ctx: inout ctx,
+            code: "E0105",
+            at: name.span,
+            detail: "no policy `" ++ name.text ++ "` in this module"
+          )
+        } else {
+          context.set_ref(
+            ctx: inout ctx,
+            key: key(r: r, tag: defs.tag_sig, span: span),
+            res: defs.DefRes(def: pol)
+          )
+        }
+      }
+    }
+  }
+  return Unit
+}
+
+fn res_item(r: inout Resolver, ctx: inout context.Context, item: ast.Item) -> Unit may mutate, alloc
+  decreases item
+{
+  match item with
+  | ast.FnItem(decl) -> res_fn_decl(r: inout r, ctx: inout ctx, f: decl, outer: r.module_scope)
+  | ast.TypeAliasItem(decl) -> res_type(
+    r: r,
+    ctx: inout ctx,
+    t: decl.ty,
+    scope: r.module_scope,
+    as_arg: false
+  )
+  | ast.IntrinsicTypeItem(decl) -> res_tparams(
+    r: r,
+    ctx: inout ctx,
+    ps: decl.tparams,
+    scope: child(parent: r.module_scope)
+  )
+  | ast.ConstItem(decl) -> {
+    res_type(r: r, ctx: inout ctx, t: decl.ty, scope: r.module_scope, as_arg: false)
+    res_expr(r: r, ctx: inout ctx, e: decl.value, scope: r.module_scope)
+  }
+  | ast.RecordItem(decl) -> {
+    let scope: Scope = child(parent: r.module_scope)
+    res_tparams(r: r, ctx: inout ctx, ps: decl.tparams, scope: scope)
+    res_fields(r: r, ctx: inout ctx, fields: decl.fields, scope: scope)
+  }
+  | ast.UnionItem(decl) -> {
+    let scope: Scope = child(parent: r.module_scope)
+    res_tparams(r: r, ctx: inout ctx, ps: decl.tparams, scope: scope)
+    for v: ast.Variant in decl.variants {
+      res_fields(r: r, ctx: inout ctx, fields: v.fields, scope: child(parent: scope))
+    }
+  }
+  | ast.InterfaceItem(decl) -> res_interface(r: inout r, ctx: inout ctx, d: decl)
+  | ast.ImplItem(decl) -> res_impl(r: inout r, ctx: inout ctx, im: decl)
+  | ast.ClaimItem(decl) -> {
+    match decl.body with
+    | ast.Derived(pred) -> res_claim_pred(r: r, ctx: inout ctx, p: pred)
+    | ast.Asserted(description) -> skip()
+  }
+  | ast.CapabilityItem(decl) -> {
+    let scope: Scope = child(parent: r.module_scope)
+    res_tparams(r: r, ctx: inout ctx, ps: decl.tparams, scope: scope)
+    -- Grant names were validated when the definitions were collected.
+    for g: ast.Grant in decl.grant_list {
+      match g.when_cond with
+      | Some(value) -> res_expr(r: r, ctx: inout ctx, e: value, scope: scope)
+      | None -> skip()
+    }
+  }
+  | ast.PathItem(decl) -> res_path(r: r, ctx: inout ctx, p: decl)
+  | ast.PolicyItem(decl) -> skip()
+  | ast.ExampleItem(decl) -> res_block(
+    r: r,
+    ctx: inout ctx,
+    b: decl.body,
+    scope: child_frame(parent: r.module_scope, frame: 0)
+  )
+  | ast.PropertyItem(decl) -> {
+    let scope: Scope = child_frame(parent: r.module_scope, frame: 0)
+    res_params(r: r, ctx: inout ctx, ps: decl.params, scope: scope, bind: true)
+    res_block(r: r, ctx: inout ctx, b: decl.body, scope: child(parent: scope))
+  }
+  return Unit
+}
+
+-- A `verify` block (§20.2) is a function of its own: it sees the module, its
+-- parameters and nothing of the enclosing function's locals.
+fn res_verify_block(
+  r: Resolver,
+  ctx: inout context.Context,
+  v: ast.VerifyBlock
+) -> Unit may mutate, alloc
+  decreases v
+{
+  let id: Int = context.def_count(ctx: ctx)
+  context.add_def(
+    ctx: inout ctx,
+    d: defs.Def {
+      id: id,
+      kind: defs.Verify,
+      node: defs.VerifyNode(decl: v),
+      name: "verify",
+      mod: r.m.id,
+      file: r.m.file,
+      key: key(r: r, tag: defs.tag_misc, span: v.span),
+      span: v.span,
+      is_pub: false,
+      is_sealed: false,
+      is_intrinsic: false,
+      parent: r.current_fn_def,
+      frame: 0,
+      is_inout: false
+    }
+  )
+  let scope: Scope = child_frame(parent: r.module_scope, frame: 0)
+  res_params(r: r, ctx: inout ctx, ps: v.params, scope: scope, bind: true)
+  res_effects(r: r, ctx: inout ctx, refs: v.effects, scope: scope, allow_recover: false)
+  res_block(r: r, ctx: inout ctx, b: v.body, scope: child(parent: scope))
+  return Unit
+}
+
+-- Statements -----------------------------------------------------------------------
+fn res_block(
+  r: Resolver,
+  ctx: inout context.Context,
+  b: ast.Block,
+  scope: Scope
+) -> Unit may mutate, alloc
+  decreases b
+{
+  for s: ast.Stmt in b.stmts {
+    res_stmt(r: r, ctx: inout ctx, s: s, scope: scope)
+  }
+  return Unit
+}
+
+fn res_stmt(
+  r: Resolver,
+  ctx: inout context.Context,
+  s: ast.Stmt,
+  scope: Scope
+) -> Unit may mutate, alloc
+  decreases s
+{
+  match s with
+  | ast.Let(name, ty, value, span) -> {
+    res_type(r: r, ctx: inout ctx, t: ty, scope: scope, as_arg: false)
+    res_expr(r: r, ctx: inout ctx, e: value, scope: scope)
+    let id: Int = bind_value(
+      r: r,
+      ctx: inout ctx,
+      scope: scope,
+      kind: defs.Let,
+      node: defs.StmtNode(decl: s),
+      name: name,
+      key: key(r: r, tag: defs.tag_stmt, span: span),
+      is_inout: false
+    )
+  }
+  | ast.Var(name, ty, value, span) -> {
+    res_type(r: r, ctx: inout ctx, t: ty, scope: scope, as_arg: false)
+    res_expr(r: r, ctx: inout ctx, e: value, scope: scope)
+    let id: Int = bind_value(
+      r: r,
+      ctx: inout ctx,
+      scope: scope,
+      kind: defs.Var,
+      node: defs.StmtNode(decl: s),
+      name: name,
+      key: key(r: r, tag: defs.tag_stmt, span: span),
+      is_inout: false
+    )
+  }
+  | ast.Assign(name, value, span) -> {
+    let target: Int = or_neg(o: lookup_value(s: scope, name: name.text))
+    if target < 0 {
+      rep(
+        r: r,
+        ctx: inout ctx,
+        code: "E0105",
+        at: name.span,
+        detail: "no binding `" ++ name.text ++ "` in scope"
+      )
+    } else {
+      context.set_ref(
+        ctx: inout ctx,
+        key: key(r: r, tag: defs.tag_stmt, span: span),
+        res: defs.DefRes(def: target)
+      )
+    }
+    res_expr(r: r, ctx: inout ctx, e: value, scope: scope)
+  }
+  | ast.Return(value, span) -> res_expr(r: r, ctx: inout ctx, e: value, scope: scope)
+  | ast.If(cond, then_block, else_block, span) -> {
+    res_expr(r: r, ctx: inout ctx, e: cond, scope: scope)
+    res_block(r: r, ctx: inout ctx, b: then_block, scope: child(parent: scope))
+    match else_block with
+    | Some(value) -> res_block(r: r, ctx: inout ctx, b: value, scope: child(parent: scope))
+    | None -> skip()
+  }
+  | ast.Match(scrutinee, arms, span) -> {
+    res_expr(r: r, ctx: inout ctx, e: scrutinee, scope: scope)
+    for a: ast.Arm in arms {
+      let arm_scope: Scope = child(parent: scope)
+      res_pattern(r: r, ctx: inout ctx, p: a.pattern, scope: arm_scope)
+      match a.guard with
+      | Some(value) -> res_expr(r: r, ctx: inout ctx, e: value, scope: arm_scope)
+      | None -> skip()
+      match a.body with
+      | ast.ArmBlock(block) -> res_block(
+        r: r,
+        ctx: inout ctx,
+        b: block,
+        scope: child(parent: arm_scope)
+      )
+      | ast.ArmStmt(stmt) -> res_stmt(r: r, ctx: inout ctx, s: stmt, scope: arm_scope)
+    }
+  }
+  | ast.Loop(cond, clauses, body, span) -> {
+    res_expr(r: r, ctx: inout ctx, e: cond, scope: scope)
+    for c: ast.LoopClause in clauses {
+      res_expr(r: r, ctx: inout ctx, e: c.expr, scope: scope)
+    }
+    res_block(r: r, ctx: inout ctx, b: body, scope: child(parent: scope))
+  }
+  | ast.For(name, ty, domain, body, span) -> {
+    res_type(r: r, ctx: inout ctx, t: ty, scope: scope, as_arg: false)
+    res_domain(r: r, ctx: inout ctx, d: domain, scope: scope)
+    let inner: Scope = child(parent: scope)
+    let id: Int = bind_value(
+      r: r,
+      ctx: inout ctx,
+      scope: inner,
+      kind: defs.For,
+      node: defs.StmtNode(decl: s),
+      name: name,
+      key: key(r: r, tag: defs.tag_stmt, span: span),
+      is_inout: false
+    )
+    res_block(r: r, ctx: inout ctx, b: body, scope: child(parent: inner))
+  }
+  | ast.Assume(claim, justification, verify_block, span) -> {
+    let c: Option[Int] = claim_ref(
+      r: r,
+      ctx: inout ctx,
+      q: claim,
+      at: Some(value: key(r: r, tag: defs.tag_stmt, span: span))
+    )
+    match verify_block with
+    | Some(value) -> res_verify_block(r: r, ctx: inout ctx, v: value)
+    | None -> skip()
+  }
+  | ast.ExprStmt(expr, span) -> res_expr(r: r, ctx: inout ctx, e: expr, scope: scope)
+  return Unit
+}
+
+fn res_domain(
+  r: Resolver,
+  ctx: inout context.Context,
+  d: ast.Domain,
+  scope: Scope
+) -> Unit may mutate, alloc
+  decreases d
+{
+  match d with
+  | ast.RangeDomain(lo, hi, span) -> {
+    res_expr(r: r, ctx: inout ctx, e: lo, scope: scope)
+    res_expr(r: r, ctx: inout ctx, e: hi, scope: scope)
+  }
+  | ast.InDomain(expr, span) -> res_expr(r: r, ctx: inout ctx, e: expr, scope: scope)
+  return Unit
+}
+
+-- Expressions ----------------------------------------------------------------------
+fn dup_fields(
+  r: Resolver,
+  ctx: inout context.Context,
+  fields: List[ast.FieldInit]
+) -> Unit may mutate, alloc {
+  var seen: Dict[Text, Bool] = Map.dict()
+  for f: ast.FieldInit in fields {
+    if Map.contains(d: seen, key: f.name.text) {
+      rep(
+        r: r,
+        ctx: inout ctx,
+        code: "E0107",
+        at: f.name.span,
+        detail: "field `" ++ f.name.text ++ "` is given twice"
+      )
+    }
+    Map.set(d: inout seen, key: f.name.text, value: true)
+  }
+  return Unit
+}
+
+fn dup_args(
+  r: Resolver,
+  ctx: inout context.Context,
+  args: List[ast.Arg]
+) -> Unit may mutate, alloc {
+  var seen: Dict[Text, Bool] = Map.dict()
+  for a: ast.Arg in args {
+    if Map.contains(d: seen, key: a.name.text) {
+      rep(
+        r: r,
+        ctx: inout ctx,
+        code: "E0107",
+        at: a.name.span,
+        detail: "argument `" ++ a.name.text ++ "` is given twice"
+      )
+    }
+    Map.set(d: inout seen, key: a.name.text, value: true)
+  }
+  return Unit
+}
+
+fn name_ref(
+  r: Resolver,
+  ctx: inout context.Context,
+  name: ast.Ident,
+  at: ast.Span,
+  scope: Scope
+) -> Unit may mutate, alloc {
+  match lookup_value(s: scope, name: name.text) with
+  | None -> {
+    var hint: Text = ""
+    if Map.contains(d: r.aliases, key: name.text) {
+      hint = "; `" ++ name.text ++ "` is a module alias, not a value"
+    }
+    rep(
+      r: r,
+      ctx: inout ctx,
+      code: "E0105",
+      at: at,
+      detail: "no binding `" ++ name.text ++ "` in scope" ++ hint
+    )
+  }
+  | Some(value) -> {
+    let d: defs.Def = context.get_def(ctx: ctx, id: value)
+    if d.frame >= 0 and d.frame < scope.frame and (d.kind == defs.Var or (d.kind == defs.Param and d.is_inout)) {
+      var what: Text = "an inout parameter"
+      if d.kind == defs.Var {
+        what = "a var"
+      }
+      rep(
+        r: r,
+        ctx: inout ctx,
+        code: "E0330",
+        at: at,
+        detail: "`" ++ name.text ++ "` is " ++ what ++ " of an enclosing function; closures capture only let bindings and parameters by value"
+      )
+    }
+    context.set_ref(
+      ctx: inout ctx,
+      key: key(r: r, tag: defs.tag_expr, span: at),
+      res: defs.DefRes(def: value)
+    )
+  }
+  return Unit
+}
+
+fn res_expr(
+  r: Resolver,
+  ctx: inout context.Context,
+  e: ast.Expr,
+  scope: Scope
+) -> Unit may mutate, alloc
+  decreases e
+{
+  match e with
+  | ast.IntLit(_, _, _) -> skip()
+  | ast.FloatLit(_, _) -> skip()
+  | ast.TextLit(_, _) -> skip()
+  | ast.BoolLit(_, _) -> skip()
+  | ast.DurationLit(_, _) -> skip()
+  | ast.Name(name, span) -> name_ref(r: r, ctx: inout ctx, name: name, at: span, scope: scope)
+  | ast.It(span) -> {
+    if not r.in_where {
+      rep(
+        r: r,
+        ctx: inout ctx,
+        code: "E0114",
+        at: span,
+        detail: "`it` names the refined value and is legal only in a `where` clause"
+      )
+    }
+  }
+  | ast.ResultRef(span) -> {
+    if not r.in_ensures {
+      rep(
+        r: r,
+        ctx: inout ctx,
+        code: "E0114",
+        at: span,
+        detail: "`result` is legal only in an `ensures` clause"
+      )
+    }
+  }
+  | ast.Old(name, span) -> {
+    if not r.in_ensures {
+      rep(
+        r: r,
+        ctx: inout ctx,
+        code: "E0114",
+        at: span,
+        detail: "`old(...)` is legal only in an `ensures` clause"
+      )
+    }
+    match lookup_value(s: scope, name: name.text) with
+    | None -> rep(
+      r: r,
+      ctx: inout ctx,
+      code: "E0105",
+      at: name.span,
+      detail: "no binding `" ++ name.text ++ "` in scope"
+    )
+    | Some(value) -> {
+      if not List.contains(xs: r.inout_params, x: name.text) {
+        rep(
+          r: r,
+          ctx: inout ctx,
+          code: "E0114",
+          at: name.span,
+          detail: "`old(" ++ name.text ++ ")` requires an `inout` parameter"
+        )
+      } else {
+        context.set_ref(
+          ctx: inout ctx,
+          key: key(r: r, tag: defs.tag_expr, span: span),
+          res: defs.DefRes(def: value)
+        )
+      }
+    }
+  }
+  | ast.Ctor(name, args, fields, span) -> {
+    match ctor_name(
+      r: r,
+      ctx: inout ctx,
+      q: name,
+      scope: scope,
+      has_args: args is Some,
+      has_fields: fields is Some
+    ) with
+    | Some(value) -> {
+      context.set_ref(ctx: inout ctx, key: key(r: r, tag: defs.tag_expr, span: span), res: value)
+      match value with
+      | defs.DefRes(def) -> check_sealed(
+        r: r,
+        ctx: inout ctx,
+        d: context.get_def(ctx: ctx, id: def),
+        at: name.span
+      )
+      | _ -> skip()
+    }
+    | None -> skip()
+    match args with
+    | Some(value) -> {
+      dup_args(r: r, ctx: inout ctx, args: value)
+      for a: ast.Arg in value {
+        res_expr(r: r, ctx: inout ctx, e: a.value, scope: scope)
+      }
+    }
+    | None -> skip()
+    match fields with
+    | Some(value) -> {
+      dup_fields(r: r, ctx: inout ctx, fields: value)
+      for f: ast.FieldInit in value {
+        res_expr(r: r, ctx: inout ctx, e: f.value, scope: scope)
+      }
+    }
+    | None -> skip()
+  }
+  | ast.RecordUpdate(base, fields, span) -> {
+    res_expr(r: r, ctx: inout ctx, e: base, scope: scope)
+    for f: ast.FieldInit in fields {
+      res_expr(r: r, ctx: inout ctx, e: f.value, scope: scope)
+    }
+    dup_fields(r: r, ctx: inout ctx, fields: fields)
+  }
+  | ast.ListLit(elems, span) -> {
+    for x: ast.Expr in elems {
+      res_expr(r: r, ctx: inout ctx, e: x, scope: scope)
+    }
+  }
+  | ast.Try(expr, else_, span) -> {
+    res_expr(r: r, ctx: inout ctx, e: expr, scope: scope)
+    match else_ with
+    | Some(value) -> {
+      let inner: Scope = child(parent: scope)
+      if value.name.text != "_" {
+        let id: Int = bind_value(
+          r: r,
+          ctx: inout ctx,
+          scope: inner,
+          kind: defs.TryElse,
+          node: defs.TryElseNode(decl: value),
+          name: value.name,
+          key: key(r: r, tag: defs.tag_misc, span: value.span),
+          is_inout: false
+        )
+      }
+      res_expr(r: r, ctx: inout ctx, e: value.expr, scope: inner)
+    }
+    | None -> skip()
+  }
+  | ast.Recover(body, span) -> res_block(r: r, ctx: inout ctx, b: body, scope: child(parent: scope))
+  | ast.Quantifier(quant, name, ty, domain, where_, body, span) -> {
+    res_type(r: r, ctx: inout ctx, t: ty, scope: scope, as_arg: false)
+    match domain with
+    | Some(value) -> res_domain(r: r, ctx: inout ctx, d: value, scope: scope)
+    | None -> skip()
+    let inner: Scope = child(parent: scope)
+    let id: Int = bind_value(
+      r: r,
+      ctx: inout ctx,
+      scope: inner,
+      kind: defs.Binder,
+      node: defs.ExprNode(decl: e),
+      name: name,
+      key: key(r: r, tag: defs.tag_expr, span: span),
+      is_inout: false
+    )
+    match where_ with
+    | Some(value) -> res_expr(r: r, ctx: inout ctx, e: value, scope: inner)
+    | None -> skip()
+    res_expr(r: r, ctx: inout ctx, e: body, scope: inner)
+  }
+  | ast.Closure(params, ret, effects, body, span) -> {
+    let inner: Scope = child_frame(parent: scope, frame: scope.frame + 1)
+    res_params(r: r, ctx: inout ctx, ps: params, scope: inner, bind: true)
+    res_effects(r: r, ctx: inout ctx, refs: effects, scope: inner, allow_recover: false)
+    let cleared: Resolver = { r with inout_params: [], in_ensures: false, in_where: false }
+    res_type(r: cleared, ctx: inout ctx, t: ret, scope: inner, as_arg: false)
+    res_block(r: cleared, ctx: inout ctx, b: body, scope: child(parent: inner))
+  }
+  | ast.Fake(capability, fields, span) -> {
+    match type_name(r: r, ctx: inout ctx, q: capability, scope: scope, allow_variant: false) with
+    | Some(value) -> {
+      let d: Int = or_neg(o: owner_def(o: value))
+      if d >= 0 {
+        context.set_ref(
+          ctx: inout ctx,
+          key: key(r: r, tag: defs.tag_expr, span: span),
+          res: defs.DefRes(def: d)
+        )
+      }
+    }
+    | None -> skip()
+    for f: ast.FieldInit in fields {
+      res_expr(r: r, ctx: inout ctx, e: f.value, scope: scope)
+    }
+  }
+  | ast.Hole(span) -> {
+    var table: Dict[Int, List[Text]] = ctx.holes
+    Map.set(
+      d: inout table,
+      key: key(r: r, tag: defs.tag_expr, span: span),
+      value: visible_locals(s: scope)
+    )
+  }
+  | ast.FieldAccess(object, name, span) -> {
+    if not res_field_access(r: r, ctx: inout ctx, e: e, scope: scope) {
+      res_expr(r: r, ctx: inout ctx, e: object, scope: scope)
+    }
+  }
+  | ast.Call(callee, targs, args, span) -> {
+    res_expr(r: r, ctx: inout ctx, e: callee, scope: scope)
+    match targs with
+    | Some(value) -> {
+      for a: ast.TypeArg in value {
+        match a with
+        | ast.TypeArgType(_, ty, _) -> res_type(
+          r: r,
+          ctx: inout ctx,
+          t: ty,
+          scope: scope,
+          as_arg: false
+        )
+        | ast.TypeArgConst(_, expr, _) -> res_expr(r: r, ctx: inout ctx, e: expr, scope: scope)
+      }
+    }
+    | None -> skip()
+    dup_args(r: r, ctx: inout ctx, args: args)
+    for a: ast.Arg in args {
+      res_expr(r: r, ctx: inout ctx, e: a.value, scope: scope)
+    }
+  }
+  | ast.Unary(op, operand, span) -> res_expr(r: r, ctx: inout ctx, e: operand, scope: scope)
+  | ast.Binary(op, left, right, span) -> {
+    res_expr(r: r, ctx: inout ctx, e: left, scope: scope)
+    res_expr(r: r, ctx: inout ctx, e: right, scope: scope)
+  }
+  | ast.And(operands, span) -> {
+    for o: ast.Expr in operands {
+      res_expr(r: r, ctx: inout ctx, e: o, scope: scope)
+    }
+  }
+  | ast.Or(operands, span) -> {
+    for o: ast.Expr in operands {
+      res_expr(r: r, ctx: inout ctx, e: o, scope: scope)
+    }
+  }
+  | ast.Is(expr, pattern, span) -> {
+    res_expr(r: r, ctx: inout ctx, e: expr, scope: scope)
+    res_pattern(r: r, ctx: inout ctx, p: pattern, scope: child(parent: scope))
+  }
+  return Unit
+}
+
+-- `QTNAME [args] [{ fields }]`: a variant, record, `Unit`, or a type name used as a value.
+fn ctor_name(
+  r: Resolver,
+  ctx: inout context.Context,
+  q: ast.QName,
+  scope: Scope,
+  has_args: Bool,
+  has_fields: Bool
+) -> Option[defs.Resolution] may mutate, alloc {
+  let n: Int = List.len(xs: q.segments)
+  if n == 0 {
+    return None
+  }
+  let last: ast.Ident = List.get(xs: q.segments, i: n - 1)
+  let want_record: Bool = has_fields
+  var what: Text = "variant"
+  if has_fields {
+    what = "record"
+  }
+  if n == 1 {
+    let name: Text = last.text
+    if name == "Unit" and not has_args and not has_fields {
+      if lookup_variant(r: r, ctx: inout ctx, name: name, at: last.span) is None {
+        return Some(value: defs.UnitRes)
+      }
+    }
+    let variant: Option[Int] = lookup_variant(r: r, ctx: inout ctx, name: name, at: last.span)
+    match variant with
+    | Some(value) -> {
+      if not want_record {
+        return Some(value: defs.DefRes(def: value))
+      }
+    }
+    | None -> skip()
+    match lookup_type(s: scope, name: name) with
+    | Some(value) -> {
+      if has_args or has_fields {
+        let d: Int = or_neg(o: owner_def(o: value))
+        if d >= 0 and kind_of(ctx: ctx, id: d) == defs.Record {
+          return Some(value: defs.DefRes(def: d))
+        }
+        rep(
+          r: r,
+          ctx: inout ctx,
+          code: "E0105",
+          at: last.span,
+          detail: "`" ++ name ++ "` is not a " ++ what
+        )
+        return None
+      }
+      return Some(value: defs.TypeValueRes(owner: value))
+    }
+    | None -> skip()
+    match variant with
+    | Some(value) -> return Some(value: defs.DefRes(def: value))
+    | None -> skip()
+    rep(
+      r: r,
+      ctx: inout ctx,
+      code: "E0105",
+      at: last.span,
+      detail: "no variant, record or type `" ++ name ++ "` in scope"
+    )
+    return None
+  }
+  match module_of_path(
+    r: r,
+    ctx: inout ctx,
+    segments: List.slice(xs: q.segments, from: 0, to: n - 1)
+  ) with
+  | None -> return None
+  | Some(value) -> {
+    let mem: defs.Members = members_of(ctx: inout ctx, mod: value)
+    let variant: Int = find_or(d: mem.variants, key: last.text)
+    if variant >= 0 and not want_record {
+      if not visible(
+        r: r,
+        ctx: inout ctx,
+        d: context.get_def(ctx: ctx, id: variant),
+        at: last.span,
+        what: "variant"
+      ) {
+        return None
+      }
+      return Some(value: defs.DefRes(def: variant))
+    }
+    var ty: Int = find_or(d: mem.types, key: last.text)
+    if ty < 0 {
+      ty = find_or(d: mem.interfaces, key: last.text)
+    }
+    if ty >= 0 {
+      if not visible(
+        r: r,
+        ctx: inout ctx,
+        d: context.get_def(ctx: ctx, id: ty),
+        at: last.span,
+        what: "type"
+      ) {
+        return None
+      }
+      if has_args or has_fields {
+        if kind_of(ctx: ctx, id: ty) == defs.Record {
+          return Some(value: defs.DefRes(def: ty))
+        }
+        rep(
+          r: r,
+          ctx: inout ctx,
+          code: "E0105",
+          at: last.span,
+          detail: "`" ++ context.qualified_name(ctx: ctx, id: ty) ++ "` is not a " ++ what
+        )
+        return None
+      }
+      return Some(value: defs.TypeValueRes(owner: defs.DefOwner(def: ty)))
+    }
+    rep(
+      r: r,
+      ctx: inout ctx,
+      code: "E0109",
+      at: last.span,
+      detail: "module `" ++ context.module_name(
+        ctx: ctx,
+        id: value
+      ) ++ "` has no variant or type `" ++ last.text ++ "`"
+    )
+    return None
+  }
+}
+
+fn field_of(e: ast.Expr) -> ast.Ident {
+  match e with
+  | ast.FieldAccess(object, name, span) -> return name
+  | _ -> return ast.Ident { text: "", span: ast.Span { start: 0, end: 0 } }
+}
+
+fn is_bare_ctor(e: ast.Expr) -> Bool {
+  match e with
+  | ast.Ctor(name, args, fields, span) -> return args is None and fields is None
+  | _ -> return false
+}
+
+fn module_member_ref(
+  r: Resolver,
+  ctx: inout context.Context,
+  mod: Int,
+  field: ast.Ident,
+  at: ast.Span
+) -> Unit may mutate, alloc {
+  let mem: defs.Members = members_of(ctx: inout ctx, mod: mod)
+  let d: Int = find_or(d: mem.values, key: field.text)
+  var ok: Bool = d >= 0
+  if ok {
+    let k: defs.DefKind = kind_of(ctx: ctx, id: d)
+    ok = k == defs.Fn or k == defs.Const
+  }
+  if not ok {
+    rep(
+      r: r,
+      ctx: inout ctx,
+      code: "E0109",
+      at: field.span,
+      detail: "module `" ++ context.module_name(
+        ctx: ctx,
+        id: mod
+      ) ++ "` has no function or constant `" ++ field.text ++ "`"
+    )
+    return Unit
+  }
+  if not visible(
+    r: r,
+    ctx: inout ctx,
+    d: context.get_def(ctx: ctx, id: d),
+    at: field.span,
+    what: "function"
+  ) {
+    return Unit
+  }
+  context.set_ref(
+    ctx: inout ctx,
+    key: key(r: r, tag: defs.tag_expr, span: at),
+    res: defs.DefRes(def: d)
+  )
+  return Unit
+}
+
+-- The interface function `name` of interface `iface`, if any.
+fn find_iface_fn(ctx: context.Context, iface: Int, name: Text) -> Option[Int] {
+  for i: Int in 0 ..< context.def_count(ctx: ctx) {
+    let d: defs.Def = context.get_def(ctx: ctx, id: i)
+    if d.kind == defs.IfaceFn and d.name == name and d.parent == Some(value: iface) {
+      return Some(value: i)
+    }
+  }
+  return None
+}
+
+-- `a.b`: a module member (`io.create`), a companion function (`Grid.filled`,
+-- `Float.of`), an interface function (`Ord.compare`), or a field access on
+-- a value (left to the type checker). True when the object was resolved
+-- here; otherwise the caller resolves it as an expression.
+fn res_field_access(
+  r: Resolver,
+  ctx: inout context.Context,
+  e: ast.Expr,
+  scope: Scope
+) -> Bool may mutate, alloc {
+  let field: ast.Ident = field_of(e: e)
+  match e with
+  | ast.FieldAccess(object, _, span) -> {
+    let object_span: ast.Span = parser.span_of_expr(e: object)
+    match object with
+    | ast.Name(name, _) -> {
+      match Map.find(d: r.aliases, key: name.text) with
+      | Some(value) -> {
+        context.set_ref(
+          ctx: inout ctx,
+          key: key(r: r, tag: defs.tag_expr, span: object_span),
+          res: defs.ModuleRes(mod: value)
+        )
+        module_member_ref(r: r, ctx: inout ctx, mod: value, field: field, at: span)
+        return true
+      }
+      | None -> return false
+    }
+    | ast.Ctor(name, args, fields, _) -> {
+      if args is Some or fields is Some {
+        return false
+      }
+      match ctor_owner(r: r, ctx: inout ctx, q: name, scope: scope) with
+      | Some(value) -> {
+        if is_interface(ctx: ctx, o: value) {
+          let iface: Int = or_neg(o: owner_def(o: value))
+          let fd: Int = or_neg(o: find_iface_fn(ctx: ctx, iface: iface, name: field.text))
+          if fd < 0 {
+            rep(
+              r: r,
+              ctx: inout ctx,
+              code: "E0109",
+              at: field.span,
+              detail: "interface `" ++ context.get_def(
+                ctx: ctx,
+                id: iface
+              ).name ++ "` has no function `" ++ field.text ++ "`"
+            )
+          } else {
+            context.set_ref(
+              ctx: inout ctx,
+              key: key(r: r, tag: defs.tag_expr, span: object_span),
+              res: defs.TypeValueRes(owner: value)
+            )
+            context.set_ref(
+              ctx: inout ctx,
+              key: key(r: r, tag: defs.tag_expr, span: span),
+              res: defs.IfaceFnRes(iface: iface, fn_def: fd)
+            )
+          }
+        } else {
+          let fd: Int = or_neg(o: companion(r: r, ctx: inout ctx, owner: value, field: field))
+          context.set_ref(
+            ctx: inout ctx,
+            key: key(r: r, tag: defs.tag_expr, span: object_span),
+            res: defs.TypeValueRes(owner: value)
+          )
+          if fd >= 0 {
+            context.set_ref(
+              ctx: inout ctx,
+              key: key(r: r, tag: defs.tag_expr, span: span),
+              res: defs.CompanionRes(owner: value, fn_def: fd)
+            )
+          }
+        }
+        return true
+      }
+      | None -> return false
+    }
+    | _ -> return false
+  }
+  | _ -> return false
+}
+
+-- The type a bare or qualified type name denotes, without reporting; None if it is not a type.
+fn ctor_owner(
+  r: Resolver,
+  ctx: inout context.Context,
+  q: ast.QName,
+  scope: Scope
+) -> Option[defs.TypeOwner] may mutate, alloc {
+  let n: Int = List.len(xs: q.segments)
+  if n == 0 {
+    return None
+  }
+  let last: ast.Ident = List.get(xs: q.segments, i: n - 1)
+  if n == 1 {
+    if Map.contains(d: members_of(ctx: inout ctx, mod: r.m.id).variants, key: last.text) {
+      return None
+    }
+    return lookup_type(s: scope, name: last.text)
+  }
+  if n != 2 {
+    return None
+  }
+  let head: ast.Ident = List.get(xs: q.segments, i: 0)
+  match Map.find(d: r.aliases, key: head.text) with
+  | None -> return None
+  | Some(value) -> {
+    let mem: defs.Members = members_of(ctx: inout ctx, mod: value)
+    var d: Int = find_or(d: mem.types, key: last.text)
+    if d < 0 {
+      d = find_or(d: mem.interfaces, key: last.text)
+    }
+    if d < 0 {
+      return None
+    }
+    return Some(value: defs.DefOwner(def: d))
+  }
+}
+
+-- Function `field` of the module that declares `owner`.
+fn companion(
+  r: Resolver,
+  ctx: inout context.Context,
+  owner: defs.TypeOwner,
+  field: ast.Ident
+) -> Option[Int] may mutate, alloc {
+  var mod: Int = -1
+  var type_name_text: Text = ""
+  match owner with
+  | defs.PrimOwner(name) -> {
+    let mod_name: Text = defs.companion_module_of(prim: name)
+    mod = or_neg(o: Map.find(d: ctx.by_name, key: mod_name))
+    type_name_text = name
+    if mod < 0 {
+      rep(
+        r: r,
+        ctx: inout ctx,
+        code: "E0109",
+        at: field.span,
+        detail: "the standard library module `" ++ mod_name ++ "` is not loaded, so `" ++ name ++ "." ++ field.text ++ "` cannot be resolved"
+      )
+      return None
+    }
+  }
+  | defs.DefOwner(def) -> {
+    mod = context.get_def(ctx: ctx, id: def).mod
+    type_name_text = context.get_def(ctx: ctx, id: def).name
+  }
+  let d: Int = find_or(d: members_of(ctx: inout ctx, mod: mod).values, key: field.text)
+  if d < 0 or kind_of(ctx: ctx, id: d) != defs.Fn {
+    rep(
+      r: r,
+      ctx: inout ctx,
+      code: "E0109",
+      at: field.span,
+      detail: "`" ++ type_name_text ++ "` has no function `" ++ field.text ++ "` (module `" ++ context.module_name(
+        ctx: ctx,
+        id: mod
+      ) ++ "`)"
+    )
+    return None
+  }
+  if not visible(
+    r: r,
+    ctx: inout ctx,
+    d: context.get_def(ctx: ctx, id: d),
+    at: field.span,
+    what: "function"
+  ) {
+    return None
+  }
+  return Some(value: d)
+}
+
+-- Patterns -----------------------------------------------------------------------------
+fn bind_pat_fields(
+  r: Resolver,
+  ctx: inout context.Context,
+  fields: List[ast.PatField],
+  scope: Scope
+) -> Unit may mutate, alloc {
+  for f: ast.PatField in fields {
+    match f with
+    | ast.PatFieldName(name, span) -> {
+      let id: Int = bind_value(
+        r: r,
+        ctx: inout ctx,
+        scope: scope,
+        kind: defs.Pattern,
+        node: defs.PatFieldNode(decl: f),
+        name: name,
+        key: key(r: r, tag: defs.tag_pattern, span: span),
+        is_inout: false
+      )
+    }
+    | _ -> skip()
+  }
+  return Unit
+}
+
+fn res_pattern(
+  r: Resolver,
+  ctx: inout context.Context,
+  p: ast.Pattern,
+  scope: Scope
+) -> Unit may mutate, alloc
+  decreases p
+{
+  match p with
+  | ast.WildcardPat(span) -> skip()
+  | ast.LitPat(literal, span) -> skip()
+  | ast.BindPat(name, span) -> {
+    let id: Int = bind_value(
+      r: r,
+      ctx: inout ctx,
+      scope: scope,
+      kind: defs.Pattern,
+      node: defs.PatternNode(decl: p),
+      name: name,
+      key: key(r: r, tag: defs.tag_pattern, span: span),
+      is_inout: false
+    )
+  }
+  | ast.VariantPat(name, fields, span) -> {
+    match ctor_name(
+      r: r,
+      ctx: inout ctx,
+      q: name,
+      scope: scope,
+      has_args: true,
+      has_fields: false
+    ) with
+    | Some(value) -> {
+      var is_variant: Bool = false
+      match value with
+      | defs.DefRes(def) -> is_variant = kind_of(ctx: ctx, id: def) == defs.Variant
+      | _ -> is_variant = false
+      if is_variant {
+        context.set_ref(
+          ctx: inout ctx,
+          key: key(r: r, tag: defs.tag_pattern, span: span),
+          res: value
+        )
+      } else {
+        rep(
+          r: r,
+          ctx: inout ctx,
+          code: "E0105",
+          at: name.span,
+          detail: "`" ++ loader.qname_text(q: name) ++ "` is not a variant"
+        )
+      }
+    }
+    | None -> skip()
+    match fields with
+    | Some(value) -> bind_pat_fields(r: r, ctx: inout ctx, fields: value, scope: scope)
+    | None -> skip()
+  }
+  return Unit
+}
+
+-- Entry -----------------------------------------------------------------------------------
+fn resolve_module(ctx: inout context.Context, m: defs.ModuleRecord) -> Unit may mutate, alloc {
+  var r: Resolver = Resolver {
+    m: m,
+    module_scope: new_scope(parent: None, frame: -1),
+    current_def: None,
+    current_fn_def: None,
+    in_where: false,
+    in_ensures: false,
+    inout_params: [],
+    aliases: Map.dict()
+  }
+  build_module_scope(r: inout r, ctx: inout ctx)
+  for item: ast.Item in m.tree.items {
+    r = { r with current_def: Some(value: item_name(item: item)) }
+    res_item(r: inout r, ctx: inout ctx, item: item)
+    r = { r with current_def: None }
+  }
+  return Unit
+}
+
+-- Pass 3b: resolves every loaded module. Reports E0105–E0115, E0202 and E0330.
+pub fn resolve_pass(ctx: inout context.Context) -> Unit may mutate, alloc {
+  for id: Int in 0 ..< ctx.module_count {
+    match Map.find(d: ctx.modules, key: id) with
+    | Some(value) -> collect(ctx: inout ctx, m: value)
+    | None -> skip()
+  }
+  for id: Int in 0 ..< ctx.module_count {
+    match Map.find(d: ctx.modules, key: id) with
+    | Some(value) -> resolve_module(ctx: inout ctx, m: value)
+    | None -> skip()
+  }
+  return Unit
+}

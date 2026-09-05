@@ -1,0 +1,142 @@
+module check
+import std.io
+import ast
+import report
+import context
+import loader
+import resolve
+import typecheck
+import consteval
+import effects
+
+-- `onus check` in Onus (impl spec M15.2): runs the passes implemented so
+-- far over an entry file and prints every diagnostic as one line:
+-- code, path, start, end (code points), definition, detail.
+--
+--   check <entry.onus> [--root <dir>] [--stdlib <dir>] [--to <pass>]
+record Options {
+  entry: Text
+  root: Option[Text]
+  stdlib: Option[Text]
+  to: Text
+}
+
+fn parse_args(args: List[Text]) -> Result[Options, io.Error] may alloc {
+  var entry: Text = ""
+  var root: Option[Text] = None
+  var stdlib: Option[Text] = None
+  var to: Text = "effects"
+  var i: Int = 0
+  loop while i < List.len(xs: args)
+    invariant i >= 0
+    decreases List.len(xs: args) - i
+  {
+    let a: Text = List.get(xs: args, i: i)
+    if (a == "--root" or a == "--stdlib" or a == "--to") and i + 1 < List.len(xs: args) {
+      let v: Text = List.get(xs: args, i: i + 1)
+      if a == "--root" {
+        root = Some(value: v)
+      } else {
+        if a == "--stdlib" {
+          stdlib = Some(value: v)
+        } else {
+          to = v
+        }
+      }
+      i = i + 2
+    } else {
+      entry = a
+      i = i + 1
+    }
+  }
+  if entry == "" {
+    return Err(
+      error: Other(
+        detail: "usage: check <entry.onus> [--root <dir>] [--stdlib <dir>] [--to <pass>]"
+      )
+    )
+  }
+  return Ok(value: Options { entry: entry, root: root, stdlib: stdlib, to: to })
+}
+
+fn pass_index(name: Text) -> Int {
+  if name == "parse" {
+    return 0
+  }
+  if name == "canonical" {
+    return 1
+  }
+  if name == "load" {
+    return 2
+  }
+  if name == "resolve" {
+    return 3
+  }
+  if name == "types" {
+    return 4
+  }
+  if name == "consteval" {
+    return 5
+  }
+  if name == "effects" {
+    return 6
+  }
+  return 6
+}
+
+fn def_text(d: Option[Text]) -> Text {
+  match d with
+  | Some(value) -> return value
+  | None -> return "-"
+}
+
+pub fn main(
+  args: List[Text],
+  files: io.Files,
+  console: io.Console
+) -> Result[Unit, io.Error] may io.file, alloc, mutate {
+  let opts: Options = try parse_args(args: args)
+  let to: Int = pass_index(name: opts.to)
+  var ctx: context.Context = context.new_context(root: opts.root, stdlib: opts.stdlib)
+  let text: Text = try io.read(files: files, path: opts.entry)
+  if loader.add_file(ctx: inout ctx, path: opts.entry, text: text) is None {
+    return Err(error: Other(detail: "the entry file is too long"))
+  }
+  if to >= 1 {
+    loader.canonical(ctx: inout ctx, file: 0)
+  }
+  if to >= 2 and context.clean(ctx: ctx) {
+    loader.load(ctx: inout ctx, files: files)
+    for f: Int in 0 ..< context.file_count(ctx: ctx) {
+      loader.canonical(ctx: inout ctx, file: f)
+    }
+  }
+  if to >= 3 and context.clean(ctx: ctx) {
+    resolve.resolve_pass(ctx: inout ctx)
+  }
+  if to >= 4 and context.clean(ctx: ctx) {
+    typecheck.types_pass(ctx: inout ctx)
+  }
+  if to >= 5 and context.clean(ctx: ctx) {
+    consteval.consteval_pass(ctx: inout ctx)
+  }
+  if to >= 6 and context.clean(ctx: ctx) {
+    effects.effects_pass(ctx: inout ctx)
+  }
+  for d: report.Diagnostic in List.finish(b: ctx.diagnostics) {
+    var path: Text = "?"
+    if d.file >= 0 and d.file < context.file_count(ctx: ctx) {
+      path = context.file_at(ctx: ctx, id: d.file).path
+    }
+    io.print(
+      console: console,
+      text: d.code ++ "\t" ++ path ++ "\t" ++ Int.to_text(x: d.span.start) ++ "\t" ++ Int.to_text(
+        x: d.span.end
+      ) ++ "\t" ++ def_text(d: d.def_name) ++ "\t" ++ Text.join(
+        parts: d.context,
+        sep: " | "
+      ) ++ "\n"
+    )
+  }
+  return Ok(value: Unit)
+}

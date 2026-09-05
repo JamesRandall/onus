@@ -1,0 +1,621 @@
+module loader
+import std.io
+import ast
+import tokens
+import lexer
+import parser
+import comments
+import printer
+import report
+import defs
+import context
+
+-- Module loading (impl spec §4, pass 3, first half; `resolve/loader.ts`).
+-- Maps module names to files (`a.b.c` is `<root>/a/b/c.onus`, or
+-- `<stdlib>/std/…` for `std.*`), parses what the entry files transitively
+-- import plus the implicit prelude, checks that every file declares the
+-- module its path says it is, reserves `std.*` for the standard library
+-- root, and rejects import cycles. The only pass that reads files.
+-- Modules whose public types and variants every module sees unqualified (§16).
+pub const prelude_modules: List[Text] = [
+  "std.results",
+  "std.option",
+  "std.list",
+  "std.grid",
+  "std.map",
+  "std.int",
+  "std.float",
+  "std.text",
+  "std.bool",
+  "std.bytes",
+  "std.duration",
+  "std.check",
+  "std.typeinfo"
+]
+
+-- The bound on import edges a compilation follows.
+const max_edges: Int = 10000000
+
+pub fn qname_text(q: ast.QName) -> Text may alloc, mutate {
+  var parts: Builder[Text] = List.builder()
+  for seg: ast.Ident in q.segments {
+    List.push(b: inout parts, x: seg.text)
+  }
+  return Text.join(parts: List.finish(b: parts), sep: ".")
+}
+
+pub fn name_of(m: ast.Module) -> Text may alloc, mutate {
+  return qname_text(q: m.name)
+}
+
+fn path_for(root: Text, name: Text) -> Text may alloc {
+  return root ++ "/" ++ Text.replace(t: name, from: ".", to: "/") ++ ".onus"
+}
+
+fn is_std_name(name: Text) -> Bool {
+  return name == "std" or Text.starts_with(t: name, prefix: "std.")
+}
+
+fn or_empty(o: Option[Text]) -> Text {
+  match o with
+  | Some(value) -> return value
+  | None -> return ""
+}
+
+fn under_stdlib(ctx: context.Context, path: Text) -> Bool may alloc {
+  match ctx.stdlib with
+  | None -> return false
+  | Some(value) -> return Text.starts_with(t: path, prefix: value ++ "/")
+}
+
+fn syntax_diagnostic(file: Int, d: tokens.Diagnostic) -> report.Diagnostic may alloc {
+  return report.Diagnostic {
+    code: d.code,
+    file: file,
+    span: ast.Span { start: d.start, end: d.end },
+    def_name: None,
+    context: [d.detail]
+  }
+}
+
+-- Files ---------------------------------------------------------------------
+-- Registers, lexes and parses a file; its syntax diagnostics are reported.
+-- None when the file is too long or the compilation has too many files.
+pub fn add_file(
+  ctx: inout context.Context,
+  path: Text,
+  text: Text
+) -> Option[Int] may alloc, mutate {
+  let cps: List[Int] = Text.code_points(t: text)
+  let n: Int = List.len(xs: cps)
+  if n >= defs.max_span or List.built(b: ctx.files) >= defs.max_files {
+    return None
+  }
+  let id: Int = List.built(b: ctx.files)
+  var fs: Builder[report.SourceFile] = ctx.files
+  List.push(b: inout fs, x: report.SourceFile { id: id, path: path, text: text, cps: cps })
+  let lexed: lexer.LexResult = lexer.lex(source: text)
+  let toks: List[tokens.Token] = lexed.tokens
+  var had_error: Bool = false
+  var parsed: context.Parsed = context.Parsed { module: None, comment_list: lexed.comments }
+  if List.len(xs: toks) >= 1 and List.len(xs: toks) <= 100000000 {
+    let r: parser.ParseResult = parser.parse(toks: toks, source_end: n)
+    parsed = context.Parsed { module: r.module, comment_list: lexed.comments }
+    for d: tokens.Diagnostic in lexed.diagnostics {
+      context.report(ctx: inout ctx, d: syntax_diagnostic(file: id, d: d))
+      had_error = true
+    }
+    for d: tokens.Diagnostic in r.diagnostics {
+      context.report(ctx: inout ctx, d: syntax_diagnostic(file: id, d: d))
+      had_error = true
+    }
+  } else {
+    had_error = true
+  }
+  if had_error {
+    var errs: Dict[Int, Bool] = ctx.syntax_error_files
+    Map.set(d: inout errs, key: id, value: true)
+  }
+  var table: Dict[Int, context.Parsed] = ctx.parsed
+  Map.set(d: inout table, key: id, value: parsed)
+  return Some(value: id)
+}
+
+pub fn module_of_file(ctx: context.Context, file: Int) -> Option[ast.Module] {
+  match Map.find(d: ctx.parsed, key: file) with
+  | None -> return None
+  | Some(value) -> return value.module
+}
+
+fn comments_of_file(ctx: context.Context, file: Int) -> List[tokens.Comment] may alloc {
+  match Map.find(d: ctx.parsed, key: file) with
+  | None -> return []
+  | Some(value) -> return value.comment_list
+}
+
+fn first_difference(a: List[Int], b: List[Int]) -> Int
+  ensures result >= 0 and result <= List.len(xs: a)
+{
+  var i: Int = 0
+  loop while i < List.len(xs: a) and i < List.len(xs: b) and List.get(xs: a, i: i) == List.get(
+    xs: b,
+    i: i
+  )
+    invariant i >= 0 and i <= List.len(xs: a)
+    decreases List.len(xs: a) - i
+  {
+    i = i + 1
+  }
+  return i
+}
+
+-- Pass 2 for one file: compares the source with its canonical printing and
+-- reports E0001 where they first differ. Files with syntax errors are skipped.
+pub fn canonical(ctx: inout context.Context, file: Int) -> Unit may alloc, mutate {
+  if file < 0 or file >= List.built(b: ctx.files) {
+    return Unit
+  }
+  if Map.contains(d: ctx.canonical, key: file) or Map.contains(
+    d: ctx.syntax_error_files,
+    key: file
+  ) {
+    return Unit
+  }
+  match module_of_file(ctx: ctx, file: file) with
+  | None -> return Unit
+  | Some(value) -> {
+    let sf: report.SourceFile = context.file_at(ctx: ctx, id: file)
+    let tab: comments.Table = comments.attach(
+      m: value,
+      comment_list: comments_of_file(ctx: ctx, file: file),
+      src: sf.cps
+    )
+    let text: Text = printer.print_module(m: value, tab: tab)
+    var table: Dict[Int, Text] = ctx.canonical
+    Map.set(d: inout table, key: file, value: text)
+    if text != sf.text {
+      let i: Int = first_difference(a: sf.cps, b: Text.code_points(t: text))
+      var end: Int = i + 1
+      if end > List.len(xs: sf.cps) {
+        end = List.len(xs: sf.cps)
+      }
+      context.report(
+        ctx: inout ctx,
+        d: report.diagnostic(
+          code: "E0001",
+          file: file,
+          span: ast.Span { start: i, end: end },
+          def_name: None,
+          detail: "the source differs from its canonical form at this position; `onus fmt` rewrites it"
+        )
+      )
+    }
+    return Unit
+  }
+}
+
+-- Loading -------------------------------------------------------------------
+record Pending {
+  file: Int
+  tree: ast.Module
+  is_std: Bool
+}
+
+record PendingImport {
+  from: Int
+  from_file: Int
+  name: Text
+  span: ast.Span
+  implicit: Bool
+}
+
+record Edge {
+  from: Int
+  alias: Text
+  span: ast.Span
+  to: Int
+  implicit: Bool
+}
+
+fn last_segment(name: Text) -> Text may alloc {
+  let parts: List[Text] = Text.split(t: name, sep: ".")
+  return List.get(xs: parts, i: List.len(xs: parts) - 1)
+}
+
+-- The project root a file implies, given the suffix its module name demands; None on mismatch.
+fn root_for(path: Text, suffix: Text, root: Option[Text]) -> Option[Text] may alloc {
+  match root with
+  | None -> {
+    if Text.ends_with(t: path, suffix: suffix) and Text.count(t: suffix) <= Text.count(t: path) {
+      return Some(
+        value: Text.slice(t: path, from: 0, to: Text.count(t: path) - Text.count(t: suffix))
+      )
+    }
+    return None
+  }
+  | Some(value) -> {
+    if path == value ++ suffix {
+      return root
+    }
+    return None
+  }
+}
+
+-- The entry files as pending modules, in file order.
+fn entry_candidates(ctx: context.Context) -> List[Pending] may alloc, mutate {
+  var out: Builder[Pending] = List.builder()
+  for id: Int in 0 ..< List.built(b: ctx.files) {
+    match module_of_file(ctx: ctx, file: id) with
+    | None -> skip()
+    | Some(value) -> List.push(
+      b: inout out,
+      x: Pending {
+        file: id,
+        tree: value,
+        is_std: under_stdlib(ctx: ctx, path: context.file_at(ctx: ctx, id: id).path)
+      }
+    )
+  }
+  return List.finish(b: out)
+}
+
+fn skip() -> Unit {
+  return Unit
+}
+
+fn register(
+  ctx: inout context.Context,
+  p: Pending,
+  pending: inout Builder[PendingImport]
+) -> Option[Int] may alloc, mutate {
+  let name: Text = name_of(m: p.tree)
+  match Map.find(d: ctx.by_name, key: name) with
+  | Some(value) -> return Some(value: value)
+  | None -> skip()
+  if is_std_name(name: name) and not p.is_std {
+    context.report(
+      ctx: inout ctx,
+      d: report.diagnostic(
+        code: "E0112",
+        file: p.file,
+        span: p.tree.name.span,
+        def_name: None,
+        detail: "`std.…` names belong to the standard library"
+      )
+    )
+    return None
+  }
+  let id: Int = ctx.module_count
+  ctx = { ctx with module_count: id + 1 }
+  var names: Dict[Text, Int] = ctx.by_name
+  Map.set(d: inout names, key: name, value: id)
+  var mods: Dict[Int, defs.ModuleRecord] = ctx.modules
+  Map.set(
+    d: inout mods,
+    key: id,
+    value: defs.ModuleRecord {
+      id: id,
+      name: name,
+      file: p.file,
+      tree: p.tree,
+      is_std: p.is_std,
+      imports: [],
+      implicit: []
+    }
+  )
+  for imp: ast.Import in p.tree.imports {
+    List.push(
+      b: inout pending,
+      x: PendingImport {
+        from: id,
+        from_file: p.file,
+        name: qname_text(q: imp.name),
+        span: imp.span,
+        implicit: false
+      }
+    )
+  }
+  if ctx.stdlib is Some {
+    for pre: Text in prelude_modules {
+      if pre != name {
+        List.push(
+          b: inout pending,
+          x: PendingImport {
+            from: id,
+            from_file: p.file,
+            name: pre,
+            span: p.tree.name.span,
+            implicit: true
+          }
+        )
+      }
+    }
+  }
+  return Some(value: id)
+}
+
+fn read_or_none(files: io.Files, path: Text) -> Option[Text] may io.file, alloc {
+  match io.read(files: files, path: path) with
+  | Ok(value) -> return Some(value: value)
+  | Err(error) -> return None
+}
+
+fn declared_name(ctx: context.Context, file: Int) -> Option[Text] may alloc, mutate {
+  match module_of_file(ctx: ctx, file: file) with
+  | None -> return None
+  | Some(value) -> return Some(value: name_of(m: value))
+}
+
+fn module_name_span(ctx: context.Context, file: Int) -> ast.Span {
+  match module_of_file(ctx: ctx, file: file) with
+  | None -> return ast.Span { start: 0, end: 0 }
+  | Some(value) -> return value.name.span
+}
+
+fn pending_of(ctx: context.Context, file: Int, is_std: Bool) -> Option[Pending] {
+  match module_of_file(ctx: ctx, file: file) with
+  | None -> return None
+  | Some(value) -> return Some(value: Pending { file: file, tree: value, is_std: is_std })
+}
+
+-- Loads the module `name` imported at `at` in `at_file`, registering it; None (after a report) when it cannot be.
+fn load_module(
+  ctx: inout context.Context,
+  files: io.Files,
+  name: Text,
+  at: ast.Span,
+  at_file: Int,
+  failed: inout Dict[Text, Bool],
+  pending: inout Builder[PendingImport]
+) -> Option[Int] may io.file, alloc, mutate {
+  match Map.find(d: ctx.by_name, key: name) with
+  | Some(value) -> return Some(value: value)
+  | None -> skip()
+  if Map.contains(d: failed, key: name) {
+    return None
+  }
+  Map.set(d: inout failed, key: name, value: true)
+  let is_std: Bool = is_std_name(name: name)
+  var base: Option[Text] = ctx.root
+  if is_std {
+    base = ctx.stdlib
+  }
+  if base is None {
+    var why: Text = "no project root is known"
+    if is_std {
+      why = "no standard library is configured"
+    }
+    context.report(
+      ctx: inout ctx,
+      d: report.diagnostic(code: "E0103", file: at_file, span: at, def_name: None, detail: why)
+    )
+    return None
+  }
+  let path: Text = path_for(root: or_empty(o: base), name: name)
+  let text: Option[Text] = read_or_none(files: files, path: path)
+  if text is None {
+    context.report(
+      ctx: inout ctx,
+      d: report.diagnostic(
+        code: "E0103",
+        file: at_file,
+        span: at,
+        def_name: None,
+        detail: "expected `" ++ name ++ "` at `" ++ path ++ "`"
+      )
+    )
+    return None
+  }
+  let id: Int = try add_file(ctx: inout ctx, path: path, text: or_empty(o: text))
+  match declared_name(ctx: ctx, file: id) with
+  | None -> return None
+  | Some(value) -> {
+    if value != name {
+      context.report(
+        ctx: inout ctx,
+        d: report.diagnostic(
+          code: "E0104",
+          file: id,
+          span: module_name_span(ctx: ctx, file: id),
+          def_name: None,
+          detail: "file `" ++ path ++ "` declares `module " ++ value ++ "` but is imported as `" ++ name ++ "`"
+        )
+      )
+      return None
+    }
+  }
+  match pending_of(ctx: ctx, file: id, is_std: is_std) with
+  | None -> return None
+  | Some(value) -> {
+    let r: Option[Int] = register(ctx: inout ctx, p: value, pending: inout pending)
+    if r is Some {
+      Map.remove(d: inout failed, key: name)
+    }
+    return r
+  }
+}
+
+fn cycle_text(ctx: context.Context, stack: List[Int], to: Int) -> Text may alloc, mutate {
+  var names: Builder[Text] = List.builder()
+  var started: Bool = false
+  for m: Int in stack {
+    if m == to {
+      started = true
+    }
+    if started {
+      List.push(b: inout names, x: context.module_name(ctx: ctx, id: m))
+    }
+  }
+  List.push(b: inout names, x: context.module_name(ctx: ctx, id: to))
+  return Text.join(parts: List.finish(b: names), sep: " -> ")
+}
+
+-- Depth-first search over explicit imports; `fuel` bounds the depth by the module count.
+fn visit(
+  ctx: inout context.Context,
+  m: Int,
+  edges: List[Edge],
+  state: inout Dict[Int, Int],
+  stack: inout Builder[Int],
+  fuel: Int where it >= 0
+) -> Unit may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Unit
+  }
+  Map.set(d: inout state, key: m, value: 1)
+  List.push(b: inout stack, x: m)
+  for e: Edge in edges {
+    if e.from == m and not e.implicit {
+      match Map.find(d: state, key: e.to) with
+      | Some(value) -> {
+        if value == 1 {
+          let file: Int = module_file(ctx: ctx, id: m)
+          context.report(
+            ctx: inout ctx,
+            d: report.diagnostic(
+              code: "E0101",
+              file: file,
+              span: e.span,
+              def_name: None,
+              detail: cycle_text(ctx: ctx, stack: List.finish(b: stack), to: e.to)
+            )
+          )
+        }
+      }
+      | None -> visit(
+        ctx: inout ctx,
+        m: e.to,
+        edges: edges,
+        state: inout state,
+        stack: inout stack,
+        fuel: fuel - 1
+      )
+    }
+  }
+  let popped: Option[Int] = List.pop(b: inout stack)
+  Map.set(d: inout state, key: m, value: 2)
+  return Unit
+}
+
+fn module_file(ctx: context.Context, id: Int) -> Int {
+  match Map.find(d: ctx.modules, key: id) with
+  | Some(value) -> return value.file
+  | None -> return 0
+}
+
+-- Loads every module reachable from the files already in the context and
+-- records the module graph; reports E0101, E0103, E0104 and E0112.
+pub fn load(ctx: inout context.Context, files: io.Files) -> Unit may io.file, alloc, mutate {
+  var root: Option[Text] = ctx.root
+  var entries: Builder[Pending] = List.builder()
+  for p: Pending in entry_candidates(ctx: ctx) {
+    var ok: Bool = true
+    if not p.is_std {
+      let name: Text = name_of(m: p.tree)
+      let suffix: Text = "/" ++ Text.replace(t: name, from: ".", to: "/") ++ ".onus"
+      let path: Text = context.file_at(ctx: ctx, id: p.file).path
+      match root_for(path: path, suffix: suffix, root: root) with
+      | None -> {
+        ok = false
+        context.report(
+          ctx: inout ctx,
+          d: report.diagnostic(
+            code: "E0104",
+            file: p.file,
+            span: p.tree.name.span,
+            def_name: None,
+            detail: "module `" ++ name ++ "` must live at `" ++ Text.replace(
+              t: name,
+              from: ".",
+              to: "/"
+            ) ++ ".onus` under the project root; this file is `" ++ path ++ "`"
+          )
+        )
+      }
+      | Some(value) -> root = Some(value: value)
+    }
+    if ok {
+      List.push(b: inout entries, x: p)
+    }
+  }
+  ctx = { ctx with root: root }
+  var pending: Builder[PendingImport] = List.builder()
+  for p: Pending in List.finish(b: entries) {
+    let registered: Option[Int] = register(ctx: inout ctx, p: p, pending: inout pending)
+  }
+  -- Breadth-first over imports; `pending` grows as modules register.
+  var failed: Dict[Text, Bool] = Map.dict()
+  var edges: Builder[Edge] = List.builder()
+  var i: Int = 0
+  loop while i < List.built(b: pending) and i < max_edges
+    invariant i >= 0
+    decreases max_edges - i
+  {
+    let imp: PendingImport = List.at(b: pending, i: i)
+    match load_module(
+      ctx: inout ctx,
+      files: files,
+      name: imp.name,
+      at: imp.span,
+      at_file: imp.from_file,
+      failed: inout failed,
+      pending: inout pending
+    ) with
+    | None -> skip()
+    | Some(value) -> List.push(
+      b: inout edges,
+      x: Edge {
+        from: imp.from,
+        alias: last_segment(name: imp.name),
+        span: imp.span,
+        to: value,
+        implicit: imp.implicit
+      }
+    )
+    i = i + 1
+  }
+  let edge_list: List[Edge] = List.finish(b: edges)
+  for id: Int in 0 ..< ctx.module_count {
+    match Map.find(d: ctx.modules, key: id) with
+    | None -> skip()
+    | Some(value) -> {
+      var imports: Builder[defs.ImportRecord] = List.builder()
+      var implicit: Builder[Int] = List.builder()
+      for e: Edge in edge_list {
+        if e.from == id {
+          if e.implicit {
+            List.push(b: inout implicit, x: e.to)
+          } else {
+            List.push(
+              b: inout imports,
+              x: defs.ImportRecord { alias: e.alias, mod: e.to, span: e.span }
+            )
+          }
+        }
+      }
+      var mods: Dict[Int, defs.ModuleRecord] = ctx.modules
+      Map.set(
+        d: inout mods,
+        key: id,
+        value: { value with imports: List.finish(b: imports), implicit: List.finish(b: implicit) }
+      )
+    }
+  }
+  var state: Dict[Int, Int] = Map.dict()
+  var stack: Builder[Int] = List.builder()
+  for id: Int in 0 ..< ctx.module_count {
+    if not Map.contains(d: state, key: id) {
+      visit(
+        ctx: inout ctx,
+        m: id,
+        edges: edge_list,
+        state: inout state,
+        stack: inout stack,
+        fuel: ctx.module_count + 1
+      )
+    }
+  }
+  return Unit
+}

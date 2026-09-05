@@ -934,6 +934,122 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     walk the node as its measure (item 133) and drops `diverge`; the
     parser's differential test is unchanged.
 
+## M15.2 — the checker in Onus, first part: loading, resolution and the type layer
+
+139. **A structural measure may be passed on unchanged (§5.1, spec change).**
+    The type checker in Onus, like the one in TypeScript, routes `expr(e)`
+    through helpers that take the same node and recurse on its parts, so
+    `expr` calls `call(e)`, which calls `expr(a.value)`. The structural
+    rule of item 133 rejected the first call: the argument is the measure
+    itself, not a proper part. The verifier now classifies every call on a
+    structural measure as strict (a proper part), equal (the measure
+    itself, through aliases) or neither; strict calls are proved as before,
+    neither is `E0344` as before, and equal calls are settled once every
+    function is lowered: they are proved when the calls passing the measure
+    unchanged form no cycle of their own, since every cycle then takes a
+    proper part somewhere, and are `E0344` when they do. Pinned by
+    `test/verify/ok_structural_helper.onus` and
+    `test/verify/e0344_equal_cycle.onus`.
+140. **`Dict` in `std.map`.** `Map.put` copies the whole map on every write,
+    which a checker's definition and scope tables cannot afford. `Dict[K,
+    V]` is an in-place table with value keys for `Int` and `Text`, on the
+    `Builder` model (bind once, write through that binding): `dict`,
+    `count`, `set`, `find`, `contains`, `remove`, `keys` and `values` in
+    insertion order. JavaScript runtime and `--emit ts` type; pinned by
+    `test/stdlib/map_ops.onus`.
+141. **Nodes are keyed, not numbered.** The syntax tree in Onus has no node
+    ids. Side tables are keyed by `defs.node_key(file, tag, span)`: the
+    file, a syntactic class (expression, type, pattern, statement, item,
+    signature part, other) and the span, packed into one `Int` (a file is
+    limited to 2^20 code points and a compilation to 1024 files). Two nodes
+    of one class never share a span, so the key is unique; comment
+    attachment already keyed sites the same way. A definition carries its
+    declaring node (`defs.DeclNode`) so that later passes reach the
+    declaration without a node table.
+142. **Loading and resolution in Onus.** `self/report.onus` (diagnostics
+    and source files), `self/defs.onus`, `self/context.onus` (the
+    compilation context, one record of tables that dicts and builders make
+    writable through a copy), `self/loader.onus` (`resolve/loader.ts`: the
+    module graph, the prelude, `E0101`, `E0103`, `E0104`, `E0112`, and
+    pass 2 for every loaded file) and `self/resolve.onus`
+    (`resolve/resolve.ts`: definition collection and every rule of §3.10
+    and §11). `self/check.onus` is `onus check` in Onus: it runs the passes
+    implemented so far and prints every diagnostic as one line.
+    `packages/compiler/test/self/checker.test.ts` builds it once and runs it
+    over every source in the repository against the TypeScript pipeline up
+    to the same pass; codes, files, spans and order must agree, and they
+    do up to `resolve`.
+143. **What the resolver taught.** (a) `fn`, `claims` and `module` are
+    keywords, so they cannot be field names; the records use `fn_def`,
+    `claim_table` and `mod`. (b) A `Some(value)` arm inside another
+    `Some(value)` arm is shadowing (item 130), so nested optionals go
+    through small total accessors (`or_neg`, `find_or`) or one match per
+    level in a helper. (c) The measure of a mutual recursion is a parameter
+    *position* (item 121), so a `fuel` measure must sit at the same
+    position in every function of its cycle; the basic evaluator in Onus
+    puts it first. (d) A dict inside a record is written through a local
+    copy (`var d = r.table; Map.set(d: inout d, …)`), which the runtime
+    shares; the verifier does not see the record change, so no contract
+    speaks about a dict's contents.
+
+## M15.2 — the checker in Onus, second part: types, constants and effects
+
+144. **The type checker in Onus.** `self/effectset.onus` (`effects/set.ts`),
+    `self/types.onus` (`types/type.ts`: the type representation, equality
+    after stripping refinements, assignability, substitution, the type
+    variable tests), `self/basic.onus` (`consteval/basic.ts`) and
+    `self/typecheck.onus` (`types/check.ts`, with exhaustiveness from
+    `types/exhaustive.ts`). The port keeps the TypeScript structure, which
+    item 139 made possible: `check_expr(e)` hands `e` to `ctor`, `call`,
+    `binary` and the rest, and each recurses on the parts. One structural
+    change: a refinement's predicate is not checked where the type is
+    elaborated but from a queue once the enclosing item is done, so that
+    elaborating a type never re-enters the expression checker and the
+    elaboration functions form a cycle of their own with a depth measure.
+    The diagnostics are the same, in another order, so the differential
+    test compares them sorted.
+145. **The constant evaluator and pass in Onus.** `self/values.onus`
+    (`consteval/values.ts`), `self/evaluator.onus` (`consteval/eval.ts`
+    with `consteval/intrinsics.ts`) and `self/consteval.onus`
+    (`consteval/pass.ts` with `consteval/offsets.ts`). What TypeScript does
+    with exceptions the evaluator does with a `Result` whose error is
+    `NotConstF`, `PanicF`, `BudgetF` or `ReturnF`, propagated by `try`;
+    integer overflow is caught with `recover`, so a constant that leaves
+    ±2^53 is `E0701` as before instead of a panic in the compiler. An
+    intrinsic is evaluated by calling the standard library function it
+    names, after its refinements are checked by hand so that the evaluator
+    itself has no `panic` effect. Union results (`Int.parse`,
+    `Float.classify`) are rebuilt from the union's variants by name.
+146. **The effects pass in Onus.** `self/effects.onus` (`effects/check.ts`):
+    sites, containment, closures, verify blocks, the flow of function
+    values into function-typed positions, the call graph, Tarjan's strongly
+    connected components with a depth measure, and the measure keys of
+    §5.1 computed over the printed measure. `printer.print_expr` is the
+    printer's new entry point for it.
+147. **M15.2 acceptance.** `self/check.onus` runs load, resolve, types,
+    constants and effects in the order of `driver.ts`, stopping at the
+    first pass that reports as the driver does.
+    `packages/compiler/test/self/checker.test.ts` runs it over every
+    source in the repository against the TypeScript pipeline up to
+    `effects`; codes, files and spans agree on all of them.
+148. **A function named `eval` (codegen bug).** The JavaScript emitter
+    renamed reserved words where a local was declared and where a function
+    was referenced, but not where a function was declared, so a module
+    with `fn eval` produced a file Node refuses in strict mode. Every
+    declaration site now goes through the same renaming. Pinned by
+    `test/codegen/reserved_names.onus`, whose functions are named `eval`,
+    `delete` and `new`.
+149. **What the checker taught.** (a) A loop or a recursion whose measure
+    is a field of an `inout` record cannot be proved to decrease once the
+    body passes that record to a callee, since the callee may change the
+    field; a local counter written back afterwards is the shape that
+    proves. (b) A counter declared `var i: Int = 0` loses `i >= 0` at a
+    loop head; declaring it `var i: Int where it >= 0 = 0` keeps it. (c)
+    The evaluator's `Ev` record refines `steps` and `budget` to be
+    non-negative for the same reason. (d) A function that takes the same
+    node as a helper and re-matches it is the idiom that lets a large
+    `match` be split, now that item 139 admits the call.
+
 ### Deferred, not changed
 
 - `Stream[T] ! e` as a type (§3.11) is not parsed: `-> Stream[T] ! e` is

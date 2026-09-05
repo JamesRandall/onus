@@ -1,0 +1,21 @@
+module e0344_equal_cycle
+
+-- Two functions hand the measure to each other unchanged: no call on the
+-- cycle takes a proper part, so the structural order shows nothing.
+union Tree =
+  | Leaf
+  | Node of child: Tree
+
+fn ping(t: Tree) -> Int
+  decreases t
+{
+  match t with
+  | Leaf -> return 0
+  | Node(child) -> return pong(t: t)
+}
+
+fn pong(t: Tree) -> Int
+  decreases t
+{
+  return ping(t: t)
+}

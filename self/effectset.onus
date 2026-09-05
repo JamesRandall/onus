@@ -1,0 +1,118 @@
+module effectset
+import defs
+
+-- Effect sets (spec §6; `effects/set.ts`). An effect is a primitive effect,
+-- a resource effect declared by a capability's `grants` clause, or an
+-- effect parameter. A set holds each effect once, in insertion order.
+pub record EffectSet {
+  items: List[defs.Effect]
+}
+
+-- Stable text key of an effect, for set membership.
+pub fn effect_key(e: defs.Effect) -> Text may alloc {
+  match e with
+  | defs.PrimEffect(name) -> return name
+  | defs.ResourceEffect(mod, name) -> return "resource:" ++ Int.to_text(x: mod) ++ ":" ++ name
+  | defs.ParamEffect(def) -> return "param:" ++ Int.to_text(x: def)
+}
+
+pub fn empty() -> EffectSet may alloc {
+  return EffectSet { items: [] }
+}
+
+pub fn of_list(effects: List[defs.Effect]) -> EffectSet may alloc, mutate {
+  var seen: Dict[Text, Bool] = Map.dict()
+  var out: Builder[defs.Effect] = List.builder()
+  for e: defs.Effect in effects {
+    let k: Text = effect_key(e: e)
+    if not Map.contains(d: seen, key: k) {
+      Map.set(d: inout seen, key: k, value: true)
+      List.push(b: inout out, x: e)
+    }
+  }
+  return EffectSet { items: List.finish(b: out) }
+}
+
+pub fn has(s: EffectSet, e: defs.Effect) -> Bool may alloc {
+  let k: Text = effect_key(e: e)
+  for x: defs.Effect in s.items {
+    if effect_key(e: x) == k {
+      return true
+    }
+  }
+  return false
+}
+
+pub fn size(s: EffectSet) -> Int {
+  return List.len(xs: s.items)
+}
+
+pub fn values(s: EffectSet) -> List[defs.Effect] {
+  return s.items
+}
+
+-- Set inclusion: every effect of `a` is in `b`.
+pub fn subset_of(a: EffectSet, b: EffectSet) -> Bool may alloc {
+  for x: defs.Effect in a.items {
+    if not has(s: b, e: x) {
+      return false
+    }
+  }
+  return true
+}
+
+pub fn join_sets(a: EffectSet, b: EffectSet) -> EffectSet may alloc, mutate {
+  var all: Builder[defs.Effect] = List.builder()
+  for x: defs.Effect in a.items {
+    List.push(b: inout all, x: x)
+  }
+  for x: defs.Effect in b.items {
+    List.push(b: inout all, x: x)
+  }
+  return of_list(effects: List.finish(b: all))
+}
+
+-- Effects of `a` not in `b`.
+pub fn minus(a: EffectSet, b: EffectSet) -> List[defs.Effect] may alloc, mutate {
+  var out: Builder[defs.Effect] = List.builder()
+  for x: defs.Effect in a.items {
+    if not has(s: b, e: x) {
+      List.push(b: inout out, x: x)
+    }
+  }
+  return List.finish(b: out)
+}
+
+-- Effects of `a` without `e`.
+pub fn without(a: EffectSet, e: defs.Effect) -> EffectSet may alloc, mutate {
+  let k: Text = effect_key(e: e)
+  var out: Builder[defs.Effect] = List.builder()
+  for x: defs.Effect in a.items {
+    if effect_key(e: x) != k {
+      List.push(b: inout out, x: x)
+    }
+  }
+  return EffectSet { items: List.finish(b: out) }
+}
+
+pub fn equals(a: EffectSet, b: EffectSet) -> Bool may alloc {
+  return subset_of(a: a, b: b) and subset_of(a: b, b: a)
+}
+
+example sets {
+  let a: EffectSet = of_list(
+    effects: [
+      defs.PrimEffect(name: "alloc"),
+      defs.PrimEffect(name: "alloc"),
+      defs.PrimEffect(name: "mutate")
+    ]
+  )
+  size(s: a) == 2
+  has(s: a, e: defs.PrimEffect(name: "mutate"))
+  not has(s: a, e: defs.PrimEffect(name: "panic"))
+  equals(
+    a: a,
+    b: of_list(effects: [defs.PrimEffect(name: "mutate"), defs.PrimEffect(name: "alloc")])
+  )
+  List.len(xs: minus(a: a, b: of_list(effects: [defs.PrimEffect(name: "alloc")]))) == 1
+}

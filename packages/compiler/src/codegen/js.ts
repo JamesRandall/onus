@@ -234,6 +234,8 @@ class JsEmitter {
             return `$rt.grid.Grid<${targs[0] ?? 'unknown'}>`;
           case 'std.map.Map':
             return `$rt.map.Map<${targs[0] ?? 'unknown'}, ${targs[1] ?? 'unknown'}>`;
+          case 'std.map.Dict':
+            return `$rt.map.Dict<${targs[0] ?? 'unknown'}, ${targs[1] ?? 'unknown'}>`;
           case 'std.sql.Select':
             return `$rt.sql.Select<${targs[0] ?? 'unknown'}>`;
           case 'std.sql.Param':
@@ -323,6 +325,7 @@ class JsEmitter {
           q === 'std.list.List' ? `readonly ${params[0] ?? 'unknown'}[]` :
           q === 'std.grid.Grid' ? `$rt.grid.Grid<${params[0] ?? 'unknown'}>` :
           q === 'std.map.Map' ? `$rt.map.Map<${params[0] ?? 'unknown'}, ${params[1] ?? 'unknown'}>` :
+          q === 'std.map.Dict' ? `$rt.map.Dict<${params[0] ?? 'unknown'}, ${params[1] ?? 'unknown'}>` :
           q === 'std.list.Builder' ? `$rt.list.Builder<${params[0] ?? 'unknown'}>` :
           q === 'std.sql.Select' ? `$rt.sql.Select<${params[0] ?? 'unknown'}>` :
           q === 'std.sql.Param' ? '$rt.sql.Param' :
@@ -373,7 +376,7 @@ class JsEmitter {
 
   private impl(item: IrImpl): void {
     for (const f of item.fns) this.fnDecl(f);
-    const entries = item.entries.map((e) => `${this.local(e.name)}: ${e.fn.name}`);
+    const entries = item.entries.map((e) => `${this.local(e.name)}: ${this.local(e.fn.name)}`);
     const type = this.opts.ts ? `: ${this.tsIfaceDict(item.iface, item.target)}` : '';
     this.w.line(`export const ${item.dictName}${type} = { ${entries.join(', ')} };`);
     this.w.line('');
@@ -401,14 +404,14 @@ class JsEmitter {
     if (f.intrinsic !== null) {
       const args = [...f.constParams.map((c) => c.name), ...f.params.map((p) => p.name)].map((n) => this.local(n));
       if (isSelect) args.push('$decode ?? null');
-      this.w.block(`export function ${f.name}${tsSig} {`, () => this.w.line(`return $rt.${f.intrinsic?.ns ?? ''}.${f.intrinsic?.name ?? ''}(${args.join(', ')});`));
+      this.w.block(`export function ${this.local(f.name)}${tsSig} {`, () => this.w.line(`return $rt.${f.intrinsic?.ns ?? ''}.${f.intrinsic?.name ?? ''}(${args.join(', ')});`));
       this.w.line('');
       return;
     }
     if (f.body === null) return;
     const body = f.body;
     this.fn = { inout: f.params.filter((p) => p.inout).map((p) => p.name), ret: f.ret };
-    this.w.block(`export function ${f.name}${tsSig} {`, () => {
+    this.w.block(`export function ${this.local(f.name)}${tsSig} {`, () => {
       this.block(f.entry);
       this.withEarlyReturn(f.earlyReturn, () => this.block(body));
     });
@@ -735,7 +738,7 @@ class JsEmitter {
       case 'value':
         return piece(this.valueLiteral(e.value), ATOM);
       case 'dict':
-        return piece(e.module === this.m.id && this.selfAlias === null ? e.name : `${this.alias(e.module)}.${e.name}`, ATOM);
+        return piece(e.module === this.m.id && this.selfAlias === null ? this.local(e.name) : `${this.alias(e.module)}.${this.local(e.name)}`, ATOM);
       case 'dict-param':
         return piece(e.name, ATOM);
       case 'snapshot':
@@ -890,7 +893,7 @@ class JsEmitter {
     const destructure = v.params.length === 0 ? '$args' : `{ ${v.params.map((p) => this.local(p.name)).join(', ')} }`;
     this.fn = { inout: [], ret: { k: 'prim', name: 'Bool' } };
     this.assertMode = 'return-false';
-    this.w.block(`export function ${v.name}(${destructure}) {`, () => {
+    this.w.block(`export function ${this.local(v.name)}(${destructure}) {`, () => {
       this.withEarlyReturn(v.earlyReturn, () => {
         this.block(v.body);
         this.w.line('return true;');

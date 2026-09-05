@@ -1,0 +1,347 @@
+module basic
+import ast
+import parser
+import defs
+import types
+import context
+
+-- The check-time evaluator for literals, constants and simple arithmetic
+-- (impl spec milestone 2; `consteval/basic.ts`): the leaf evaluator the
+-- type checker uses for type indices and `const` declarations.
+-- The value of each `const` seen so far (None when it is not a constant), and the ones being evaluated.
+pub record ConstEnv {
+  memo: Dict[Int, Option[types.ConstValue]]
+  busy: Dict[Int, Bool]
+}
+
+pub fn new_env() -> ConstEnv may alloc {
+  return ConstEnv { memo: Map.dict(), busy: Map.dict() }
+}
+
+-- The bound on the depth of constant references followed.
+pub const max_depth: Int = 100000
+
+-- The value of a `const` definition, or None when it is not a constant expression.
+pub fn const_of(
+  fuel: Int where it >= 0,
+  ctx: context.Context,
+  env: ConstEnv,
+  def: Int
+) -> Option[types.ConstValue] may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return None
+  }
+  match Map.find(d: env.memo, key: def) with
+  | Some(value) -> return value
+  | None -> skip()
+  if Map.contains(d: env.busy, key: def) {
+    return None
+  }
+  let d: defs.Def = context.get_def(ctx: ctx, id: def)
+  var busy: Dict[Int, Bool] = env.busy
+  Map.set(d: inout busy, key: def, value: true)
+  var v: Option[types.ConstValue] = None
+  match d.node with
+  | defs.ConstNode(decl) -> v = eval(
+    ctx: ctx,
+    env: env,
+    e: decl.value,
+    file: d.file,
+    fuel: fuel - 1
+  )
+  | _ -> v = None
+  Map.remove(d: inout busy, key: def)
+  var memo: Dict[Int, Option[types.ConstValue]] = env.memo
+  Map.set(d: inout memo, key: def, value: v)
+  return v
+}
+
+fn skip() -> Unit {
+  return Unit
+}
+
+fn ref_of(ctx: context.Context, file: Int, span: ast.Span) -> Option[defs.Resolution] {
+  return Map.find(d: ctx.refs, key: defs.node_key(file: file, tag: defs.tag_expr, span: span))
+}
+
+-- Evaluates `e` if it is a constant expression (§3.8): a literal, a `const`
+-- name, a nullary variant, `Unit`, a parameter usable as an index (a
+-- symbolic value), or arithmetic, comparison and boolean operators over
+-- constants. None otherwise, including on division by zero.
+pub fn eval(
+  fuel: Int where it >= 0,
+  ctx: context.Context,
+  env: ConstEnv,
+  e: ast.Expr,
+  file: Int
+) -> Option[types.ConstValue] may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return None
+  }
+  match e with
+  | ast.IntLit(value, _, _) -> return Some(value: types.IntV(v: value))
+  | ast.FloatLit(value, _) -> return Some(value: types.FloatV(v: value))
+  | ast.BoolLit(value, _) -> return Some(value: types.BoolV(v: value))
+  | ast.TextLit(value, _) -> return Some(value: types.TextV(v: value))
+  | ast.DurationLit(nanos, _) -> return Some(value: types.DurationV(v: nanos))
+  | ast.Name(_, span) -> {
+    match ref_of(ctx: ctx, file: file, span: span) with
+    | Some(value) -> {
+      match value with
+      | defs.DefRes(def) -> {
+        let d: defs.Def = context.get_def(ctx: ctx, id: def)
+        if d.kind == defs.Const {
+          return const_of(ctx: ctx, env: env, def: def, fuel: fuel - 1)
+        }
+        if d.kind == defs.ConstParam or d.kind == defs.Param {
+          return Some(value: types.SymV(def: def))
+        }
+        return None
+      }
+      | _ -> return None
+    }
+    | None -> return None
+  }
+  | ast.Ctor(_, args, fields, span) -> {
+    if args is Some or fields is Some {
+      return None
+    }
+    match ref_of(ctx: ctx, file: file, span: span) with
+    | Some(value) -> {
+      match value with
+      | defs.UnitRes -> return Some(value: types.UnitV)
+      | defs.DefRes(def) -> {
+        if context.get_def(ctx: ctx, id: def).kind == defs.Variant {
+          return Some(value: types.VariantV(def: def))
+        }
+        return None
+      }
+      | _ -> return None
+    }
+    | None -> return None
+  }
+  | ast.Unary(op, operand, _) -> {
+    match eval(ctx: ctx, env: env, e: operand, file: file, fuel: fuel - 1) with
+    | None -> return None
+    | Some(value) -> return unary(op: op, x: value)
+  }
+  | ast.Binary(op, left, right, _) -> {
+    let l: Option[types.ConstValue] = eval(ctx: ctx, env: env, e: left, file: file, fuel: fuel - 1)
+    let r: Option[types.ConstValue] = eval(ctx: ctx, env: env, e: right, file: file, fuel: fuel - 1)
+    if l is None or r is None {
+      return None
+    }
+    return binary(op: op, l: or_error(o: l), r: or_error(o: r))
+  }
+  | ast.And(operands, _) -> return conjunction(
+    ctx: ctx,
+    env: env,
+    operands: operands,
+    file: file,
+    is_and: true,
+    fuel: fuel - 1
+  )
+  | ast.Or(operands, _) -> return conjunction(
+    ctx: ctx,
+    env: env,
+    operands: operands,
+    file: file,
+    is_and: false,
+    fuel: fuel - 1
+  )
+  | _ -> return None
+}
+
+fn conjunction(
+  fuel: Int where it >= 0,
+  ctx: context.Context,
+  env: ConstEnv,
+  operands: List[ast.Expr],
+  file: Int,
+  is_and: Bool
+) -> Option[types.ConstValue] may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return None
+  }
+  var acc: Bool = is_and
+  for o: ast.Expr in operands {
+    match eval(ctx: ctx, env: env, e: o, file: file, fuel: fuel - 1) with
+    | None -> return None
+    | Some(value) -> {
+      match value with
+      | types.BoolV(v) -> {
+        if is_and {
+          acc = acc and v
+        } else {
+          acc = acc or v
+        }
+      }
+      | _ -> return None
+    }
+  }
+  return Some(value: types.BoolV(v: acc))
+}
+
+fn or_error(o: Option[types.ConstValue]) -> types.ConstValue {
+  match o with
+  | Some(value) -> return value
+  | None -> return types.ErrorV
+}
+
+fn unary(op: Text, x: types.ConstValue) -> Option[types.ConstValue] {
+  if op == "not" {
+    match x with
+    | types.BoolV(v) -> return Some(value: types.BoolV(v: not v))
+    | _ -> return None
+  }
+  match x with
+  | types.IntV(v) -> return Some(value: types.IntV(v: 0 - v))
+  | types.FloatV(v) -> return Some(value: types.FloatV(v: 0.0 - v))
+  | _ -> return None
+}
+
+fn int_binary(op: Text, a: Int, b: Int) -> Option[types.ConstValue] {
+  if op == "+" {
+    return Some(value: types.IntV(v: a + b))
+  }
+  if op == "-" {
+    return Some(value: types.IntV(v: a - b))
+  }
+  if op == "*" {
+    return Some(value: types.IntV(v: a * b))
+  }
+  if op == "/" {
+    if b == 0 {
+      return None
+    }
+    return Some(value: types.IntV(v: a / b))
+  }
+  if op == "%" {
+    if b == 0 {
+      return None
+    }
+    return Some(value: types.IntV(v: a % b))
+  }
+  if op == "==" {
+    return Some(value: types.BoolV(v: a == b))
+  }
+  if op == "!=" {
+    return Some(value: types.BoolV(v: a != b))
+  }
+  if op == "<" {
+    return Some(value: types.BoolV(v: a < b))
+  }
+  if op == "<=" {
+    return Some(value: types.BoolV(v: a <= b))
+  }
+  if op == ">" {
+    return Some(value: types.BoolV(v: a > b))
+  }
+  if op == ">=" {
+    return Some(value: types.BoolV(v: a >= b))
+  }
+  return None
+}
+
+fn float_binary(op: Text, a: Float, b: Float) -> Option[types.ConstValue] {
+  if op == "+" {
+    return Some(value: types.FloatV(v: a + b))
+  }
+  if op == "-" {
+    return Some(value: types.FloatV(v: a - b))
+  }
+  if op == "*" {
+    return Some(value: types.FloatV(v: a * b))
+  }
+  if op == "/" {
+    return Some(value: types.FloatV(v: a / b))
+  }
+  if op == "==" {
+    return Some(value: types.BoolV(v: a == b))
+  }
+  if op == "!=" {
+    return Some(value: types.BoolV(v: a != b))
+  }
+  if op == "<" {
+    return Some(value: types.BoolV(v: a < b))
+  }
+  if op == "<=" {
+    return Some(value: types.BoolV(v: a <= b))
+  }
+  if op == ">" {
+    return Some(value: types.BoolV(v: a > b))
+  }
+  if op == ">=" {
+    return Some(value: types.BoolV(v: a >= b))
+  }
+  return None
+}
+
+fn text_binary(op: Text, a: Text, b: Text) -> Option[types.ConstValue] may alloc {
+  if op == "++" {
+    return Some(value: types.TextV(v: a ++ b))
+  }
+  if op == "==" {
+    return Some(value: types.BoolV(v: a == b))
+  }
+  if op == "!=" {
+    return Some(value: types.BoolV(v: a != b))
+  }
+  return None
+}
+
+fn bool_binary(op: Text, a: Bool, b: Bool) -> Option[types.ConstValue] {
+  if op == "==" {
+    return Some(value: types.BoolV(v: a == b))
+  }
+  if op == "!=" {
+    return Some(value: types.BoolV(v: a != b))
+  }
+  if op == "implies" {
+    return Some(value: types.BoolV(v: not a or b))
+  }
+  return None
+}
+
+fn binary(
+  op: Text,
+  l: types.ConstValue,
+  r: types.ConstValue
+) -> Option[types.ConstValue] may alloc {
+  if types.const_tag(v: l) != types.const_tag(v: r) {
+    return None
+  }
+  match l with
+  | types.IntV(v) -> return int_binary(op: op, a: v, b: types.int_of(c: r))
+  | types.FloatV(v) -> return float_binary(op: op, a: v, b: types.float_of(c: r))
+  | types.TextV(v) -> return text_binary(op: op, a: v, b: types.text_of(c: r))
+  | types.BoolV(v) -> return bool_binary(op: op, a: v, b: types.bool_of(c: r))
+  | types.VariantV(def) -> {
+    if op == "==" {
+      return Some(value: types.BoolV(v: def == types.variant_of(c: r)))
+    }
+    if op == "!=" {
+      return Some(value: types.BoolV(v: def != types.variant_of(c: r)))
+    }
+    return None
+  }
+  | _ -> return None
+}
+
+example arithmetic {
+  binary(op: "+", l: types.IntV(v: 2), r: types.IntV(v: 3)) == Some(value: types.IntV(v: 5))
+  binary(op: "/", l: types.IntV(v: 2), r: types.IntV(v: 0)) == None
+  binary(op: "++", l: types.TextV(v: "a"), r: types.TextV(v: "b")) == Some(
+    value: types.TextV(v: "ab")
+  )
+  binary(op: "implies", l: types.BoolV(v: true), r: types.BoolV(v: false)) == Some(
+    value: types.BoolV(v: false)
+  )
+  unary(op: "not", x: types.BoolV(v: true)) == Some(value: types.BoolV(v: false))
+}

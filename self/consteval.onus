@@ -1,0 +1,977 @@
+module consteval
+import ast
+import parser
+import printer
+import comments
+import report
+import defs
+import context
+import types
+import values
+import evaluator
+import effectset
+
+-- The const-evaluation pass (impl spec §4, pass 5; spec §3.8, §5.2;
+-- `consteval/pass.ts`):
+--   - every `const` definition is evaluated (E0701 when it is not constant);
+--   - at every call whose arguments are constant, the callee's `requires
+--     proved` clauses are evaluated: a clause that is false is E0700, with a
+--     `ConstError` mapped into the text literal it indexes;
+--   - `example` blocks whose statements are evaluable run at check time: a
+--     false assertion is E0702, and an example that needs the runtime is
+--     deferred to the generated tests;
+--   - a contract failing inside evaluation is E0701; exceeding the step
+--     budget is E0501, naming the function that spent it.
+record Cp {
+  current_def: Option[Text]
+  current_file: Int
+}
+
+fn skip() -> Unit {
+  return Unit
+}
+
+fn rep(
+  cp: Cp,
+  ctx: inout context.Context,
+  code: Text,
+  at: ast.Span,
+  detail: Text
+) -> Unit may mutate, alloc {
+  context.report(
+    ctx: inout ctx,
+    d: report.diagnostic(
+      code: code,
+      file: cp.current_file,
+      span: at,
+      def_name: cp.current_def,
+      detail: detail
+    )
+  )
+  return Unit
+}
+
+fn key(cp: Cp, tag: Int, span: ast.Span) -> Int {
+  return defs.node_key(file: cp.current_file, tag: tag, span: span)
+}
+
+fn or_neg(o: Option[Int]) -> Int {
+  match o with
+  | Some(value) -> return value
+  | None -> return -1
+}
+
+fn def_of_key(ctx: context.Context, k: Int) -> Int {
+  return or_neg(o: Map.find(d: ctx.def_of, key: k))
+}
+
+fn copy_env(env: Dict[Int, values.Value]) -> Dict[Int, values.Value] may alloc, mutate {
+  var out: Dict[Int, values.Value] = Map.dict()
+  for k: Int in Map.keys(d: env) {
+    match Map.find(d: env, key: k) with
+    | Some(value) -> Map.set(d: inout out, key: k, value: value)
+    | None -> skip()
+  }
+  return out
+}
+
+fn item_name(item: ast.Item) -> Text {
+  match item with
+  | ast.FnItem(decl) -> return decl.name.text
+  | ast.TypeAliasItem(decl) -> return decl.name.text
+  | ast.IntrinsicTypeItem(decl) -> return decl.name.text
+  | ast.ConstItem(decl) -> return decl.name.text
+  | ast.RecordItem(decl) -> return decl.name.text
+  | ast.UnionItem(decl) -> return decl.name.text
+  | ast.InterfaceItem(decl) -> return decl.name.text
+  | ast.ImplItem(decl) -> return decl.iface.text
+  | ast.ClaimItem(decl) -> return decl.name.text
+  | ast.CapabilityItem(decl) -> return decl.name.text
+  | ast.PathItem(decl) -> return decl.name.text
+  | ast.PolicyItem(decl) -> return decl.name.text
+  | ast.ExampleItem(decl) -> return decl.name.text
+  | ast.PropertyItem(decl) -> return decl.name.text
+}
+
+-- Collecting calls -------------------------------------------------------------------------
+fn calls_in_type(t: ast.Type, out: inout Builder[ast.Expr]) -> Unit may mutate, alloc
+  decreases t
+{
+  match t with
+  | ast.FnType(params, ret, _, _) -> {
+    calls_in_params(ps: params, out: inout out)
+    calls_in_type(t: ret, out: inout out)
+  }
+  | ast.NamedType(_, args, where_, _) -> {
+    for a: ast.TypeArg in args {
+      match a with
+      | ast.TypeArgType(_, ty, _) -> calls_in_type(t: ty, out: inout out)
+      | ast.TypeArgConst(_, expr, _) -> calls_in_expr(e: expr, out: inout out)
+    }
+    match where_ with
+    | Some(value) -> calls_in_expr(e: value, out: inout out)
+    | None -> skip()
+  }
+  return Unit
+}
+
+fn calls_in_params(ps: List[ast.Param], out: inout Builder[ast.Expr]) -> Unit may mutate, alloc
+  decreases ps
+{
+  for p: ast.Param in ps {
+    calls_in_type(t: p.ty, out: inout out)
+  }
+  return Unit
+}
+
+fn calls_in_targs(ts: List[ast.TypeArg], out: inout Builder[ast.Expr]) -> Unit may mutate, alloc
+  decreases ts
+{
+  for a: ast.TypeArg in ts {
+    match a with
+    | ast.TypeArgType(_, ty, _) -> calls_in_type(t: ty, out: inout out)
+    | ast.TypeArgConst(_, expr, _) -> calls_in_expr(e: expr, out: inout out)
+  }
+  return Unit
+}
+
+fn calls_in_block(b: ast.Block, out: inout Builder[ast.Expr]) -> Unit may mutate, alloc
+  decreases b
+{
+  for s: ast.Stmt in b.stmts {
+    calls_in_stmt(s: s, out: inout out)
+  }
+  return Unit
+}
+
+fn calls_in_stmt(s: ast.Stmt, out: inout Builder[ast.Expr]) -> Unit may mutate, alloc
+  decreases s
+{
+  match s with
+  | ast.Let(_, ty, value, _) -> {
+    calls_in_type(t: ty, out: inout out)
+    calls_in_expr(e: value, out: inout out)
+  }
+  | ast.Var(_, ty, value, _) -> {
+    calls_in_type(t: ty, out: inout out)
+    calls_in_expr(e: value, out: inout out)
+  }
+  | ast.Assign(_, value, _) -> calls_in_expr(e: value, out: inout out)
+  | ast.Return(value, _) -> calls_in_expr(e: value, out: inout out)
+  | ast.If(cond, then_block, else_block, _) -> {
+    calls_in_expr(e: cond, out: inout out)
+    calls_in_block(b: then_block, out: inout out)
+    match else_block with
+    | Some(value) -> calls_in_block(b: value, out: inout out)
+    | None -> skip()
+  }
+  | ast.Match(scrutinee, arms, _) -> {
+    calls_in_expr(e: scrutinee, out: inout out)
+    for a: ast.Arm in arms {
+      calls_in_pattern(p: a.pattern, out: inout out)
+      match a.guard with
+      | Some(value) -> calls_in_expr(e: value, out: inout out)
+      | None -> skip()
+      match a.body with
+      | ast.ArmBlock(block) -> calls_in_block(b: block, out: inout out)
+      | ast.ArmStmt(stmt) -> calls_in_stmt(s: stmt, out: inout out)
+    }
+  }
+  | ast.Loop(cond, clauses, body, _) -> {
+    calls_in_expr(e: cond, out: inout out)
+    for c: ast.LoopClause in clauses {
+      calls_in_expr(e: c.expr, out: inout out)
+    }
+    calls_in_block(b: body, out: inout out)
+  }
+  | ast.For(_, ty, domain, body, _) -> {
+    calls_in_type(t: ty, out: inout out)
+    match domain with
+    | ast.RangeDomain(lo, hi, _) -> {
+      calls_in_expr(e: lo, out: inout out)
+      calls_in_expr(e: hi, out: inout out)
+    }
+    | ast.InDomain(expr, _) -> calls_in_expr(e: expr, out: inout out)
+    calls_in_block(b: body, out: inout out)
+  }
+  | ast.Assume(_, _, verify_block, _) -> {
+    match verify_block with
+    | Some(value) -> {
+      calls_in_params(ps: value.params, out: inout out)
+      calls_in_block(b: value.body, out: inout out)
+    }
+    | None -> skip()
+  }
+  | ast.ExprStmt(expr, _) -> calls_in_expr(e: expr, out: inout out)
+  return Unit
+}
+
+fn calls_in_pattern(p: ast.Pattern, out: inout Builder[ast.Expr]) -> Unit may mutate, alloc
+  decreases p
+{
+  match p with
+  | ast.LitPat(literal, _) -> calls_in_expr(e: literal, out: inout out)
+  | _ -> skip()
+  return Unit
+}
+
+fn calls_in_expr(e: ast.Expr, out: inout Builder[ast.Expr]) -> Unit may mutate, alloc
+  decreases e
+{
+  match e with
+  | ast.Ctor(_, args, fields, _) -> {
+    match args with
+    | Some(value) -> {
+      for a: ast.Arg in value {
+        calls_in_expr(e: a.value, out: inout out)
+      }
+    }
+    | None -> skip()
+    match fields with
+    | Some(value) -> {
+      for f: ast.FieldInit in value {
+        calls_in_expr(e: f.value, out: inout out)
+      }
+    }
+    | None -> skip()
+  }
+  | ast.RecordUpdate(base, fields, _) -> {
+    calls_in_expr(e: base, out: inout out)
+    for f: ast.FieldInit in fields {
+      calls_in_expr(e: f.value, out: inout out)
+    }
+  }
+  | ast.ListLit(elems, _) -> {
+    for x: ast.Expr in elems {
+      calls_in_expr(e: x, out: inout out)
+    }
+  }
+  | ast.Try(expr, else_, _) -> {
+    calls_in_expr(e: expr, out: inout out)
+    match else_ with
+    | Some(value) -> calls_in_expr(e: value.expr, out: inout out)
+    | None -> skip()
+  }
+  | ast.Recover(body, _) -> calls_in_block(b: body, out: inout out)
+  | ast.Quantifier(_, _, ty, domain, where_, body, _) -> {
+    calls_in_type(t: ty, out: inout out)
+    match domain with
+    | Some(value) -> {
+      match value with
+      | ast.RangeDomain(lo, hi, _) -> {
+        calls_in_expr(e: lo, out: inout out)
+        calls_in_expr(e: hi, out: inout out)
+      }
+      | ast.InDomain(expr, _) -> calls_in_expr(e: expr, out: inout out)
+    }
+    | None -> skip()
+    match where_ with
+    | Some(value) -> calls_in_expr(e: value, out: inout out)
+    | None -> skip()
+    calls_in_expr(e: body, out: inout out)
+  }
+  | ast.Closure(params, ret, _, body, _) -> {
+    calls_in_params(ps: params, out: inout out)
+    calls_in_type(t: ret, out: inout out)
+    calls_in_block(b: body, out: inout out)
+  }
+  | ast.Fake(_, fields, _) -> {
+    for f: ast.FieldInit in fields {
+      calls_in_expr(e: f.value, out: inout out)
+    }
+  }
+  | ast.FieldAccess(object, _, _) -> calls_in_expr(e: object, out: inout out)
+  | ast.Call(callee, targs, args, _) -> {
+    List.push(b: inout out, x: e)
+    calls_in_expr(e: callee, out: inout out)
+    match targs with
+    | Some(value) -> calls_in_targs(ts: value, out: inout out)
+    | None -> skip()
+    for a: ast.Arg in args {
+      calls_in_expr(e: a.value, out: inout out)
+    }
+  }
+  | ast.Unary(_, operand, _) -> calls_in_expr(e: operand, out: inout out)
+  | ast.Binary(_, left, right, _) -> {
+    calls_in_expr(e: left, out: inout out)
+    calls_in_expr(e: right, out: inout out)
+  }
+  | ast.And(operands, _) -> {
+    for o: ast.Expr in operands {
+      calls_in_expr(e: o, out: inout out)
+    }
+  }
+  | ast.Or(operands, _) -> {
+    for o: ast.Expr in operands {
+      calls_in_expr(e: o, out: inout out)
+    }
+  }
+  | ast.Is(expr, pattern, _) -> {
+    calls_in_expr(e: expr, out: inout out)
+    calls_in_pattern(p: pattern, out: inout out)
+  }
+  | _ -> skip()
+  return Unit
+}
+
+fn calls_in_tparams(ps: List[ast.TParam], out: inout Builder[ast.Expr]) -> Unit may mutate, alloc {
+  for p: ast.TParam in ps {
+    match p with
+    | ast.ConstParam(_, ty, _) -> calls_in_type(t: ty, out: inout out)
+    | _ -> skip()
+  }
+  return Unit
+}
+
+fn calls_in_fn(f: ast.FnDecl, out: inout Builder[ast.Expr]) -> Unit may mutate, alloc {
+  calls_in_tparams(ps: f.tparams, out: inout out)
+  calls_in_params(ps: f.params, out: inout out)
+  calls_in_type(t: f.ret, out: inout out)
+  for c: ast.Contract in f.contracts {
+    calls_in_expr(e: c.expr, out: inout out)
+  }
+  match f.body with
+  | Some(value) -> calls_in_block(b: value, out: inout out)
+  | None -> skip()
+  return Unit
+}
+
+fn calls_in_iface_item(
+  member: ast.IfaceItem,
+  out: inout Builder[ast.Expr]
+) -> Unit may mutate, alloc {
+  match member with
+  | ast.IfaceFnItem(decl) -> {
+    calls_in_params(ps: decl.params, out: inout out)
+    calls_in_type(t: decl.ret, out: inout out)
+    for c: ast.Contract in decl.contracts {
+      calls_in_expr(e: c.expr, out: inout out)
+    }
+  }
+  | ast.LawItem(decl) -> {
+    calls_in_params(ps: decl.params, out: inout out)
+    calls_in_block(b: decl.body, out: inout out)
+  }
+  return Unit
+}
+
+-- Every call expression under `item`, in pre-order.
+fn calls_in_item(item: ast.Item) -> List[ast.Expr] may mutate, alloc {
+  var out: Builder[ast.Expr] = List.builder()
+  match item with
+  | ast.FnItem(decl) -> calls_in_fn(f: decl, out: inout out)
+  | ast.TypeAliasItem(decl) -> calls_in_type(t: decl.ty, out: inout out)
+  | ast.IntrinsicTypeItem(decl) -> calls_in_tparams(ps: decl.tparams, out: inout out)
+  | ast.ConstItem(decl) -> {
+    calls_in_type(t: decl.ty, out: inout out)
+    calls_in_expr(e: decl.value, out: inout out)
+  }
+  | ast.RecordItem(decl) -> {
+    calls_in_tparams(ps: decl.tparams, out: inout out)
+    for f: ast.Field in decl.fields {
+      calls_in_type(t: f.ty, out: inout out)
+    }
+  }
+  | ast.UnionItem(decl) -> {
+    calls_in_tparams(ps: decl.tparams, out: inout out)
+    for v: ast.Variant in decl.variants {
+      for f: ast.Field in v.fields {
+        calls_in_type(t: f.ty, out: inout out)
+      }
+    }
+  }
+  | ast.InterfaceItem(decl) -> {
+    for member: ast.IfaceItem in decl.items {
+      calls_in_iface_item(member: member, out: inout out)
+    }
+  }
+  | ast.ImplItem(decl) -> {
+    calls_in_type(t: decl.target, out: inout out)
+    for f: ast.FnDecl in decl.fns {
+      calls_in_fn(f: f, out: inout out)
+    }
+  }
+  | ast.CapabilityItem(decl) -> {
+    calls_in_tparams(ps: decl.tparams, out: inout out)
+    for g: ast.Grant in decl.grant_list {
+      match g.when_cond with
+      | Some(value) -> calls_in_expr(e: value, out: inout out)
+      | None -> skip()
+    }
+  }
+  | ast.ExampleItem(decl) -> calls_in_block(b: decl.body, out: inout out)
+  | ast.PropertyItem(decl) -> {
+    calls_in_params(ps: decl.params, out: inout out)
+    calls_in_block(b: decl.body, out: inout out)
+  }
+  | _ -> skip()
+  return List.finish(b: out)
+}
+
+-- `requires proved` at call sites ---------------------------------------------------------
+fn res_fn(ctx: context.Context, k: Int) -> Int {
+  match Map.find(d: ctx.refs, key: k) with
+  | None -> return -1
+  | Some(value) -> {
+    match value with
+    | defs.DefRes(def) -> return def
+    | defs.CompanionRes(owner, fn_def) -> return fn_def
+    | _ -> return -1
+  }
+}
+
+fn proved_clauses(sig: types.Signature) -> List[ast.Contract] may alloc, mutate {
+  var out: Builder[ast.Contract] = List.builder()
+  for c: ast.Contract in sig.contracts {
+    if c.clause == "requires" and c.is_proved {
+      List.push(b: inout out, x: c)
+    }
+  }
+  return List.finish(b: out)
+}
+
+fn find_arg(args: List[ast.Arg], name: Text) -> Option[ast.Arg] {
+  for a: ast.Arg in args {
+    if a.name.text == name {
+      return Some(value: a)
+    }
+  }
+  return None
+}
+
+fn record_proved(
+  ctx: inout context.Context,
+  call_key: Int,
+  clause_key: Int
+) -> Unit may mutate, alloc {
+  var current: List[Int] = []
+  match Map.find(d: ctx.proved_at_check_time, key: call_key) with
+  | Some(value) -> current = value
+  | None -> current = []
+  var table: Dict[Int, List[Int]] = ctx.proved_at_check_time
+  Map.set(d: inout table, key: call_key, value: List.append(xs: current, x: clause_key))
+  return Unit
+}
+
+fn check_call(
+  cp: Cp,
+  ev: inout evaluator.Ev,
+  ctx: inout context.Context,
+  e: ast.Expr
+) -> Unit may mutate, alloc {
+  match e with
+  | ast.Call(callee, targs, args, span) -> {
+    let fn_id: Int = res_fn(
+      ctx: ctx,
+      k: key(cp: cp, tag: defs.tag_expr, span: parser.span_of_expr(e: callee))
+    )
+    if fn_id < 0 {
+      return Unit
+    }
+    let fn_def: defs.Def = context.get_def(ctx: ctx, id: fn_id)
+    if fn_def.kind != defs.Fn {
+      return Unit
+    }
+    var sig_opt: Option[types.Signature] = Map.find(d: ctx.signatures, key: fn_id)
+    if sig_opt is None {
+      return Unit
+    }
+    let sig: types.Signature = sig_or_empty(o: sig_opt)
+    let clauses: List[ast.Contract] = proved_clauses(sig: sig)
+    if List.len(xs: clauses) == 0 {
+      return Unit
+    }
+    -- Bind every parameter to a constant, or give up silently: the verifier owns the rest.
+    var env: Dict[Int, values.Value] = Map.dict()
+    let call_key: Int = key(cp: cp, tag: defs.tag_expr, span: span)
+    var inst: List[types.TypeArg] = []
+    match Map.find(d: ctx.instantiations, key: call_key) with
+    | Some(value) -> inst = value
+    | None -> inst = []
+    for i: Int in 0 ..< List.len(xs: sig.tparams) {
+      let p: types.TParamInfo = List.get(xs: sig.tparams, i: i)
+      if p is types.ConstP {
+        var bound: Option[values.Value] = None
+        if i < List.len(xs: inst) {
+          let a: types.TypeArg = List.get(xs: inst, i: i)
+          if a is types.ConstA {
+            bound = values.of_const(c: types.arg_const(a: a))
+          }
+        }
+        match bound with
+        | Some(value) -> Map.set(d: inout env, key: types.tparam_def(p: p), value: value)
+        | None -> return Unit
+      }
+    }
+    -- Bind the parameters whose arguments are constant; a clause that needs another one is left to the verifier.
+    for i: Int in 0 ..< List.len(xs: sig.params) {
+      let p: types.FnParam = List.get(xs: sig.params, i: i)
+      if i >= List.len(xs: sig.param_defs) {
+        return Unit
+      }
+      match find_arg(args: args, name: p.name) with
+      | None -> return Unit
+      | Some(value) -> {
+        evaluator.reset(ev: inout ev)
+        let r: Result[values.Value, evaluator.Fail] = evaluator.eval_expr(
+          fuel: evaluator.max_depth,
+          ev: inout ev,
+          ctx: inout ctx,
+          e: value.value,
+          env: Map.dict()
+        )
+        if r is Ok {
+          Map.set(d: inout env, key: List.get(xs: sig.param_defs, i: i), value: ok_or_unit(r: r))
+        }
+      }
+    }
+    let saved_file: Int = ev.file
+    ev = { ev with file: fn_def.file }
+    for clause: ast.Contract in clauses {
+      evaluator.reset(ev: inout ev)
+      match evaluator.eval_expr(
+        fuel: evaluator.max_depth,
+        ev: inout ev,
+        ctx: inout ctx,
+        e: clause.expr,
+        env: copy_env(env: env)
+      ) with
+      | Err(error) -> {
+        match error with
+        | evaluator.PanicF(detail, _) -> rep(
+          cp: cp,
+          ctx: inout ctx,
+          code: "E0701",
+          at: span,
+          detail: "evaluating `requires proved " ++ printer.print_expr(
+            e: clause.expr
+          ) ++ "` of `" ++ fn_def.name ++ "`: " ++ detail
+        )
+        | evaluator.BudgetF(fn_name) -> rep(
+          cp: cp,
+          ctx: inout ctx,
+          code: "E0501",
+          at: span,
+          detail: "evaluating `requires proved " ++ printer.print_expr(
+            e: clause.expr
+          ) ++ "` of `" ++ fn_def.name ++ "` exceeded the check-time step budget in `" ++ fn_name ++ "`"
+        )
+        | _ -> skip()
+      }
+      | Ok(value) -> {
+        if value is values.BoolV and values.bool_of(c: value) {
+          record_proved(
+            ctx: inout ctx,
+            call_key: call_key,
+            clause_key: key(cp: cp, tag: defs.tag_sig, span: clause.span)
+          )
+        } else {
+          library_check_failed(
+            cp: cp,
+            ev: ev,
+            ctx: inout ctx,
+            at: span,
+            fn_def: fn_def,
+            clause: clause,
+            targs: targs
+          )
+          -- One failed precondition invalidates the call; later clauses would only repeat it.
+          ev = { ev with file: saved_file }
+          return Unit
+        }
+      }
+    }
+    ev = { ev with file: saved_file }
+  }
+  | _ -> skip()
+  return Unit
+}
+
+fn sig_or_empty(o: Option[types.Signature]) -> types.Signature may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return types.Signature {
+    def: -1,
+    tparams: [],
+    params: [],
+    param_defs: [],
+    ret: types.ErrorT,
+    effects: effectset_empty(),
+    contracts: [],
+    is_const_fn: false,
+    is_intrinsic: false
+  }
+}
+
+fn effectset_empty() -> effectset.EffectSet may alloc {
+  return effectset.empty()
+}
+
+fn library_check_failed(
+  cp: Cp,
+  ev: evaluator.Ev,
+  ctx: inout context.Context,
+  at: ast.Span,
+  fn_def: defs.Def,
+  clause: ast.Contract,
+  targs: Option[List[ast.TypeArg]]
+) -> Unit may mutate, alloc {
+  var span: ast.Span = at
+  var message: Text = "`requires proved " ++ printer.print_expr(
+    e: clause.expr
+  ) ++ "` of `" ++ fn_def.name ++ "` is false"
+  match ev.last_const_error with
+  | Some(value) -> {
+    if value is values.RecordV {
+      let fs: List[values.Field] = values.fields_of(c: value)
+      let msg: Option[values.Value] = values.field_of(fields: fs, name: "message")
+      if msg is Some and value_or_unit(o: msg) is values.TextV {
+        message = values.text_of(c: value_or_unit(o: msg))
+      }
+      let offset: Option[values.Value] = values.field_of(fields: fs, name: "offset")
+      let literal: Option[ast.Span] = const_text_literal(ctx: ctx, fn_def: fn_def, targs: targs)
+      if offset is Some and literal is Some {
+        let ov: values.Value = value_or_unit(o: offset)
+        if ov is values.IntV and values.int_of(c: ov) >= 0 {
+          span = grapheme_span(
+            ctx: ctx,
+            file: cp.current_file,
+            literal: span_or_zero(o: literal),
+            grapheme_index: values.int_of(c: ov)
+          )
+        }
+      }
+    }
+  }
+  | None -> skip()
+  context.report(
+    ctx: inout ctx,
+    d: report.Diagnostic {
+      code: "E0700",
+      file: cp.current_file,
+      span: span,
+      def_name: cp.current_def,
+      context: [
+        message,
+        "in the `requires proved` clause of `" ++ context.qualified_name(
+          ctx: ctx,
+          id: fn_def.id
+        ) ++ "`"
+      ]
+    }
+  )
+  return Unit
+}
+
+fn ok_or_unit(r: Result[values.Value, evaluator.Fail]) -> values.Value {
+  match r with
+  | Ok(value) -> return value
+  | Err(_) -> return values.UnitV
+}
+
+fn ident_text(o: Option[ast.Ident]) -> Text {
+  match o with
+  | Some(value) -> return value.text
+  | None -> return ""
+}
+
+fn value_or_unit(o: Option[values.Value]) -> values.Value {
+  match o with
+  | Some(value) -> return value
+  | None -> return values.UnitV
+}
+
+fn span_or_zero(o: Option[ast.Span]) -> ast.Span {
+  match o with
+  | Some(value) -> return value
+  | None -> return ast.Span { start: 0, end: 0 }
+}
+
+fn type_arg_label(a: ast.TypeArg) -> Option[ast.Ident] {
+  match a with
+  | ast.TypeArgType(label, _, _) -> return label
+  | ast.TypeArgConst(label, _, _) -> return label
+}
+
+fn text_literal_span(a: ast.TypeArg) -> Option[ast.Span] {
+  match a with
+  | ast.TypeArgConst(_, expr, _) -> {
+    if expr is ast.TextLit {
+      return Some(value: parser.span_of_expr(e: expr))
+    }
+    return None
+  }
+  | _ -> return None
+}
+
+-- The literal passed for the callee's first `const` Text parameter, if it is one.
+fn const_text_literal(
+  ctx: context.Context,
+  fn_def: defs.Def,
+  targs: Option[List[ast.TypeArg]]
+) -> Option[ast.Span] may alloc {
+  var tps: List[types.TParamInfo] = []
+  match Map.find(d: ctx.type_params, key: fn_def.id) with
+  | Some(value) -> tps = value
+  | None -> tps = []
+  var index: Int = -1
+  var pname: Text = ""
+  var i: Int = 0
+  for p: types.TParamInfo in tps {
+    if index < 0 {
+      match p with
+      | types.ConstP(def, ty) -> {
+        if types.prim_name(t: types.strip(t: ty)) == "Text" {
+          index = i
+          pname = context.get_def(ctx: ctx, id: def).name
+        }
+      }
+      | _ -> skip()
+    }
+    i = i + 1
+  }
+  if index < 0 {
+    return None
+  }
+  match targs with
+  | None -> return None
+  | Some(value) -> {
+    var positional: Int = 0
+    for a: ast.TypeArg in value {
+      var matches: Bool = false
+      let label: Option[ast.Ident] = type_arg_label(a: a)
+      if label is Some {
+        matches = ident_text(o: label) == pname
+      } else {
+        matches = positional == index
+        positional = positional + 1
+      }
+      if matches {
+        return text_literal_span(a: a)
+      }
+    }
+    return None
+  }
+}
+
+fn decoded_escape(e: Int) -> Int {
+  if e == 110 {
+    return 10
+  }
+  if e == 116 {
+    return 9
+  }
+  if e == 114 {
+    return 13
+  }
+  if e == 48 {
+    return 0
+  }
+  return e
+}
+
+-- The source span of grapheme `grapheme_index` of the text literal at `literal` (§3.8.1).
+fn grapheme_span(
+  ctx: context.Context,
+  file: Int,
+  literal: ast.Span,
+  grapheme_index: Int
+) -> ast.Span may alloc, mutate {
+  if file < 0 or file >= context.file_count(ctx: ctx) {
+    return literal
+  }
+  let cps: List[Int] = context.file_at(ctx: ctx, id: file).cps
+  let n: Int = List.len(xs: cps)
+  var from_i: Int = literal.start + 1
+  var to_i: Int = literal.end - 1
+  if from_i < 0 {
+    from_i = 0
+  }
+  if to_i > n {
+    to_i = n
+  }
+  if to_i < from_i {
+    to_i = from_i
+  }
+  let src: List[Int] = List.slice(xs: cps, from: from_i, to: to_i)
+  let m: Int = List.len(xs: src)
+  var starts: Builder[Int] = List.builder()
+  var value_cps: Builder[Int where 0 <= it and it <= 1114111] = List.builder()
+  var i: Int where it >= 0 = 0
+  loop while i < m
+    invariant i >= 0
+    decreases m - i
+  {
+    let c: Int = List.get(xs: src, i: i)
+    var decoded: Int = c
+    var width: Int = 1
+    if c == 92 and i + 1 < m {
+      decoded = decoded_escape(e: List.get(xs: src, i: i + 1))
+      width = 2
+    }
+    List.push(b: inout starts, x: i)
+    if decoded >= 0 and decoded <= 1114111 {
+      List.push(b: inout value_cps, x: decoded)
+    }
+    i = i + width
+  }
+  let start_list: List[Int] = List.finish(b: starts)
+  let value_text: Text = Text.of_code_points(cps: List.finish(b: value_cps))
+  var unit: Int = 0
+  var g: Int = 0
+  var width: Int = 1
+  var found: Bool = false
+  for seg: Text in Text.graphemes(t: value_text) {
+    if not found {
+      if g == grapheme_index {
+        width = Text.count(t: seg)
+        found = true
+      } else {
+        unit = unit + Text.count(t: seg)
+        g = g + 1
+      }
+    }
+  }
+  let base: Int = literal.start + 1
+  if not found or unit < 0 or unit >= List.len(xs: start_list) {
+    return ast.Span { start: literal.end - 1, end: literal.end }
+  }
+  let from: Int = List.get(xs: start_list, i: unit)
+  let to_index: Int = unit + width
+  var to: Int = m
+  if to_index >= 0 and to_index < List.len(xs: start_list) {
+    to = List.get(xs: start_list, i: to_index)
+  }
+  return ast.Span { start: base + from, end: base + to }
+}
+
+-- Examples (§5.2) -----------------------------------------------------------------------------
+fn set_example(ctx: inout context.Context, def: Int, status: Text) -> Unit may mutate, alloc {
+  var table: Dict[Int, Text] = ctx.examples
+  Map.set(d: inout table, key: def, value: status)
+  return Unit
+}
+
+fn example_failure(
+  cp: Cp,
+  ctx: inout context.Context,
+  decl: ast.ExampleDecl,
+  def: Int,
+  f: evaluator.Fail
+) -> Unit may mutate, alloc {
+  match f with
+  | evaluator.NotConstF(_, _) -> set_example(ctx: inout ctx, def: def, status: "deferred")
+  | evaluator.PanicF(detail, span) -> {
+    rep(
+      cp: cp,
+      ctx: inout ctx,
+      code: "E0701",
+      at: evaluator.span_or(o: span, dflt: decl.name.span),
+      detail: "example `" ++ decl.name.text ++ "`: " ++ detail
+    )
+    set_example(ctx: inout ctx, def: def, status: "failed")
+  }
+  | evaluator.BudgetF(fn_name) -> {
+    rep(
+      cp: cp,
+      ctx: inout ctx,
+      code: "E0501",
+      at: decl.name.span,
+      detail: "example `" ++ decl.name.text ++ "` exceeded the check-time step budget in `" ++ fn_name ++ "`"
+    )
+    set_example(ctx: inout ctx, def: def, status: "failed")
+  }
+  | evaluator.ReturnF(_) -> set_example(ctx: inout ctx, def: def, status: "deferred")
+  return Unit
+}
+
+fn example(
+  cp: Cp,
+  ev: inout evaluator.Ev,
+  ctx: inout context.Context,
+  decl: ast.ExampleDecl
+) -> Unit may mutate, alloc {
+  let def: Int = def_of_key(ctx: ctx, k: key(cp: cp, tag: defs.tag_item, span: decl.span))
+  if def < 0 {
+    return Unit
+  }
+  let env: Dict[Int, values.Value] = Map.dict()
+  evaluator.reset(ev: inout ev)
+  for s: ast.Stmt in decl.body.stmts {
+    match s with
+    | ast.ExprStmt(expr, span) -> {
+      match evaluator.eval_expr(
+        fuel: evaluator.max_depth,
+        ev: inout ev,
+        ctx: inout ctx,
+        e: expr,
+        env: env
+      ) with
+      | Ok(value) -> {
+        if not value is values.BoolV or not values.bool_of(c: value) {
+          rep(
+            cp: cp,
+            ctx: inout ctx,
+            code: "E0702",
+            at: span,
+            detail: "`" ++ printer.print_expr(e: expr) ++ "` is false"
+          )
+          set_example(ctx: inout ctx, def: def, status: "failed")
+          return Unit
+        }
+      }
+      | Err(error) -> {
+        example_failure(cp: cp, ctx: inout ctx, decl: decl, def: def, f: error)
+        return Unit
+      }
+    }
+    | _ -> {
+      match evaluator.exec_stmt(
+        fuel: evaluator.max_depth,
+        ev: inout ev,
+        ctx: inout ctx,
+        s: s,
+        env: env
+      ) with
+      | Ok(_) -> skip()
+      | Err(error) -> {
+        example_failure(cp: cp, ctx: inout ctx, decl: decl, def: def, f: error)
+        return Unit
+      }
+    }
+  }
+  set_example(ctx: inout ctx, def: def, status: "passed")
+  return Unit
+}
+
+-- Entry ---------------------------------------------------------------------------------------
+-- Pass 5: evaluates constants, check-time contracts and pure examples. Reports E0501, E0700, E0701, E0702.
+pub fn consteval_pass(ctx: inout context.Context) -> Unit may mutate, alloc {
+  var ev: evaluator.Ev = evaluator.new_ev(file: 0)
+  for id: Int in 0 ..< ctx.module_count {
+    match Map.find(d: ctx.modules, key: id) with
+    | Some(value) -> {
+      let cp0: Cp = Cp { current_def: None, current_file: value.file }
+      ev = { ev with file: value.file }
+      for item: ast.Item in value.tree.items {
+        let cp: Cp = { cp0 with current_def: Some(value: item_name(item: item)) }
+        match item with
+        | ast.ConstItem(decl) -> {
+          let cv: Option[values.Value] = evaluator.const_of(
+            fuel: evaluator.max_depth,
+            ev: inout ev,
+            ctx: inout ctx,
+            def: def_of_key(ctx: ctx, k: key(cp: cp, tag: defs.tag_item, span: decl.span))
+          )
+        }
+        | ast.ExampleItem(decl) -> example(cp: cp, ev: inout ev, ctx: inout ctx, decl: decl)
+        | _ -> skip()
+        for c: ast.Expr in calls_in_item(item: item) {
+          check_call(cp: cp, ev: inout ev, ctx: inout ctx, e: c)
+        }
+      }
+    }
+    | None -> skip()
+  }
+  return Unit
+}

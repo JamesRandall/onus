@@ -1,0 +1,37 @@
+module map_ops
+
+-- `Map.Dict` (M15.2): an in-place table with value keys, iterated in insertion order.
+fn histogram(words: List[Text]) -> Dict[Text, Int] may alloc, mutate {
+  var d: Dict[Text, Int] = Map.dict()
+  for w: Text in words {
+    match Map.find(d: d, key: w) with
+    | Some(value) -> Map.set(d: inout d, key: w, value: value + 1)
+    | None -> Map.set(d: inout d, key: w, value: 1)
+  }
+  return d
+}
+
+example dict_operations {
+  let d: Dict[Text, Int] = histogram(words: ["a", "b", "a", "c", "a"])
+  Map.count(d: d) == 3
+  Map.find(d: d, key: "a") == Some(value: 3)
+  Map.find(d: d, key: "z") == None
+  Map.contains(d: d, key: "b")
+  Map.keys(d: d) == ["a", "b", "c"]
+  Map.values(d: d) == [3, 1, 1]
+}
+
+fn after_removal() -> Dict[Int, Text] may alloc, mutate {
+  var d: Dict[Int, Text] = Map.dict()
+  Map.set(d: inout d, key: 2, value: "two")
+  Map.set(d: inout d, key: 1, value: "one")
+  Map.remove(d: inout d, key: 2)
+  return d
+}
+
+example dict_removal {
+  let d: Dict[Int, Text] = after_removal()
+  Map.count(d: d) == 1
+  Map.keys(d: d) == [1]
+  not Map.contains(d: d, key: 2)
+}

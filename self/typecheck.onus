@@ -1,0 +1,4859 @@
+module typecheck
+import ast
+import parser
+import comments
+import report
+import defs
+import context
+import effectset
+import types
+import basic
+import loader
+
+-- The types pass (impl spec §4, pass 4; spec §3–§5, §10.1; `types/check.ts`).
+-- Elaborates every signature and declaration into types, then checks every
+-- body bidirectionally: an expression is checked against an expected type
+-- where one is known and inferred otherwise. Only base types are compared;
+-- a flow into a refined position is recorded as an obligation site.
+--
+-- A refinement's predicate is checked once the type carrying it has been
+-- elaborated, from a queue, so that elaborating a type never re-enters the
+-- expression checker; the diagnostics are the same, in another order.
+-- The bound on nested type elaboration (aliases of aliases, arguments of arguments).
+pub const max_type_depth: Int = 100000
+
+record FnCtx {
+  -- Return type; None in assertion blocks (example, property, law) and recover blocks.
+  ret: Option[types.Type]
+  assertion: Bool
+  in_recover: Bool
+  frame: Int
+  -- A `verify` block (§20.2): assertions yield its Bool, and `try ... else` yields the else value.
+  is_verify: Bool
+}
+
+record PendingWhere {
+  file: Int
+  def_name: Option[Text]
+  pred: ast.Expr
+  base: types.Type
+  fn_ctx: Option[FnCtx]
+}
+
+pub record Checker {
+  current_file: Int
+  current_def: Option[Text]
+  current_module: Option[defs.ModuleRecord]
+  it_stack: List[types.Type]
+  fn_stack: List[FnCtx]
+  type_memo: Dict[Int, types.Type]
+  env: basic.ConstEnv
+  busy: Dict[Int, Bool]
+  impls: Dict[Int, List[types.ImplInfo]]
+  pending: Builder[PendingWhere]
+  processed: Int where it >= 0
+}
+
+fn new_checker() -> Checker may alloc {
+  return Checker {
+    current_file: 0,
+    current_def: None,
+    current_module: None,
+    it_stack: [],
+    fn_stack: [],
+    type_memo: Map.dict(),
+    env: basic.new_env(),
+    busy: Map.dict(),
+    impls: Map.dict(),
+    pending: List.builder(),
+    processed: 0
+  }
+}
+
+fn skip() -> Unit {
+  return Unit
+}
+
+-- Reporting and rendering ------------------------------------------------------------
+fn rep(
+  ck: Checker,
+  ctx: inout context.Context,
+  code: Text,
+  at: ast.Span,
+  detail: Text
+) -> Unit may mutate, alloc {
+  context.report(
+    ctx: inout ctx,
+    d: report.diagnostic(
+      code: code,
+      file: ck.current_file,
+      span: at,
+      def_name: ck.current_def,
+      detail: detail
+    )
+  )
+  return Unit
+}
+
+fn key(ck: Checker, tag: Int, span: ast.Span) -> Int {
+  return defs.node_key(file: ck.current_file, tag: tag, span: span)
+}
+
+fn def_name(ctx: context.Context, id: Int) -> Text {
+  return context.get_def(ctx: ctx, id: id).name
+}
+
+pub fn const_to_text(ctx: context.Context, c: types.ConstValue) -> Text may alloc, mutate {
+  match c with
+  | types.IntV(v) -> return Int.to_text(x: v)
+  | types.FloatV(v) -> return Float.to_text(x: v)
+  | types.BoolV(v) -> return Bool.to_text(b: v)
+  | types.TextV(v) -> return printer_quote(t: v)
+  | types.DurationV(v) -> return Int.to_text(x: v) ++ "ns"
+  | types.UnitV -> return "Unit"
+  | types.VariantV(def) -> return def_name(ctx: ctx, id: def)
+  | types.SymV(def) -> return def_name(ctx: ctx, id: def)
+  | types.ErrorV -> return "<error>"
+}
+
+fn printer_quote(t: Text) -> Text may alloc, mutate {
+  return "\"" ++ Text.replace(
+    t: Text.replace(t: t, from: "\\", to: "\\\\"),
+    from: "\"",
+    to: "\\\""
+  ) ++ "\""
+}
+
+pub fn effects_to_text(ctx: context.Context, es: effectset.EffectSet) -> Text may alloc, mutate {
+  var names: Builder[Text] = List.builder()
+  for e: defs.Effect in effectset.values(s: es) {
+    match e with
+    | defs.PrimEffect(name) -> List.push(b: inout names, x: name)
+    | defs.ResourceEffect(mod, name) -> List.push(b: inout names, x: name)
+    | defs.ParamEffect(def) -> List.push(b: inout names, x: def_name(ctx: ctx, id: def))
+  }
+  return Text.join(parts: sort_texts(xs: List.finish(b: names)), sep: ", ")
+}
+
+fn sort_texts(xs: List[Text]) -> List[Text] may alloc, mutate {
+  var out: List[Text] = []
+  for x: Text in xs {
+    var inserted: Bool = false
+    var b: Builder[Text] = List.builder()
+    for y: Text in out {
+      if not inserted and Text.compare(a: x, b: y) < 0 {
+        List.push(b: inout b, x: x)
+        inserted = true
+      }
+      List.push(b: inout b, x: y)
+    }
+    if not inserted {
+      List.push(b: inout b, x: x)
+    }
+    out = List.finish(b: b)
+  }
+  return out
+}
+
+-- Renders a type in Onus syntax for diagnostics.
+pub fn show(ctx: context.Context, t: types.Type) -> Text may alloc, mutate
+  decreases t
+{
+  match t with
+  | types.Prim(name) -> return name
+  | types.Refined(base, _, alias) -> {
+    match alias with
+    | Some(value) -> return def_name(ctx: ctx, id: value)
+    | None -> return show(ctx: ctx, t: base) ++ " where …"
+  }
+  | types.RecordT(def, args) -> return def_name(ctx: ctx, id: def) ++ show_args(
+    ctx: ctx,
+    args: args
+  )
+  | types.UnionT(def, args) -> return def_name(ctx: ctx, id: def) ++ show_args(ctx: ctx, args: args)
+  | types.Opaque(def, args) -> return def_name(ctx: ctx, id: def) ++ show_args(ctx: ctx, args: args)
+  | types.Capability(def, args, restrictions) -> {
+    var parts: Builder[Text] = List.builder()
+    for a: types.TypeArg in args {
+      List.push(b: inout parts, x: show_arg(ctx: ctx, a: a))
+    }
+    for r: types.Restriction in restrictions {
+      List.push(b: inout parts, x: r.label ++ ": " ++ const_to_text(ctx: ctx, c: r.value))
+    }
+    if List.built(b: parts) == 0 {
+      return def_name(ctx: ctx, id: def)
+    }
+    return def_name(ctx: ctx, id: def) ++ "[" ++ Text.join(
+      parts: List.finish(b: parts),
+      sep: ", "
+    ) ++ "]"
+  }
+  | types.FnT(params, ret, effects) -> {
+    var ps: Builder[Text] = List.builder()
+    for p: types.FnParam in params {
+      var head: Text = p.name ++ ": "
+      if p.is_inout {
+        head = head ++ "inout "
+      }
+      List.push(b: inout ps, x: head ++ show(ctx: ctx, t: p.ty))
+    }
+    var eff: Text = ""
+    if effectset.size(s: effects) > 0 {
+      eff = " may " ++ effects_to_text(ctx: ctx, es: effects)
+    }
+    return "fn(" ++ Text.join(parts: List.finish(b: ps), sep: ", ") ++ ") -> " ++ show(
+      ctx: ctx,
+      t: ret
+    ) ++ eff
+  }
+  | types.ParamT(def) -> return def_name(ctx: ctx, id: def)
+  | types.TypeInfoT -> return "TypeInfo"
+  | types.SpecT -> return "Spec"
+  | types.ErrorT -> return "<error>"
+}
+
+fn show_arg(ctx: context.Context, a: types.TypeArg) -> Text may alloc, mutate
+  decreases a
+{
+  match a with
+  | types.TypeA(ty) -> return show(ctx: ctx, t: ty)
+  | types.ConstA(value) -> return const_to_text(ctx: ctx, c: value)
+  | types.EffectsA(effects) -> return "! " ++ effects_to_text(ctx: ctx, es: effects)
+}
+
+fn show_args(ctx: context.Context, args: List[types.TypeArg]) -> Text may alloc, mutate
+  decreases args
+{
+  if List.len(xs: args) == 0 {
+    return ""
+  }
+  var parts: Builder[Text] = List.builder()
+  for a: types.TypeArg in args {
+    List.push(b: inout parts, x: show_arg(ctx: ctx, a: a))
+  }
+  return "[" ++ Text.join(parts: List.finish(b: parts), sep: ", ") ++ "]"
+}
+
+fn plural(n: Int) -> Text may alloc {
+  if n == 1 {
+    return Int.to_text(x: n) ++ " type argument"
+  }
+  return Int.to_text(x: n) ++ " type arguments"
+}
+
+-- Function contexts --------------------------------------------------------------------
+fn push_fn(ck: inout Checker, f: FnCtx) -> Unit may alloc, mutate {
+  ck = { ck with fn_stack: List.append(xs: ck.fn_stack, x: f) }
+  return Unit
+}
+
+fn pop_fn(ck: inout Checker) -> Unit may alloc, mutate {
+  let n: Int = List.len(xs: ck.fn_stack)
+  if n > 0 {
+    ck = { ck with fn_stack: List.slice(xs: ck.fn_stack, from: 0, to: n - 1) }
+  }
+  return Unit
+}
+
+fn fn_top(ck: Checker) -> Option[FnCtx] {
+  let n: Int = List.len(xs: ck.fn_stack)
+  if n == 0 {
+    return None
+  }
+  return Some(value: List.get(xs: ck.fn_stack, i: n - 1))
+}
+
+fn fn_ret(ck: Checker) -> Option[types.Type] {
+  match fn_top(ck: ck) with
+  | Some(value) -> return value.ret
+  | None -> return None
+}
+
+fn fn_frame(ck: Checker) -> Int {
+  match fn_top(ck: ck) with
+  | Some(value) -> return value.frame
+  | None -> return 0
+}
+
+fn fn_flag(ck: Checker, which: Int) -> Bool {
+  match fn_top(ck: ck) with
+  | Some(value) -> {
+    if which == 0 {
+      return value.assertion
+    }
+    if which == 1 {
+      return value.in_recover
+    }
+    return value.is_verify
+  }
+  | None -> return false
+}
+
+fn plain_fn(ret: Option[types.Type], frame: Int) -> FnCtx {
+  return FnCtx { ret: ret, assertion: false, in_recover: false, frame: frame, is_verify: false }
+}
+
+fn or_error(o: Option[types.Type]) -> types.Type {
+  match o with
+  | Some(value) -> return value
+  | None -> return types.ErrorT
+}
+
+fn arg_or(o: Option[types.TypeArg]) -> types.TypeArg {
+  match o with
+  | Some(value) -> return value
+  | None -> return types.TypeA(ty: types.ErrorT)
+}
+
+fn const_or(o: Option[types.ConstValue]) -> types.ConstValue {
+  match o with
+  | Some(value) -> return value
+  | None -> return types.ErrorV
+}
+
+fn ident_or(o: Option[ast.Ident]) -> ast.Ident may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return ast.Ident { text: "", span: ast.Span { start: 0, end: 0 } }
+}
+
+fn tparam_or(o: Option[types.TParamInfo]) -> types.TParamInfo {
+  match o with
+  | Some(value) -> return value
+  | None -> return types.EffectP(def: -1)
+}
+
+fn tparam_bound(p: types.TParamInfo) -> Option[Int] {
+  match p with
+  | types.TypeP(_, bound) -> return bound
+  | _ -> return None
+}
+
+fn else_or(o: Option[ast.TryElse]) -> ast.TryElse may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return ast.TryElse {
+    name: ast.Ident { text: "_", span: ast.Span { start: 0, end: 0 } },
+    expr: ast.IntLit(value: 0, text: "0", span: ast.Span { start: 0, end: 0 }),
+    span: ast.Span { start: 0, end: 0 }
+  }
+}
+
+fn or_neg(o: Option[Int]) -> Int {
+  match o with
+  | Some(value) -> return value
+  | None -> return -1
+}
+
+fn decl_type(ctx: context.Context, def: Int) -> types.Type {
+  return or_error(o: Map.find(d: ctx.decl_types, key: def))
+}
+
+fn set_decl_type(ctx: inout context.Context, def: Int, t: types.Type) -> Unit may mutate, alloc {
+  var table: Dict[Int, types.Type] = ctx.decl_types
+  Map.set(d: inout table, key: def, value: t)
+  return Unit
+}
+
+fn def_of_key(ctx: context.Context, k: Int) -> Int {
+  return or_neg(o: Map.find(d: ctx.def_of, key: k))
+}
+
+fn ref_at(ctx: context.Context, k: Int) -> Option[defs.Resolution] {
+  return Map.find(d: ctx.refs, key: k)
+}
+
+-- The definition a resolution names, when it names one.
+fn res_def(res: Option[defs.Resolution]) -> Int {
+  match res with
+  | None -> return -1
+  | Some(value) -> {
+    match value with
+    | defs.DefRes(def) -> return def
+    | defs.CompanionRes(owner, fn_def) -> return fn_def
+    | defs.IfaceFnRes(iface, fn_def) -> return fn_def
+    | _ -> return -1
+  }
+}
+
+fn res_tag(res: Option[defs.Resolution]) -> Int {
+  match res with
+  | None -> return -1
+  | Some(value) -> {
+    match value with
+    | defs.DefRes(def) -> return 0
+    | defs.PrimRes(name) -> return 1
+    | defs.UnitRes -> return 2
+    | defs.ModuleRes(mod) -> return 3
+    | defs.TypeValueRes(owner) -> return 4
+    | defs.CompanionRes(owner, fn_def) -> return 5
+    | defs.IfaceFnRes(iface, fn_def) -> return 6
+    | defs.EffectRes(effect) -> return 7
+  }
+}
+
+fn res_iface(res: Option[defs.Resolution]) -> Int {
+  match res with
+  | None -> return -1
+  | Some(value) -> {
+    match value with
+    | defs.IfaceFnRes(iface, fn_def) -> return iface
+    | _ -> return -1
+  }
+}
+
+-- Standard library types --------------------------------------------------------------
+fn std_type(
+  ctx: inout context.Context,
+  module_name: Text,
+  type_name: Text
+) -> Int may mutate, alloc {
+  match Map.find(d: ctx.by_name, key: module_name) with
+  | None -> return -1
+  | Some(value) -> return or_neg(
+    o: Map.find(d: context.members_of(ctx: inout ctx, module: value).types, key: type_name)
+  )
+}
+
+fn list_of(ctx: inout context.Context, elem: types.Type) -> types.Type may mutate, alloc {
+  let def: Int = std_type(ctx: inout ctx, module_name: "std.list", type_name: "List")
+  if def < 0 {
+    return types.ErrorT
+  }
+  return types.Opaque(def: def, args: [types.TypeA(ty: elem)])
+}
+
+fn result_of(
+  ctx: inout context.Context,
+  value: types.Type,
+  error: types.Type
+) -> types.Type may mutate, alloc {
+  let def: Int = std_type(ctx: inout ctx, module_name: "std.results", type_name: "Result")
+  if def < 0 {
+    return types.ErrorT
+  }
+  return types.UnionT(def: def, args: [types.TypeA(ty: value), types.TypeA(ty: error)])
+}
+
+fn panicked_type(ctx: inout context.Context) -> types.Type may mutate, alloc {
+  let def: Int = std_type(ctx: inout ctx, module_name: "std.results", type_name: "Panicked")
+  if def < 0 {
+    return types.ErrorT
+  }
+  return types.RecordT(def: def, args: [])
+}
+
+fn is_list_type(ctx: inout context.Context, t: types.Type) -> Bool may mutate, alloc {
+  return t is types.Opaque and types.def_of(t: t) == std_type(
+    ctx: inout ctx,
+    module_name: "std.list",
+    type_name: "List"
+  )
+}
+
+fn first_type_arg(t: types.Type) -> Option[types.Type] may alloc {
+  let args: List[types.TypeArg] = types.args_of(t: t)
+  if List.len(xs: args) == 0 {
+    return None
+  }
+  let a: types.TypeArg = List.get(xs: args, i: 0)
+  if a is types.TypeA {
+    return Some(value: types.arg_type(a: a))
+  }
+  return None
+}
+
+fn second_type_arg(t: types.Type) -> Option[types.Type] may alloc {
+  let args: List[types.TypeArg] = types.args_of(t: t)
+  if List.len(xs: args) < 2 {
+    return None
+  }
+  let a: types.TypeArg = List.get(xs: args, i: 1)
+  if a is types.TypeA {
+    return Some(value: types.arg_type(a: a))
+  }
+  return None
+}
+
+record Fallible {
+  value: types.Type
+  error: types.Type
+  is_option: Bool
+}
+
+fn fallible_value_or(o: Option[Fallible], dflt: types.Type) -> types.Type {
+  match o with
+  | Some(value) -> return value.value
+  | None -> return dflt
+}
+
+-- `Result[T, E]` gives T and E; `Option[T]` gives T and Unit; else None.
+fn unwrap_fallible(
+  ctx: inout context.Context,
+  t: types.Type
+) -> Option[Fallible] may mutate, alloc {
+  let s: types.Type = types.strip(t: t)
+  if not s is types.UnionT {
+    return None
+  }
+  let a0: Option[types.Type] = first_type_arg(t: s)
+  if a0 is None {
+    return None
+  }
+  if types.def_of(t: s) == std_type(
+    ctx: inout ctx,
+    module_name: "std.results",
+    type_name: "Result"
+  ) {
+    let a1: Option[types.Type] = second_type_arg(t: s)
+    if a1 is None {
+      return None
+    }
+    return Some(
+      value: Fallible { value: or_error(o: a0), error: or_error(o: a1), is_option: false }
+    )
+  }
+  if types.def_of(t: s) == std_type(
+    ctx: inout ctx,
+    module_name: "std.option",
+    type_name: "Option"
+  ) {
+    return Some(value: Fallible { value: or_error(o: a0), error: types.unit_t, is_option: true })
+  }
+  return None
+}
+
+-- Elaboration: types -------------------------------------------------------------------
+fn effect_set_of(
+  ctx: context.Context,
+  file: Int,
+  refs: List[ast.EffectRef]
+) -> effectset.EffectSet may alloc, mutate {
+  var out: Builder[defs.Effect] = List.builder()
+  for r: ast.EffectRef in refs {
+    match Map.find(
+      d: ctx.refs,
+      key: defs.node_key(file: file, tag: defs.tag_sig, span: r.span)
+    ) with
+    | Some(value) -> {
+      match value with
+      | defs.EffectRes(effect) -> List.push(b: inout out, x: effect)
+      | _ -> skip()
+    }
+    | None -> skip()
+  }
+  return effectset.of_list(effects: List.finish(b: out))
+}
+
+-- Elaborates a type node in the current file.
+fn type_of(
+  fuel: Int where it >= 0,
+  ck: inout Checker,
+  ctx: inout context.Context,
+  t: ast.Type
+) -> types.Type may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return types.ErrorT
+  }
+  let k: Int = key(ck: ck, tag: defs.tag_type, span: comments.type_span(t: t))
+  match Map.find(d: ck.type_memo, key: k) with
+  | Some(value) -> return value
+  | None -> skip()
+  let res_t: types.Type = compute_type(fuel: fuel - 1, ck: inout ck, ctx: inout ctx, t: t)
+  var memo: Dict[Int, types.Type] = ck.type_memo
+  Map.set(d: inout memo, key: k, value: res_t)
+  return res_t
+}
+
+fn compute_type(
+  fuel: Int where it >= 0,
+  ck: inout Checker,
+  ctx: inout context.Context,
+  t: ast.Type
+) -> types.Type may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return types.ErrorT
+  }
+  match t with
+  | ast.FnType(params, ret, effects, span) -> {
+    var ps: Builder[types.FnParam] = List.builder()
+    for p: ast.Param in params {
+      List.push(
+        b: inout ps,
+        x: types.FnParam {
+          name: p.name.text,
+          is_inout: p.is_inout,
+          ty: type_of(fuel: fuel - 1, ck: inout ck, ctx: inout ctx, t: p.ty)
+        }
+      )
+    }
+    return types.FnT(
+      params: List.finish(b: ps),
+      ret: type_of(fuel: fuel - 1, ck: inout ck, ctx: inout ctx, t: ret),
+      effects: effect_set_of(ctx: ctx, file: ck.current_file, refs: effects)
+    )
+  }
+  | ast.NamedType(name, args, where_, span) -> {
+    var base: types.Type = types.ErrorT
+    match ref_at(ctx: ctx, k: key(ck: ck, tag: defs.tag_type, span: span)) with
+    | None -> base = types.ErrorT
+    | Some(value) -> base = named_base(
+      fuel: fuel - 1,
+      ck: inout ck,
+      ctx: inout ctx,
+      res: value,
+      q: name,
+      args: args,
+      at: span
+    )
+    match where_ with
+    | None -> return base
+    | Some(value) -> {
+      var q: Builder[PendingWhere] = ck.pending
+      List.push(
+        b: inout q,
+        x: PendingWhere {
+          file: ck.current_file,
+          def_name: ck.current_def,
+          pred: value,
+          base: base,
+          fn_ctx: fn_top(ck: ck)
+        }
+      )
+      return types.Refined(
+        base: base,
+        pred: key(ck: ck, tag: defs.tag_expr, span: parser.span_of_expr(e: value)),
+        alias: None
+      )
+    }
+  }
+}
+
+fn named_base(
+  fuel: Int where it >= 0,
+  ck: inout Checker,
+  ctx: inout context.Context,
+  res: defs.Resolution,
+  q: ast.QName,
+  args: List[ast.TypeArg],
+  at: ast.Span
+) -> types.Type may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return types.ErrorT
+  }
+  match res with
+  | defs.PrimRes(name) -> {
+    if List.len(xs: args) > 0 {
+      rep(
+        ck: ck,
+        ctx: inout ctx,
+        code: "E0324",
+        at: at,
+        detail: "`" ++ name ++ "` takes no type arguments"
+      )
+    }
+    if name == "TypeInfo" {
+      return types.TypeInfoT
+    }
+    if name == "Spec" {
+      return types.SpecT
+    }
+    return types.Prim(name: name)
+  }
+  | defs.DefRes(def) -> {
+    let d: defs.Def = context.get_def(ctx: ctx, id: def)
+    if d.kind == defs.Alias {
+      if List.len(xs: args) > 0 {
+        rep(
+          ck: ck,
+          ctx: inout ctx,
+          code: "E0324",
+          at: at,
+          detail: "`" ++ d.name ++ "` is a type alias and takes no type arguments"
+        )
+      }
+      return alias_type(fuel: fuel - 1, ck: inout ck, ctx: inout ctx, d: d)
+    }
+    if d.kind == defs.TypeParam {
+      if List.len(xs: args) > 0 {
+        rep(
+          ck: ck,
+          ctx: inout ctx,
+          code: "E0324",
+          at: at,
+          detail: "type parameter `" ++ d.name ++ "` takes no type arguments"
+        )
+      }
+      return types.ParamT(def: def)
+    }
+    if d.kind == defs.Record or d.kind == defs.Union or d.kind == defs.IntrinsicType or d.kind == defs.Capability {
+      return instantiate(fuel: fuel - 1, ck: inout ck, ctx: inout ctx, d: d, args: args, at: at)
+    }
+    if d.kind == defs.Interface {
+      rep(
+        ck: ck,
+        ctx: inout ctx,
+        code: "E0106",
+        at: q.span,
+        detail: "`" ++ d.name ++ "` is an interface; write it as a bound (`[T: " ++ d.name ++ "]`), not a type"
+      )
+      return types.ErrorT
+    }
+    if d.kind == defs.Variant {
+      rep(
+        ck: ck,
+        ctx: inout ctx,
+        code: "E0106",
+        at: q.span,
+        detail: "`" ++ d.name ++ "` is a variant, not a type"
+      )
+      return types.ErrorT
+    }
+    return types.ErrorT
+  }
+  | _ -> return types.ErrorT
+}
+
+fn with_alias(t: types.Type, alias: Int) -> types.Type {
+  match t with
+  | types.Refined(base, pred, _) -> return types.Refined(
+    base: base,
+    pred: pred,
+    alias: Some(value: alias)
+  )
+  | _ -> return t
+}
+
+fn alias_type(
+  fuel: Int where it >= 0,
+  ck: inout Checker,
+  ctx: inout context.Context,
+  d: defs.Def
+) -> types.Type may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return types.ErrorT
+  }
+  match Map.find(d: ctx.type_aliases, key: d.id) with
+  | Some(value) -> return value
+  | None -> skip()
+  let saved_file: Int = ck.current_file
+  ck = { ck with current_file: d.file }
+  if Map.contains(d: ck.busy, key: d.id) {
+    rep(
+      ck: ck,
+      ctx: inout ctx,
+      code: "E0106",
+      at: d.span,
+      detail: "type alias `" ++ d.name ++ "` refers to itself"
+    )
+    ck = { ck with current_file: saved_file }
+    return types.ErrorT
+  }
+  var busy: Dict[Int, Bool] = ck.busy
+  Map.set(d: inout busy, key: d.id, value: true)
+  var t: types.Type = types.ErrorT
+  match d.node with
+  | defs.AliasNode(decl) -> t = type_of(fuel: fuel - 1, ck: inout ck, ctx: inout ctx, t: decl.ty)
+  | _ -> t = types.ErrorT
+  t = with_alias(t: t, alias: d.id)
+  Map.remove(d: inout busy, key: d.id)
+  var table: Dict[Int, types.Type] = ctx.type_aliases
+  Map.set(d: inout table, key: d.id, value: t)
+  ck = { ck with current_file: saved_file }
+  return t
+}
+
+fn tparams_of_node(node: defs.DeclNode) -> List[ast.TParam] may alloc {
+  match node with
+  | defs.FnNode(decl) -> return decl.tparams
+  | defs.RecordNode(decl) -> return decl.tparams
+  | defs.UnionNode(decl) -> return decl.tparams
+  | defs.IntrinsicTypeNode(decl) -> return decl.tparams
+  | defs.CapabilityNode(decl) -> return decl.tparams
+  | _ -> return []
+}
+
+fn tparam_span(p: ast.TParam) -> ast.Span {
+  match p with
+  | ast.TypeParam(_, _, span) -> return span
+  | ast.ConstParam(_, _, span) -> return span
+  | ast.EffectParam(_, span) -> return span
+}
+
+pub fn type_params_of(
+  fuel: Int where it >= 0,
+  ck: inout Checker,
+  ctx: inout context.Context,
+  d: defs.Def
+) -> List[types.TParamInfo] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return []
+  }
+  match Map.find(d: ctx.type_params, key: d.id) with
+  | Some(value) -> return value
+  | None -> skip()
+  var table: Dict[Int, List[types.TParamInfo]] = ctx.type_params
+  Map.set(d: inout table, key: d.id, value: [])
+  let saved_file: Int = ck.current_file
+  ck = { ck with current_file: d.file }
+  var out: Builder[types.TParamInfo] = List.builder()
+  for p: ast.TParam in tparams_of_node(node: d.node) {
+    let pd: Int = def_of_key(ctx: ctx, k: key(ck: ck, tag: defs.tag_sig, span: tparam_span(p: p)))
+    match p with
+    | ast.TypeParam(name, bound, span) -> {
+      let b: Int = res_def(res: ref_at(ctx: ctx, k: key(ck: ck, tag: defs.tag_sig, span: span)))
+      var bound_def: Option[Int] = None
+      if b >= 0 {
+        bound_def = Some(value: b)
+      }
+      List.push(b: inout out, x: types.TypeP(def: pd, bound: bound_def))
+    }
+    | ast.ConstParam(name, ty, span) -> {
+      let t: types.Type = type_of(fuel: fuel - 1, ck: inout ck, ctx: inout ctx, t: ty)
+      set_decl_type(ctx: inout ctx, def: pd, t: t)
+      List.push(b: inout out, x: types.ConstP(def: pd, ty: t))
+    }
+    | ast.EffectParam(name, span) -> List.push(b: inout out, x: types.EffectP(def: pd))
+  }
+  let res_t: List[types.TParamInfo] = List.finish(b: out)
+  Map.set(d: inout table, key: d.id, value: res_t)
+  ck = { ck with current_file: saved_file }
+  return res_t
+}
+
+-- The type parameter of an interface declaration.
+fn iface_param(ctx: context.Context, iface: Int) -> Int {
+  for i: Int in 0 ..< context.def_count(ctx: ctx) {
+    let d: defs.Def = context.get_def(ctx: ctx, id: i)
+    if d.kind == defs.TypeParam and d.parent == Some(value: iface) {
+      return i
+    }
+  }
+  return -1
+}
+
+fn tparam_tag(p: Option[types.TParamInfo]) -> Int {
+  match p with
+  | None -> return -1
+  | Some(value) -> {
+    match value with
+    | types.TypeP(_, _) -> return 0
+    | types.ConstP(_, _) -> return 1
+    | types.EffectP(_) -> return 2
+  }
+}
+
+fn tparam_name(ctx: context.Context, p: Option[types.TParamInfo]) -> Text {
+  match p with
+  | None -> return ""
+  | Some(value) -> return def_name(ctx: ctx, id: types.tparam_def(p: value))
+}
+
+fn tparam_type(p: Option[types.TParamInfo]) -> types.Type {
+  match p with
+  | None -> return types.ErrorT
+  | Some(value) -> {
+    match value with
+    | types.ConstP(_, ty) -> return ty
+    | _ -> return types.ErrorT
+  }
+}
+
+fn type_arg_label(a: ast.TypeArg) -> Option[ast.Ident] {
+  match a with
+  | ast.TypeArgType(label, _, _) -> return label
+  | ast.TypeArgConst(label, _, _) -> return label
+}
+
+fn type_arg_span(a: ast.TypeArg) -> ast.Span {
+  match a with
+  | ast.TypeArgType(_, _, span) -> return span
+  | ast.TypeArgConst(_, _, span) -> return span
+}
+
+fn eval_const(
+  ck: Checker,
+  ctx: context.Context,
+  e: ast.Expr
+) -> Option[types.ConstValue] may mutate, alloc {
+  return basic.eval(fuel: basic.max_depth, ctx: ctx, env: ck.env, e: e, file: ck.current_file)
+}
+
+fn const_type(
+  ck: Checker,
+  ctx: context.Context,
+  v: types.ConstValue
+) -> Option[types.Type] may alloc {
+  match v with
+  | types.IntV(_) -> return Some(value: types.int_t)
+  | types.FloatV(_) -> return Some(value: types.float_t)
+  | types.BoolV(_) -> return Some(value: types.bool_t)
+  | types.TextV(_) -> return Some(value: types.text_t)
+  | types.DurationV(_) -> return Some(value: types.duration_t)
+  | types.UnitV -> return Some(value: types.unit_t)
+  | types.VariantV(def) -> {
+    match context.get_def(ctx: ctx, id: def).parent with
+    | None -> return None
+    | Some(value) -> return Some(value: types.UnionT(def: value, args: []))
+  }
+  | types.SymV(def) -> return Map.find(d: ctx.decl_types, key: def)
+  | types.ErrorV -> return None
+}
+
+fn type_arg_of(
+  fuel: Int where it >= 0,
+  ck: inout Checker,
+  ctx: inout context.Context,
+  a: ast.TypeArg,
+  param: Option[types.TParamInfo]
+) -> Option[types.TypeArg] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return None
+  }
+  match a with
+  | ast.TypeArgType(label, ty, span) -> {
+    -- A nullary variant in argument position is a constant index.
+    if ty is ast.NamedType {
+      let v: Int = res_def(
+        res: ref_at(ctx: ctx, k: key(ck: ck, tag: defs.tag_type, span: comments.type_span(t: ty)))
+      )
+      if v >= 0 and context.get_def(ctx: ctx, id: v).kind == defs.Variant {
+        return Some(value: types.ConstA(value: types.VariantV(def: v)))
+      }
+    }
+    let t: types.Type = type_of(fuel: fuel - 1, ck: inout ck, ctx: inout ctx, t: ty)
+    if tparam_tag(p: param) == 1 {
+      rep(
+        ck: ck,
+        ctx: inout ctx,
+        code: "E0324",
+        at: span,
+        detail: "`" ++ tparam_name(ctx: ctx, p: param) ++ "` is a const parameter; a type was given"
+      )
+      return None
+    }
+    return Some(value: types.TypeA(ty: t))
+  }
+  | ast.TypeArgConst(label, expr, span) -> {
+    match eval_const(ck: ck, ctx: ctx, e: expr) with
+    | None -> {
+      rep(
+        ck: ck,
+        ctx: inout ctx,
+        code: "E0337",
+        at: span,
+        detail: "a type index must be a literal, a `const`, or a parameter"
+      )
+      return Some(value: types.ConstA(value: types.ErrorV))
+    }
+    | Some(value) -> {
+      if tparam_tag(p: param) == 0 {
+        rep(
+          ck: ck,
+          ctx: inout ctx,
+          code: "E0324",
+          at: span,
+          detail: "`" ++ tparam_name(
+            ctx: ctx,
+            p: param
+          ) ++ "` is a type parameter; a value was given"
+        )
+        return None
+      }
+      if tparam_tag(p: param) == 1 {
+        let vt: Option[types.Type] = const_type(ck: ck, ctx: ctx, v: value)
+        if vt is Some and not types.assignable(
+          actual: or_error(o: vt),
+          expected: tparam_type(p: param)
+        ) {
+          rep(
+            ck: ck,
+            ctx: inout ctx,
+            code: "E0321",
+            at: span,
+            detail: "index `" ++ tparam_name(ctx: ctx, p: param) ++ "` has type " ++ show(
+              ctx: ctx,
+              t: tparam_type(p: param)
+            ) ++ ", but this value has type " ++ show(ctx: ctx, t: or_error(o: vt))
+          )
+        }
+      }
+      return Some(value: types.ConstA(value: value))
+    }
+  }
+}
+
+fn instantiate(
+  fuel: Int where it >= 0,
+  ck: inout Checker,
+  ctx: inout context.Context,
+  d: defs.Def,
+  args: List[ast.TypeArg],
+  at: ast.Span
+) -> types.Type may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return types.ErrorT
+  }
+  let tparams: List[types.TParamInfo] = type_params_of(
+    fuel: fuel - 1,
+    ck: inout ck,
+    ctx: inout ctx,
+    d: d
+  )
+  let n: Int = List.len(xs: tparams)
+  var out: Dict[Int, types.TypeArg] = Map.dict()
+  var restrictions: Builder[types.Restriction] = List.builder()
+  var positional: Int = 0
+  for a: ast.TypeArg in args {
+    match type_arg_label(a: a) with
+    | Some(value) -> {
+      var idx: Int = -1
+      for i: Int in 0 ..< n {
+        if idx < 0 and def_name(
+          ctx: ctx,
+          id: types.tparam_def(p: List.get(xs: tparams, i: i))
+        ) == value.text {
+          idx = i
+        }
+      }
+      if idx >= 0 {
+        let v: Option[types.TypeArg] = type_arg_of(
+          fuel: fuel - 1,
+          ck: inout ck,
+          ctx: inout ctx,
+          a: a,
+          param: Some(value: List.get(xs: tparams, i: idx))
+        )
+        if v is Some {
+          Map.set(d: inout out, key: idx, value: arg_or(o: v))
+        }
+      } else {
+        if d.kind == defs.Capability {
+          let v: Option[types.TypeArg] = type_arg_of(
+            fuel: fuel - 1,
+            ck: inout ck,
+            ctx: inout ctx,
+            a: a,
+            param: None
+          )
+          if v is Some {
+            let va: types.TypeArg = arg_or(o: v)
+            if va is types.ConstA {
+              List.push(
+                b: inout restrictions,
+                x: types.Restriction { label: value.text, value: types.arg_const(a: va) }
+              )
+            } else {
+              rep(
+                ck: ck,
+                ctx: inout ctx,
+                code: "E0324",
+                at: type_arg_span(a: a),
+                detail: "a capability restriction must be a constant value"
+              )
+            }
+          }
+        } else {
+          rep(
+            ck: ck,
+            ctx: inout ctx,
+            code: "E0324",
+            at: type_arg_span(a: a),
+            detail: "`" ++ d.name ++ "` has no type parameter `" ++ value.text ++ "`"
+          )
+        }
+      }
+    }
+    | None -> {
+      if positional >= n {
+        rep(
+          ck: ck,
+          ctx: inout ctx,
+          code: "E0324",
+          at: type_arg_span(a: a),
+          detail: "`" ++ d.name ++ "` takes " ++ plural(n: n)
+        )
+        positional = positional + 1
+      } else {
+        let v: Option[types.TypeArg] = type_arg_of(
+          fuel: fuel - 1,
+          ck: inout ck,
+          ctx: inout ctx,
+          a: a,
+          param: Some(value: List.get(xs: tparams, i: positional))
+        )
+        if v is Some {
+          Map.set(d: inout out, key: positional, value: arg_or(o: v))
+        }
+        positional = positional + 1
+      }
+    }
+  }
+  var filled: Builder[types.TypeArg] = List.builder()
+  var missing: Bool = false
+  for i: Int in 0 ..< n {
+    match Map.find(d: out, key: i) with
+    | Some(value) -> List.push(b: inout filled, x: value)
+    | None -> {
+      missing = true
+      if tparam_tag(p: Some(value: List.get(xs: tparams, i: i))) == 0 {
+        List.push(b: inout filled, x: types.TypeA(ty: types.ErrorT))
+      } else {
+        List.push(b: inout filled, x: types.ConstA(value: types.UnitV))
+      }
+    }
+  }
+  if missing and List.len(xs: args) > 0 {
+    rep(
+      ck: ck,
+      ctx: inout ctx,
+      code: "E0324",
+      at: at,
+      detail: "`" ++ d.name ++ "` takes " ++ plural(n: n)
+    )
+  } else {
+    if missing {
+      rep(
+        ck: ck,
+        ctx: inout ctx,
+        code: "E0324",
+        at: at,
+        detail: "`" ++ d.name ++ "` needs " ++ plural(n: n)
+      )
+    }
+  }
+  let fa: List[types.TypeArg] = List.finish(b: filled)
+  if d.kind == defs.Record {
+    return types.RecordT(def: d.id, args: fa)
+  }
+  if d.kind == defs.Union {
+    return types.UnionT(def: d.id, args: fa)
+  }
+  if d.kind == defs.Capability {
+    return types.Capability(def: d.id, args: fa, restrictions: List.finish(b: restrictions))
+  }
+  return types.Opaque(def: d.id, args: fa)
+}
+
+fn fields_of_node(node: defs.DeclNode) -> List[ast.Field] may alloc {
+  match node with
+  | defs.RecordNode(decl) -> return decl.fields
+  | defs.VariantNode(decl) -> return decl.fields
+  | _ -> return []
+}
+
+pub fn fields_of(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  d: defs.Def
+) -> List[types.FieldInfo] may mutate, alloc {
+  match Map.find(d: ctx.fields, key: d.id) with
+  | Some(value) -> return value
+  | None -> skip()
+  var table: Dict[Int, List[types.FieldInfo]] = ctx.fields
+  Map.set(d: inout table, key: d.id, value: [])
+  let saved_file: Int = ck.current_file
+  ck = { ck with current_file: d.file }
+  var out: Builder[types.FieldInfo] = List.builder()
+  for f: ast.Field in fields_of_node(node: d.node) {
+    let fd: Int = def_of_key(ctx: ctx, k: key(ck: ck, tag: defs.tag_sig, span: f.span))
+    let t: types.Type = type_of(fuel: max_type_depth, ck: inout ck, ctx: inout ctx, t: f.ty)
+    set_decl_type(ctx: inout ctx, def: fd, t: t)
+    List.push(b: inout out, x: types.FieldInfo { def: fd, name: f.name.text, ty: t })
+  }
+  let res_t: List[types.FieldInfo] = List.finish(b: out)
+  Map.set(d: inout table, key: d.id, value: res_t)
+  ck = { ck with current_file: saved_file }
+  return res_t
+}
+
+pub fn variants_of(
+  ck: Checker,
+  ctx: inout context.Context,
+  d: defs.Def
+) -> List[Int] may mutate, alloc {
+  match Map.find(d: ctx.variants, key: d.id) with
+  | Some(value) -> return value
+  | None -> skip()
+  var out: Builder[Int] = List.builder()
+  match d.node with
+  | defs.UnionNode(decl) -> {
+    for v: ast.Variant in decl.variants {
+      List.push(
+        b: inout out,
+        x: def_of_key(ctx: ctx, k: defs.node_key(file: d.file, tag: defs.tag_sig, span: v.span))
+      )
+    }
+  }
+  | _ -> skip()
+  let res_t: List[Int] = List.finish(b: out)
+  var table: Dict[Int, List[Int]] = ctx.variants
+  Map.set(d: inout table, key: d.id, value: res_t)
+  return res_t
+}
+
+-- Elaboration: signatures ------------------------------------------------------------------
+record SigParts {
+  params: List[ast.Param]
+  ret: Option[ast.Type]
+  effects: List[ast.EffectRef]
+  contracts: List[ast.Contract]
+  is_const: Bool
+  is_intrinsic: Bool
+  has_tparams: Bool
+}
+
+fn sig_parts(node: defs.DeclNode) -> SigParts may alloc {
+  match node with
+  | defs.FnNode(decl) -> return SigParts {
+    params: decl.params,
+    ret: Some(value: decl.ret),
+    effects: decl.effects,
+    contracts: decl.contracts,
+    is_const: decl.is_const,
+    is_intrinsic: decl.is_intrinsic,
+    has_tparams: true
+  }
+  | defs.IfaceFnNode(decl) -> return SigParts {
+    params: decl.params,
+    ret: Some(value: decl.ret),
+    effects: decl.effects,
+    contracts: decl.contracts,
+    is_const: false,
+    is_intrinsic: false,
+    has_tparams: false
+  }
+  | defs.LawNode(decl) -> return SigParts {
+    params: decl.params,
+    ret: None,
+    effects: [],
+    contracts: [],
+    is_const: false,
+    is_intrinsic: false,
+    has_tparams: false
+  }
+  | _ -> return SigParts {
+    params: [],
+    ret: None,
+    effects: [],
+    contracts: [],
+    is_const: false,
+    is_intrinsic: false,
+    has_tparams: false
+  }
+}
+
+pub fn signature_of(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  d: defs.Def
+) -> types.Signature may mutate, alloc {
+  match Map.find(d: ctx.signatures, key: d.id) with
+  | Some(value) -> return value
+  | None -> skip()
+  let saved_file: Int = ck.current_file
+  ck = { ck with current_file: d.file }
+  let parts: SigParts = sig_parts(node: d.node)
+  var tparams: List[types.TParamInfo] = []
+  if parts.has_tparams {
+    tparams = type_params_of(fuel: max_type_depth, ck: inout ck, ctx: inout ctx, d: d)
+  }
+  var fn_params: Builder[types.FnParam] = List.builder()
+  var param_defs: Builder[Int] = List.builder()
+  for p: ast.Param in parts.params {
+    let pd: Int = def_of_key(ctx: ctx, k: key(ck: ck, tag: defs.tag_sig, span: p.span))
+    let t: types.Type = type_of(fuel: max_type_depth, ck: inout ck, ctx: inout ctx, t: p.ty)
+    if pd >= 0 {
+      set_decl_type(ctx: inout ctx, def: pd, t: t)
+      List.push(b: inout param_defs, x: pd)
+    }
+    List.push(
+      b: inout fn_params,
+      x: types.FnParam { name: p.name.text, is_inout: p.is_inout, ty: t }
+    )
+  }
+  var ret: types.Type = types.bool_t
+  match parts.ret with
+  | Some(value) -> ret = type_of(fuel: max_type_depth, ck: inout ck, ctx: inout ctx, t: value)
+  | None -> ret = types.bool_t
+  let sig: types.Signature = types.Signature {
+    def: d.id,
+    tparams: tparams,
+    params: List.finish(b: fn_params),
+    param_defs: List.finish(b: param_defs),
+    ret: ret,
+    effects: effect_set_of(ctx: ctx, file: d.file, refs: parts.effects),
+    contracts: parts.contracts,
+    is_const_fn: parts.is_const,
+    is_intrinsic: parts.is_intrinsic
+  }
+  var table: Dict[Int, types.Signature] = ctx.signatures
+  Map.set(d: inout table, key: d.id, value: sig)
+  ck = { ck with current_file: saved_file }
+  return sig
+}
+
+fn sig_of_id(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  id: Int
+) -> types.Signature may mutate, alloc {
+  return signature_of(ck: inout ck, ctx: inout ctx, d: context.get_def(ctx: ctx, id: id))
+}
+
+-- The type of a `const` definition, elaborated on first use.
+fn const_decl_type(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  d: defs.Def
+) -> types.Type may mutate, alloc {
+  match Map.find(d: ctx.decl_types, key: d.id) with
+  | Some(value) -> return value
+  | None -> skip()
+  let saved_file: Int = ck.current_file
+  ck = { ck with current_file: d.file }
+  var t: types.Type = types.ErrorT
+  match d.node with
+  | defs.ConstNode(decl) -> t = type_of(
+    fuel: max_type_depth,
+    ck: inout ck,
+    ctx: inout ctx,
+    t: decl.ty
+  )
+  | _ -> t = types.ErrorT
+  set_decl_type(ctx: inout ctx, def: d.id, t: t)
+  ck = { ck with current_file: saved_file }
+  return t
+}
+
+-- Items ----------------------------------------------------------------------------------
+fn item_name(item: ast.Item) -> Text {
+  match item with
+  | ast.FnItem(decl) -> return decl.name.text
+  | ast.TypeAliasItem(decl) -> return decl.name.text
+  | ast.IntrinsicTypeItem(decl) -> return decl.name.text
+  | ast.ConstItem(decl) -> return decl.name.text
+  | ast.RecordItem(decl) -> return decl.name.text
+  | ast.UnionItem(decl) -> return decl.name.text
+  | ast.InterfaceItem(decl) -> return decl.name.text
+  | ast.ImplItem(decl) -> return decl.iface.text
+  | ast.ClaimItem(decl) -> return decl.name.text
+  | ast.CapabilityItem(decl) -> return decl.name.text
+  | ast.PathItem(decl) -> return decl.name.text
+  | ast.PolicyItem(decl) -> return decl.name.text
+  | ast.ExampleItem(decl) -> return decl.name.text
+  | ast.PropertyItem(decl) -> return decl.name.text
+}
+
+fn iface_item_name(member: ast.IfaceItem) -> Text {
+  match member with
+  | ast.IfaceFnItem(decl) -> return decl.name.text
+  | ast.LawItem(decl) -> return decl.name.text
+}
+
+fn law_body(member: ast.IfaceItem) -> ast.Block may alloc {
+  match member with
+  | ast.LawItem(decl) -> return decl.body
+  | _ -> return ast.Block { stmts: [], elided: false, span: ast.Span { start: 0, end: 0 } }
+}
+
+fn iface_item_span(member: ast.IfaceItem) -> ast.Span {
+  match member with
+  | ast.IfaceFnItem(decl) -> return decl.span
+  | ast.LawItem(decl) -> return decl.span
+}
+
+fn item_def(ck: Checker, ctx: context.Context, span: ast.Span) -> defs.Def {
+  return context.get_def(
+    ctx: ctx,
+    id: def_of_key(ctx: ctx, k: key(ck: ck, tag: defs.tag_item, span: span))
+  )
+}
+
+fn sealed_misuse(
+  ck: Checker,
+  ctx: inout context.Context,
+  vis: ast.Visibility,
+  name: ast.Ident
+) -> Unit may mutate, alloc {
+  if vis.is_sealed {
+    rep(
+      ck: ck,
+      ctx: inout ctx,
+      code: "E0335",
+      at: name.span,
+      detail: "`sealed` applies to records and unions only"
+    )
+  }
+  return Unit
+}
+
+fn add_impl(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  iface: Int,
+  target: types.Type,
+  def: Int
+) -> Unit may mutate, alloc {
+  var current: List[types.ImplInfo] = []
+  match Map.find(d: ck.impls, key: iface) with
+  | Some(value) -> current = value
+  | None -> current = []
+  let entry: types.ImplInfo = types.ImplInfo { target: target, def: def }
+  var mine: Dict[Int, List[types.ImplInfo]] = ck.impls
+  Map.set(d: inout mine, key: iface, value: List.append(xs: current, x: entry))
+  var shared: List[types.ImplInfo] = []
+  match Map.find(d: ctx.impls, key: iface) with
+  | Some(value) -> shared = value
+  | None -> shared = []
+  var table: Dict[Int, List[types.ImplInfo]] = ctx.impls
+  Map.set(d: inout table, key: iface, value: List.append(xs: shared, x: entry))
+  return Unit
+}
+
+fn has_impl_for(ck: Checker, iface: Int, target: types.Type) -> Bool may alloc {
+  match Map.find(d: ck.impls, key: iface) with
+  | None -> return false
+  | Some(value) -> {
+    for x: types.ImplInfo in value {
+      if types.same_base(a: x.target, b: target) {
+        return true
+      }
+    }
+    return false
+  }
+}
+
+fn elaborate_item(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  item: ast.Item
+) -> Unit may mutate, alloc {
+  ck = { ck with current_def: Some(value: item_name(item: item)) }
+  match item with
+  | ast.FnItem(decl) -> {
+    sealed_misuse(ck: ck, ctx: inout ctx, vis: decl.vis, name: decl.name)
+    let sig: types.Signature = signature_of(
+      ck: inout ck,
+      ctx: inout ctx,
+      d: item_def(ck: ck, ctx: ctx, span: decl.span)
+    )
+  }
+  | ast.TypeAliasItem(decl) -> {
+    sealed_misuse(ck: ck, ctx: inout ctx, vis: decl.vis, name: decl.name)
+    let t: types.Type = alias_type(
+      fuel: max_type_depth,
+      ck: inout ck,
+      ctx: inout ctx,
+      d: item_def(ck: ck, ctx: ctx, span: decl.span)
+    )
+  }
+  | ast.IntrinsicTypeItem(decl) -> {
+    let ps: List[types.TParamInfo] = type_params_of(
+      fuel: max_type_depth,
+      ck: inout ck,
+      ctx: inout ctx,
+      d: item_def(ck: ck, ctx: ctx, span: decl.span)
+    )
+  }
+  | ast.CapabilityItem(decl) -> {
+    let ps: List[types.TParamInfo] = type_params_of(
+      fuel: max_type_depth,
+      ck: inout ck,
+      ctx: inout ctx,
+      d: item_def(ck: ck, ctx: ctx, span: decl.span)
+    )
+  }
+  | ast.ConstItem(decl) -> {
+    let d: defs.Def = item_def(ck: ck, ctx: ctx, span: decl.span)
+    let t: types.Type = type_of(fuel: max_type_depth, ck: inout ck, ctx: inout ctx, t: decl.ty)
+    set_decl_type(ctx: inout ctx, def: d.id, t: t)
+  }
+  | ast.RecordItem(decl) -> {
+    let d: defs.Def = item_def(ck: ck, ctx: ctx, span: decl.span)
+    let ps: List[types.TParamInfo] = type_params_of(
+      fuel: max_type_depth,
+      ck: inout ck,
+      ctx: inout ctx,
+      d: d
+    )
+    let fs: List[types.FieldInfo] = fields_of(ck: inout ck, ctx: inout ctx, d: d)
+  }
+  | ast.UnionItem(decl) -> {
+    let d: defs.Def = item_def(ck: ck, ctx: ctx, span: decl.span)
+    let ps: List[types.TParamInfo] = type_params_of(
+      fuel: max_type_depth,
+      ck: inout ck,
+      ctx: inout ctx,
+      d: d
+    )
+    for v: Int in variants_of(ck: ck, ctx: inout ctx, d: d) {
+      let fs: List[types.FieldInfo] = fields_of(
+        ck: inout ck,
+        ctx: inout ctx,
+        d: context.get_def(ctx: ctx, id: v)
+      )
+    }
+  }
+  | ast.InterfaceItem(decl) -> {
+    sealed_misuse(ck: ck, ctx: inout ctx, vis: decl.vis, name: decl.name)
+    for member: ast.IfaceItem in decl.items {
+      let sig: types.Signature = signature_of(
+        ck: inout ck,
+        ctx: inout ctx,
+        d: context.get_def(
+          ctx: ctx,
+          id: def_of_key(
+            ctx: ctx,
+            k: key(ck: ck, tag: defs.tag_sig, span: iface_item_span(member: member))
+          )
+        )
+      )
+    }
+  }
+  | ast.ImplItem(decl) -> {
+    let iface: Int = res_def(
+      res: ref_at(ctx: ctx, k: key(ck: ck, tag: defs.tag_item, span: decl.span))
+    )
+    let target: types.Type = type_of(
+      fuel: max_type_depth,
+      ck: inout ck,
+      ctx: inout ctx,
+      t: decl.target
+    )
+    if iface >= 0 {
+      if has_impl_for(ck: ck, iface: iface, target: target) {
+        rep(
+          ck: ck,
+          ctx: inout ctx,
+          code: "E0107",
+          at: decl.iface.span,
+          detail: "`" ++ decl.iface.text ++ "` is already implemented for " ++ show(
+            ctx: ctx,
+            t: target
+          )
+        )
+      }
+      add_impl(
+        ck: inout ck,
+        ctx: inout ctx,
+        iface: iface,
+        target: target,
+        def: def_of_key(ctx: ctx, k: key(ck: ck, tag: defs.tag_item, span: decl.span))
+      )
+    }
+    for f: ast.FnDecl in decl.fns {
+      let sig: types.Signature = signature_of(
+        ck: inout ck,
+        ctx: inout ctx,
+        d: item_def(ck: ck, ctx: ctx, span: f.span)
+      )
+    }
+  }
+  | ast.PropertyItem(decl) -> {
+    for p: ast.Param in decl.params {
+      set_decl_type(
+        ctx: inout ctx,
+        def: def_of_key(ctx: ctx, k: key(ck: ck, tag: defs.tag_sig, span: p.span)),
+        t: type_of(fuel: max_type_depth, ck: inout ck, ctx: inout ctx, t: p.ty)
+      )
+    }
+  }
+  | _ -> skip()
+  ck = { ck with current_def: None }
+  return Unit
+}
+
+fn check_item(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  item: ast.Item
+) -> Unit may mutate, alloc
+  decreases item
+{
+  match item with
+  | ast.FnItem(decl) -> check_fn(ck: inout ck, ctx: inout ctx, f: decl)
+  | ast.ConstItem(decl) -> {
+    let t: types.Type = decl_type(
+      ctx: ctx,
+      def: def_of_key(ctx: ctx, k: key(ck: ck, tag: defs.tag_item, span: decl.span))
+    )
+    push_fn(ck: inout ck, f: plain_fn(ret: None, frame: 0))
+    let vt: types.Type = check_expr(
+      ck: inout ck,
+      ctx: inout ctx,
+      e: decl.value,
+      expected: Some(value: t)
+    )
+    pop_fn(ck: inout ck)
+  }
+  | ast.CapabilityItem(decl) -> {
+    for g: ast.Grant in decl.grant_list {
+      match g.when_cond with
+      | Some(value) -> {
+        push_fn(ck: inout ck, f: plain_fn(ret: None, frame: 0))
+        let wt: types.Type = check_expr(
+          ck: inout ck,
+          ctx: inout ctx,
+          e: value,
+          expected: Some(value: types.bool_t)
+        )
+        pop_fn(ck: inout ck)
+      }
+      | None -> skip()
+    }
+  }
+  | ast.InterfaceItem(decl) -> {
+    for member: ast.IfaceItem in decl.items {
+      ck = { ck with
+        current_def: Some(value: decl.name.text ++ "." ++ iface_item_name(member: member))
+      }
+      let sig: types.Signature = signature_of(
+        ck: inout ck,
+        ctx: inout ctx,
+        d: context.get_def(
+          ctx: ctx,
+          id: def_of_key(
+            ctx: ctx,
+            k: key(ck: ck, tag: defs.tag_sig, span: iface_item_span(member: member))
+          )
+        )
+      )
+      if member is ast.IfaceFnItem {
+        check_contracts(ck: inout ck, ctx: inout ctx, sig: sig)
+      } else {
+        check_assertion_block(ck: inout ck, ctx: inout ctx, b: law_body(member: member))
+      }
+    }
+  }
+  | ast.ImplItem(decl) -> check_impl(ck: inout ck, ctx: inout ctx, im: decl)
+  | ast.ExampleItem(decl) -> check_assertion_block(ck: inout ck, ctx: inout ctx, b: decl.body)
+  | ast.PropertyItem(decl) -> check_assertion_block(ck: inout ck, ctx: inout ctx, b: decl.body)
+  | _ -> skip()
+  return Unit
+}
+
+fn check_fn(ck: inout Checker, ctx: inout context.Context, f: ast.FnDecl) -> Unit may mutate, alloc
+  decreases f
+{
+  let sig: types.Signature = signature_of(
+    ck: inout ck,
+    ctx: inout ctx,
+    d: item_def(ck: ck, ctx: ctx, span: f.span)
+  )
+  check_contracts(ck: inout ck, ctx: inout ctx, sig: sig)
+  match f.body with
+  | None -> skip()
+  | Some(value) -> {
+    push_fn(ck: inout ck, f: plain_fn(ret: Some(value: sig.ret), frame: 0))
+    check_block(ck: inout ck, ctx: inout ctx, b: value)
+    if not types.same_base(a: sig.ret, b: types.unit_t) and not block_returns(b: value) {
+      rep(
+        ck: ck,
+        ctx: inout ctx,
+        code: "E0331",
+        at: f.name.span,
+        detail: "`" ++ f.name.text ++ "` returns " ++ show(
+          ctx: ctx,
+          t: sig.ret
+        ) ++ " but not every path ends in `return`"
+      )
+    }
+    pop_fn(ck: inout ck)
+  }
+  return Unit
+}
+
+fn check_contracts(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  sig: types.Signature
+) -> Unit may mutate, alloc {
+  for c: ast.Contract in sig.contracts {
+    push_fn(ck: inout ck, f: plain_fn(ret: Some(value: sig.ret), frame: 0))
+    if c.clause != "decreases" {
+      let bt: types.Type = check_expr(
+        ck: inout ck,
+        ctx: inout ctx,
+        e: c.expr,
+        expected: Some(value: types.bool_t)
+      )
+    } else {
+      -- A measure is numeric, or a record, union or list value taken in the structural order (§5.1).
+      let t: types.Type = check_expr(ck: inout ck, ctx: inout ctx, e: c.expr, expected: None)
+      let s: types.Type = types.strip(t: t)
+      let pn: Text = types.prim_name(t: s)
+      let ok: Bool = pn == "Int" or pn == "Duration" or s is types.RecordT or s is types.UnionT or s is types.ErrorT or (s is types.Opaque and context.qualified_name(
+        ctx: ctx,
+        id: types.def_of(t: s)
+      ) == "std.list.List")
+      if not ok {
+        rep(
+          ck: ck,
+          ctx: inout ctx,
+          code: "E0321",
+          at: parser.span_of_expr(e: c.expr),
+          detail: "a `decreases` measure is an Int, or a record, union or list value; found " ++ show(
+            ctx: ctx,
+            t: t
+          )
+        )
+      }
+    }
+    pop_fn(ck: inout ck)
+  }
+  return Unit
+}
+
+-- A `verify` block (§20.2): capability parameters, declared effects, an assertion body yielding Bool.
+fn check_verify(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  v: ast.VerifyBlock
+) -> Unit may mutate, alloc
+  decreases v
+{
+  var ps: Builder[types.FnParam] = List.builder()
+  for p: ast.Param in v.params {
+    let t: types.Type = type_of(fuel: max_type_depth, ck: inout ck, ctx: inout ctx, t: p.ty)
+    set_decl_type(
+      ctx: inout ctx,
+      def: def_of_key(ctx: ctx, k: key(ck: ck, tag: defs.tag_sig, span: p.span)),
+      t: t
+    )
+    List.push(b: inout ps, x: types.FnParam { name: p.name.text, is_inout: false, ty: t })
+    if not types.strip(t: t) is types.Capability {
+      rep(
+        ck: ck,
+        ctx: inout ctx,
+        code: "E0208",
+        at: p.span,
+        detail: "verify parameters are capabilities supplied by the environment (§20.2); `" ++ p.name.text ++ "` is " ++ show(
+          ctx: ctx,
+          t: t
+        )
+      )
+    }
+  }
+  var table: Dict[Int, types.VerifyInfo] = ctx.verifies
+  Map.set(
+    d: inout table,
+    key: key(ck: ck, tag: defs.tag_misc, span: v.span),
+    value: types.VerifyInfo {
+      params: List.finish(b: ps),
+      effects: effect_set_of(ctx: ctx, file: ck.current_file, refs: v.effects)
+    }
+  )
+  push_fn(
+    ck: inout ck,
+    f: FnCtx {
+      ret: Some(value: types.bool_t),
+      assertion: true,
+      in_recover: false,
+      frame: 0,
+      is_verify: true
+    }
+  )
+  check_block(ck: inout ck, ctx: inout ctx, b: v.body)
+  pop_fn(ck: inout ck)
+  return Unit
+}
+
+fn check_assertion_block(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  b: ast.Block
+) -> Unit may mutate, alloc
+  decreases b
+{
+  push_fn(
+    ck: inout ck,
+    f: FnCtx { ret: None, assertion: true, in_recover: false, frame: 0, is_verify: false }
+  )
+  check_block(ck: inout ck, ctx: inout ctx, b: b)
+  pop_fn(ck: inout ck)
+  return Unit
+}
+
+record ImplFn {
+  node: ast.FnDecl
+  def: defs.Def
+}
+
+fn iface_fns(ctx: context.Context, iface: Int) -> List[defs.Def] may alloc, mutate {
+  var out: Builder[defs.Def] = List.builder()
+  for i: Int in 0 ..< context.def_count(ctx: ctx) {
+    let d: defs.Def = context.get_def(ctx: ctx, id: i)
+    if d.kind == defs.IfaceFn and d.parent == Some(value: iface) {
+      List.push(b: inout out, x: d)
+    }
+  }
+  return List.finish(b: out)
+}
+
+fn find_impl_fn(fns: List[ImplFn], name: Text) -> Option[ImplFn] {
+  for x: ImplFn in fns {
+    if x.def.name == name {
+      return Some(value: x)
+    }
+  }
+  return None
+}
+
+fn has_iface_fn(fns: List[defs.Def], name: Text) -> Bool {
+  for d: defs.Def in fns {
+    if d.name == name {
+      return true
+    }
+  }
+  return false
+}
+
+fn check_impl(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  im: ast.ImplDecl
+) -> Unit may mutate, alloc
+  decreases im
+{
+  let iface_id: Int = res_def(
+    res: ref_at(ctx: ctx, k: key(ck: ck, tag: defs.tag_item, span: im.span))
+  )
+  if iface_id < 0 {
+    return Unit
+  }
+  let iface: defs.Def = context.get_def(ctx: ctx, id: iface_id)
+  let target: types.Type = type_of(fuel: max_type_depth, ck: inout ck, ctx: inout ctx, t: im.target)
+  let tp: Int = iface_param(ctx: ctx, iface: iface_id)
+  var subst: Dict[Int, types.TypeArg] = Map.dict()
+  Map.set(d: inout subst, key: tp, value: types.TypeA(ty: target))
+  let wanted: List[defs.Def] = iface_fns(ctx: ctx, iface: iface_id)
+  var impl_fns: Builder[ImplFn] = List.builder()
+  for f: ast.FnDecl in im.fns {
+    List.push(
+      b: inout impl_fns,
+      x: ImplFn { node: f, def: item_def(ck: ck, ctx: ctx, span: f.span) }
+    )
+  }
+  let have_fns: List[ImplFn] = List.finish(b: impl_fns)
+  for want: defs.Def in wanted {
+    match find_impl_fn(fns: have_fns, name: want.name) with
+    | None -> rep(
+      ck: ck,
+      ctx: inout ctx,
+      code: "E0334",
+      at: im.iface.span,
+      detail: "impl " ++ iface.name ++ "[" ++ show(
+        ctx: ctx,
+        t: target
+      ) ++ "] is missing `" ++ want.name ++ "`"
+    )
+    | Some(value) -> {
+      let ws: types.Signature = signature_of(ck: inout ck, ctx: inout ctx, d: want)
+      let hs: types.Signature = signature_of(ck: inout ck, ctx: inout ctx, d: value.def)
+      var problems: Builder[Text] = List.builder()
+      if List.len(xs: ws.params) != List.len(xs: hs.params) {
+        List.push(
+          b: inout problems,
+          x: "expected " ++ Int.to_text(
+            x: List.len(xs: ws.params)
+          ) ++ " parameters, found " ++ Int.to_text(x: List.len(xs: hs.params))
+        )
+      } else {
+        for i: Int in 0 ..< List.len(xs: ws.params) {
+          let wp: types.FnParam = List.get(xs: ws.params, i: i)
+          let hp: types.FnParam = List.get(xs: hs.params, i: i)
+          let wt: types.Type = types.substitute(t: wp.ty, subst: subst)
+          if wp.name != hp.name {
+            List.push(
+              b: inout problems,
+              x: "parameter " ++ Int.to_text(
+                x: i + 1
+              ) ++ " is named `" ++ wp.name ++ "` in the interface, `" ++ hp.name ++ "` here"
+            )
+          } else {
+            if wp.is_inout != hp.is_inout {
+              List.push(b: inout problems, x: "parameter `" ++ wp.name ++ "` differs in `inout`")
+            } else {
+              if not types.same_base(a: wt, b: hp.ty) {
+                List.push(
+                  b: inout problems,
+                  x: "parameter `" ++ wp.name ++ "` has type " ++ show(
+                    ctx: ctx,
+                    t: wt
+                  ) ++ " in the interface, " ++ show(ctx: ctx, t: hp.ty) ++ " here"
+                )
+              }
+            }
+          }
+        }
+      }
+      let wr: types.Type = types.substitute(t: ws.ret, subst: subst)
+      if not types.same_base(a: wr, b: hs.ret) {
+        List.push(
+          b: inout problems,
+          x: "returns " ++ show(ctx: ctx, t: wr) ++ " in the interface, " ++ show(
+            ctx: ctx,
+            t: hs.ret
+          ) ++ " here"
+        )
+      }
+      if List.len(xs: hs.tparams) > 0 {
+        List.push(b: inout problems, x: "an impl function takes no type parameters")
+      }
+      for p: Text in List.finish(b: problems) {
+        rep(
+          ck: ck,
+          ctx: inout ctx,
+          code: "E0334",
+          at: value.node.name.span,
+          detail: "`" ++ want.name ++ "`: " ++ p
+        )
+      }
+    }
+  }
+  for have: ImplFn in have_fns {
+    if not has_iface_fn(fns: wanted, name: have.def.name) {
+      rep(
+        ck: ck,
+        ctx: inout ctx,
+        code: "E0334",
+        at: have.node.name.span,
+        detail: "interface `" ++ iface.name ++ "` has no function `" ++ have.def.name ++ "`"
+      )
+    }
+  }
+  for f: ast.FnDecl in im.fns {
+    ck = { ck with current_def: Some(value: im.iface.text ++ "." ++ f.name.text) }
+    check_fn(ck: inout ck, ctx: inout ctx, f: f)
+  }
+  return Unit
+}
+
+-- True iff an implementation of `iface` exists for `target`, or `target` is a type parameter with that bound.
+fn implemented(
+  ck: Checker,
+  ctx: context.Context,
+  iface: Int,
+  target: types.Type
+) -> Bool may alloc {
+  let s: types.Type = types.strip(t: target)
+  if s is types.ErrorT {
+    return true
+  }
+  match s with
+  | types.ParamT(def) -> {
+    for infos: List[types.TParamInfo] in Map.values(d: ctx.type_params) {
+      for p: types.TParamInfo in infos {
+        if p is types.TypeP and types.tparam_def(p: p) == def {
+          return tparam_bound(p: p) == Some(value: iface)
+        }
+      }
+    }
+    return false
+  }
+  | _ -> return has_impl_for(ck: ck, iface: iface, target: s)
+}
+
+-- Statements -----------------------------------------------------------------------------
+fn check_block(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  b: ast.Block
+) -> Unit may mutate, alloc
+  decreases b
+{
+  var returned: Bool = false
+  for s: ast.Stmt in b.stmts {
+    if returned {
+      rep(
+        ck: ck,
+        ctx: inout ctx,
+        code: "E0332",
+        at: parser.span_of_stmt(st: s),
+        detail: "this statement follows a `return` on every path"
+      )
+      returned = false
+    }
+    check_stmt(ck: inout ck, ctx: inout ctx, s: s)
+    if stmt_returns(s: s) {
+      returned = true
+    }
+  }
+  return Unit
+}
+
+fn stmt_returns(s: ast.Stmt) -> Bool
+  decreases s
+{
+  match s with
+  | ast.Return(_, _) -> return true
+  | ast.If(_, then_block, else_block, _) -> {
+    match else_block with
+    | None -> return false
+    | Some(value) -> return block_returns(b: then_block) and block_returns(b: value)
+  }
+  | ast.Match(_, arms, _) -> {
+    if List.len(xs: arms) == 0 {
+      return false
+    }
+    for a: ast.Arm in arms {
+      match a.body with
+      | ast.ArmBlock(block) -> {
+        if not block_returns(b: block) {
+          return false
+        }
+      }
+      | ast.ArmStmt(stmt) -> {
+        if not stmt_returns(s: stmt) {
+          return false
+        }
+      }
+    }
+    return true
+  }
+  | _ -> return false
+}
+
+fn block_returns(b: ast.Block) -> Bool
+  decreases b
+{
+  for s: ast.Stmt in b.stmts {
+    if stmt_returns(s: s) {
+      return true
+    }
+  }
+  return false
+}
+
+fn describe_binding(d: defs.Def) -> Text may alloc {
+  if d.kind == defs.Let {
+    return "a `let` binding"
+  }
+  if d.kind == defs.Param {
+    return "a parameter"
+  }
+  if d.kind == defs.For {
+    return "a loop variable"
+  }
+  if d.kind == defs.Const {
+    return "a constant"
+  }
+  return "a " ++ defs.kind_text(k: d.kind)
+}
+
+fn check_stmt(ck: inout Checker, ctx: inout context.Context, s: ast.Stmt) -> Unit may mutate, alloc
+  decreases s
+{
+  match s with
+  | ast.Let(name, ty, value, span) -> {
+    let t: types.Type = type_of(fuel: max_type_depth, ck: inout ck, ctx: inout ctx, t: ty)
+    set_decl_type(
+      ctx: inout ctx,
+      def: def_of_key(ctx: ctx, k: key(ck: ck, tag: defs.tag_stmt, span: span)),
+      t: t
+    )
+    let vt: types.Type = check_expr(
+      ck: inout ck,
+      ctx: inout ctx,
+      e: value,
+      expected: Some(value: t)
+    )
+  }
+  | ast.Var(name, ty, value, span) -> {
+    let t: types.Type = type_of(fuel: max_type_depth, ck: inout ck, ctx: inout ctx, t: ty)
+    set_decl_type(
+      ctx: inout ctx,
+      def: def_of_key(ctx: ctx, k: key(ck: ck, tag: defs.tag_stmt, span: span)),
+      t: t
+    )
+    let vt: types.Type = check_expr(
+      ck: inout ck,
+      ctx: inout ctx,
+      e: value,
+      expected: Some(value: t)
+    )
+  }
+  | ast.Assign(name, value, span) -> {
+    let def: Int = res_def(res: ref_at(ctx: ctx, k: key(ck: ck, tag: defs.tag_stmt, span: span)))
+    if def >= 0 {
+      let d: defs.Def = context.get_def(ctx: ctx, id: def)
+      if d.kind != defs.Var and not (d.kind == defs.Param and d.is_inout) {
+        rep(
+          ck: ck,
+          ctx: inout ctx,
+          code: "E0328",
+          at: name.span,
+          detail: "`" ++ name.text ++ "` is " ++ describe_binding(
+            d: d
+          ) ++ "; only a `var` or an `inout` parameter can be assigned"
+        )
+      }
+      let vt: types.Type = check_expr(
+        ck: inout ck,
+        ctx: inout ctx,
+        e: value,
+        expected: Some(value: decl_type(ctx: ctx, def: def))
+      )
+    }
+  }
+  | ast.Return(value, span) -> {
+    let rt: Option[types.Type] = fn_ret(ck: ck)
+    if rt is None {
+      var why: Text = "`return` is not allowed here"
+      if fn_flag(ck: ck, which: 1) {
+        why = "`return` is not allowed inside `recover`; the block's last expression is its value"
+      }
+      rep(ck: ck, ctx: inout ctx, code: "E0321", at: span, detail: why)
+    }
+    let vt: types.Type = check_expr(ck: inout ck, ctx: inout ctx, e: value, expected: rt)
+  }
+  | ast.If(cond, then_block, else_block, span) -> {
+    let ct: types.Type = check_expr(
+      ck: inout ck,
+      ctx: inout ctx,
+      e: cond,
+      expected: Some(value: types.bool_t)
+    )
+    check_block(ck: inout ck, ctx: inout ctx, b: then_block)
+    match else_block with
+    | Some(value) -> check_block(ck: inout ck, ctx: inout ctx, b: value)
+    | None -> skip()
+  }
+  | ast.Match(scrutinee, arms, span) -> match_stmt(ck: inout ck, ctx: inout ctx, s: s)
+  | ast.Loop(cond, clauses, body, span) -> {
+    let ct: types.Type = check_expr(
+      ck: inout ck,
+      ctx: inout ctx,
+      e: cond,
+      expected: Some(value: types.bool_t)
+    )
+    for c: ast.LoopClause in clauses {
+      var want: types.Type = types.int_t
+      if c.clause == "invariant" {
+        want = types.bool_t
+      }
+      let lt: types.Type = check_expr(
+        ck: inout ck,
+        ctx: inout ctx,
+        e: c.expr,
+        expected: Some(value: want)
+      )
+    }
+    check_block(ck: inout ck, ctx: inout ctx, b: body)
+  }
+  | ast.For(name, ty, domain, body, span) -> {
+    let declared: types.Type = type_of(fuel: max_type_depth, ck: inout ck, ctx: inout ctx, t: ty)
+    set_decl_type(
+      ctx: inout ctx,
+      def: def_of_key(ctx: ctx, k: key(ck: ck, tag: defs.tag_stmt, span: span)),
+      t: declared
+    )
+    match domain with
+    | ast.RangeDomain(lo, hi, _) -> {
+      if not types.same_base(a: declared, b: types.int_t) {
+        rep(
+          ck: ck,
+          ctx: inout ctx,
+          code: "E0321",
+          at: comments.type_span(t: ty),
+          detail: "a range iterates Int values, not " ++ show(ctx: ctx, t: declared)
+        )
+      }
+      let lt: types.Type = check_expr(
+        ck: inout ck,
+        ctx: inout ctx,
+        e: lo,
+        expected: Some(value: types.int_t)
+      )
+      let ht: types.Type = check_expr(
+        ck: inout ck,
+        ctx: inout ctx,
+        e: hi,
+        expected: Some(value: types.int_t)
+      )
+    }
+    | ast.InDomain(expr, _) -> {
+      let dt: types.Type = check_expr(ck: inout ck, ctx: inout ctx, e: expr, expected: None)
+      match element_type(ck: ck, ctx: inout ctx, t: dt, at: parser.span_of_expr(e: expr)) with
+      | Some(value) -> {
+        let ct: types.Type = coerce(
+          ck: ck,
+          ctx: inout ctx,
+          actual: value,
+          expected: declared,
+          at: comments.type_span(t: ty),
+          what: "loop variable",
+          at_key: None
+        )
+      }
+      | None -> skip()
+    }
+    check_block(ck: inout ck, ctx: inout ctx, b: body)
+  }
+  | ast.Assume(_, _, verify_block, _) -> {
+    match verify_block with
+    | Some(value) -> check_verify(ck: inout ck, ctx: inout ctx, v: value)
+    | None -> skip()
+  }
+  | ast.ExprStmt(expr, span) -> {
+    let t: types.Type = check_expr(ck: inout ck, ctx: inout ctx, e: expr, expected: None)
+    if fn_flag(ck: ck, which: 0) {
+      if not types.assignable(actual: t, expected: types.bool_t) {
+        rep(
+          ck: ck,
+          ctx: inout ctx,
+          code: "E0321",
+          at: span,
+          detail: "an assertion must be Bool, found " ++ show(ctx: ctx, t: t)
+        )
+      }
+    } else {
+      if not fn_flag(ck: ck, which: 1) {
+        if not types.assignable(actual: t, expected: types.unit_t) {
+          rep(
+            ck: ck,
+            ctx: inout ctx,
+            code: "E0339",
+            at: span,
+            detail: "this call returns " ++ show(
+              ctx: ctx,
+              t: t
+            ) ++ "; bind it with `let` or return it"
+          )
+        }
+      }
+    }
+  }
+  return Unit
+}
+
+-- The element type of a `List[T]`, or None (reported).
+fn element_type(
+  ck: Checker,
+  ctx: inout context.Context,
+  t: types.Type,
+  at: ast.Span
+) -> Option[types.Type] may mutate, alloc {
+  let s: types.Type = types.strip(t: t)
+  if s is types.ErrorT {
+    return Some(value: types.ErrorT)
+  }
+  if is_list_type(ctx: inout ctx, t: s) {
+    match first_type_arg(t: s) with
+    | Some(value) -> return Some(value: value)
+    | None -> skip()
+  }
+  rep(
+    ck: ck,
+    ctx: inout ctx,
+    code: "E0321",
+    at: at,
+    detail: "`for` iterates a range or a List, not " ++ show(ctx: ctx, t: t)
+  )
+  return None
+}
+
+-- Exhaustiveness (spec §3.9) --------------------------------------------------------------
+union ArmShape =
+  | AllShape of guarded: Bool
+  | VariantShape of variant: Int, guarded: Bool
+  | BoolShape of value: Bool, guarded: Bool
+  | LitShape of guarded: Bool
+
+union Scrutinee =
+  | UnionS of variants: List[Int]
+  | BoolS
+  | OtherS
+
+record Coverage {
+  missing: List[Text]
+  needs_catch_all: Bool
+  unreachable: List[Int]
+}
+
+fn shape_key(a: ArmShape) -> Option[Text] may alloc {
+  match a with
+  | VariantShape(variant, _) -> return Some(value: "v:" ++ Int.to_text(x: variant))
+  | BoolShape(value, _) -> return Some(value: "b:" ++ Bool.to_text(b: value))
+  | _ -> return None
+}
+
+fn shape_guarded(a: ArmShape) -> Bool {
+  match a with
+  | AllShape(guarded) -> return guarded
+  | VariantShape(_, guarded) -> return guarded
+  | BoolShape(_, guarded) -> return guarded
+  | LitShape(guarded) -> return guarded
+}
+
+fn all_variants_covered(variants: List[Int], covered: Dict[Text, Bool]) -> Bool may alloc {
+  for v: Int in variants {
+    if not Map.contains(d: covered, key: "v:" ++ Int.to_text(x: v)) {
+      return false
+    }
+  }
+  return true
+}
+
+-- Arms are tried in order. An unguarded wildcard or binding covers
+-- everything; an unguarded variant pattern covers its variant; a guarded arm
+-- covers nothing. An arm whose pattern is already fully covered is unreachable.
+fn coverage(
+  ctx: context.Context,
+  scrutinee: Scrutinee,
+  arms: List[ArmShape]
+) -> Coverage may alloc, mutate {
+  var covered: Dict[Text, Bool] = Map.dict()
+  var all: Bool = false
+  var unreachable: Builder[Int] = List.builder()
+  var i: Int = 0
+  for arm: ArmShape in arms {
+    let k: Option[Text] = shape_key(a: arm)
+    var already: Bool = all
+    match k with
+    | Some(value) -> {
+      if Map.contains(d: covered, key: value) {
+        already = true
+      }
+    }
+    | None -> skip()
+    if already {
+      List.push(b: inout unreachable, x: i)
+    } else {
+      if not shape_guarded(a: arm) {
+        if arm is AllShape {
+          all = true
+        } else {
+          match k with
+          | Some(value) -> Map.set(d: inout covered, key: value, value: true)
+          | None -> skip()
+        }
+        match scrutinee with
+        | BoolS -> {
+          if Map.contains(d: covered, key: "b:true") and Map.contains(d: covered, key: "b:false") {
+            all = true
+          }
+        }
+        | UnionS(variants) -> {
+          if all_variants_covered(variants: variants, covered: covered) {
+            all = true
+          }
+        }
+        | OtherS -> skip()
+      }
+    }
+    i = i + 1
+  }
+  if all {
+    return Coverage {
+      missing: [],
+      needs_catch_all: false,
+      unreachable: List.finish(b: unreachable)
+    }
+  }
+  match scrutinee with
+  | UnionS(variants) -> {
+    var missing: Builder[Text] = List.builder()
+    for v: Int in variants {
+      if not Map.contains(d: covered, key: "v:" ++ Int.to_text(x: v)) {
+        List.push(b: inout missing, x: def_name(ctx: ctx, id: v))
+      }
+    }
+    return Coverage {
+      missing: List.finish(b: missing),
+      needs_catch_all: false,
+      unreachable: List.finish(b: unreachable)
+    }
+  }
+  | BoolS -> {
+    var missing: Builder[Text] = List.builder()
+    if not Map.contains(d: covered, key: "b:true") {
+      List.push(b: inout missing, x: "true")
+    }
+    if not Map.contains(d: covered, key: "b:false") {
+      List.push(b: inout missing, x: "false")
+    }
+    return Coverage {
+      missing: List.finish(b: missing),
+      needs_catch_all: false,
+      unreachable: List.finish(b: unreachable)
+    }
+  }
+  | OtherS -> return Coverage {
+    missing: [],
+    needs_catch_all: true,
+    unreachable: List.finish(b: unreachable)
+  }
+}
+
+fn pattern_span(p: ast.Pattern) -> ast.Span {
+  match p with
+  | ast.WildcardPat(span) -> return span
+  | ast.BindPat(_, span) -> return span
+  | ast.LitPat(_, span) -> return span
+  | ast.VariantPat(_, _, span) -> return span
+}
+
+fn match_stmt(ck: inout Checker, ctx: inout context.Context, s: ast.Stmt) -> Unit may mutate, alloc
+  decreases s
+{
+  match s with
+  | ast.Match(scrutinee, arms, span) -> {
+    let st_full: types.Type = check_expr(ck: inout ck, ctx: inout ctx, e: scrutinee, expected: None)
+    let st: types.Type = types.strip(t: st_full)
+    var shape: Scrutinee = OtherS
+    let pn: Text = types.prim_name(t: st)
+    if st is types.UnionT {
+      shape = UnionS(
+        variants: variants_of(
+          ck: ck,
+          ctx: inout ctx,
+          d: context.get_def(ctx: ctx, id: types.def_of(t: st))
+        )
+      )
+    } else {
+      if pn == "Bool" {
+        shape = BoolS
+      } else {
+        if st is types.ErrorT or pn == "Int" or pn == "Text" or pn == "Float" or pn == "Duration" {
+          shape = OtherS
+        } else {
+          rep(
+            ck: ck,
+            ctx: inout ctx,
+            code: "E0321",
+            at: parser.span_of_expr(e: scrutinee),
+            detail: "`match` needs a union, Bool, Int, Text, Float or Duration, not " ++ show(
+              ctx: ctx,
+              t: st_full
+            )
+          )
+          shape = OtherS
+        }
+      }
+    }
+    var shapes: Builder[ArmShape] = List.builder()
+    for a: ast.Arm in arms {
+      List.push(
+        b: inout shapes,
+        x: check_pattern(
+          ck: inout ck,
+          ctx: inout ctx,
+          p: a.pattern,
+          scrutinee: st_full,
+          guarded: a.guard is Some
+        )
+      )
+      match a.guard with
+      | Some(value) -> {
+        let gt: types.Type = check_expr(
+          ck: inout ck,
+          ctx: inout ctx,
+          e: value,
+          expected: Some(value: types.bool_t)
+        )
+      }
+      | None -> skip()
+      match a.body with
+      | ast.ArmBlock(block) -> check_block(ck: inout ck, ctx: inout ctx, b: block)
+      | ast.ArmStmt(stmt) -> check_stmt(ck: inout ck, ctx: inout ctx, s: stmt)
+    }
+    if st is types.ErrorT {
+      return Unit
+    }
+    let cov: Coverage = coverage(ctx: ctx, scrutinee: shape, arms: List.finish(b: shapes))
+    for i: Int in cov.unreachable {
+      if i >= 0 and i < List.len(xs: arms) {
+        rep(
+          ck: ck,
+          ctx: inout ctx,
+          code: "E0327",
+          at: pattern_span(p: List.get(xs: arms, i: i).pattern),
+          detail: "every value this arm could match is handled by an earlier arm"
+        )
+      }
+    }
+    if cov.needs_catch_all {
+      rep(
+        ck: ck,
+        ctx: inout ctx,
+        code: "E0326",
+        at: parser.span_of_expr(e: scrutinee),
+        detail: "a `match` on " ++ show(ctx: ctx, t: st_full) ++ " needs a `_` arm"
+      )
+    } else {
+      if List.len(xs: cov.missing) > 0 {
+        var quoted: Builder[Text] = List.builder()
+        for m: Text in cov.missing {
+          List.push(b: inout quoted, x: "`" ++ m ++ "`")
+        }
+        rep(
+          ck: ck,
+          ctx: inout ctx,
+          code: "E0326",
+          at: parser.span_of_expr(e: scrutinee),
+          detail: "missing " ++ Text.join(parts: List.finish(b: quoted), sep: ", ")
+        )
+      }
+    }
+  }
+  | _ -> skip()
+  return Unit
+}
+
+fn pat_field_tag(pf: ast.PatField) -> Int {
+  match pf with
+  | ast.PatFieldName(_, _) -> return 0
+  | ast.PatFieldSkip(_) -> return 1
+  | ast.PatFieldRest(_) -> return 2
+}
+
+fn pat_field_span(pf: ast.PatField) -> ast.Span {
+  match pf with
+  | ast.PatFieldName(_, span) -> return span
+  | ast.PatFieldSkip(span) -> return span
+  | ast.PatFieldRest(span) -> return span
+}
+
+fn pat_field_ident(pf: ast.PatField) -> ast.Ident {
+  match pf with
+  | ast.PatFieldName(name, _) -> return name
+  | _ -> return ast.Ident { text: "", span: ast.Span { start: 0, end: 0 } }
+}
+
+fn subst_of(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  d: defs.Def,
+  args: List[types.TypeArg]
+) -> Dict[Int, types.TypeArg] may mutate, alloc {
+  var subst: Dict[Int, types.TypeArg] = Map.dict()
+  let ps: List[types.TParamInfo] = type_params_of(
+    fuel: max_type_depth,
+    ck: inout ck,
+    ctx: inout ctx,
+    d: d
+  )
+  for i: Int in 0 ..< List.len(xs: ps) {
+    if i < List.len(xs: args) {
+      Map.set(
+        d: inout subst,
+        key: types.tparam_def(p: List.get(xs: ps, i: i)),
+        value: List.get(xs: args, i: i)
+      )
+    }
+  }
+  return subst
+}
+
+fn plural_fields(n: Int) -> Text may alloc {
+  if n == 1 {
+    return "1 field"
+  }
+  return Int.to_text(x: n) ++ " fields"
+}
+
+-- Types the bindings of `p` against `scrutinee` and returns its coverage shape.
+fn check_pattern(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  p: ast.Pattern,
+  scrutinee: types.Type,
+  guarded: Bool
+) -> ArmShape may mutate, alloc
+  decreases p
+{
+  let st: types.Type = types.strip(t: scrutinee)
+  match p with
+  | ast.WildcardPat(_) -> return AllShape(guarded: guarded)
+  | ast.BindPat(_, span) -> {
+    set_decl_type(
+      ctx: inout ctx,
+      def: def_of_key(ctx: ctx, k: key(ck: ck, tag: defs.tag_pattern, span: span)),
+      t: scrutinee
+    )
+    return AllShape(guarded: guarded)
+  }
+  | ast.LitPat(literal, span) -> {
+    let lt: types.Type = check_expr(ck: inout ck, ctx: inout ctx, e: literal, expected: None)
+    if not types.assignable(actual: lt, expected: scrutinee) {
+      rep(
+        ck: ck,
+        ctx: inout ctx,
+        code: "E0341",
+        at: span,
+        detail: "a " ++ show(ctx: ctx, t: lt) ++ " literal cannot match " ++ show(
+          ctx: ctx,
+          t: scrutinee
+        )
+      )
+    }
+    match literal with
+    | ast.BoolLit(value, _) -> return BoolShape(value: value, guarded: guarded)
+    | _ -> return LitShape(guarded: guarded)
+  }
+  | ast.VariantPat(name, fields, span) -> {
+    let vdef: Int = res_def(
+      res: ref_at(ctx: ctx, k: key(ck: ck, tag: defs.tag_pattern, span: span))
+    )
+    if vdef < 0 {
+      return AllShape(guarded: true)
+    }
+    let variant: defs.Def = context.get_def(ctx: ctx, id: vdef)
+    let union_id: Int = or_neg(o: variant.parent)
+    if st is types.ErrorT {
+      return VariantShape(variant: vdef, guarded: guarded)
+    }
+    if union_id < 0 or not st is types.UnionT or types.def_of(t: st) != union_id {
+      var union_name: Text = "?"
+      if union_id >= 0 {
+        union_name = def_name(ctx: ctx, id: union_id)
+      }
+      rep(
+        ck: ck,
+        ctx: inout ctx,
+        code: "E0341",
+        at: name.span,
+        detail: "`" ++ variant.name ++ "` is a variant of " ++ union_name ++ ", but the scrutinee has type " ++ show(
+          ctx: ctx,
+          t: scrutinee
+        )
+      )
+      return VariantShape(variant: vdef, guarded: true)
+    }
+    let subst: Dict[Int, types.TypeArg] = subst_of(
+      ck: inout ck,
+      ctx: inout ctx,
+      d: context.get_def(ctx: ctx, id: union_id),
+      args: types.args_of(t: st)
+    )
+    let fs: List[types.FieldInfo] = fields_of(ck: inout ck, ctx: inout ctx, d: variant)
+    let nf: Int = List.len(xs: fs)
+    match fields with
+    | None -> return VariantShape(variant: vdef, guarded: guarded)
+    | Some(value) -> {
+      var i: Int where it >= 0 = 0
+      var rest: Bool = false
+      var stop: Bool = false
+      for pf: ast.PatField in value {
+        if not stop {
+          if rest {
+            rep(
+              ck: ck,
+              ctx: inout ctx,
+              code: "E0310",
+              at: pat_field_span(pf: pf),
+              detail: "`..` must be the last pattern field"
+            )
+            stop = true
+          } else {
+            if pat_field_tag(pf: pf) == 2 {
+              rest = true
+            } else {
+              if i >= nf {
+                rep(
+                  ck: ck,
+                  ctx: inout ctx,
+                  code: "E0310",
+                  at: pat_field_span(pf: pf),
+                  detail: "`" ++ variant.name ++ "` has only " ++ plural_fields(n: nf)
+                )
+                stop = true
+              } else {
+                let f: types.FieldInfo = List.get(xs: fs, i: i)
+                if pat_field_tag(pf: pf) == 0 {
+                  let ident: ast.Ident = pat_field_ident(pf: pf)
+                  if ident.text != f.name {
+                    rep(
+                      ck: ck,
+                      ctx: inout ctx,
+                      code: "E0310",
+                      at: ident.span,
+                      detail: "field " ++ Int.to_text(
+                        x: i + 1
+                      ) ++ " of `" ++ variant.name ++ "` is `" ++ f.name ++ "`; patterns cannot rename"
+                    )
+                  }
+                  set_decl_type(
+                    ctx: inout ctx,
+                    def: def_of_key(
+                      ctx: ctx,
+                      k: key(ck: ck, tag: defs.tag_pattern, span: pat_field_span(pf: pf))
+                    ),
+                    t: types.substitute(t: f.ty, subst: subst)
+                  )
+                }
+                i = i + 1
+              }
+            }
+          }
+        }
+      }
+      if not stop and not rest and i < nf {
+        rep(
+          ck: ck,
+          ctx: inout ctx,
+          code: "E0310",
+          at: span,
+          detail: "`" ++ variant.name ++ "` has " ++ plural_fields(
+            n: nf
+          ) ++ "; list them all or end with `..`"
+        )
+      }
+      return VariantShape(variant: vdef, guarded: guarded)
+    }
+  }
+}
+
+-- Expressions ------------------------------------------------------------------------------
+-- Checks that `actual` flows into `expected`, recording a refinement obligation at `at_key` when it does.
+fn coerce(
+  ck: Checker,
+  ctx: inout context.Context,
+  actual: types.Type,
+  expected: types.Type,
+  at: ast.Span,
+  what: Text,
+  at_key: Option[Int]
+) -> types.Type may mutate, alloc {
+  if actual is types.ErrorT {
+    return types.ErrorT
+  }
+  if expected is types.ErrorT {
+    return actual
+  }
+  if not types.assignable(actual: actual, expected: expected) {
+    var suffix: Text = ""
+    if what != "expression" {
+      suffix = " (" ++ what ++ ")"
+    }
+    rep(
+      ck: ck,
+      ctx: inout ctx,
+      code: "E0321",
+      at: at,
+      detail: "expected " ++ show(ctx: ctx, t: expected) ++ ", found " ++ show(
+        ctx: ctx,
+        t: actual
+      ) ++ suffix
+    )
+    return types.ErrorT
+  }
+  match at_key with
+  | Some(value) -> {
+    if types.is_refined(t: expected) and not types.same_refinement(a: actual, b: expected) {
+      var flows: Builder[types.RefinementFlow] = ctx.refinement_flows
+      List.push(b: inout flows, x: types.RefinementFlow { at: value, from: actual, to: expected })
+    }
+  }
+  | None -> skip()
+  return actual
+}
+
+fn infer(ck: inout Checker, ctx: inout context.Context, e: ast.Expr) -> types.Type may mutate, alloc
+  decreases e
+{
+  return check_expr(ck: inout ck, ctx: inout ctx, e: e, expected: None)
+}
+
+-- Types `e`; when `expected` is given the res_t must be assignable to it.
+-- Records the expression's type and returns it (`ErrorT` after a report).
+fn check_expr(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  e: ast.Expr,
+  expected: Option[types.Type]
+) -> types.Type may mutate, alloc
+  decreases e
+{
+  let t: types.Type = expr_inner(ck: inout ck, ctx: inout ctx, e: e, expected: expected)
+  let k: Int = key(ck: ck, tag: defs.tag_expr, span: parser.span_of_expr(e: e))
+  var res_t: types.Type = t
+  match expected with
+  | None -> res_t = t
+  | Some(value) -> res_t = coerce(
+    ck: ck,
+    ctx: inout ctx,
+    actual: t,
+    expected: value,
+    at: parser.span_of_expr(e: e),
+    what: "expression",
+    at_key: Some(value: k)
+  )
+  var table: Dict[Int, types.Type] = ctx.expr_types
+  Map.set(d: inout table, key: k, value: res_t)
+  return res_t
+}
+
+fn set_expr_type(
+  ck: Checker,
+  ctx: inout context.Context,
+  e: ast.Expr,
+  t: types.Type
+) -> Unit may mutate, alloc {
+  var table: Dict[Int, types.Type] = ctx.expr_types
+  Map.set(
+    d: inout table,
+    key: key(ck: ck, tag: defs.tag_expr, span: parser.span_of_expr(e: e)),
+    value: t
+  )
+  return Unit
+}
+
+fn it_top(ck: Checker) -> types.Type {
+  let n: Int = List.len(xs: ck.it_stack)
+  if n == 0 {
+    return types.ErrorT
+  }
+  return List.get(xs: ck.it_stack, i: n - 1)
+}
+
+fn expr_inner(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  e: ast.Expr,
+  expected: Option[types.Type]
+) -> types.Type may mutate, alloc
+  decreases e
+{
+  match e with
+  | ast.IntLit(_, _, _) -> return types.int_t
+  | ast.FloatLit(_, _) -> return types.float_t
+  | ast.TextLit(_, _) -> return types.text_t
+  | ast.BoolLit(_, _) -> return types.bool_t
+  | ast.DurationLit(_, _) -> return types.duration_t
+  | ast.Name(_, _) -> return name_type(ck: inout ck, ctx: inout ctx, e: e)
+  | ast.It(_) -> return it_top(ck: ck)
+  | ast.ResultRef(_) -> return or_error(o: fn_ret(ck: ck))
+  | ast.Old(_, span) -> {
+    let def: Int = res_def(res: ref_at(ctx: ctx, k: key(ck: ck, tag: defs.tag_expr, span: span)))
+    if def < 0 {
+      return types.ErrorT
+    }
+    return decl_type(ctx: ctx, def: def)
+  }
+  | ast.Ctor(_, _, _, _) -> return ctor(ck: inout ck, ctx: inout ctx, e: e, expected: expected)
+  | ast.RecordUpdate(_, _, _) -> return record_update(ck: inout ck, ctx: inout ctx, e: e)
+  | ast.ListLit(_, _) -> return list_lit(ck: inout ck, ctx: inout ctx, e: e, expected: expected)
+  | ast.Try(_, _, _) -> return try_expr(ck: inout ck, ctx: inout ctx, e: e)
+  | ast.Recover(_, _) -> return recover_expr(ck: inout ck, ctx: inout ctx, e: e)
+  | ast.Quantifier(_, _, _, _, _, _, _) -> return quantifier(ck: inout ck, ctx: inout ctx, e: e)
+  | ast.Closure(_, _, _, _, _) -> return closure(ck: inout ck, ctx: inout ctx, e: e)
+  | ast.Fake(_, _, _) -> return fake_expr(ck: inout ck, ctx: inout ctx, e: e, expected: expected)
+  | ast.Hole(span) -> {
+    var table: Dict[Int, Option[types.Type]] = ctx.type_holes
+    Map.set(d: inout table, key: key(ck: ck, tag: defs.tag_expr, span: span), value: expected)
+    return types.ErrorT
+  }
+  | ast.FieldAccess(_, _, _) -> return field_access(ck: inout ck, ctx: inout ctx, e: e)
+  | ast.Call(_, _, _, _) -> return call(ck: inout ck, ctx: inout ctx, e: e, expected: expected)
+  | ast.Unary(op, operand, span) -> {
+    if op == "not" {
+      let bt: types.Type = check_expr(
+        ck: inout ck,
+        ctx: inout ctx,
+        e: operand,
+        expected: Some(value: types.bool_t)
+      )
+      return types.bool_t
+    }
+    let t: types.Type = infer(ck: inout ck, ctx: inout ctx, e: operand)
+    if not types.is_numeric(t: t) {
+      if not t is types.ErrorT {
+        rep(
+          ck: ck,
+          ctx: inout ctx,
+          code: "E0340",
+          at: span,
+          detail: "unary `-` needs Int, Float or Duration, not " ++ show(ctx: ctx, t: t)
+        )
+      }
+      return types.ErrorT
+    }
+    return types.strip(t: t)
+  }
+  | ast.Binary(_, _, _, _) -> return binary(ck: inout ck, ctx: inout ctx, e: e)
+  | ast.And(operands, _) -> {
+    for o: ast.Expr in operands {
+      let bt: types.Type = check_expr(
+        ck: inout ck,
+        ctx: inout ctx,
+        e: o,
+        expected: Some(value: types.bool_t)
+      )
+    }
+    return types.bool_t
+  }
+  | ast.Or(operands, _) -> {
+    for o: ast.Expr in operands {
+      let bt: types.Type = check_expr(
+        ck: inout ck,
+        ctx: inout ctx,
+        e: o,
+        expected: Some(value: types.bool_t)
+      )
+    }
+    return types.bool_t
+  }
+  | ast.Is(expr, pattern, _) -> {
+    let t: types.Type = infer(ck: inout ck, ctx: inout ctx, e: expr)
+    let shape: ArmShape = check_pattern(
+      ck: inout ck,
+      ctx: inout ctx,
+      p: pattern,
+      scrutinee: t,
+      guarded: false
+    )
+    return types.bool_t
+  }
+}
+
+fn fn_value_type(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  d: defs.Def,
+  at: ast.Span
+) -> types.Type may mutate, alloc {
+  let sig: types.Signature = signature_of(ck: inout ck, ctx: inout ctx, d: d)
+  if List.len(xs: sig.tparams) > 0 {
+    rep(
+      ck: ck,
+      ctx: inout ctx,
+      code: "E0324",
+      at: at,
+      detail: "`" ++ d.name ++ "` is generic; a generic function cannot be used as a value"
+    )
+    return types.ErrorT
+  }
+  return types.FnT(params: sig.params, ret: sig.ret, effects: sig.effects)
+}
+
+fn name_type(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  e: ast.Expr
+) -> types.Type may mutate, alloc {
+  match e with
+  | ast.Name(name, span) -> {
+    let def: Int = res_def(res: ref_at(ctx: ctx, k: key(ck: ck, tag: defs.tag_expr, span: span)))
+    if def < 0 {
+      return types.ErrorT
+    }
+    let d: defs.Def = context.get_def(ctx: ctx, id: def)
+    if d.kind == defs.Fn {
+      return fn_value_type(ck: inout ck, ctx: inout ctx, d: d, at: span)
+    }
+    if d.kind == defs.Const {
+      return const_decl_type(ck: inout ck, ctx: inout ctx, d: d)
+    }
+    let t: types.Type = decl_type(ctx: ctx, def: def)
+    if fn_top(ck: ck) is Some and d.frame >= 0 and d.frame < fn_frame(ck: ck) and types.strip(
+      t: t
+    ) is types.Capability {
+      rep(
+        ck: ck,
+        ctx: inout ctx,
+        code: "E0330",
+        at: span,
+        detail: "`" ++ d.name ++ "` is a capability; closures may not capture capabilities (§8)"
+      )
+    }
+    return t
+  }
+  | _ -> return types.ErrorT
+}
+
+fn is_arith(op: Text) -> Bool {
+  return op == "+" or op == "-" or op == "*" or op == "/" or op == "%"
+}
+
+fn is_order(op: Text) -> Bool {
+  return op == "<" or op == "<=" or op == ">" or op == ">="
+}
+
+fn binary(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  e: ast.Expr
+) -> types.Type may mutate, alloc
+  decreases e
+{
+  match e with
+  | ast.Binary(op, left, right, span) -> {
+    if is_arith(op: op) {
+      let l: types.Type = infer(ck: inout ck, ctx: inout ctx, e: left)
+      if l is types.ErrorT {
+        let rt: types.Type = infer(ck: inout ck, ctx: inout ctx, e: right)
+        return types.ErrorT
+      }
+      if not types.is_numeric(t: l) {
+        rep(
+          ck: ck,
+          ctx: inout ctx,
+          code: "E0340",
+          at: parser.span_of_expr(e: left),
+          detail: "`" ++ op ++ "` needs Int, Float or Duration operands, not " ++ show(
+            ctx: ctx,
+            t: l
+          )
+        )
+        let rt: types.Type = infer(ck: inout ck, ctx: inout ctx, e: right)
+        return types.ErrorT
+      }
+      let base: types.Type = types.strip(t: l)
+      let rt: types.Type = check_expr(
+        ck: inout ck,
+        ctx: inout ctx,
+        e: right,
+        expected: Some(value: base)
+      )
+      return base
+    }
+    if op == "++" {
+      let l: types.Type = infer(ck: inout ck, ctx: inout ctx, e: left)
+      if l is types.ErrorT {
+        let rt: types.Type = infer(ck: inout ck, ctx: inout ctx, e: right)
+        return types.ErrorT
+      }
+      let base: types.Type = types.strip(t: l)
+      if not types.same_base(a: base, b: types.text_t) and not is_list_type(
+        ctx: inout ctx,
+        t: base
+      ) {
+        rep(
+          ck: ck,
+          ctx: inout ctx,
+          code: "E0340",
+          at: parser.span_of_expr(e: left),
+          detail: "`++` joins Text or List values, not " ++ show(ctx: ctx, t: l)
+        )
+        let rt: types.Type = infer(ck: inout ck, ctx: inout ctx, e: right)
+        return types.ErrorT
+      }
+      let rt: types.Type = check_expr(
+        ck: inout ck,
+        ctx: inout ctx,
+        e: right,
+        expected: Some(value: base)
+      )
+      return base
+    }
+    if op == "==" or op == "!=" {
+      let l: types.Type = infer(ck: inout ck, ctx: inout ctx, e: left)
+      if types.strip(t: l) is types.FnT {
+        rep(
+          ck: ck,
+          ctx: inout ctx,
+          code: "E0340",
+          at: span,
+          detail: "function values cannot be compared (§3.7)"
+        )
+      }
+      var want: types.Type = types.strip(t: l)
+      if l is types.ErrorT {
+        want = l
+      }
+      let rt: types.Type = check_expr(
+        ck: inout ck,
+        ctx: inout ctx,
+        e: right,
+        expected: Some(value: want)
+      )
+      return types.bool_t
+    }
+    if is_order(op: op) {
+      let l: types.Type = infer(ck: inout ck, ctx: inout ctx, e: left)
+      if not l is types.ErrorT and not types.is_numeric(t: l) {
+        rep(
+          ck: ck,
+          ctx: inout ctx,
+          code: "E0340",
+          at: parser.span_of_expr(e: left),
+          detail: "`" ++ op ++ "` compares Int, Float or Duration values, not " ++ show(
+            ctx: ctx,
+            t: l
+          )
+        )
+        let rt: types.Type = infer(ck: inout ck, ctx: inout ctx, e: right)
+        return types.bool_t
+      }
+      var want: types.Type = types.strip(t: l)
+      if l is types.ErrorT {
+        want = l
+      }
+      let rt: types.Type = check_expr(
+        ck: inout ck,
+        ctx: inout ctx,
+        e: right,
+        expected: Some(value: want)
+      )
+      return types.bool_t
+    }
+    -- implies
+    let lt: types.Type = check_expr(
+      ck: inout ck,
+      ctx: inout ctx,
+      e: left,
+      expected: Some(value: types.bool_t)
+    )
+    let rt: types.Type = check_expr(
+      ck: inout ck,
+      ctx: inout ctx,
+      e: right,
+      expected: Some(value: types.bool_t)
+    )
+    return types.bool_t
+  }
+  | _ -> return types.ErrorT
+}
+
+fn field_params(fs: List[types.FieldInfo]) -> List[types.FnParam] may alloc, mutate {
+  var out: Builder[types.FnParam] = List.builder()
+  for f: types.FieldInfo in fs {
+    List.push(b: inout out, x: types.FnParam { name: f.name, is_inout: false, ty: f.ty })
+  }
+  return List.finish(b: out)
+}
+
+fn ctor(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  e: ast.Expr,
+  expected: Option[types.Type]
+) -> types.Type may mutate, alloc
+  decreases e
+{
+  match e with
+  | ast.Ctor(_, args, fields, span) -> {
+    let res: Option[defs.Resolution] = ref_at(
+      ctx: ctx,
+      k: key(ck: ck, tag: defs.tag_expr, span: span)
+    )
+    let tag: Int = res_tag(res: res)
+    if tag == 2 {
+      return types.unit_t
+    }
+    if tag == 4 {
+      return types.TypeInfoT
+    }
+    if tag != 0 {
+      return types.ErrorT
+    }
+    let d: defs.Def = context.get_def(ctx: ctx, id: res_def(res: res))
+    if d.kind == defs.Variant {
+      let union_id: Int = or_neg(o: d.parent)
+      if union_id < 0 {
+        return types.ErrorT
+      }
+      if fields is Some {
+        rep(
+          ck: ck,
+          ctx: inout ctx,
+          code: "E0322",
+          at: span,
+          detail: "`" ++ d.name ++ "` is a variant; give its fields as named arguments in parentheses"
+        )
+        return types.ErrorT
+      }
+      let union_def: defs.Def = context.get_def(ctx: ctx, id: union_id)
+      let subst: Dict[Int, types.TypeArg] = bind_from_expected(
+        ck: inout ck,
+        ctx: inout ctx,
+        d: union_def,
+        expected: expected
+      )
+      let fs: List[types.FieldInfo] = fields_of(ck: inout ck, ctx: inout ctx, d: d)
+      let vparams: List[types.FnParam] = field_params(fs: fs)
+      let vtparams: List[types.TParamInfo] = type_params_of(
+        fuel: max_type_depth,
+        ck: inout ck,
+        ctx: inout ctx,
+        d: union_def
+      )
+      match args with
+      | Some(value) -> match_named(
+        ck: inout ck,
+        ctx: inout ctx,
+        args: value,
+        params: vparams,
+        subst: subst,
+        tparams: vtparams,
+        at: span,
+        what: "variant `" ++ d.name ++ "`"
+      )
+      | None -> report_missing(
+        ck: ck,
+        ctx: inout ctx,
+        params: vparams,
+        seen: Map.dict(),
+        at: span,
+        what: "variant `" ++ d.name ++ "`"
+      )
+      return types.UnionT(
+        def: union_id,
+        args: finish_args(ck: inout ck, ctx: inout ctx, d: union_def, subst: subst, at: span)
+      )
+    }
+    if d.kind == defs.Record {
+      if args is Some {
+        rep(
+          ck: ck,
+          ctx: inout ctx,
+          code: "E0322",
+          at: span,
+          detail: "`" ++ d.name ++ "` is a record; give its fields in braces"
+        )
+        return types.ErrorT
+      }
+      let subst: Dict[Int, types.TypeArg] = bind_from_expected(
+        ck: inout ck,
+        ctx: inout ctx,
+        d: d,
+        expected: expected
+      )
+      let fs: List[types.FieldInfo] = fields_of(ck: inout ck, ctx: inout ctx, d: d)
+      let rparams: List[types.FnParam] = field_params(fs: fs)
+      let rtparams: List[types.TParamInfo] = type_params_of(
+        fuel: max_type_depth,
+        ck: inout ck,
+        ctx: inout ctx,
+        d: d
+      )
+      match fields with
+      | Some(value) -> match_named_fields(
+        ck: inout ck,
+        ctx: inout ctx,
+        inits: value,
+        params: rparams,
+        subst: subst,
+        tparams: rtparams,
+        at: span,
+        what: "record `" ++ d.name ++ "`"
+      )
+      | None -> report_missing(
+        ck: ck,
+        ctx: inout ctx,
+        params: rparams,
+        seen: Map.dict(),
+        at: span,
+        what: "record `" ++ d.name ++ "`"
+      )
+      return types.RecordT(
+        def: d.id,
+        args: finish_args(ck: inout ck, ctx: inout ctx, d: d, subst: subst, at: span)
+      )
+    }
+    return types.ErrorT
+  }
+  | _ -> return types.ErrorT
+}
+
+-- Binds a generic declaration's type parameters from an expected instance of the same declaration.
+fn bind_from_expected(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  d: defs.Def,
+  expected: Option[types.Type]
+) -> Dict[Int, types.TypeArg] may mutate, alloc {
+  var subst: Dict[Int, types.TypeArg] = Map.dict()
+  match expected with
+  | None -> return subst
+  | Some(value) -> {
+    let s: types.Type = types.strip(t: value)
+    if (s is types.RecordT or s is types.UnionT or s is types.Opaque) and types.def_of(
+      t: s
+    ) == d.id {
+      let ps: List[types.TParamInfo] = type_params_of(
+        fuel: max_type_depth,
+        ck: inout ck,
+        ctx: inout ctx,
+        d: d
+      )
+      let args: List[types.TypeArg] = types.args_of(t: s)
+      for i: Int in 0 ..< List.len(xs: ps) {
+        if i < List.len(xs: args) {
+          Map.set(
+            d: inout subst,
+            key: types.tparam_def(p: List.get(xs: ps, i: i)),
+            value: List.get(xs: args, i: i)
+          )
+        }
+      }
+    }
+    return subst
+  }
+}
+
+-- After argument checking: every type parameter must be bound.
+fn finish_args(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  d: defs.Def,
+  subst: Dict[Int, types.TypeArg],
+  at: ast.Span
+) -> List[types.TypeArg] may mutate, alloc {
+  var out: Builder[types.TypeArg] = List.builder()
+  for p: types.TParamInfo in type_params_of(
+    fuel: max_type_depth,
+    ck: inout ck,
+    ctx: inout ctx,
+    d: d
+  ) {
+    match Map.find(d: subst, key: types.tparam_def(p: p)) with
+    | Some(value) -> List.push(b: inout out, x: value)
+    | None -> {
+      rep(
+        ck: ck,
+        ctx: inout ctx,
+        code: "E0324",
+        at: at,
+        detail: "cannot determine `" ++ def_name(
+          ctx: ctx,
+          id: types.tparam_def(p: p)
+        ) ++ "` of `" ++ d.name ++ "`; annotate the binding or pass the type argument"
+      )
+      if p is types.TypeP {
+        List.push(b: inout out, x: types.TypeA(ty: types.ErrorT))
+      } else {
+        List.push(b: inout out, x: types.ConstA(value: types.UnitV))
+      }
+    }
+  }
+  return List.finish(b: out)
+}
+
+fn find_param(params: List[types.FnParam], name: Text) -> Option[types.FnParam] {
+  for p: types.FnParam in params {
+    if p.name == name {
+      return Some(value: p)
+    }
+  }
+  return None
+}
+
+fn tvars_of(tparams: List[types.TParamInfo]) -> Dict[Int, Bool] may alloc, mutate {
+  var tvars: Dict[Int, Bool] = Map.dict()
+  for p: types.TParamInfo in tparams {
+    Map.set(d: inout tvars, key: types.tparam_def(p: p), value: true)
+  }
+  return tvars
+}
+
+fn missing_params(
+  params: List[types.FnParam],
+  seen: Dict[Text, Bool]
+) -> List[Text] may alloc, mutate {
+  var out: Builder[Text] = List.builder()
+  for p: types.FnParam in params {
+    if not Map.contains(d: seen, key: p.name) {
+      List.push(b: inout out, x: "`" ++ p.name ++ "`")
+    }
+  }
+  return List.finish(b: out)
+}
+
+fn report_missing(
+  ck: Checker,
+  ctx: inout context.Context,
+  params: List[types.FnParam],
+  seen: Dict[Text, Bool],
+  at: ast.Span,
+  what: Text
+) -> Unit may mutate, alloc {
+  let missing: List[Text] = missing_params(params: params, seen: seen)
+  if List.len(xs: missing) > 0 {
+    rep(
+      ck: ck,
+      ctx: inout ctx,
+      code: "E0322",
+      at: at,
+      detail: what ++ " is missing " ++ Text.join(parts: missing, sep: ", ")
+    )
+  }
+  return Unit
+}
+
+fn expr_text(e: ast.Expr) -> Text {
+  match e with
+  | ast.Name(name, _) -> return name.text
+  | _ -> return "…"
+}
+
+-- Checks one named argument against its parameter once the parameter's type
+-- variables are bound, inferring the argument to bind them otherwise.
+fn check_arg_value(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  value: ast.Expr,
+  p: types.FnParam,
+  subst: Dict[Int, types.TypeArg],
+  tvars: Dict[Int, Bool]
+) -> Unit may mutate, alloc
+  decreases value
+{
+  let pt: types.Type = types.substitute(t: p.ty, subst: subst)
+  if types.has_unbound(t: pt, tvars: tvars, subst: subst) {
+    let actual: types.Type = infer(ck: inout ck, ctx: inout ctx, e: value)
+    if not unify(pattern: pt, actual: actual, subst: subst, tvars: tvars) {
+      rep(
+        ck: ck,
+        ctx: inout ctx,
+        code: "E0321",
+        at: parser.span_of_expr(e: value),
+        detail: "expected " ++ show(
+          ctx: ctx,
+          t: types.substitute(t: pt, subst: subst)
+        ) ++ ", found " ++ show(ctx: ctx, t: actual)
+      )
+    }
+  } else {
+    let at: types.Type = check_expr(
+      ck: inout ck,
+      ctx: inout ctx,
+      e: value,
+      expected: Some(value: pt)
+    )
+  }
+  return Unit
+}
+
+-- Matches named arguments to parameters.
+fn match_named(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  args: List[ast.Arg],
+  params: List[types.FnParam],
+  subst: Dict[Int, types.TypeArg],
+  tparams: List[types.TParamInfo],
+  at: ast.Span,
+  what: Text
+) -> Unit may mutate, alloc
+  decreases args
+{
+  let tvars: Dict[Int, Bool] = tvars_of(tparams: tparams)
+  var seen: Dict[Text, Bool] = Map.dict()
+  var inout_vars: Dict[Int, Bool] = Map.dict()
+  for a: ast.Arg in args {
+    match find_param(params: params, name: a.name.text) with
+    | None -> {
+      rep(
+        ck: ck,
+        ctx: inout ctx,
+        code: "E0322",
+        at: a.name.span,
+        detail: what ++ " has no parameter `" ++ a.name.text ++ "`"
+      )
+      let it_: types.Type = infer(ck: inout ck, ctx: inout ctx, e: a.value)
+    }
+    | Some(value) -> {
+      Map.set(d: inout seen, key: value.name, value: true)
+      if value.is_inout != a.is_inout {
+        if value.is_inout {
+          rep(
+            ck: ck,
+            ctx: inout ctx,
+            code: "E0329",
+            at: a.span,
+            detail: "`" ++ value.name ++ "` is an `inout` parameter; write `" ++ value.name ++ ": inout " ++ expr_text(
+              e: a.value
+            ) ++ "`"
+          )
+        } else {
+          rep(
+            ck: ck,
+            ctx: inout ctx,
+            code: "E0329",
+            at: a.span,
+            detail: "`" ++ value.name ++ "` is not an `inout` parameter"
+          )
+        }
+      }
+      if a.is_inout {
+        check_inout_arg(ck: ck, ctx: inout ctx, a: a, inout_vars: inout_vars)
+      }
+      check_arg_value(
+        ck: inout ck,
+        ctx: inout ctx,
+        value: a.value,
+        p: value,
+        subst: subst,
+        tvars: tvars
+      )
+    }
+  }
+  let missing: List[Text] = missing_params(params: params, seen: seen)
+  if List.len(xs: missing) > 0 {
+    rep(
+      ck: ck,
+      ctx: inout ctx,
+      code: "E0322",
+      at: at,
+      detail: what ++ " is missing " ++ Text.join(parts: missing, sep: ", ")
+    )
+  }
+  return Unit
+}
+
+-- `match_named` for a record's field initialisers.
+fn match_named_fields(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  inits: List[ast.FieldInit],
+  params: List[types.FnParam],
+  subst: Dict[Int, types.TypeArg],
+  tparams: List[types.TParamInfo],
+  at: ast.Span,
+  what: Text
+) -> Unit may mutate, alloc
+  decreases inits
+{
+  let tvars: Dict[Int, Bool] = tvars_of(tparams: tparams)
+  var seen: Dict[Text, Bool] = Map.dict()
+  for f: ast.FieldInit in inits {
+    match find_param(params: params, name: f.name.text) with
+    | None -> {
+      rep(
+        ck: ck,
+        ctx: inout ctx,
+        code: "E0322",
+        at: f.name.span,
+        detail: what ++ " has no parameter `" ++ f.name.text ++ "`"
+      )
+      let it_: types.Type = infer(ck: inout ck, ctx: inout ctx, e: f.value)
+    }
+    | Some(value) -> {
+      Map.set(d: inout seen, key: value.name, value: true)
+      check_arg_value(
+        ck: inout ck,
+        ctx: inout ctx,
+        value: f.value,
+        p: value,
+        subst: subst,
+        tvars: tvars
+      )
+    }
+  }
+  let missing: List[Text] = missing_params(params: params, seen: seen)
+  if List.len(xs: missing) > 0 {
+    rep(
+      ck: ck,
+      ctx: inout ctx,
+      code: "E0322",
+      at: at,
+      detail: what ++ " is missing " ++ Text.join(parts: missing, sep: ", ")
+    )
+  }
+  return Unit
+}
+
+fn check_inout_arg(
+  ck: Checker,
+  ctx: inout context.Context,
+  a: ast.Arg,
+  inout_vars: Dict[Int, Bool]
+) -> Unit may mutate, alloc {
+  var def: Int = -1
+  if a.value is ast.Name {
+    def = res_def(
+      res: ref_at(
+        ctx: ctx,
+        k: key(ck: ck, tag: defs.tag_expr, span: parser.span_of_expr(e: a.value))
+      )
+    )
+  }
+  var ok: Bool = def >= 0
+  if ok {
+    let d: defs.Def = context.get_def(ctx: ctx, id: def)
+    ok = d.kind == defs.Var or (d.kind == defs.Param and d.is_inout)
+  }
+  if not ok {
+    rep(
+      ck: ck,
+      ctx: inout ctx,
+      code: "E0329",
+      at: parser.span_of_expr(e: a.value),
+      detail: "an `inout` argument must be a `var` or an `inout` parameter"
+    )
+    return Unit
+  }
+  if Map.contains(d: inout_vars, key: def) {
+    rep(
+      ck: ck,
+      ctx: inout ctx,
+      code: "E0329",
+      at: parser.span_of_expr(e: a.value),
+      detail: "`" ++ def_name(ctx: ctx, id: def) ++ "` is passed `inout` twice in one call"
+    )
+  }
+  var vars: Dict[Int, Bool] = inout_vars
+  Map.set(d: inout vars, key: def, value: true)
+  return Unit
+}
+
+-- Structural unification binding type variables in `tvars`; `pattern` is the parameter's type.
+fn unify(
+  pattern: types.Type,
+  actual: types.Type,
+  subst: Dict[Int, types.TypeArg],
+  tvars: Dict[Int, Bool]
+) -> Bool may mutate, alloc
+  decreases pattern
+{
+  var st: Dict[Int, types.TypeArg] = subst
+  match pattern with
+  | types.Refined(base, _, _) -> return unify(
+    pattern: base,
+    actual: actual,
+    subst: subst,
+    tvars: tvars
+  )
+  | _ -> skip()
+  let a: types.Type = types.strip(t: actual)
+  if a is types.ErrorT or pattern is types.ErrorT {
+    return true
+  }
+  match pattern with
+  | types.ParamT(def) -> {
+    if Map.contains(d: tvars, key: def) {
+      match Map.find(d: subst, key: def) with
+      | None -> {
+        Map.set(d: inout st, key: def, value: types.TypeA(ty: actual))
+        return true
+      }
+      | Some(value) -> return value is types.TypeA and types.assignable(
+        actual: actual,
+        expected: types.arg_type(a: value)
+      )
+    }
+    return a is types.ParamT and types.def_of(t: a) == def
+  }
+  | _ -> skip()
+  if types.kind_tag(t: pattern) != types.kind_tag(t: a) {
+    return false
+  }
+  match pattern with
+  | types.Prim(name) -> return name == types.prim_name(t: a)
+  | types.RecordT(def, args) -> return unify_args(
+    pargs: args,
+    aargs: types.args_of(t: a),
+    same_def: def == types.def_of(t: a),
+    subst: subst,
+    tvars: tvars
+  )
+  | types.UnionT(def, args) -> return unify_args(
+    pargs: args,
+    aargs: types.args_of(t: a),
+    same_def: def == types.def_of(t: a),
+    subst: subst,
+    tvars: tvars
+  )
+  | types.Opaque(def, args) -> return unify_args(
+    pargs: args,
+    aargs: types.args_of(t: a),
+    same_def: def == types.def_of(t: a),
+    subst: subst,
+    tvars: tvars
+  )
+  | types.Capability(def, args, _) -> return unify_args(
+    pargs: args,
+    aargs: types.args_of(t: a),
+    same_def: def == types.def_of(t: a),
+    subst: subst,
+    tvars: tvars
+  )
+  | types.FnT(params, ret, effects) -> {
+    let aps: List[types.FnParam] = types.params_of(t: a)
+    if List.len(xs: aps) != List.len(xs: params) {
+      return false
+    }
+    for i: Int in 0 ..< List.len(xs: params) {
+      let pp: types.FnParam = List.get(xs: params, i: i)
+      let ap: types.FnParam = List.get(xs: aps, i: i)
+      if pp.is_inout != ap.is_inout or not unify(
+        pattern: pp.ty,
+        actual: ap.ty,
+        subst: subst,
+        tvars: tvars
+      ) {
+        return false
+      }
+    }
+    if not unify(pattern: ret, actual: types.ret_of(t: a), subst: subst, tvars: tvars) {
+      return false
+    }
+    -- An effect parameter of the pattern binds to the actual effects not accounted for by concrete ones.
+    var concrete: Builder[defs.Effect] = List.builder()
+    for x: defs.Effect in effectset.values(s: effects) {
+      var is_var: Bool = false
+      match x with
+      | defs.ParamEffect(def) -> is_var = Map.contains(d: tvars, key: def)
+      | _ -> is_var = false
+      if not is_var {
+        List.push(b: inout concrete, x: x)
+      }
+    }
+    let concrete_set: effectset.EffectSet = effectset.of_list(effects: List.finish(b: concrete))
+    for x: defs.Effect in effectset.values(s: effects) {
+      match x with
+      | defs.ParamEffect(def) -> {
+        if Map.contains(d: tvars, key: def) and not Map.contains(d: subst, key: def) {
+          Map.set(
+            d: inout st,
+            key: def,
+            value: types.EffectsA(
+              effects: effectset.of_list(
+                effects: effectset.minus(a: types.effects_of(t: a), b: concrete_set)
+              )
+            )
+          )
+        }
+      }
+      | _ -> skip()
+    }
+    return true
+  }
+  | _ -> return types.same_base(a: pattern, b: a)
+}
+
+fn unify_args(
+  pargs: List[types.TypeArg],
+  aargs: List[types.TypeArg],
+  same_def: Bool,
+  subst: Dict[Int, types.TypeArg],
+  tvars: Dict[Int, Bool]
+) -> Bool may mutate, alloc
+  decreases pargs
+{
+  var st: Dict[Int, types.TypeArg] = subst
+  if not same_def or List.len(xs: pargs) != List.len(xs: aargs) {
+    return false
+  }
+  for i: Int in 0 ..< List.len(xs: pargs) {
+    let pa: types.TypeArg = List.get(xs: pargs, i: i)
+    let aa: types.TypeArg = List.get(xs: aargs, i: i)
+    if types.arg_tag(a: pa) != types.arg_tag(a: aa) {
+      return false
+    }
+    match pa with
+    | types.TypeA(ty) -> {
+      if not unify(pattern: ty, actual: types.arg_type(a: aa), subst: subst, tvars: tvars) {
+        return false
+      }
+    }
+    | types.ConstA(value) -> {
+      let av: types.ConstValue = types.arg_const(a: aa)
+      var handled: Bool = false
+      match value with
+      | types.SymV(def) -> {
+        if Map.contains(d: tvars, key: def) {
+          handled = true
+          let bound: Option[types.TypeArg] = Map.find(d: subst, key: def)
+          if bound is None {
+            Map.set(d: inout st, key: def, value: aa)
+          } else {
+            let ba: types.TypeArg = arg_or(o: bound)
+            if not ba is types.ConstA or not types.const_equals(a: types.arg_const(a: ba), b: av) {
+              return false
+            }
+          }
+        }
+      }
+      | _ -> skip()
+      if not handled and not types.const_equals(a: value, b: av) {
+        return false
+      }
+    }
+    | types.EffectsA(_) -> return false
+  }
+  return true
+}
+
+fn record_update(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  e: ast.Expr
+) -> types.Type may mutate, alloc
+  decreases e
+{
+  match e with
+  | ast.RecordUpdate(base, fields, span) -> {
+    let bt: types.Type = infer(ck: inout ck, ctx: inout ctx, e: base)
+    let s: types.Type = types.strip(t: bt)
+    if s is types.ErrorT {
+      for f: ast.FieldInit in fields {
+        let ft: types.Type = infer(ck: inout ck, ctx: inout ctx, e: f.value)
+      }
+      return types.ErrorT
+    }
+    if not s is types.RecordT {
+      rep(
+        ck: ck,
+        ctx: inout ctx,
+        code: "E0321",
+        at: parser.span_of_expr(e: base),
+        detail: "`with` updates a record, not " ++ show(ctx: ctx, t: bt)
+      )
+      for f: ast.FieldInit in fields {
+        let ft: types.Type = infer(ck: inout ck, ctx: inout ctx, e: f.value)
+      }
+      return types.ErrorT
+    }
+    let d: defs.Def = context.get_def(ctx: ctx, id: types.def_of(t: s))
+    match ck.current_module with
+    | Some(value) -> {
+      if d.is_sealed and d.mod != value.id and not value.tree.is_test {
+        rep(
+          ck: ck,
+          ctx: inout ctx,
+          code: "E0111",
+          at: span,
+          detail: "`" ++ context.qualified_name(
+            ctx: ctx,
+            id: d.id
+          ) ++ "` is sealed; `with` is allowed only in module `" ++ context.module_name(
+            ctx: ctx,
+            id: d.mod
+          ) ++ "`"
+        )
+      }
+    }
+    | None -> skip()
+    let subst: Dict[Int, types.TypeArg] = subst_of(
+      ck: inout ck,
+      ctx: inout ctx,
+      d: d,
+      args: types.args_of(t: s)
+    )
+    let fs: List[types.FieldInfo] = fields_of(ck: inout ck, ctx: inout ctx, d: d)
+    for f: ast.FieldInit in fields {
+      match find_param(params: field_params(fs: fs), name: f.name.text) with
+      | None -> {
+        rep(
+          ck: ck,
+          ctx: inout ctx,
+          code: "E0325",
+          at: f.name.span,
+          detail: "`" ++ d.name ++ "` has no field `" ++ f.name.text ++ "`"
+        )
+        let ft: types.Type = infer(ck: inout ck, ctx: inout ctx, e: f.value)
+      }
+      | Some(value) -> {
+        let ft: types.Type = check_expr(
+          ck: inout ck,
+          ctx: inout ctx,
+          e: f.value,
+          expected: Some(value: types.substitute(t: value.ty, subst: subst))
+        )
+      }
+    }
+    return s
+  }
+  | _ -> return types.ErrorT
+}
+
+fn list_lit(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  e: ast.Expr,
+  expected: Option[types.Type]
+) -> types.Type may mutate, alloc
+  decreases e
+{
+  match e with
+  | ast.ListLit(elems, span) -> {
+    var exp_elem: Option[types.Type] = None
+    var has_expected: Bool = false
+    match expected with
+    | Some(value) -> {
+      has_expected = true
+      let exp: types.Type = types.strip(t: value)
+      if is_list_type(ctx: inout ctx, t: exp) {
+        exp_elem = first_type_arg(t: exp)
+      }
+    }
+    | None -> skip()
+    match exp_elem with
+    | Some(value) -> {
+      for x: ast.Expr in elems {
+        let xt: types.Type = check_expr(
+          ck: inout ck,
+          ctx: inout ctx,
+          e: x,
+          expected: Some(value: value)
+        )
+      }
+      return list_of(ctx: inout ctx, elem: value)
+    }
+    | None -> skip()
+    if List.len(xs: elems) == 0 {
+      if not has_expected {
+        rep(
+          ck: ck,
+          ctx: inout ctx,
+          code: "E0324",
+          at: span,
+          detail: "cannot determine the element type of an empty list; annotate the binding"
+        )
+        return types.ErrorT
+      }
+      return list_of(ctx: inout ctx, elem: types.ErrorT)
+    }
+    var elem: types.Type = types.ErrorT
+    var first: Bool = true
+    for x: ast.Expr in elems {
+      if first {
+        elem = types.strip(t: infer(ck: inout ck, ctx: inout ctx, e: x))
+        first = false
+      } else {
+        let xt: types.Type = check_expr(
+          ck: inout ck,
+          ctx: inout ctx,
+          e: x,
+          expected: Some(value: elem)
+        )
+      }
+    }
+    return list_of(ctx: inout ctx, elem: elem)
+  }
+  | _ -> return types.ErrorT
+}
+
+fn try_expr(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  e: ast.Expr
+) -> types.Type may mutate, alloc
+  decreases e
+{
+  match e with
+  | ast.Try(expr, else_, span) -> {
+    let inner: types.Type = infer(ck: inout ck, ctx: inout ctx, e: expr)
+    match unwrap_fallible(ctx: inout ctx, t: inner) with
+    | None -> {
+      if not inner is types.ErrorT {
+        rep(
+          ck: ck,
+          ctx: inout ctx,
+          code: "E0321",
+          at: parser.span_of_expr(e: expr),
+          detail: "`try` unwraps a Result or Option, not " ++ show(ctx: ctx, t: inner)
+        )
+      }
+      match else_ with
+      | Some(value) -> {
+        let et: types.Type = infer(ck: inout ck, ctx: inout ctx, e: value.expr)
+      }
+      | None -> skip()
+      return types.ErrorT
+    }
+    | Some(value) -> return try_tail(
+      ck: inout ck,
+      ctx: inout ctx,
+      else_: else_,
+      fallible: value,
+      at: span
+    )
+  }
+  | _ -> return types.ErrorT
+}
+
+fn fallible_of_ret(ck: Checker, ctx: inout context.Context) -> Option[Fallible] may mutate, alloc {
+  match fn_ret(ck: ck) with
+  | Some(value) -> return unwrap_fallible(ctx: inout ctx, t: value)
+  | None -> return None
+}
+
+fn fallible_or(o: Option[Fallible]) -> Fallible {
+  match o with
+  | Some(value) -> return value
+  | None -> return Fallible { value: types.ErrorT, error: types.ErrorT, is_option: false }
+}
+
+fn report_no_fallible_ret(
+  ck: Checker,
+  ctx: inout context.Context,
+  at: ast.Span
+) -> Unit may mutate, alloc {
+  match fn_ret(ck: ck) with
+  | None -> rep(
+    ck: ck,
+    ctx: inout ctx,
+    code: "E0321",
+    at: at,
+    detail: "`try` is allowed only in a function returning Result or Option"
+  )
+  | Some(value) -> rep(
+    ck: ck,
+    ctx: inout ctx,
+    code: "E0321",
+    at: at,
+    detail: "`try` needs the enclosing function to return Result or Option, not " ++ show(
+      ctx: ctx,
+      t: value
+    )
+  )
+  return Unit
+}
+
+fn try_tail(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  else_: Option[ast.TryElse],
+  fallible: Fallible,
+  at: ast.Span
+) -> types.Type may mutate, alloc
+  decreases else_
+{
+  if fn_flag(ck: ck, which: 2) {
+    -- In a verify block the else value is the block's Bool result (§20.2).
+    match else_ with
+    | None -> {
+      rep(
+        ck: ck,
+        ctx: inout ctx,
+        code: "E0321",
+        at: at,
+        detail: "`try` in a verify block needs an `else` yielding the Bool result"
+      )
+      return fallible.value
+    }
+    | Some(value) -> {
+      if value.name.text != "_" {
+        set_decl_type(
+          ctx: inout ctx,
+          def: def_of_key(ctx: ctx, k: key(ck: ck, tag: defs.tag_misc, span: value.span)),
+          t: fallible.error
+        )
+      }
+      let et: types.Type = check_expr(
+        ck: inout ck,
+        ctx: inout ctx,
+        e: value.expr,
+        expected: Some(value: types.bool_t)
+      )
+      return fallible.value
+    }
+  }
+  let outer: Option[Fallible] = fallible_of_ret(ck: ck, ctx: inout ctx)
+  match else_ with
+  | None -> {
+    if outer is None {
+      report_no_fallible_ret(ck: ck, ctx: inout ctx, at: at)
+      return fallible.value
+    }
+    let o: Fallible = fallible_or(o: outer)
+    if fallible.is_option != o.is_option {
+      var inner_kind: Text = "a Result"
+      if fallible.is_option {
+        inner_kind = "an Option"
+      }
+      var outer_kind: Text = "Result"
+      if o.is_option {
+        outer_kind = "Option"
+      }
+      rep(
+        ck: ck,
+        ctx: inout ctx,
+        code: "E0321",
+        at: at,
+        detail: "`try` on " ++ inner_kind ++ " inside a function returning " ++ outer_kind ++ " needs an `else`"
+      )
+    } else {
+      if not fallible.is_option and not types.same_base(a: fallible.error, b: o.error) {
+        rep(
+          ck: ck,
+          ctx: inout ctx,
+          code: "E0321",
+          at: at,
+          detail: "the error type " ++ show(
+            ctx: ctx,
+            t: fallible.error
+          ) ++ " differs from the function's " ++ show(
+            ctx: ctx,
+            t: o.error
+          ) ++ "; add `else e: ...` to convert it"
+        )
+      }
+    }
+    return fallible.value
+  }
+  | Some(value) -> {
+    if outer is None {
+      report_no_fallible_ret(ck: ck, ctx: inout ctx, at: at)
+      let et: types.Type = infer(ck: inout ck, ctx: inout ctx, e: value.expr)
+      return fallible.value
+    }
+    let o: Fallible = fallible_or(o: outer)
+    if value.name.text != "_" {
+      set_decl_type(
+        ctx: inout ctx,
+        def: def_of_key(ctx: ctx, k: key(ck: ck, tag: defs.tag_misc, span: value.span)),
+        t: fallible.error
+      )
+    }
+    let et: types.Type = check_expr(
+      ck: inout ck,
+      ctx: inout ctx,
+      e: value.expr,
+      expected: Some(value: o.error)
+    )
+    return fallible.value
+  }
+}
+
+fn recover_expr(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  e: ast.Expr
+) -> types.Type may mutate, alloc
+  decreases e
+{
+  match e with
+  | ast.Recover(body, span) -> {
+    let n: Int = List.len(xs: body.stmts)
+    var value: types.Type = types.ErrorT
+    var ends_in_expr: Bool = false
+    push_fn(
+      ck: inout ck,
+      f: FnCtx {
+        ret: None,
+        assertion: false,
+        in_recover: true,
+        frame: fn_frame(ck: ck),
+        is_verify: false
+      }
+    )
+    var i: Int = 0
+    for s: ast.Stmt in body.stmts {
+      var handled: Bool = false
+      if i == n - 1 {
+        match s with
+        | ast.ExprStmt(expr, _) -> {
+          value = infer(ck: inout ck, ctx: inout ctx, e: expr)
+          ends_in_expr = true
+          handled = true
+        }
+        | _ -> skip()
+      }
+      if not handled {
+        check_stmt(ck: inout ck, ctx: inout ctx, s: s)
+      }
+      i = i + 1
+    }
+    pop_fn(ck: inout ck)
+    if not ends_in_expr {
+      rep(
+        ck: ck,
+        ctx: inout ctx,
+        code: "E0321",
+        at: span,
+        detail: "a `recover` block ends in the expression whose value it yields"
+      )
+    }
+    return result_of(ctx: inout ctx, value: value, error: panicked_type(ctx: inout ctx))
+  }
+  | _ -> return types.ErrorT
+}
+
+fn finite_type(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  base: types.Type
+) -> Bool may mutate, alloc {
+  if types.prim_name(t: base) == "Bool" {
+    return true
+  }
+  if base is types.UnionT {
+    for v: Int in variants_of(
+      ck: ck,
+      ctx: inout ctx,
+      d: context.get_def(ctx: ctx, id: types.def_of(t: base))
+    ) {
+      if List.len(
+        xs: fields_of(ck: inout ck, ctx: inout ctx, d: context.get_def(ctx: ctx, id: v))
+      ) > 0 {
+        return false
+      }
+    }
+    return true
+  }
+  return false
+}
+
+fn quantifier(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  e: ast.Expr
+) -> types.Type may mutate, alloc
+  decreases e
+{
+  match e with
+  | ast.Quantifier(_, _, ty, domain, where_, body, span) -> {
+    let binder: types.Type = type_of(fuel: max_type_depth, ck: inout ck, ctx: inout ctx, t: ty)
+    set_decl_type(
+      ctx: inout ctx,
+      def: def_of_key(ctx: ctx, k: key(ck: ck, tag: defs.tag_expr, span: span)),
+      t: binder
+    )
+    let base: types.Type = types.strip(t: binder)
+    match domain with
+    | None -> {
+      if not finite_type(ck: inout ck, ctx: inout ctx, base: base) and not base is types.ErrorT {
+        rep(
+          ck: ck,
+          ctx: inout ctx,
+          code: "E0338",
+          at: span,
+          detail: "quantify over a range or a list: " ++ show(
+            ctx: ctx,
+            t: binder
+          ) ++ " is not a finite type (§5.3)"
+        )
+      }
+    }
+    | Some(value) -> {
+      match value with
+      | ast.RangeDomain(lo, hi, _) -> {
+        if not types.same_base(a: base, b: types.int_t) {
+          rep(
+            ck: ck,
+            ctx: inout ctx,
+            code: "E0321",
+            at: comments.type_span(t: ty),
+            detail: "a range binds an Int, not " ++ show(ctx: ctx, t: binder)
+          )
+        }
+        let lt: types.Type = check_expr(
+          ck: inout ck,
+          ctx: inout ctx,
+          e: lo,
+          expected: Some(value: types.int_t)
+        )
+        let ht: types.Type = check_expr(
+          ck: inout ck,
+          ctx: inout ctx,
+          e: hi,
+          expected: Some(value: types.int_t)
+        )
+      }
+      | ast.InDomain(expr, _) -> {
+        -- In a contract, a domain of type Result[List[T], E] or Option[List[T]] ranges over the
+        -- contained list and the formula holds vacuously for Err / None (§5.3).
+        let dom_type: types.Type = infer(ck: inout ck, ctx: inout ctx, e: expr)
+        let inner_type: types.Type = fallible_value_or(
+          o: unwrap_fallible(ctx: inout ctx, t: dom_type),
+          dflt: dom_type
+        )
+        let elem: Option[types.Type] = element_type(
+          ck: ck,
+          ctx: inout ctx,
+          t: inner_type,
+          at: parser.span_of_expr(e: expr)
+        )
+        if elem is Some {
+          let ct: types.Type = coerce(
+            ck: ck,
+            ctx: inout ctx,
+            actual: or_error(o: elem),
+            expected: binder,
+            at: comments.type_span(t: ty),
+            what: "binder",
+            at_key: None
+          )
+        }
+      }
+    }
+    match where_ with
+    | Some(value) -> {
+      let wt: types.Type = check_expr(
+        ck: inout ck,
+        ctx: inout ctx,
+        e: value,
+        expected: Some(value: types.bool_t)
+      )
+    }
+    | None -> skip()
+    let bt: types.Type = check_expr(
+      ck: inout ck,
+      ctx: inout ctx,
+      e: body,
+      expected: Some(value: types.bool_t)
+    )
+    return types.bool_t
+  }
+  | _ -> return types.ErrorT
+}
+
+fn closure(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  e: ast.Expr
+) -> types.Type may mutate, alloc
+  decreases e
+{
+  match e with
+  | ast.Closure(params, ret, effects, body, span) -> {
+    var ps: Builder[types.FnParam] = List.builder()
+    for p: ast.Param in params {
+      let t: types.Type = type_of(fuel: max_type_depth, ck: inout ck, ctx: inout ctx, t: p.ty)
+      set_decl_type(
+        ctx: inout ctx,
+        def: def_of_key(ctx: ctx, k: key(ck: ck, tag: defs.tag_sig, span: p.span)),
+        t: t
+      )
+      List.push(b: inout ps, x: types.FnParam { name: p.name.text, is_inout: p.is_inout, ty: t })
+    }
+    let rt: types.Type = type_of(fuel: max_type_depth, ck: inout ck, ctx: inout ctx, t: ret)
+    let frame: Int = fn_frame(ck: ck) + 1
+    push_fn(ck: inout ck, f: plain_fn(ret: Some(value: rt), frame: frame))
+    check_block(ck: inout ck, ctx: inout ctx, b: body)
+    if not types.same_base(a: rt, b: types.unit_t) and not block_returns(b: body) {
+      rep(
+        ck: ck,
+        ctx: inout ctx,
+        code: "E0331",
+        at: span,
+        detail: "this closure returns " ++ show(
+          ctx: ctx,
+          t: rt
+        ) ++ " but not every path ends in `return`"
+      )
+    }
+    pop_fn(ck: inout ck)
+    return types.FnT(
+      params: List.finish(b: ps),
+      ret: rt,
+      effects: effect_set_of(ctx: ctx, file: ck.current_file, refs: effects)
+    )
+  }
+  | _ -> return types.ErrorT
+}
+
+fn fake_expr(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  e: ast.Expr,
+  expected: Option[types.Type]
+) -> types.Type may mutate, alloc
+  decreases e
+{
+  match e with
+  | ast.Fake(capability, fields, span) -> {
+    for f: ast.FieldInit in fields {
+      let ft: types.Type = infer(ck: inout ck, ctx: inout ctx, e: f.value)
+    }
+    let def: Int = res_def(res: ref_at(ctx: ctx, k: key(ck: ck, tag: defs.tag_expr, span: span)))
+    if def < 0 {
+      return types.ErrorT
+    }
+    let d: defs.Def = context.get_def(ctx: ctx, id: def)
+    if d.kind != defs.Capability {
+      rep(
+        ck: ck,
+        ctx: inout ctx,
+        code: "E0321",
+        at: capability.span,
+        detail: "`fake` constructs a capability, not " ++ defs.kind_text(
+          k: d.kind
+        ) ++ " `" ++ d.name ++ "`"
+      )
+      return types.ErrorT
+    }
+    match expected with
+    | Some(value) -> {
+      let exp: types.Type = types.strip(t: value)
+      if exp is types.Capability and types.def_of(t: exp) == def {
+        return exp
+      }
+    }
+    | None -> skip()
+    return instantiate(fuel: max_type_depth, ck: inout ck, ctx: inout ctx, d: d, args: [], at: span)
+  }
+  | _ -> return types.ErrorT
+}
+
+fn field_access(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  e: ast.Expr
+) -> types.Type may mutate, alloc
+  decreases e
+{
+  match e with
+  | ast.FieldAccess(object, name, span) -> {
+    match ref_at(ctx: ctx, k: key(ck: ck, tag: defs.tag_expr, span: span)) with
+    | Some(value) -> return resolved_value_type(ck: inout ck, ctx: inout ctx, res: value, at: span)
+    | None -> skip()
+    let obj: types.Type = infer(ck: inout ck, ctx: inout ctx, e: object)
+    let s: types.Type = types.strip(t: obj)
+    if s is types.ErrorT {
+      return types.ErrorT
+    }
+    if not s is types.RecordT {
+      var hint: Text = ""
+      if s is types.UnionT {
+        hint = "; match on it to reach a variant's fields"
+      }
+      rep(
+        ck: ck,
+        ctx: inout ctx,
+        code: "E0325",
+        at: name.span,
+        detail: show(ctx: ctx, t: obj) ++ " has no fields" ++ hint
+      )
+      return types.ErrorT
+    }
+    let d: defs.Def = context.get_def(ctx: ctx, id: types.def_of(t: s))
+    let fs: List[types.FieldInfo] = fields_of(ck: inout ck, ctx: inout ctx, d: d)
+    match find_param(params: field_params(fs: fs), name: name.text) with
+    | None -> {
+      rep(
+        ck: ck,
+        ctx: inout ctx,
+        code: "E0325",
+        at: name.span,
+        detail: "`" ++ d.name ++ "` has no field `" ++ name.text ++ "`"
+      )
+      return types.ErrorT
+    }
+    | Some(value) -> return types.substitute(
+      t: value.ty,
+      subst: subst_of(ck: inout ck, ctx: inout ctx, d: d, args: types.args_of(t: s))
+    )
+  }
+  | _ -> return types.ErrorT
+}
+
+-- The type of a resolved module member or companion function used as a value.
+fn resolved_value_type(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  res: defs.Resolution,
+  at: ast.Span
+) -> types.Type may mutate, alloc {
+  var target_def: Int = -1
+  match res with
+  | defs.DefRes(def) -> target_def = def
+  | defs.CompanionRes(owner, fn_def) -> target_def = fn_def
+  | defs.IfaceFnRes(iface, fn_def) -> {
+    rep(
+      ck: ck,
+      ctx: inout ctx,
+      code: "E0323",
+      at: at,
+      detail: "an interface function must be called"
+    )
+    return types.ErrorT
+  }
+  | defs.UnitRes -> return types.unit_t
+  | defs.TypeValueRes(owner) -> return types.TypeInfoT
+  | _ -> return types.ErrorT
+  if target_def < 0 {
+    return types.ErrorT
+  }
+  let d: defs.Def = context.get_def(ctx: ctx, id: target_def)
+  if d.kind == defs.Fn {
+    return fn_value_type(ck: inout ck, ctx: inout ctx, d: d, at: at)
+  }
+  if d.kind == defs.Const {
+    return const_decl_type(ck: inout ck, ctx: inout ctx, d: d)
+  }
+  return decl_type(ctx: ctx, def: target_def)
+}
+
+fn call(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  e: ast.Expr,
+  expected: Option[types.Type]
+) -> types.Type may mutate, alloc
+  decreases e
+{
+  match e with
+  | ast.Call(callee, targs, args, span) -> {
+    let res: Option[defs.Resolution] = ref_at(
+      ctx: ctx,
+      k: key(ck: ck, tag: defs.tag_expr, span: parser.span_of_expr(e: callee))
+    )
+    let tag: Int = res_tag(res: res)
+    if tag == 0 or tag == 5 or tag == 6 {
+      let fn_def: defs.Def = context.get_def(ctx: ctx, id: res_def(res: res))
+      if fn_def.kind == defs.Fn or fn_def.kind == defs.IfaceFn {
+        set_expr_type(ck: ck, ctx: inout ctx, e: callee, t: types.ErrorT)
+        var iface: Option[Int] = None
+        if tag == 6 {
+          iface = Some(value: res_iface(res: res))
+        }
+        return call_signature(
+          ck: inout ck,
+          ctx: inout ctx,
+          e: e,
+          fn_def: fn_def,
+          iface: iface,
+          expected: expected
+        )
+      }
+    }
+    let callee_type: types.Type = infer(ck: inout ck, ctx: inout ctx, e: callee)
+    let s: types.Type = types.strip(t: callee_type)
+    if s is types.ErrorT {
+      for a: ast.Arg in args {
+        let at: types.Type = infer(ck: inout ck, ctx: inout ctx, e: a.value)
+      }
+      return types.ErrorT
+    }
+    if not s is types.FnT {
+      rep(
+        ck: ck,
+        ctx: inout ctx,
+        code: "E0323",
+        at: parser.span_of_expr(e: callee),
+        detail: show(ctx: ctx, t: callee_type) ++ " is not a function"
+      )
+      for a: ast.Arg in args {
+        let at: types.Type = infer(ck: inout ck, ctx: inout ctx, e: a.value)
+      }
+      return types.ErrorT
+    }
+    if targs is Some {
+      rep(
+        ck: ck,
+        ctx: inout ctx,
+        code: "E0324",
+        at: span,
+        detail: "a function value takes no type arguments"
+      )
+    }
+    match_named(
+      ck: inout ck,
+      ctx: inout ctx,
+      args: args,
+      params: types.params_of(t: s),
+      subst: Map.dict(),
+      tparams: [],
+      at: span,
+      what: "this function"
+    )
+    return types.ret_of(t: s)
+  }
+  | _ -> return types.ErrorT
+}
+
+fn find_tparam(
+  ctx: context.Context,
+  tparams: List[types.TParamInfo],
+  name: Text
+) -> Option[types.TParamInfo] {
+  for p: types.TParamInfo in tparams {
+    if def_name(ctx: ctx, id: types.tparam_def(p: p)) == name {
+      return Some(value: p)
+    }
+  }
+  return None
+}
+
+fn call_signature(
+  ck: inout Checker,
+  ctx: inout context.Context,
+  e: ast.Expr,
+  fn_def: defs.Def,
+  iface: Option[Int],
+  expected: Option[types.Type]
+) -> types.Type may mutate, alloc
+  decreases e
+{
+  match e with
+  | ast.Call(callee, targs, args, span) -> {
+    let sig: types.Signature = signature_of(ck: inout ck, ctx: inout ctx, d: fn_def)
+    var tparams: List[types.TParamInfo] = sig.tparams
+    match iface with
+    | Some(value) -> tparams = List.append(
+      xs: tparams,
+      x: types.TypeP(def: iface_param(ctx: ctx, iface: value), bound: Some(value: value))
+    )
+    | None -> skip()
+    var subst: Dict[Int, types.TypeArg] = Map.dict()
+    let tvars: Dict[Int, Bool] = tvars_of(tparams: tparams)
+    match targs with
+    | Some(value) -> {
+      var positional: Int = 0
+      for a: ast.TypeArg in value {
+        var p: Option[types.TParamInfo] = None
+        let label: Option[ast.Ident] = type_arg_label(a: a)
+        if label is Some {
+          let lb: ast.Ident = ident_or(o: label)
+          p = find_tparam(ctx: ctx, tparams: tparams, name: lb.text)
+          if p is None {
+            rep(
+              ck: ck,
+              ctx: inout ctx,
+              code: "E0324",
+              at: type_arg_span(a: a),
+              detail: "`" ++ fn_def.name ++ "` has no type parameter `" ++ lb.text ++ "`"
+            )
+          }
+        } else {
+          if positional < List.len(xs: tparams) {
+            p = Some(value: List.get(xs: tparams, i: positional))
+          } else {
+            rep(
+              ck: ck,
+              ctx: inout ctx,
+              code: "E0324",
+              at: type_arg_span(a: a),
+              detail: "`" ++ fn_def.name ++ "` takes " ++ plural(n: List.len(xs: tparams))
+            )
+          }
+          positional = positional + 1
+        }
+        if p is Some {
+          let v: Option[types.TypeArg] = type_arg_of(
+            fuel: max_type_depth,
+            ck: inout ck,
+            ctx: inout ctx,
+            a: a,
+            param: p
+          )
+          if v is Some {
+            Map.set(d: inout subst, key: types.tparam_def(p: tparam_or(o: p)), value: arg_or(o: v))
+          }
+        }
+      }
+    }
+    | None -> skip()
+    match expected with
+    | Some(value) -> {
+      let u: Bool = unify(pattern: sig.ret, actual: value, subst: subst, tvars: tvars)
+    }
+    | None -> skip()
+    match_named(
+      ck: inout ck,
+      ctx: inout ctx,
+      args: args,
+      params: sig.params,
+      subst: subst,
+      tparams: tparams,
+      at: span,
+      what: "`" ++ fn_def.name ++ "`"
+    )
+    for p: types.TParamInfo in tparams {
+      if not Map.contains(d: subst, key: types.tparam_def(p: p)) {
+        if p is types.EffectP {
+          -- An effect parameter no argument mentions is instantiated empty.
+          Map.set(
+            d: inout subst,
+            key: types.tparam_def(p: p),
+            value: types.EffectsA(effects: effectset.empty())
+          )
+        } else {
+          rep(
+            ck: ck,
+            ctx: inout ctx,
+            code: "E0324",
+            at: span,
+            detail: "cannot determine type argument `" ++ def_name(
+              ctx: ctx,
+              id: types.tparam_def(p: p)
+            ) ++ "` of `" ++ fn_def.name ++ "`; pass it explicitly"
+          )
+          if p is types.TypeP {
+            Map.set(
+              d: inout subst,
+              key: types.tparam_def(p: p),
+              value: types.TypeA(ty: types.ErrorT)
+            )
+          } else {
+            Map.set(
+              d: inout subst,
+              key: types.tparam_def(p: p),
+              value: types.ConstA(value: types.UnitV)
+            )
+          }
+        }
+      }
+    }
+    for p: types.TParamInfo in tparams {
+      let bound: Option[Int] = tparam_bound(p: p)
+      if bound is Some {
+        let b: Int = or_neg(o: bound)
+        let pdef: Int = types.tparam_def(p: p)
+        let bv: Option[types.TypeArg] = Map.find(d: subst, key: pdef)
+        if bv is Some {
+          let ba: types.TypeArg = arg_or(o: bv)
+          if ba is types.TypeA and not implemented(
+            ck: ck,
+            ctx: ctx,
+            iface: b,
+            target: types.arg_type(a: ba)
+          ) {
+            rep(
+              ck: ck,
+              ctx: inout ctx,
+              code: "E0333",
+              at: span,
+              detail: show(
+                ctx: ctx,
+                t: types.arg_type(a: ba)
+              ) ++ " does not implement `" ++ def_name(
+                ctx: ctx,
+                id: b
+              ) ++ "` (required by `" ++ def_name(
+                ctx: ctx,
+                id: pdef
+              ) ++ "` of `" ++ fn_def.name ++ "`)"
+            )
+          }
+        }
+      }
+    }
+    -- Parameters used as indices in the return type are replaced by the constant passed for them.
+    var index_subst: Dict[Int, types.TypeArg] = Map.dict()
+    for i: Int in 0 ..< List.len(xs: sig.param_defs) {
+      let pd: Int = List.get(xs: sig.param_defs, i: i)
+      var pname: Text = ""
+      if i < List.len(xs: sig.params) {
+        pname = List.get(xs: sig.params, i: i).name
+      }
+      for a: ast.Arg in args {
+        if a.name.text == pname {
+          let v: Option[types.ConstValue] = eval_const(ck: ck, ctx: ctx, e: a.value)
+          if v is Some {
+            Map.set(d: inout index_subst, key: pd, value: types.ConstA(value: const_or(o: v)))
+          } else {
+            if types.mentions_sym(t: sig.ret, def: pd) {
+              rep(
+                ck: ck,
+                ctx: inout ctx,
+                code: "E0337",
+                at: parser.span_of_expr(e: a.value),
+                detail: "`" ++ pname ++ "` is used as a type index in the result; pass a literal, a `const` or a parameter"
+              )
+              Map.set(d: inout index_subst, key: pd, value: types.ConstA(value: types.ErrorV))
+            }
+          }
+        }
+      }
+    }
+    let ret: types.Type = types.substitute(
+      t: types.substitute(t: sig.ret, subst: subst),
+      subst: index_subst
+    )
+    let call_key: Int = key(ck: ck, tag: defs.tag_expr, span: span)
+    var inst: Builder[types.TypeArg] = List.builder()
+    var bindings: Dict[Int, effectset.EffectSet] = Map.dict()
+    for p: types.TParamInfo in tparams {
+      match Map.find(d: subst, key: types.tparam_def(p: p)) with
+      | Some(value) -> {
+        List.push(b: inout inst, x: value)
+        if p is types.EffectP and value is types.EffectsA {
+          Map.set(
+            d: inout bindings,
+            key: types.tparam_def(p: p),
+            value: types.arg_effects(a: value)
+          )
+        }
+      }
+      | None -> List.push(b: inout inst, x: types.TypeA(ty: types.ErrorT))
+    }
+    var insts: Dict[Int, List[types.TypeArg]] = ctx.instantiations
+    Map.set(d: inout insts, key: call_key, value: List.finish(b: inst))
+    var idx: Dict[Int, Dict[Int, types.TypeArg]] = ctx.index_bindings
+    Map.set(d: inout idx, key: call_key, value: index_subst)
+    var effs: Dict[Int, Dict[Int, effectset.EffectSet]] = ctx.effect_bindings
+    Map.set(d: inout effs, key: call_key, value: bindings)
+    return ret
+  }
+  | _ -> return types.ErrorT
+}
+
+-- Deferred refinement predicates ------------------------------------------------------------
+-- The bound on refinement predicates one compilation checks.
+const max_pending: Int = 10000000
+
+fn process_pending(ck: inout Checker, ctx: inout context.Context) -> Unit may mutate, alloc {
+  var i: Int where it >= 0 = ck.processed
+  loop while i < List.built(b: ck.pending) and i < max_pending
+    invariant i >= 0
+    decreases max_pending - i
+  {
+    let p: PendingWhere = List.at(b: ck.pending, i: i)
+    i = i + 1
+    let saved_file: Int = ck.current_file
+    let saved_def: Option[Text] = ck.current_def
+    ck = { ck with
+      current_file: p.file,
+      current_def: p.def_name,
+      it_stack: List.append(xs: ck.it_stack, x: p.base)
+    }
+    var pushed: Bool = false
+    match p.fn_ctx with
+    | Some(value) -> {
+      push_fn(ck: inout ck, f: value)
+      pushed = true
+    }
+    | None -> skip()
+    let t: types.Type = check_expr(
+      ck: inout ck,
+      ctx: inout ctx,
+      e: p.pred,
+      expected: Some(value: types.bool_t)
+    )
+    if pushed {
+      pop_fn(ck: inout ck)
+    }
+    let n: Int = List.len(xs: ck.it_stack)
+    if n > 0 {
+      ck = { ck with it_stack: List.slice(xs: ck.it_stack, from: 0, to: n - 1) }
+    }
+    ck = { ck with current_file: saved_file, current_def: saved_def }
+  }
+  ck = { ck with processed: i }
+  return Unit
+}
+
+-- Entry ------------------------------------------------------------------------------------
+-- Pass 4: elaborates every signature and checks every body. Reports E0310 and E0321–E0341, E0111, E0330.
+pub fn types_pass(ctx: inout context.Context) -> Unit may mutate, alloc {
+  var ck: Checker = new_checker()
+  for id: Int in 0 ..< ctx.module_count {
+    match Map.find(d: ctx.modules, key: id) with
+    | Some(value) -> {
+      ck = { ck with current_module: Some(value: value), current_file: value.file }
+      for item: ast.Item in value.tree.items {
+        elaborate_item(ck: inout ck, ctx: inout ctx, item: item)
+      }
+      process_pending(ck: inout ck, ctx: inout ctx)
+    }
+    | None -> skip()
+  }
+  for id: Int in 0 ..< ctx.module_count {
+    match Map.find(d: ctx.modules, key: id) with
+    | Some(value) -> {
+      ck = { ck with current_module: Some(value: value), current_file: value.file }
+      for item: ast.Item in value.tree.items {
+        ck = { ck with current_def: Some(value: item_name(item: item)) }
+        check_item(ck: inout ck, ctx: inout ctx, item: item)
+        ck = { ck with current_def: None }
+        process_pending(ck: inout ck, ctx: inout ctx)
+      }
+    }
+    | None -> skip()
+  }
+  process_pending(ck: inout ck, ctx: inout ctx)
+  return Unit
+}
