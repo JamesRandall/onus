@@ -1,0 +1,3072 @@
+module parser
+import tokens
+import ast
+
+-- The Onus parser in Onus (spec §2.3; docs/grammar-v0.md; impl spec M15.1):
+-- recursive descent over the lexer's stream, the same tree and the same
+-- syntax diagnostics as `packages/compiler/src/syntax/parser.ts`.
+--
+--   - A syntax error is a diagnostic and an `Err(Failed)` result; `try`
+--     propagates it to the nearest recovery point, which skips to the next
+--     statement or item, so every error in a file is reported.
+--   - The parser state is one record passed `inout`; its position is bound
+--     by the record's own refinements, so no index can go astray.
+--   - Every function of the recursive cycle takes a `rank` and shares the
+--     measure `(tokens left) * 64 + rank`: a call at a lower rank, or after
+--     a token was consumed, is strictly smaller, and the verifier proves
+--     the parser terminates.
+--
+-- Not carried over from the TypeScript parser: the cursor and hole of
+-- `onus next` (§14), which this compiler does not serve yet.
+pub record Parser {
+  toks: List[tokens.Token] where List.len(xs: it) >= 1 and List.len(xs: it) <= 100000000
+  pos: Int where it >= 0 and it <= List.len(xs: toks)
+  source_end: Int where it >= 0
+  current_def: Text
+  is_test_module: Bool
+  is_std_module: Bool
+  no_brace: Bool
+  assertion_block: Bool
+  diagnostics: List[tokens.Diagnostic]
+}
+
+pub union Fail =
+  | Failed
+
+-- An operand of `or`, with whether it was itself an `and` chain parsed at this level: `(a and b) or c` is not mixed.
+record Chained {
+  expr: ast.Expr
+  chained: Bool
+}
+
+record ChainedClaim {
+  pred: ast.ClaimPred
+  chained: Bool
+}
+
+pub record ParseResult {
+  module: Option[ast.Module]
+  diagnostics: List[tokens.Diagnostic]
+}
+
+-- Ranks of the functions in the recursive cycle (see the module comment).
+const r_block: Int = 50
+
+const r_stmts: Int = 48
+
+const r_stmt: Int = 46
+
+const r_if: Int = 45
+
+const r_domain: Int = 44
+
+const r_expr: Int = 40
+
+const r_or: Int = 38
+
+const r_and: Int = 36
+
+const r_not: Int = 34
+
+const r_cmp: Int = 32
+
+const r_add: Int = 30
+
+const r_pattern: Int = 29
+
+const r_mul: Int = 28
+
+const r_variant_pattern: Int = 27
+
+const r_unary: Int = 26
+
+const r_postfix: Int = 24
+
+const r_primary: Int = 22
+
+const r_ctor_rest: Int = 20
+
+const r_call_args: Int = 18
+
+const r_field_inits: Int = 17
+
+const r_type_args: Int = 43
+
+const r_type_arg: Int = 42
+
+const r_type: Int = 14
+
+const r_binder_type: Int = 15
+
+const r_param_list: Int = 8
+
+const r_param: Int = 6
+
+const r_claim_or: Int = 12
+
+const r_claim_and: Int = 11
+
+const r_claim_not: Int = 10
+
+const r_claim_atom: Int = 9
+
+-- Parses a lexed file. The module is absent when its header could not be parsed.
+pub fn parse(
+  toks: List[tokens.Token],
+  source_end: Int where it >= 0
+) -> ParseResult may alloc, mutate
+  requires List.len(xs: toks) >= 1 and List.len(xs: toks) <= 100000000
+{
+  var p: Parser = Parser {
+    toks: toks,
+    pos: 0,
+    source_end: source_end,
+    current_def: "",
+    is_test_module: false,
+    is_std_module: false,
+    no_brace: false,
+    assertion_block: false,
+    diagnostics: []
+  }
+  match parse_module(p: inout p) with
+  | Ok(value) -> return ParseResult { module: Some(value: value), diagnostics: p.diagnostics }
+  | Err(error) -> return ParseResult { module: None, diagnostics: p.diagnostics }
+}
+
+-- Token access ------------------------------------------------------------
+fn count(p: Parser) -> Int where it >= 1 {
+  return List.len(xs: p.toks)
+}
+
+-- The token `n` ahead, or the last token (always `eof`) past the end.
+fn peek(p: Parser, n: Int where 0 <= it and it <= 4) -> tokens.Token {
+  var i: Int = p.pos + n
+  if i > List.len(xs: p.toks) - 1 {
+    i = List.len(xs: p.toks) - 1
+  }
+  return List.get(xs: p.toks, i: i)
+}
+
+fn kind_at(p: Parser, n: Int where 0 <= it and it <= 4) -> tokens.Kind {
+  return peek(p: p, n: n).kind
+}
+
+fn at_punct(p: Parser, want: Text) -> Bool {
+  return tokens.is_punct(kind: kind_at(p: p, n: 0), want: want)
+}
+
+fn at_punct_n(p: Parser, n: Int where 0 <= it and it <= 4, want: Text) -> Bool {
+  return tokens.is_punct(kind: kind_at(p: p, n: n), want: want)
+}
+
+fn at_word(p: Parser, want: Text) -> Bool {
+  return tokens.is_word(kind: kind_at(p: p, n: 0), want: want)
+}
+
+fn at_word_n(p: Parser, n: Int where 0 <= it and it <= 4, want: Text) -> Bool {
+  return tokens.is_word(kind: kind_at(p: p, n: n), want: want)
+}
+
+-- A `name` token or a soft keyword.
+fn at_name(p: Parser, n: Int where 0 <= it and it <= 4) -> Bool {
+  return tokens.is_name_kind(kind: kind_at(p: p, n: n))
+}
+
+fn at_tname(p: Parser, n: Int where 0 <= it and it <= 4) -> Bool {
+  return kind_at(p: p, n: n) is tokens.TName
+}
+
+fn at_newline(p: Parser) -> Bool {
+  return kind_at(p: p, n: 0) is tokens.Newline
+}
+
+fn at_eof(p: Parser) -> Bool {
+  return kind_at(p: p, n: 0) is tokens.Eof
+}
+
+fn at_end(p: Parser) -> Bool {
+  return p.pos >= List.len(xs: p.toks) - 1
+}
+
+fn here(p: Parser) -> Int where it >= 0 {
+  return peek(p: p, n: 0).start
+}
+
+fn prev(p: Parser) -> tokens.Token {
+  if p.pos == 0 {
+    return peek(p: p, n: 0)
+  }
+  return List.get(xs: p.toks, i: p.pos - 1)
+}
+
+fn span_from(p: Parser, start: Int where it >= 0) -> ast.Span {
+  let end: Int = prev(p: p).end
+  if end < start {
+    return ast.Span { start: start, end: start }
+  }
+  return ast.Span { start: start, end: end }
+}
+
+fn span_of(t: tokens.Token) -> ast.Span {
+  return ast.Span { start: t.start, end: t.end }
+}
+
+fn join_spans(a: ast.Span, b: ast.Span) -> ast.Span {
+  var start: Int = a.start
+  if b.start < start {
+    start = b.start
+  }
+  var end: Int = a.end
+  if b.end > end {
+    end = b.end
+  }
+  return ast.Span { start: start, end: end }
+}
+
+-- The token's text as an identifier: names, type names, keywords and punctuation alike.
+fn ident_of(t: tokens.Token) -> ast.Ident {
+  match t.kind with
+  | tokens.Name(text) -> return ast.Ident { text: text, span: span_of(t: t) }
+  | tokens.TName(text) -> return ast.Ident { text: text, span: span_of(t: t) }
+  | tokens.Keyword(word) -> return ast.Ident { text: word, span: span_of(t: t) }
+  | tokens.Punct(text) -> return ast.Ident { text: text, span: span_of(t: t) }
+  | _ -> return ast.Ident { text: "", span: span_of(t: t) }
+}
+
+fn text_value(t: tokens.Token) -> Text {
+  match t.kind with
+  | tokens.TextLit(value) -> return value
+  | _ -> return ""
+}
+
+-- Consumes the current token unless it is the last (`eof`).
+fn advance(p: inout Parser) -> tokens.Token may mutate
+  ensures p.toks == old(p).toks
+  ensures p.pos >= old(p).pos and p.pos <= old(p).pos + 1
+  ensures old(p).pos < List.len(xs: old(p).toks) - 1 implies p.pos == old(p).pos + 1
+{
+  let t: tokens.Token = peek(p: p, n: 0)
+  if p.pos < List.len(xs: p.toks) - 1 {
+    p = { p with pos: p.pos + 1 }
+  }
+  return t
+}
+
+-- Diagnostics ---------------------------------------------------------------
+fn report(
+  p: inout Parser,
+  code: Text,
+  start: Int where it >= 0,
+  end: Int where it >= 0,
+  detail: Text
+) -> Unit may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos == old(p).pos
+{
+  p = { p with
+    diagnostics: List.append(
+      xs: p.diagnostics,
+      x: tokens.Diagnostic { code: code, start: start, end: end, detail: detail }
+    )
+  }
+}
+
+fn fail_at(p: inout Parser, expected: Text, t: tokens.Token) -> Fail may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos == old(p).pos
+{
+  report(
+    p: inout p,
+    code: "E0003",
+    start: t.start,
+    end: t.end,
+    detail: "expected " ++ expected ++ ", found " ++ tokens.describe_kind(kind: t.kind)
+  )
+  return Failed
+}
+
+fn fail(p: inout Parser, expected: Text) -> Fail may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos == old(p).pos
+{
+  let t: tokens.Token = peek(p: p, n: 0)
+  return fail_at(p: inout p, expected: expected, t: t)
+}
+
+fn accept_punct(p: inout Parser, want: Text) -> Bool may mutate
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos and p.pos <= old(p).pos + 1
+  ensures result implies p.pos == old(p).pos + 1
+  ensures not result implies p.pos == old(p).pos
+{
+  if at_punct(p: p, want: want) and p.pos < List.len(xs: p.toks) - 1 {
+    skip(p: inout p)
+    return true
+  }
+  return false
+}
+
+fn accept_word(p: inout Parser, want: Text) -> Bool may mutate
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos and p.pos <= old(p).pos + 1
+  ensures result implies p.pos == old(p).pos + 1
+  ensures not result implies p.pos == old(p).pos
+{
+  if at_word(p: p, want: want) and p.pos < List.len(xs: p.toks) - 1 {
+    skip(p: inout p)
+    return true
+  }
+  return false
+}
+
+fn accept_newline(p: inout Parser) -> Bool may mutate
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos and p.pos <= old(p).pos + 1
+  ensures result implies p.pos == old(p).pos + 1
+  ensures not result implies p.pos == old(p).pos
+{
+  if at_newline(p: p) and p.pos < List.len(xs: p.toks) - 1 {
+    skip(p: inout p)
+    return true
+  }
+  return false
+}
+
+fn expect_punct(p: inout Parser, want: Text) -> Result[tokens.Token, Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos and p.pos <= old(p).pos + 1
+  ensures result is Ok implies p.pos == old(p).pos + 1
+{
+  if at_punct(p: p, want: want) and p.pos < List.len(xs: p.toks) - 1 {
+    let t: tokens.Token = advance(p: inout p)
+    return Ok(value: t)
+  }
+  return Err(error: fail(p: inout p, expected: "`" ++ want ++ "`"))
+}
+
+fn expect_word(p: inout Parser, want: Text) -> Result[tokens.Token, Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos and p.pos <= old(p).pos + 1
+  ensures result is Ok implies p.pos == old(p).pos + 1
+{
+  if at_word(p: p, want: want) and p.pos < List.len(xs: p.toks) - 1 {
+    let t: tokens.Token = advance(p: inout p)
+    return Ok(value: t)
+  }
+  return Err(error: fail(p: inout p, expected: "`" ++ want ++ "`"))
+}
+
+fn expect_newline(p: inout Parser) -> Result[tokens.Token, Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos and p.pos <= old(p).pos + 1
+  ensures result is Ok implies p.pos == old(p).pos + 1
+{
+  if at_newline(p: p) and p.pos < List.len(xs: p.toks) - 1 {
+    let t: tokens.Token = advance(p: inout p)
+    return Ok(value: t)
+  }
+  return Err(error: fail(p: inout p, expected: "newline"))
+}
+
+fn expect_name(p: inout Parser) -> Result[ast.Ident, Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos and p.pos <= old(p).pos + 1
+  ensures result is Ok implies p.pos == old(p).pos + 1
+{
+  if at_name(p: p, n: 0) and p.pos < List.len(xs: p.toks) - 1 {
+    let t: tokens.Token = advance(p: inout p)
+    return Ok(value: ident_of(t: t))
+  }
+  return Err(error: fail(p: inout p, expected: "a name"))
+}
+
+fn expect_tname(p: inout Parser) -> Result[ast.Ident, Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos and p.pos <= old(p).pos + 1
+  ensures result is Ok implies p.pos == old(p).pos + 1
+{
+  if at_tname(p: p, n: 0) and p.pos < List.len(xs: p.toks) - 1 {
+    let t: tokens.Token = advance(p: inout p)
+    return Ok(value: ident_of(t: t))
+  }
+  return Err(error: fail(p: inout p, expected: "a type name"))
+}
+
+-- Consuming a token for its effect alone.
+fn skip(p: inout Parser) -> Unit may mutate
+  ensures p.toks == old(p).toks
+  ensures p.pos >= old(p).pos and p.pos <= old(p).pos + 1
+  ensures old(p).pos < List.len(xs: old(p).toks) - 1 implies p.pos == old(p).pos + 1
+{
+  let t: tokens.Token = advance(p: inout p)
+}
+
+fn skip_newline(p: inout Parser) -> Unit may mutate
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos and p.pos <= old(p).pos + 1
+{
+  let seen: Bool = accept_newline(p: inout p)
+}
+
+fn need_punct(p: inout Parser, want: Text) -> Result[Unit, Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos and p.pos <= old(p).pos + 1
+  ensures result is Ok implies p.pos == old(p).pos + 1
+{
+  let t: tokens.Token = try expect_punct(p: inout p, want: want)
+  return Ok(value: Unit)
+}
+
+fn need_word(p: inout Parser, want: Text) -> Result[Unit, Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos and p.pos <= old(p).pos + 1
+  ensures result is Ok implies p.pos == old(p).pos + 1
+{
+  let t: tokens.Token = try expect_word(p: inout p, want: want)
+  return Ok(value: Unit)
+}
+
+fn need_newline(p: inout Parser) -> Result[Unit, Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos and p.pos <= old(p).pos + 1
+  ensures result is Ok implies p.pos == old(p).pos + 1
+{
+  let t: tokens.Token = try expect_newline(p: inout p)
+  return Ok(value: Unit)
+}
+
+-- After an item or statement: a newline is required unless one was just consumed or a closer follows.
+fn terminator(p: inout Parser, in_block: Bool) -> Result[Unit, Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos and p.pos <= old(p).pos + 1
+{
+  if (in_block and at_punct(p: p, want: "}")) or at_eof(p: p) {
+    return Ok(value: Unit)
+  }
+  if prev(p: p).kind is tokens.Newline {
+    return Ok(value: Unit)
+  }
+  try need_newline(p: inout p)
+  return Ok(value: Unit)
+}
+
+-- Skips forward to the next newline, `}` or end of file (statement recovery).
+fn recover_to_line_end(p: inout Parser) -> Unit may mutate
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+{
+  let start: Int = p.pos
+  let toks0: List[tokens.Token] = p.toks
+  loop while p.pos < List.len(xs: p.toks) - 1 and not at_newline(p: p) and not at_punct(
+    p: p,
+    want: "}"
+  )
+    invariant p.pos >= start and p.toks == toks0
+    decreases List.len(xs: p.toks) - p.pos
+  {
+    skip(p: inout p)
+  }
+}
+
+-- Skips forward to a newline followed by an item keyword (item recovery).
+fn recover_to_item(p: inout Parser) -> Unit may mutate
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+{
+  let start: Int = p.pos
+  let toks0: List[tokens.Token] = p.toks
+  loop while p.pos < List.len(xs: p.toks) - 1
+    invariant p.pos >= start and p.toks == toks0
+    decreases List.len(xs: p.toks) - p.pos
+  {
+    if at_newline(p: p) and starts_item(kind: kind_at(p: p, n: 1)) {
+      skip(p: inout p)
+      return Unit
+    }
+    skip(p: inout p)
+  }
+}
+
+fn starts_item(kind: tokens.Kind) -> Bool {
+  match kind with
+  | tokens.Keyword(word) -> return word == "pub" or word == "sealed" or word == "fn" or word == "const" or word == "type" or word == "record" or word == "union" or word == "interface" or word == "impl" or word == "claim" or word == "capability" or word == "path" or word == "policy" or word == "example" or word == "property"
+  | _ -> return false
+}
+
+-- Names ---------------------------------------------------------------------
+fn qname_of(segments: List[ast.Ident]) -> ast.QName
+  requires List.len(xs: segments) >= 1
+{
+  let first: ast.Ident = List.get(xs: segments, i: 0)
+  let last: ast.Ident = List.get(xs: segments, i: List.len(xs: segments) - 1)
+  return ast.QName { segments: segments, span: join_spans(a: first.span, b: last.span) }
+}
+
+-- `NAME { "." NAME }` — a module name.
+fn module_name(p: inout Parser) -> Result[ast.QName, Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  ensures result is Ok implies p.pos > old(p).pos
+{
+  var segs: Builder[ast.Ident] = List.builder()
+  let first: ast.Ident = try expect_name(p: inout p)
+  List.push(b: inout segs, x: first)
+  let start: Int = p.pos
+  let toks0: List[tokens.Token] = p.toks
+  loop while at_punct(p: p, want: ".") and at_name(p: p, n: 1) and p.pos < List.len(xs: p.toks) - 2
+    invariant p.pos >= start and p.toks == toks0 and List.built(b: segs) >= 1
+    decreases List.len(xs: p.toks) - p.pos
+  {
+    skip(p: inout p)
+    let seg: ast.Ident = try expect_name(p: inout p)
+    List.push(b: inout segs, x: seg)
+  }
+  return Ok(value: qname_of(segments: List.finish(b: segs)))
+}
+
+-- `( NAME | TNAME ) { "." ( NAME | TNAME ) }` — effects and claims.
+fn dotted(p: inout Parser) -> Result[ast.QName, Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  ensures result is Ok implies p.pos > old(p).pos
+{
+  var segs: Builder[ast.Ident] = List.builder()
+  if at_name(p: p, n: 0) or at_tname(p: p, n: 0) {
+    let t: tokens.Token = advance(p: inout p)
+    List.push(b: inout segs, x: ident_of(t: t))
+  } else {
+    return Err(error: fail(p: inout p, expected: "a name"))
+  }
+  let start: Int = p.pos
+  let toks0: List[tokens.Token] = p.toks
+  loop while at_punct(p: p, want: ".") and (at_name(p: p, n: 1) or at_tname(
+    p: p,
+    n: 1
+  )) and p.pos < List.len(xs: p.toks) - 2
+    invariant p.pos >= start and p.toks == toks0
+    decreases List.len(xs: p.toks) - p.pos
+  {
+    skip(p: inout p)
+    let t: tokens.Token = advance(p: inout p)
+    List.push(b: inout segs, x: ident_of(t: t))
+  }
+  return Ok(value: qname_of(segments: List.finish(b: segs)))
+}
+
+-- True iff the tokens ahead form `NAME { "." NAME } "." TNAME` or `TNAME`.
+fn qtname_ahead(p: Parser) -> Bool {
+  if at_tname(p: p, n: 0) {
+    return true
+  }
+  if not at_name(p: p, n: 0) {
+    return false
+  }
+  -- Two lookahead steps cover `a.B` and `a.b.C`; deeper chains are rare and read the same way at parse time.
+  if at_punct_n(p: p, n: 1, want: ".") {
+    if at_tname(p: p, n: 2) {
+      return true
+    }
+    if at_name(p: p, n: 2) and at_punct_n(p: p, n: 3, want: ".") and at_tname(p: p, n: 4) {
+      return true
+    }
+  }
+  return false
+}
+
+-- `{ NAME "." } TNAME` — a qualified type name.
+fn qtname(p: inout Parser) -> Result[ast.QName, Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  ensures result is Ok implies p.pos > old(p).pos
+{
+  var segs: Builder[ast.Ident] = List.builder()
+  let start: Int = p.pos
+  let toks0: List[tokens.Token] = p.toks
+  loop while at_name(p: p, n: 0) and p.pos < List.len(xs: p.toks) - 1
+    invariant p.pos >= start and p.toks == toks0
+    decreases List.len(xs: p.toks) - p.pos
+  {
+    let seg: ast.Ident = try expect_name(p: inout p)
+    List.push(b: inout segs, x: seg)
+    try need_punct(p: inout p, want: ".")
+  }
+  let last: ast.Ident = try expect_tname(p: inout p)
+  List.push(b: inout segs, x: last)
+  return Ok(value: qname_of(segments: List.finish(b: segs)))
+}
+
+-- Module ----------------------------------------------------------------------
+fn parse_module(p: inout Parser) -> Result[ast.Module, Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+{
+  var is_test: Bool = false
+  if accept_word(p: inout p, want: "test") {
+    is_test = true
+  }
+  p = { p with is_test_module: is_test }
+  try need_word(p: inout p, want: "module")
+  let name: ast.QName = try module_name(p: inout p)
+  p = { p with is_std_module: List.get(xs: name.segments, i: 0).text == "std" }
+  try need_newline(p: inout p)
+  var imports: Builder[ast.Import] = List.builder()
+  let toks0: List[tokens.Token] = p.toks
+  let start0: Int = p.pos
+  loop while at_word(p: p, want: "import") and p.pos < List.len(xs: p.toks) - 1
+    invariant p.pos >= start0 and p.toks == toks0
+    decreases List.len(xs: p.toks) - p.pos
+  {
+    let s: Int = here(p: p)
+    skip(p: inout p)
+    let n: ast.QName = try module_name(p: inout p)
+    try need_newline(p: inout p)
+    List.push(b: inout imports, x: ast.Import { name: n, span: span_from(p: p, start: s) })
+  }
+  var items: Builder[ast.Item] = List.builder()
+  let start1: Int = p.pos
+  loop while not at_eof(p: p) and p.pos < List.len(xs: p.toks) - 1
+    invariant p.pos >= start1 and p.toks == toks0
+    decreases List.len(xs: p.toks) - p.pos
+  {
+    let before: Int = p.pos
+    match parse_item(p: inout p) with
+    | Ok(value) -> {
+      List.push(b: inout items, x: value)
+      let term: Result[Unit, Fail] = terminator(p: inout p, in_block: false)
+      if term is Ok {
+        p = { p with current_def: "" }
+      } else {
+        if p.pos == before {
+          skip(p: inout p)
+        }
+        recover_to_item(p: inout p)
+      }
+    }
+    | Err(error) -> {
+      if p.pos == before {
+        skip(p: inout p)
+      }
+      recover_to_item(p: inout p)
+    }
+    p = { p with current_def: "", no_brace: false, assertion_block: false }
+    if p.pos == before {
+      skip(p: inout p)
+    }
+  }
+  return Ok(
+    value: ast.Module {
+      is_test: is_test,
+      name: name,
+      imports: List.finish(b: imports),
+      items: List.finish(b: items),
+      span: ast.Span { start: 0, end: p.source_end }
+    }
+  )
+}
+
+-- Items -----------------------------------------------------------------------
+fn visibility(p: inout Parser) -> ast.Visibility may mutate
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+{
+  let is_pub: Bool = accept_word(p: inout p, want: "pub")
+  let is_sealed: Bool = accept_word(p: inout p, want: "sealed")
+  return ast.Visibility { is_pub: is_pub, is_sealed: is_sealed }
+}
+
+fn parse_item(p: inout Parser) -> Result[ast.Item, Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+{
+  let start: Int = here(p: p)
+  if at_word(p: p, want: "impl") {
+    let d: ast.ImplDecl = try parse_impl(p: inout p, start: start)
+    return Ok(value: ast.ImplItem(decl: d))
+  }
+  if at_word(p: p, want: "path") {
+    let d: ast.PathDecl = try parse_path(p: inout p, start: start)
+    return Ok(value: ast.PathItem(decl: d))
+  }
+  if at_word(p: p, want: "policy") {
+    let d: ast.PolicyDecl = try parse_policy(p: inout p, start: start)
+    return Ok(value: ast.PolicyItem(decl: d))
+  }
+  if at_word(p: p, want: "example") {
+    let d: ast.ExampleDecl = try parse_example(p: inout p, start: start)
+    return Ok(value: ast.ExampleItem(decl: d))
+  }
+  if at_word(p: p, want: "property") {
+    let d: ast.PropertyDecl = try parse_property(p: inout p, start: start)
+    return Ok(value: ast.PropertyItem(decl: d))
+  }
+  let vis: ast.Visibility = visibility(p: inout p)
+  if at_word(p: p, want: "fn") {
+    let d: ast.FnDecl = try parse_fn(
+      p: inout p,
+      start: start,
+      vis: vis,
+      is_const: false,
+      is_intrinsic: false
+    )
+    return Ok(value: ast.FnItem(decl: d))
+  }
+  if at_word(p: p, want: "const") {
+    if at_word_n(p: p, n: 1, want: "fn") {
+      skip(p: inout p)
+      let d: ast.FnDecl = try parse_fn(
+        p: inout p,
+        start: start,
+        vis: vis,
+        is_const: true,
+        is_intrinsic: false
+      )
+      return Ok(value: ast.FnItem(decl: d))
+    }
+    if at_word_n(p: p, n: 1, want: "intrinsic") and at_word_n(p: p, n: 2, want: "fn") {
+      skip(p: inout p)
+      skip(p: inout p)
+      let d: ast.FnDecl = try parse_fn(
+        p: inout p,
+        start: start,
+        vis: vis,
+        is_const: true,
+        is_intrinsic: true
+      )
+      return Ok(value: ast.FnItem(decl: d))
+    }
+    let d: ast.ConstDecl = try parse_const(p: inout p, start: start, vis: vis)
+    return Ok(value: ast.ConstItem(decl: d))
+  }
+  if at_word(p: p, want: "intrinsic") {
+    if at_word_n(p: p, n: 1, want: "fn") {
+      skip(p: inout p)
+      let d: ast.FnDecl = try parse_fn(
+        p: inout p,
+        start: start,
+        vis: vis,
+        is_const: false,
+        is_intrinsic: true
+      )
+      return Ok(value: ast.FnItem(decl: d))
+    }
+    if at_word_n(p: p, n: 1, want: "type") {
+      skip(p: inout p)
+      let d: ast.IntrinsicType = try parse_intrinsic_type(p: inout p, start: start, vis: vis)
+      return Ok(value: ast.IntrinsicTypeItem(decl: d))
+    }
+    skip(p: inout p)
+    return Err(error: fail(p: inout p, expected: "`fn` or `type` after `intrinsic`"))
+  }
+  if at_word(p: p, want: "type") {
+    let d: ast.TypeAlias = try parse_type_alias(p: inout p, start: start, vis: vis)
+    return Ok(value: ast.TypeAliasItem(decl: d))
+  }
+  if at_word(p: p, want: "record") {
+    let d: ast.RecordDecl = try parse_record(p: inout p, start: start, vis: vis)
+    return Ok(value: ast.RecordItem(decl: d))
+  }
+  if at_word(p: p, want: "union") {
+    let d: ast.UnionDecl = try parse_union(p: inout p, start: start, vis: vis)
+    return Ok(value: ast.UnionItem(decl: d))
+  }
+  if at_word(p: p, want: "interface") {
+    let d: ast.InterfaceDecl = try parse_interface(p: inout p, start: start, vis: vis)
+    return Ok(value: ast.InterfaceItem(decl: d))
+  }
+  if at_word(p: p, want: "claim") {
+    let d: ast.ClaimDecl = try parse_claim(p: inout p, start: start, vis: vis)
+    return Ok(value: ast.ClaimItem(decl: d))
+  }
+  if at_word(p: p, want: "capability") {
+    let d: ast.CapabilityDecl = try parse_capability(p: inout p, start: start, vis: vis)
+    return Ok(value: ast.CapabilityItem(decl: d))
+  }
+  return Err(
+    error: fail(
+      p: inout p,
+      expected: "an item (fn, type, const, record, union, interface, impl, claim, capability, path, policy, example or property)"
+    )
+  )
+}
+
+fn parse_fn(
+  p: inout Parser,
+  start: Int where it >= 0,
+  vis: ast.Visibility,
+  is_const: Bool,
+  is_intrinsic: Bool
+) -> Result[ast.FnDecl, Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+{
+  let fn_tok: tokens.Token = try expect_word(p: inout p, want: "fn")
+  let name: ast.Ident = try expect_name(p: inout p)
+  p = { p with current_def: name.text }
+  if is_intrinsic and not p.is_std_module {
+    report(
+      p: inout p,
+      code: "E0102",
+      start: fn_tok.start,
+      end: name.span.end,
+      detail: "intrinsic declarations are reserved for `module std.…`"
+    )
+  }
+  var tparams: List[ast.TParam] = []
+  if at_punct(p: p, want: "[") {
+    tparams = try parse_tparams(p: inout p)
+  }
+  let params: List[ast.Param] = try param_list(p: inout p, rank: r_param_list)
+  try need_punct(p: inout p, want: "->")
+  let saved: Bool = p.no_brace
+  p = { p with no_brace: true }
+  let ret: ast.Type = try parse_type(p: inout p, rank: r_type)
+  p = { p with no_brace: saved }
+  let effects: List[ast.EffectRef] = try effects_opt(p: inout p)
+  var claim_list: Builder[ast.QName] = List.builder()
+  if accept_word(p: inout p, want: "claims") {
+    let first: ast.QName = try dotted(p: inout p)
+    List.push(b: inout claim_list, x: first)
+    let toks0: List[tokens.Token] = p.toks
+    let start0: Int = p.pos
+    loop while at_punct(p: p, want: ",") and p.pos < List.len(xs: p.toks) - 1
+      invariant p.pos >= start0 and p.toks == toks0
+      decreases List.len(xs: p.toks) - p.pos
+    {
+      skip(p: inout p)
+      let more: ast.QName = try dotted(p: inout p)
+      List.push(b: inout claim_list, x: more)
+    }
+  }
+  let contracts: List[ast.Contract] = try parse_contracts(p: inout p)
+  var body: Option[ast.Block] = None
+  if is_intrinsic {
+    if at_punct(p: p, want: "{") {
+      return Err(error: fail(p: inout p, expected: "a newline: an intrinsic function has no body"))
+    }
+  } else {
+    let b: ast.Block = try parse_block(p: inout p, rank: r_block, allow_elided: true)
+    body = Some(value: b)
+  }
+  return Ok(
+    value: ast.FnDecl {
+      vis: vis,
+      is_const: is_const,
+      is_intrinsic: is_intrinsic,
+      name: name,
+      tparams: tparams,
+      params: params,
+      ret: ret,
+      effects: effects,
+      claim_list: List.finish(b: claim_list),
+      contracts: contracts,
+      body: body,
+      span: span_from(p: p, start: start)
+    }
+  )
+}
+
+fn parse_intrinsic_type(
+  p: inout Parser,
+  start: Int where it >= 0,
+  vis: ast.Visibility
+) -> Result[ast.IntrinsicType, Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+{
+  let type_tok: tokens.Token = try expect_word(p: inout p, want: "type")
+  let name: ast.Ident = try expect_tname(p: inout p)
+  p = { p with current_def: name.text }
+  if not p.is_std_module {
+    report(
+      p: inout p,
+      code: "E0102",
+      start: type_tok.start,
+      end: name.span.end,
+      detail: "intrinsic declarations are reserved for `module std.…`"
+    )
+  }
+  var tparams: List[ast.TParam] = []
+  if at_punct(p: p, want: "[") {
+    tparams = try parse_tparams(p: inout p)
+  }
+  return Ok(
+    value: ast.IntrinsicType {
+      vis: vis,
+      name: name,
+      tparams: tparams,
+      span: span_from(p: p, start: start)
+    }
+  )
+}
+
+fn parse_contracts(p: inout Parser) -> Result[List[ast.Contract], Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+{
+  var out: Builder[ast.Contract] = List.builder()
+  let toks0: List[tokens.Token] = p.toks
+  let start0: Int = p.pos
+  loop while (at_word(p: p, want: "requires") or at_word(p: p, want: "ensures") or at_word(
+    p: p,
+    want: "decreases"
+  )) and p.pos < List.len(xs: p.toks) - 1
+    invariant p.pos >= start0 and p.toks == toks0
+    decreases List.len(xs: p.toks) - p.pos
+  {
+    let s: Int = here(p: p)
+    let kw: tokens.Token = advance(p: inout p)
+    let clause: Text = ident_of(t: kw).text
+    var is_proved: Bool = false
+    if clause != "decreases" {
+      is_proved = accept_word(p: inout p, want: "proved")
+    }
+    let saved: Bool = p.no_brace
+    p = { p with no_brace: true }
+    let e: ast.Expr = try parse_expr(p: inout p, rank: r_expr)
+    p = { p with no_brace: saved }
+    List.push(
+      b: inout out,
+      x: ast.Contract {
+        clause: clause,
+        is_proved: is_proved,
+        expr: e,
+        span: span_from(p: p, start: s)
+      }
+    )
+  }
+  return Ok(value: List.finish(b: out))
+}
+
+fn effects_opt(p: inout Parser) -> Result[List[ast.EffectRef], Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+{
+  if not accept_word(p: inout p, want: "may") {
+    return Ok(value: [])
+  }
+  return effect_list(p: inout p)
+}
+
+-- `effect { "," effect }`; a comma continues the list only when an effect follows.
+fn effect_list(p: inout Parser) -> Result[List[ast.EffectRef], Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+{
+  var out: Builder[ast.EffectRef] = List.builder()
+  let first: ast.EffectRef = try effect_ref(p: inout p)
+  List.push(b: inout out, x: first)
+  let toks0: List[tokens.Token] = p.toks
+  let start0: Int = p.pos
+  loop while at_punct(p: p, want: ",") and effect_follows(p: p) and p.pos < List.len(xs: p.toks) - 1
+    invariant p.pos >= start0 and p.toks == toks0
+    decreases List.len(xs: p.toks) - p.pos
+  {
+    skip(p: inout p)
+    let more: ast.EffectRef = try effect_ref(p: inout p)
+    List.push(b: inout out, x: more)
+  }
+  return Ok(value: List.finish(b: out))
+}
+
+-- After the comma: a name (or `recover`) not followed by a colon, which would make it a parameter.
+fn effect_follows(p: Parser) -> Bool {
+  return (at_name(p: p, n: 1) or at_word_n(p: p, n: 1, want: "recover")) and not at_punct_n(
+    p: p,
+    n: 2,
+    want: ":"
+  )
+}
+
+-- `NAME { "." NAME }` or `recover`: effects are lowercase; claims never appear here.
+fn effect_ref(p: inout Parser) -> Result[ast.EffectRef, Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  ensures result is Ok implies p.pos > old(p).pos
+{
+  let s: Int = here(p: p)
+  let t: tokens.Token = peek(p: p, n: 0)
+  if accept_word(p: inout p, want: "recover") {
+    let id: ast.Ident = ident_of(t: t)
+    let name: ast.QName = ast.QName { segments: [id], span: id.span }
+    return Ok(value: ast.EffectRef { name: name, span: span_from(p: p, start: s) })
+  }
+  let name: ast.QName = try module_name(p: inout p)
+  return Ok(value: ast.EffectRef { name: name, span: span_from(p: p, start: s) })
+}
+
+fn parse_tparams(p: inout Parser) -> Result[List[ast.TParam], Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+{
+  try need_punct(p: inout p, want: "[")
+  var out: Builder[ast.TParam] = List.builder()
+  var more: Bool = true
+  let toks0: List[tokens.Token] = p.toks
+  let start0: Int = p.pos
+  loop while more and p.pos < List.len(xs: p.toks) - 1
+    invariant p.pos >= start0 and p.toks == toks0
+    decreases List.len(xs: p.toks) - p.pos
+  {
+    let s: Int = here(p: p)
+    if at_tname(p: p, n: 0) {
+      let name: ast.Ident = try expect_tname(p: inout p)
+      var bound: Option[ast.Ident] = None
+      if accept_punct(p: inout p, want: ":") {
+        let b: ast.Ident = try expect_tname(p: inout p)
+        bound = Some(value: b)
+      }
+      List.push(
+        b: inout out,
+        x: ast.TypeParam(name: name, bound: bound, span: span_from(p: p, start: s))
+      )
+    } else {
+      if accept_word(p: inout p, want: "const") {
+        let name: ast.Ident = try expect_name(p: inout p)
+        try need_punct(p: inout p, want: ":")
+        let ty: ast.Type = try parse_type(p: inout p, rank: r_type)
+        List.push(
+          b: inout out,
+          x: ast.ConstParam(name: name, ty: ty, span: span_from(p: p, start: s))
+        )
+      } else {
+        if at_name(p: p, n: 0) {
+          let name: ast.Ident = try expect_name(p: inout p)
+          List.push(b: inout out, x: ast.EffectParam(name: name, span: span_from(p: p, start: s)))
+        } else {
+          return Err(
+            error: fail(
+              p: inout p,
+              expected: "a type parameter, `const` parameter or effect parameter"
+            )
+          )
+        }
+      }
+    }
+    more = accept_punct(p: inout p, want: ",")
+  }
+  try need_punct(p: inout p, want: "]")
+  return Ok(value: List.finish(b: out))
+}
+
+fn param_list(p: inout Parser, rank: Int) -> Result[List[ast.Param], Fail] may mutate, alloc
+  requires rank == r_param_list
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  decreases (List.len(xs: p.toks) - p.pos) * 64 + rank
+{
+  try need_punct(p: inout p, want: "(")
+  var out: Builder[ast.Param] = List.builder()
+  if not at_punct(p: p, want: ")") {
+    var more: Bool = true
+    let toks0: List[tokens.Token] = p.toks
+    let start0: Int = p.pos
+    loop while more and p.pos < List.len(xs: p.toks) - 1
+      invariant p.pos >= start0 and p.toks == toks0
+      decreases List.len(xs: p.toks) - p.pos
+    {
+      let param: ast.Param = try parse_param(p: inout p, rank: r_param)
+      List.push(b: inout out, x: param)
+      more = accept_punct(p: inout p, want: ",")
+    }
+  }
+  try need_punct(p: inout p, want: ")")
+  return Ok(value: List.finish(b: out))
+}
+
+fn parse_param(p: inout Parser, rank: Int) -> Result[ast.Param, Fail] may mutate, alloc
+  requires rank == r_param
+  ensures p.toks == old(p).toks and p.pos > old(p).pos
+  decreases (List.len(xs: p.toks) - p.pos) * 64 + rank
+{
+  let s: Int = here(p: p)
+  let name: ast.Ident = try expect_name(p: inout p)
+  try need_punct(p: inout p, want: ":")
+  let is_inout: Bool = accept_word(p: inout p, want: "inout")
+  let saved: Bool = p.no_brace
+  p = { p with no_brace: false }
+  let ty: ast.Type = try parse_type(p: inout p, rank: r_type)
+  p = { p with no_brace: saved }
+  return Ok(
+    value: ast.Param { is_inout: is_inout, name: name, ty: ty, span: span_from(p: p, start: s) }
+  )
+}
+
+fn parse_const(
+  p: inout Parser,
+  start: Int where it >= 0,
+  vis: ast.Visibility
+) -> Result[ast.ConstDecl, Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+{
+  try need_word(p: inout p, want: "const")
+  let name: ast.Ident = try expect_name(p: inout p)
+  p = { p with current_def: name.text }
+  try need_punct(p: inout p, want: ":")
+  let ty: ast.Type = try parse_type(p: inout p, rank: r_type)
+  try need_punct(p: inout p, want: "=")
+  let value: ast.Expr = try parse_expr(p: inout p, rank: r_expr)
+  return Ok(
+    value: ast.ConstDecl {
+      vis: vis,
+      name: name,
+      ty: ty,
+      value: value,
+      span: span_from(p: p, start: start)
+    }
+  )
+}
+
+fn parse_type_alias(
+  p: inout Parser,
+  start: Int where it >= 0,
+  vis: ast.Visibility
+) -> Result[ast.TypeAlias, Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+{
+  try need_word(p: inout p, want: "type")
+  let name: ast.Ident = try expect_tname(p: inout p)
+  p = { p with current_def: name.text }
+  try need_punct(p: inout p, want: "=")
+  let ty: ast.Type = try parse_type(p: inout p, rank: r_type)
+  return Ok(
+    value: ast.TypeAlias { vis: vis, name: name, ty: ty, span: span_from(p: p, start: start) }
+  )
+}
+
+fn parse_record(
+  p: inout Parser,
+  start: Int where it >= 0,
+  vis: ast.Visibility
+) -> Result[ast.RecordDecl, Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+{
+  try need_word(p: inout p, want: "record")
+  let name: ast.Ident = try expect_tname(p: inout p)
+  p = { p with current_def: name.text }
+  var tparams: List[ast.TParam] = []
+  if at_punct(p: p, want: "[") {
+    tparams = try parse_tparams(p: inout p)
+  }
+  let fields: List[ast.Field] = try braced_fields(p: inout p)
+  return Ok(
+    value: ast.RecordDecl {
+      vis: vis,
+      name: name,
+      tparams: tparams,
+      fields: fields,
+      span: span_from(p: p, start: start)
+    }
+  )
+}
+
+fn parse_field(p: inout Parser) -> Result[ast.Field, Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos > old(p).pos
+{
+  let s: Int = here(p: p)
+  let name: ast.Ident = try expect_name(p: inout p)
+  try need_punct(p: inout p, want: ":")
+  let ty: ast.Type = try parse_type(p: inout p, rank: r_type)
+  return Ok(value: ast.Field { name: name, ty: ty, span: span_from(p: p, start: s) })
+}
+
+-- `"{" ( NL { field NL } | [ field ] ) "}"` with statement-level recovery.
+fn braced_fields(p: inout Parser) -> Result[List[ast.Field], Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+{
+  try need_punct(p: inout p, want: "{")
+  var out: Builder[ast.Field] = List.builder()
+  if accept_newline(p: inout p) {
+    let toks0: List[tokens.Token] = p.toks
+    let start0: Int = p.pos
+    loop while not at_punct(p: p, want: "}") and not at_eof(p: p) and p.pos < List.len(
+      xs: p.toks
+    ) - 1
+      invariant p.pos >= start0 and p.toks == toks0
+      decreases List.len(xs: p.toks) - p.pos
+    {
+      let before: Int = p.pos
+      match parse_field(p: inout p) with
+      | Ok(value) -> {
+        List.push(b: inout out, x: value)
+        let term: Result[Unit, Fail] = terminator(p: inout p, in_block: true)
+        if term is Ok {
+          p = p
+        } else {
+          recover_to_line_end(p: inout p)
+          skip_newline(p: inout p)
+        }
+      }
+      | Err(error) -> {
+        if p.pos == before {
+          skip(p: inout p)
+        }
+        recover_to_line_end(p: inout p)
+        skip_newline(p: inout p)
+      }
+      if p.pos == before {
+        skip(p: inout p)
+      }
+    }
+    try need_punct(p: inout p, want: "}")
+    return Ok(value: List.finish(b: out))
+  }
+  if accept_punct(p: inout p, want: "}") {
+    return Ok(value: List.finish(b: out))
+  }
+  let one: ast.Field = try parse_field(p: inout p)
+  List.push(b: inout out, x: one)
+  try need_punct(p: inout p, want: "}")
+  return Ok(value: List.finish(b: out))
+}
+
+fn parse_union(
+  p: inout Parser,
+  start: Int where it >= 0,
+  vis: ast.Visibility
+) -> Result[ast.UnionDecl, Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+{
+  try need_word(p: inout p, want: "union")
+  let name: ast.Ident = try expect_tname(p: inout p)
+  p = { p with current_def: name.text }
+  var tparams: List[ast.TParam] = []
+  if at_punct(p: p, want: "[") {
+    tparams = try parse_tparams(p: inout p)
+  }
+  try need_punct(p: inout p, want: "=")
+  try need_newline(p: inout p)
+  var variants: Builder[ast.Variant] = List.builder()
+  var end: Int = prev(p: p).end
+  let toks0: List[tokens.Token] = p.toks
+  let start0: Int = p.pos
+  loop while at_punct(p: p, want: "|") and p.pos < List.len(xs: p.toks) - 1
+    invariant p.pos >= start0 and p.toks == toks0
+    decreases List.len(xs: p.toks) - p.pos
+  {
+    let s: Int = here(p: p)
+    skip(p: inout p)
+    let vname: ast.Ident = try expect_tname(p: inout p)
+    var fields: Builder[ast.Field] = List.builder()
+    if accept_word(p: inout p, want: "of") {
+      let first: ast.Field = try parse_field(p: inout p)
+      List.push(b: inout fields, x: first)
+      let start1: Int = p.pos
+      loop while at_punct(p: p, want: ",") and p.pos < List.len(xs: p.toks) - 1
+        invariant p.pos >= start1 and p.toks == toks0
+        decreases List.len(xs: p.toks) - p.pos
+      {
+        skip(p: inout p)
+        let more: ast.Field = try parse_field(p: inout p)
+        List.push(b: inout fields, x: more)
+      }
+    }
+    let vspan: ast.Span = span_from(p: p, start: s)
+    end = vspan.end
+    List.push(
+      b: inout variants,
+      x: ast.Variant { name: vname, fields: List.finish(b: fields), span: vspan }
+    )
+    try need_newline(p: inout p)
+  }
+  return Ok(
+    value: ast.UnionDecl {
+      vis: vis,
+      name: name,
+      tparams: tparams,
+      variants: List.finish(b: variants),
+      span: ast.Span { start: start, end: end }
+    }
+  )
+}
+
+fn parse_interface(
+  p: inout Parser,
+  start: Int where it >= 0,
+  vis: ast.Visibility
+) -> Result[ast.InterfaceDecl, Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+{
+  try need_word(p: inout p, want: "interface")
+  let name: ast.Ident = try expect_tname(p: inout p)
+  p = { p with current_def: name.text }
+  try need_punct(p: inout p, want: "[")
+  let tparam: ast.Ident = try expect_tname(p: inout p)
+  try need_punct(p: inout p, want: "]")
+  try need_punct(p: inout p, want: "{")
+  var items: Builder[ast.IfaceItem] = List.builder()
+  if accept_newline(p: inout p) {
+    let toks0: List[tokens.Token] = p.toks
+    let start0: Int = p.pos
+    loop while not at_punct(p: p, want: "}") and not at_eof(p: p) and p.pos < List.len(
+      xs: p.toks
+    ) - 1
+      invariant p.pos >= start0 and p.toks == toks0
+      decreases List.len(xs: p.toks) - p.pos
+    {
+      let before: Int = p.pos
+      match iface_item(p: inout p) with
+      | Ok(value) -> {
+        List.push(b: inout items, x: value)
+        let term: Result[Unit, Fail] = terminator(p: inout p, in_block: true)
+        if term is Ok {
+          p = p
+        } else {
+          recover_to_line_end(p: inout p)
+          skip_newline(p: inout p)
+        }
+      }
+      | Err(error) -> {
+        if p.pos == before {
+          skip(p: inout p)
+        }
+        recover_to_line_end(p: inout p)
+        skip_newline(p: inout p)
+      }
+      if p.pos == before {
+        skip(p: inout p)
+      }
+    }
+    try need_punct(p: inout p, want: "}")
+  } else {
+    if not accept_punct(p: inout p, want: "}") {
+      let one: ast.IfaceItem = try iface_item(p: inout p)
+      List.push(b: inout items, x: one)
+      try need_punct(p: inout p, want: "}")
+    }
+  }
+  return Ok(
+    value: ast.InterfaceDecl {
+      vis: vis,
+      name: name,
+      tparam: tparam,
+      items: List.finish(b: items),
+      span: span_from(p: p, start: start)
+    }
+  )
+}
+
+fn iface_item(p: inout Parser) -> Result[ast.IfaceItem, Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos > old(p).pos
+{
+  let s: Int = here(p: p)
+  if accept_word(p: inout p, want: "law") {
+    let name: ast.Ident = try expect_name(p: inout p)
+    let params: List[ast.Param] = try param_list(p: inout p, rank: r_param_list)
+    let body: ast.Block = try parse_assertion_block(p: inout p, rank: r_block)
+    return Ok(
+      value: ast.LawItem(
+        decl: ast.Law { name: name, params: params, body: body, span: span_from(p: p, start: s) }
+      )
+    )
+  }
+  try need_word(p: inout p, want: "fn")
+  let name: ast.Ident = try expect_name(p: inout p)
+  let params: List[ast.Param] = try param_list(p: inout p, rank: r_param_list)
+  try need_punct(p: inout p, want: "->")
+  let saved: Bool = p.no_brace
+  p = { p with no_brace: true }
+  let ret: ast.Type = try parse_type(p: inout p, rank: r_type)
+  p = { p with no_brace: saved }
+  let effects: List[ast.EffectRef] = try effects_opt(p: inout p)
+  let contracts: List[ast.Contract] = try parse_contracts(p: inout p)
+  return Ok(
+    value: ast.IfaceFnItem(
+      decl: ast.IfaceFn {
+        name: name,
+        params: params,
+        ret: ret,
+        effects: effects,
+        contracts: contracts,
+        span: span_from(p: p, start: s)
+      }
+    )
+  )
+}
+
+fn parse_impl(
+  p: inout Parser,
+  start: Int where it >= 0
+) -> Result[ast.ImplDecl, Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+{
+  try need_word(p: inout p, want: "impl")
+  let iface: ast.Ident = try expect_tname(p: inout p)
+  try need_punct(p: inout p, want: "[")
+  let target: ast.Type = try parse_type(p: inout p, rank: r_type)
+  try need_punct(p: inout p, want: "]")
+  p = { p with current_def: iface.text }
+  try need_punct(p: inout p, want: "{")
+  var fns: Builder[ast.FnDecl] = List.builder()
+  if accept_newline(p: inout p) {
+    let toks0: List[tokens.Token] = p.toks
+    let start0: Int = p.pos
+    loop while not at_punct(p: p, want: "}") and not at_eof(p: p) and p.pos < List.len(
+      xs: p.toks
+    ) - 1
+      invariant p.pos >= start0 and p.toks == toks0
+      decreases List.len(xs: p.toks) - p.pos
+    {
+      let before: Int = p.pos
+      let s: Int = here(p: p)
+      let vis: ast.Visibility = visibility(p: inout p)
+      match parse_fn(p: inout p, start: s, vis: vis, is_const: false, is_intrinsic: false) with
+      | Ok(value) -> {
+        List.push(b: inout fns, x: value)
+        let term: Result[Unit, Fail] = terminator(p: inout p, in_block: true)
+        if term is Ok {
+          p = p
+        } else {
+          recover_to_line_end(p: inout p)
+          skip_newline(p: inout p)
+        }
+      }
+      | Err(error) -> {
+        if p.pos == before {
+          skip(p: inout p)
+        }
+        recover_to_line_end(p: inout p)
+        skip_newline(p: inout p)
+      }
+      if p.pos == before {
+        skip(p: inout p)
+      }
+    }
+    try need_punct(p: inout p, want: "}")
+  } else {
+    if not accept_punct(p: inout p, want: "}") {
+      let s: Int = here(p: p)
+      let vis: ast.Visibility = visibility(p: inout p)
+      let one: ast.FnDecl = try parse_fn(
+        p: inout p,
+        start: s,
+        vis: vis,
+        is_const: false,
+        is_intrinsic: false
+      )
+      List.push(b: inout fns, x: one)
+      try need_punct(p: inout p, want: "}")
+    }
+  }
+  return Ok(
+    value: ast.ImplDecl {
+      iface: iface,
+      target: target,
+      fns: List.finish(b: fns),
+      span: span_from(p: p, start: start)
+    }
+  )
+}
+
+fn parse_claim(
+  p: inout Parser,
+  start: Int where it >= 0,
+  vis: ast.Visibility
+) -> Result[ast.ClaimDecl, Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+{
+  try need_word(p: inout p, want: "claim")
+  var name: ast.Ident = ast.Ident { text: "", span: ast.Span { start: 0, end: 0 } }
+  if at_name(p: p, n: 0) {
+    let t: tokens.Token = advance(p: inout p)
+    name = ident_of(t: t)
+  } else {
+    name = try expect_tname(p: inout p)
+  }
+  p = { p with current_def: name.text }
+  if accept_punct(p: inout p, want: ":=") {
+    let pred: ast.ClaimPred = try claim_or(p: inout p, rank: r_claim_or)
+    return Ok(
+      value: ast.ClaimDecl {
+        vis: vis,
+        name: name,
+        body: ast.Derived(pred: pred),
+        span: span_from(p: p, start: start)
+      }
+    )
+  }
+  if kind_at(p: p, n: 0) is tokens.TextLit {
+    let t: tokens.Token = advance(p: inout p)
+    return Ok(
+      value: ast.ClaimDecl {
+        vis: vis,
+        name: name,
+        body: ast.Asserted(description: text_value(t: t)),
+        span: span_from(p: p, start: start)
+      }
+    )
+  }
+  return Err(error: fail(p: inout p, expected: "`:=` or a description text"))
+}
+
+fn claim_or(p: inout Parser, rank: Int) -> Result[ast.ClaimPred, Fail] may mutate, alloc
+  requires rank == r_claim_or
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  ensures result is Ok implies p.pos > old(p).pos
+  decreases (List.len(xs: p.toks) - p.pos) * 64 + rank
+{
+  let s: Int = here(p: p)
+  let first: ChainedClaim = try claim_and(p: inout p, rank: r_claim_and)
+  if not at_word(p: p, want: "or") {
+    return Ok(value: first.pred)
+  }
+  var operands: Builder[ast.ClaimPred] = List.builder()
+  List.push(b: inout operands, x: first.pred)
+  var mixed: Bool = first.chained
+  let toks0: List[tokens.Token] = p.toks
+  let start0: Int = p.pos
+  loop while at_word(p: p, want: "or") and p.pos < List.len(xs: p.toks) - 1
+    invariant p.pos >= start0 and p.toks == toks0
+    decreases List.len(xs: p.toks) - p.pos
+  {
+    skip(p: inout p)
+    let next: ChainedClaim = try claim_and(p: inout p, rank: r_claim_and)
+    if next.chained {
+      mixed = true
+    }
+    List.push(b: inout operands, x: next.pred)
+  }
+  let span: ast.Span = span_from(p: p, start: s)
+  if mixed {
+    report(
+      p: inout p,
+      code: "E0007",
+      start: span.start,
+      end: span.end,
+      detail: "write `(a and b) or c` or `a and (b or c)`"
+    )
+  }
+  return Ok(value: ast.ClaimOr(operands: List.finish(b: operands), span: span))
+}
+
+fn claim_and(p: inout Parser, rank: Int) -> Result[ChainedClaim, Fail] may mutate, alloc
+  requires rank == r_claim_and
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  ensures result is Ok implies p.pos > old(p).pos
+  decreases (List.len(xs: p.toks) - p.pos) * 64 + rank
+{
+  let s: Int = here(p: p)
+  let first: ast.ClaimPred = try claim_not(p: inout p, rank: r_claim_not)
+  if not at_word(p: p, want: "and") {
+    return Ok(value: ChainedClaim { pred: first, chained: false })
+  }
+  var operands: Builder[ast.ClaimPred] = List.builder()
+  List.push(b: inout operands, x: first)
+  let toks0: List[tokens.Token] = p.toks
+  let start0: Int = p.pos
+  loop while at_word(p: p, want: "and") and p.pos < List.len(xs: p.toks) - 1
+    invariant p.pos >= start0 and p.toks == toks0
+    decreases List.len(xs: p.toks) - p.pos
+  {
+    skip(p: inout p)
+    let next: ast.ClaimPred = try claim_not(p: inout p, rank: r_claim_not)
+    List.push(b: inout operands, x: next)
+  }
+  return Ok(
+    value: ChainedClaim {
+      pred: ast.ClaimAnd(operands: List.finish(b: operands), span: span_from(p: p, start: s)),
+      chained: true
+    }
+  )
+}
+
+fn claim_not(p: inout Parser, rank: Int) -> Result[ast.ClaimPred, Fail] may mutate, alloc
+  requires rank == r_claim_not
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  decreases (List.len(xs: p.toks) - p.pos) * 64 + rank
+  ensures result is Ok implies p.pos > old(p).pos
+{
+  let s: Int = here(p: p)
+  if accept_word(p: inout p, want: "not") {
+    let operand: ast.ClaimPred = try claim_atom(p: inout p, rank: r_claim_atom)
+    return Ok(value: ast.ClaimNot(operand: operand, span: span_from(p: p, start: s)))
+  }
+  return claim_atom(p: inout p, rank: r_claim_atom)
+}
+
+fn claim_atom(p: inout Parser, rank: Int) -> Result[ast.ClaimPred, Fail] may mutate, alloc
+  requires rank == r_claim_atom
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  decreases (List.len(xs: p.toks) - p.pos) * 64 + rank
+  ensures result is Ok implies p.pos > old(p).pos
+{
+  let s: Int = here(p: p)
+  if accept_punct(p: inout p, want: "(") {
+    let inner: ast.ClaimPred = try claim_or(p: inout p, rank: r_claim_or)
+    try need_punct(p: inout p, want: ")")
+    return Ok(value: inner)
+  }
+  if accept_word(p: inout p, want: "effects") {
+    try need_punct(p: inout p, want: "==")
+    try need_punct(p: inout p, want: "{")
+    var effects: List[ast.EffectRef] = []
+    if not at_punct(p: p, want: "}") {
+      effects = try effect_list(p: inout p)
+    }
+    try need_punct(p: inout p, want: "}")
+    return Ok(value: ast.ClaimEffectsEq(effects: effects, span: span_from(p: p, start: s)))
+  }
+  if at_name(p: p, n: 0) or at_tname(p: p, n: 0) {
+    let name: ast.QName = try dotted(p: inout p)
+    return Ok(value: ast.ClaimAtom(name: name, span: span_from(p: p, start: s)))
+  }
+  return Err(error: fail(p: inout p, expected: "an effect, a claim, `effects == { ... }` or `(`"))
+}
+
+fn parse_capability(
+  p: inout Parser,
+  start: Int where it >= 0,
+  vis: ast.Visibility
+) -> Result[ast.CapabilityDecl, Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+{
+  try need_word(p: inout p, want: "capability")
+  let name: ast.Ident = try expect_tname(p: inout p)
+  p = { p with current_def: name.text }
+  var tparams: List[ast.TParam] = []
+  if at_punct(p: p, want: "[") {
+    tparams = try parse_tparams(p: inout p)
+  }
+  try need_newline(p: inout p)
+  var grant_list: Builder[ast.Grant] = List.builder()
+  var end: Int = name.span.end
+  let toks0: List[tokens.Token] = p.toks
+  let start0: Int = p.pos
+  loop while at_word(p: p, want: "grants") and p.pos < List.len(xs: p.toks) - 1
+    invariant p.pos >= start0 and p.toks == toks0
+    decreases List.len(xs: p.toks) - p.pos
+  {
+    let s: Int = here(p: p)
+    skip(p: inout p)
+    let effect: ast.EffectRef = try effect_ref(p: inout p)
+    var when_cond: Option[ast.Expr] = None
+    if accept_word(p: inout p, want: "when") {
+      let saved: Bool = p.no_brace
+      p = { p with no_brace: true }
+      let e: ast.Expr = try parse_expr(p: inout p, rank: r_expr)
+      p = { p with no_brace: saved }
+      when_cond = Some(value: e)
+    }
+    let gspan: ast.Span = span_from(p: p, start: s)
+    end = gspan.end
+    List.push(
+      b: inout grant_list,
+      x: ast.Grant { effect: effect, when_cond: when_cond, span: gspan }
+    )
+    try need_newline(p: inout p)
+  }
+  return Ok(
+    value: ast.CapabilityDecl {
+      vis: vis,
+      name: name,
+      tparams: tparams,
+      grant_list: List.finish(b: grant_list),
+      span: ast.Span { start: start, end: end }
+    }
+  )
+}
+
+fn parse_path(
+  p: inout Parser,
+  start: Int where it >= 0
+) -> Result[ast.PathDecl, Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+{
+  try need_word(p: inout p, want: "path")
+  let name: ast.Ident = try expect_name(p: inout p)
+  p = { p with current_def: name.text }
+  try need_newline(p: inout p)
+  try need_word(p: inout p, want: "entry")
+  let entry_fn: ast.Ident = try expect_name(p: inout p)
+  try need_newline(p: inout p)
+  var clauses: Builder[ast.PathClause] = List.builder()
+  var end: Int = entry_fn.span.end
+  var more: Bool = true
+  let toks0: List[tokens.Token] = p.toks
+  let start0: Int = p.pos
+  loop while more and p.pos < List.len(xs: p.toks) - 1
+    invariant p.pos >= start0 and p.toks == toks0
+    decreases List.len(xs: p.toks) - p.pos
+  {
+    let s: Int = here(p: p)
+    if accept_word(p: inout p, want: "effects") {
+      try need_punct(p: inout p, want: "<=")
+      try need_punct(p: inout p, want: "{")
+      var effects: List[ast.EffectRef] = []
+      if not at_punct(p: p, want: "}") {
+        effects = try effect_list(p: inout p)
+      }
+      try need_punct(p: inout p, want: "}")
+      let cspan: ast.Span = span_from(p: p, start: s)
+      end = cspan.end
+      List.push(b: inout clauses, x: ast.PathEffects(effects: effects, span: cspan))
+      try need_newline(p: inout p)
+    } else {
+      if accept_word(p: inout p, want: "forbid") {
+        try need_punct(p: inout p, want: "{")
+        var effects: List[ast.EffectRef] = []
+        if not at_punct(p: p, want: "}") {
+          effects = try effect_list(p: inout p)
+        }
+        try need_punct(p: inout p, want: "}")
+        let cspan: ast.Span = span_from(p: p, start: s)
+        end = cspan.end
+        List.push(b: inout clauses, x: ast.PathForbid(effects: effects, span: cspan))
+        try need_newline(p: inout p)
+      } else {
+        if accept_word(p: inout p, want: "require") {
+          try need_punct(p: inout p, want: "{")
+          var claim_list: Builder[ast.QName] = List.builder()
+          if not at_punct(p: p, want: "}") {
+            let first: ast.QName = try dotted(p: inout p)
+            List.push(b: inout claim_list, x: first)
+            let start1: Int = p.pos
+            loop while at_punct(p: p, want: ",") and p.pos < List.len(xs: p.toks) - 1
+              invariant p.pos >= start1 and p.toks == toks0
+              decreases List.len(xs: p.toks) - p.pos
+            {
+              skip(p: inout p)
+              let next: ast.QName = try dotted(p: inout p)
+              List.push(b: inout claim_list, x: next)
+            }
+          }
+          try need_punct(p: inout p, want: "}")
+          let cspan: ast.Span = span_from(p: p, start: s)
+          end = cspan.end
+          List.push(
+            b: inout clauses,
+            x: ast.PathRequire(claim_list: List.finish(b: claim_list), span: cspan)
+          )
+          try need_newline(p: inout p)
+        } else {
+          if accept_word(p: inout p, want: "policy") {
+            let pname: ast.Ident = try expect_name(p: inout p)
+            var except_list: Builder[ast.QName] = List.builder()
+            if accept_word(p: inout p, want: "except") {
+              try need_punct(p: inout p, want: "{")
+              let first: ast.QName = try dotted(p: inout p)
+              List.push(b: inout except_list, x: first)
+              let start2: Int = p.pos
+              loop while at_punct(p: p, want: ",") and p.pos < List.len(xs: p.toks) - 1
+                invariant p.pos >= start2 and p.toks == toks0
+                decreases List.len(xs: p.toks) - p.pos
+              {
+                skip(p: inout p)
+                let next: ast.QName = try dotted(p: inout p)
+                List.push(b: inout except_list, x: next)
+              }
+              try need_punct(p: inout p, want: "}")
+            }
+            let cspan: ast.Span = span_from(p: p, start: s)
+            end = cspan.end
+            List.push(
+              b: inout clauses,
+              x: ast.PathPolicy(name: pname, except_list: List.finish(b: except_list), span: cspan)
+            )
+            try need_newline(p: inout p)
+          } else {
+            more = false
+          }
+        }
+      }
+    }
+  }
+  return Ok(
+    value: ast.PathDecl {
+      name: name,
+      entry_fn: entry_fn,
+      clauses: List.finish(b: clauses),
+      span: ast.Span { start: start, end: end }
+    }
+  )
+}
+
+fn parse_policy(
+  p: inout Parser,
+  start: Int where it >= 0
+) -> Result[ast.PolicyDecl, Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+{
+  try need_word(p: inout p, want: "policy")
+  let name: ast.Ident = try expect_name(p: inout p)
+  p = { p with current_def: name.text }
+  try need_newline(p: inout p)
+  try need_word(p: inout p, want: "forbid")
+  try need_word(p: inout p, want: "assume")
+  try need_word(p: inout p, want: "outside")
+  try need_punct(p: inout p, want: "{")
+  var outside_list: Builder[ast.PolicyScope] = List.builder()
+  var more: Bool = true
+  let toks0: List[tokens.Token] = p.toks
+  let start0: Int = p.pos
+  loop while more and p.pos < List.len(xs: p.toks) - 1
+    invariant p.pos >= start0 and p.toks == toks0
+    decreases List.len(xs: p.toks) - p.pos
+  {
+    let s: Int = here(p: p)
+    if accept_word(p: inout p, want: "self") {
+      List.push(
+        b: inout outside_list,
+        x: ast.PolicyScope { name: None, glob: false, span: span_from(p: p, start: s) }
+      )
+    } else {
+      let n: ast.QName = try module_name(p: inout p)
+      var glob: Bool = false
+      if at_punct(p: p, want: ".") and at_punct_n(p: p, n: 1, want: "*") {
+        skip(p: inout p)
+        skip(p: inout p)
+        glob = true
+      }
+      List.push(
+        b: inout outside_list,
+        x: ast.PolicyScope { name: Some(value: n), glob: glob, span: span_from(p: p, start: s) }
+      )
+    }
+    more = accept_punct(p: inout p, want: ",")
+  }
+  try need_punct(p: inout p, want: "}")
+  return Ok(
+    value: ast.PolicyDecl {
+      name: name,
+      outside_list: List.finish(b: outside_list),
+      span: span_from(p: p, start: start)
+    }
+  )
+}
+
+fn parse_example(
+  p: inout Parser,
+  start: Int where it >= 0
+) -> Result[ast.ExampleDecl, Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+{
+  try need_word(p: inout p, want: "example")
+  let name: ast.Ident = try expect_name(p: inout p)
+  p = { p with current_def: name.text }
+  let body: ast.Block = try parse_assertion_block(p: inout p, rank: r_block)
+  return Ok(value: ast.ExampleDecl { name: name, body: body, span: span_from(p: p, start: start) })
+}
+
+fn parse_property(
+  p: inout Parser,
+  start: Int where it >= 0
+) -> Result[ast.PropertyDecl, Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+{
+  try need_word(p: inout p, want: "property")
+  let name: ast.Ident = try expect_name(p: inout p)
+  p = { p with current_def: name.text }
+  let params: List[ast.Param] = try param_list(p: inout p, rank: r_param_list)
+  let body: ast.Block = try parse_assertion_block(p: inout p, rank: r_block)
+  return Ok(
+    value: ast.PropertyDecl {
+      name: name,
+      params: params,
+      body: body,
+      span: span_from(p: p, start: start)
+    }
+  )
+}
+
+-- Types -------------------------------------------------------------------------
+fn parse_type(p: inout Parser, rank: Int) -> Result[ast.Type, Fail] may mutate, alloc
+  requires rank == r_type
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  decreases (List.len(xs: p.toks) - p.pos) * 64 + rank
+  ensures result is Ok implies p.pos > old(p).pos
+{
+  let s: Int = here(p: p)
+  if accept_word(p: inout p, want: "fn") {
+    let params: List[ast.Param] = try param_list(p: inout p, rank: r_param_list)
+    try need_punct(p: inout p, want: "->")
+    let ret: ast.Type = try parse_type(p: inout p, rank: r_type)
+    let effects: List[ast.EffectRef] = try effects_opt(p: inout p)
+    return Ok(
+      value: ast.FnType(params: params, ret: ret, effects: effects, span: span_from(p: p, start: s))
+    )
+  }
+  if not qtname_ahead(p: p) {
+    return Err(error: fail(p: inout p, expected: "a type"))
+  }
+  let name: ast.QName = try qtname(p: inout p)
+  var args: List[ast.TypeArg] = []
+  if at_punct(p: p, want: "[") {
+    args = try type_args(p: inout p, rank: r_type_args)
+  }
+  var where_: Option[ast.Expr] = None
+  if accept_word(p: inout p, want: "where") {
+    let e: ast.Expr = try parse_expr(p: inout p, rank: r_expr)
+    where_ = Some(value: e)
+  }
+  return Ok(
+    value: ast.NamedType(name: name, args: args, where_: where_, span: span_from(p: p, start: s))
+  )
+}
+
+-- The type of a quantified variable: no `where` clause, which belongs to the quantifier.
+fn parse_binder_type(p: inout Parser, rank: Int) -> Result[ast.Type, Fail] may mutate, alloc
+  requires rank == r_binder_type
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  decreases (List.len(xs: p.toks) - p.pos) * 64 + rank
+  ensures result is Ok implies p.pos > old(p).pos
+{
+  let s: Int = here(p: p)
+  if at_word(p: p, want: "fn") {
+    return parse_type(p: inout p, rank: r_type)
+  }
+  if not qtname_ahead(p: p) {
+    return Err(error: fail(p: inout p, expected: "a type"))
+  }
+  let name: ast.QName = try qtname(p: inout p)
+  var args: List[ast.TypeArg] = []
+  if at_punct(p: p, want: "[") {
+    args = try type_args(p: inout p, rank: r_type_args)
+  }
+  return Ok(
+    value: ast.NamedType(name: name, args: args, where_: None, span: span_from(p: p, start: s))
+  )
+}
+
+fn type_args(p: inout Parser, rank: Int) -> Result[List[ast.TypeArg], Fail] may mutate, alloc
+  requires rank == r_type_args
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  decreases (List.len(xs: p.toks) - p.pos) * 64 + rank
+{
+  try need_punct(p: inout p, want: "[")
+  var out: Builder[ast.TypeArg] = List.builder()
+  let saved: Bool = p.no_brace
+  p = { p with no_brace: false }
+  var more: Bool = true
+  let toks0: List[tokens.Token] = p.toks
+  let start0: Int = p.pos
+  loop while more and p.pos < List.len(xs: p.toks) - 1
+    invariant p.pos >= start0 and p.toks == toks0
+    decreases List.len(xs: p.toks) - p.pos
+  {
+    let a: ast.TypeArg = try type_arg(p: inout p, rank: r_type_arg)
+    List.push(b: inout out, x: a)
+    more = accept_punct(p: inout p, want: ",")
+  }
+  p = { p with no_brace: saved }
+  try need_punct(p: inout p, want: "]")
+  return Ok(value: List.finish(b: out))
+}
+
+fn type_arg(p: inout Parser, rank: Int) -> Result[ast.TypeArg, Fail] may mutate, alloc
+  requires rank == r_type_arg
+  ensures p.toks == old(p).toks and p.pos > old(p).pos
+  decreases (List.len(xs: p.toks) - p.pos) * 64 + rank
+{
+  let s: Int = here(p: p)
+  var label: Option[ast.Ident] = None
+  if at_name(p: p, n: 0) and at_punct_n(p: p, n: 1, want: ":") {
+    let l: ast.Ident = try expect_name(p: inout p)
+    skip(p: inout p)
+    label = Some(value: l)
+  }
+  if at_word(p: p, want: "fn") or qtname_ahead(p: p) {
+    let ty: ast.Type = try parse_type(p: inout p, rank: r_type)
+    return Ok(value: ast.TypeArgType(label: label, ty: ty, span: span_from(p: p, start: s)))
+  }
+  let e: ast.Expr = try parse_expr(p: inout p, rank: r_expr)
+  return Ok(value: ast.TypeArgConst(label: label, expr: e, span: span_from(p: p, start: s)))
+}
+
+-- Statements --------------------------------------------------------------------
+fn parse_block(
+  p: inout Parser,
+  rank: Int,
+  allow_elided: Bool
+) -> Result[ast.Block, Fail] may mutate, alloc
+  requires rank == r_block
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  decreases (List.len(xs: p.toks) - p.pos) * 64 + rank
+{
+  let s: Int = here(p: p)
+  let saved_assert: Bool = p.assertion_block
+  let saved_brace: Bool = p.no_brace
+  p = { p with assertion_block: false, no_brace: false }
+  try need_punct(p: inout p, want: "{")
+  if allow_elided and accept_punct(p: inout p, want: "...") {
+    try need_punct(p: inout p, want: "}")
+    p = { p with assertion_block: saved_assert, no_brace: saved_brace }
+    return Ok(value: ast.Block { stmts: [], elided: true, span: span_from(p: p, start: s) })
+  }
+  let stmts: List[ast.Stmt] = try braced_stmts(p: inout p, rank: r_stmts)
+  p = { p with assertion_block: saved_assert, no_brace: saved_brace }
+  return Ok(value: ast.Block { stmts: stmts, elided: false, span: span_from(p: p, start: s) })
+}
+
+-- A block whose bare expression statements are assertions (§5.2).
+fn parse_assertion_block(p: inout Parser, rank: Int) -> Result[ast.Block, Fail] may mutate, alloc
+  requires rank == r_block
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  decreases (List.len(xs: p.toks) - p.pos) * 64 + rank
+{
+  let s: Int = here(p: p)
+  let saved_assert: Bool = p.assertion_block
+  let saved_brace: Bool = p.no_brace
+  p = { p with assertion_block: true, no_brace: false }
+  try need_punct(p: inout p, want: "{")
+  let stmts: List[ast.Stmt] = try braced_stmts(p: inout p, rank: r_stmts)
+  p = { p with assertion_block: saved_assert, no_brace: saved_brace }
+  return Ok(value: ast.Block { stmts: stmts, elided: false, span: span_from(p: p, start: s) })
+}
+
+-- After the opening brace: `( NL { stmt NL } | [ stmt ] ) "}"` with statement-level recovery.
+fn braced_stmts(p: inout Parser, rank: Int) -> Result[List[ast.Stmt], Fail] may mutate, alloc
+  requires rank == r_stmts
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  decreases (List.len(xs: p.toks) - p.pos) * 64 + rank
+{
+  var out: Builder[ast.Stmt] = List.builder()
+  if accept_newline(p: inout p) {
+    let toks0: List[tokens.Token] = p.toks
+    let start0: Int = p.pos
+    loop while not at_punct(p: p, want: "}") and not at_eof(p: p) and p.pos < List.len(
+      xs: p.toks
+    ) - 1
+      invariant p.pos >= start0 and p.toks == toks0
+      decreases List.len(xs: p.toks) - p.pos
+    {
+      let before: Int = p.pos
+      match parse_stmt(p: inout p, rank: r_stmt) with
+      | Ok(value) -> {
+        List.push(b: inout out, x: value)
+        let term: Result[Unit, Fail] = terminator(p: inout p, in_block: true)
+        if term is Ok {
+          p = p
+        } else {
+          recover_to_line_end(p: inout p)
+          skip_newline(p: inout p)
+        }
+      }
+      | Err(error) -> {
+        if p.pos == before {
+          skip(p: inout p)
+        }
+        recover_to_line_end(p: inout p)
+        skip_newline(p: inout p)
+      }
+      if p.pos == before {
+        skip(p: inout p)
+      }
+    }
+    try need_punct(p: inout p, want: "}")
+    return Ok(value: List.finish(b: out))
+  }
+  if accept_punct(p: inout p, want: "}") {
+    return Ok(value: List.finish(b: out))
+  }
+  let one: ast.Stmt = try parse_stmt(p: inout p, rank: r_stmt)
+  List.push(b: inout out, x: one)
+  try need_punct(p: inout p, want: "}")
+  return Ok(value: List.finish(b: out))
+}
+
+fn parse_stmt(p: inout Parser, rank: Int) -> Result[ast.Stmt, Fail] may mutate, alloc
+  requires rank == r_stmt
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  decreases (List.len(xs: p.toks) - p.pos) * 64 + rank
+  ensures result is Ok implies p.pos > old(p).pos
+{
+  let s: Int = here(p: p)
+  if at_word(p: p, want: "let") or at_word(p: p, want: "var") {
+    let kw: tokens.Token = advance(p: inout p)
+    let name: ast.Ident = try expect_name(p: inout p)
+    try need_punct(p: inout p, want: ":")
+    let ty: ast.Type = try parse_type(p: inout p, rank: r_type)
+    try need_punct(p: inout p, want: "=")
+    let value: ast.Expr = try parse_expr(p: inout p, rank: r_expr)
+    if ident_of(t: kw).text == "let" {
+      return Ok(value: ast.Let(name: name, ty: ty, value: value, span: span_from(p: p, start: s)))
+    }
+    return Ok(value: ast.Var(name: name, ty: ty, value: value, span: span_from(p: p, start: s)))
+  }
+  if accept_word(p: inout p, want: "return") {
+    let value: ast.Expr = try parse_expr(p: inout p, rank: r_expr)
+    return Ok(value: ast.Return(value: value, span: span_from(p: p, start: s)))
+  }
+  if at_word(p: p, want: "if") {
+    return parse_if(p: inout p, rank: r_if)
+  }
+  if accept_word(p: inout p, want: "match") {
+    let saved: Bool = p.no_brace
+    p = { p with no_brace: true }
+    let scrutinee: ast.Expr = try parse_expr(p: inout p, rank: r_expr)
+    p = { p with no_brace: saved }
+    try need_word(p: inout p, want: "with")
+    try need_newline(p: inout p)
+    var arms: Builder[ast.Arm] = List.builder()
+    var end: Int = span_of_expr(e: scrutinee).end
+    var more: Bool = at_punct(p: p, want: "|")
+    let toks0: List[tokens.Token] = p.toks
+    let start0: Int = p.pos
+    loop while more and p.pos < List.len(xs: p.toks) - 1
+      invariant p.pos >= start0 and p.toks == toks0
+      decreases List.len(xs: p.toks) - p.pos
+    {
+      let as_: Int = here(p: p)
+      skip(p: inout p)
+      let pattern: ast.Pattern = try parse_pattern(p: inout p, rank: r_pattern)
+      var guard: Option[ast.Expr] = None
+      if accept_word(p: inout p, want: "when") {
+        let g: ast.Expr = try parse_expr(p: inout p, rank: r_expr)
+        guard = Some(value: g)
+      }
+      try need_punct(p: inout p, want: "->")
+      var body: ast.ArmBody = ast.ArmBlock(
+        block: ast.Block { stmts: [], elided: false, span: span_from(p: p, start: as_) }
+      )
+      if at_punct(p: p, want: "{") {
+        let b: ast.Block = try parse_block(p: inout p, rank: r_block, allow_elided: false)
+        body = ast.ArmBlock(block: b)
+      } else {
+        let st: ast.Stmt = try parse_stmt(p: inout p, rank: r_stmt)
+        body = ast.ArmStmt(stmt: st)
+      }
+      let aspan: ast.Span = span_from(p: p, start: as_)
+      end = aspan.end
+      List.push(
+        b: inout arms,
+        x: ast.Arm { pattern: pattern, guard: guard, body: body, span: aspan }
+      )
+      try terminator(p: inout p, in_block: true)
+      more = at_punct(p: p, want: "|") and not at_punct(p: p, want: "}") and not at_eof(p: p)
+    }
+    return Ok(
+      value: ast.Match(
+        scrutinee: scrutinee,
+        arms: List.finish(b: arms),
+        span: ast.Span { start: s, end: end }
+      )
+    )
+  }
+  if accept_word(p: inout p, want: "loop") {
+    try need_word(p: inout p, want: "while")
+    let saved: Bool = p.no_brace
+    p = { p with no_brace: true }
+    let cond: ast.Expr = try parse_expr(p: inout p, rank: r_expr)
+    var clauses: Builder[ast.LoopClause] = List.builder()
+    let toks0: List[tokens.Token] = p.toks
+    let start0: Int = p.pos
+    loop while (at_word(p: p, want: "invariant") or at_word(
+      p: p,
+      want: "decreases"
+    )) and p.pos < List.len(xs: p.toks) - 1
+      invariant p.pos >= start0 and p.toks == toks0
+      decreases List.len(xs: p.toks) - p.pos
+    {
+      let cs: Int = here(p: p)
+      let kw: tokens.Token = advance(p: inout p)
+      let e: ast.Expr = try parse_expr(p: inout p, rank: r_expr)
+      List.push(
+        b: inout clauses,
+        x: ast.LoopClause {
+          clause: ident_of(t: kw).text,
+          expr: e,
+          span: span_from(p: p, start: cs)
+        }
+      )
+    }
+    p = { p with no_brace: saved }
+    let body: ast.Block = try parse_block(p: inout p, rank: r_block, allow_elided: false)
+    return Ok(
+      value: ast.Loop(
+        cond: cond,
+        clauses: List.finish(b: clauses),
+        body: body,
+        span: span_from(p: p, start: s)
+      )
+    )
+  }
+  if accept_word(p: inout p, want: "for") {
+    let name: ast.Ident = try expect_name(p: inout p)
+    try need_punct(p: inout p, want: ":")
+    let ty: ast.Type = try parse_type(p: inout p, rank: r_type)
+    try need_word(p: inout p, want: "in")
+    let saved: Bool = p.no_brace
+    p = { p with no_brace: true }
+    let domain: ast.Domain = try parse_domain(p: inout p, rank: r_domain)
+    p = { p with no_brace: saved }
+    let body: ast.Block = try parse_block(p: inout p, rank: r_block, allow_elided: false)
+    return Ok(
+      value: ast.For(
+        name: name,
+        ty: ty,
+        domain: domain,
+        body: body,
+        span: span_from(p: p, start: s)
+      )
+    )
+  }
+  if accept_word(p: inout p, want: "assume") {
+    let claim: ast.QName = try dotted(p: inout p)
+    var justification: Text = ""
+    if kind_at(p: p, n: 0) is tokens.TextLit {
+      let t: tokens.Token = advance(p: inout p)
+      justification = text_value(t: t)
+    } else {
+      return Err(error: fail(p: inout p, expected: "a text literal"))
+    }
+    var verify_block: Option[ast.VerifyBlock] = None
+    if at_word(p: p, want: "verify") {
+      let vs: Int = here(p: p)
+      skip(p: inout p)
+      let params: List[ast.Param] = try param_list(p: inout p, rank: r_param_list)
+      let effects: List[ast.EffectRef] = try effects_opt(p: inout p)
+      let body: ast.Block = try parse_assertion_block(p: inout p, rank: r_block)
+      verify_block = Some(
+        value: ast.VerifyBlock {
+          params: params,
+          effects: effects,
+          body: body,
+          span: span_from(p: p, start: vs)
+        }
+      )
+    }
+    return Ok(
+      value: ast.Assume(
+        claim: claim,
+        justification: justification,
+        verify_block: verify_block,
+        span: span_from(p: p, start: s)
+      )
+    )
+  }
+  let e: ast.Expr = try parse_expr(p: inout p, rank: r_expr)
+  match e with
+  | ast.Name(name, span) -> {
+    if accept_punct(p: inout p, want: "=") {
+      let value: ast.Expr = try parse_expr(p: inout p, rank: r_expr)
+      return Ok(value: ast.Assign(name: name, value: value, span: span_from(p: p, start: s)))
+    }
+  }
+  | _ -> {
+    p = p
+  }
+  if not p.assertion_block and not is_call_for_effect(e: e) {
+    let espan: ast.Span = span_of_expr(e: e)
+    report(
+      p: inout p,
+      code: "E0002",
+      start: espan.start,
+      end: espan.end,
+      detail: "a bare expression statement must be a call (or `try` of a call)"
+    )
+  }
+  return Ok(value: ast.ExprStmt(expr: e, span: span_from(p: p, start: s)))
+}
+
+fn parse_if(p: inout Parser, rank: Int) -> Result[ast.Stmt, Fail] may mutate, alloc
+  requires rank == r_if
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  decreases (List.len(xs: p.toks) - p.pos) * 64 + rank
+  ensures result is Ok implies p.pos > old(p).pos
+{
+  let s: Int = here(p: p)
+  try need_word(p: inout p, want: "if")
+  let saved: Bool = p.no_brace
+  p = { p with no_brace: true }
+  let cond: ast.Expr = try parse_expr(p: inout p, rank: r_expr)
+  p = { p with no_brace: saved }
+  let then_block: ast.Block = try parse_block(p: inout p, rank: r_block, allow_elided: false)
+  var else_block: Option[ast.Block] = None
+  if accept_word(p: inout p, want: "else") {
+    if at_word(p: p, want: "if") {
+      let nested: ast.Stmt = try parse_if(p: inout p, rank: r_if)
+      let nspan: ast.Span = span_of_stmt(st: nested)
+      else_block = Some(value: ast.Block { stmts: [nested], elided: false, span: nspan })
+    } else {
+      let b: ast.Block = try parse_block(p: inout p, rank: r_block, allow_elided: false)
+      else_block = Some(value: b)
+    }
+  }
+  return Ok(
+    value: ast.If(
+      cond: cond,
+      then_block: then_block,
+      else_block: else_block,
+      span: span_from(p: p, start: s)
+    )
+  )
+}
+
+fn parse_domain(p: inout Parser, rank: Int) -> Result[ast.Domain, Fail] may mutate, alloc
+  requires rank == r_domain
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  decreases (List.len(xs: p.toks) - p.pos) * 64 + rank
+  ensures result is Ok implies p.pos > old(p).pos
+{
+  let s: Int = here(p: p)
+  let first: ast.Expr = try parse_expr(p: inout p, rank: r_expr)
+  if accept_punct(p: inout p, want: "..<") {
+    let hi: ast.Expr = try parse_expr(p: inout p, rank: r_expr)
+    return Ok(value: ast.RangeDomain(lo: first, hi: hi, span: span_from(p: p, start: s)))
+  }
+  return Ok(value: ast.InDomain(expr: first, span: span_from(p: p, start: s)))
+}
+
+pub fn span_of_expr(e: ast.Expr) -> ast.Span {
+  match e with
+  | ast.IntLit(value, span) -> return span
+  | ast.FloatLit(value, span) -> return span
+  | ast.TextLit(value, span) -> return span
+  | ast.BoolLit(value, span) -> return span
+  | ast.DurationLit(nanos, span) -> return span
+  | ast.Name(name, span) -> return span
+  | ast.It(span) -> return span
+  | ast.ResultRef(span) -> return span
+  | ast.Ctor(name, args, fields, span) -> return span
+  | ast.RecordUpdate(base, fields, span) -> return span
+  | ast.ListLit(elems, span) -> return span
+  | ast.Try(expr, else_, span) -> return span
+  | ast.Recover(body, span) -> return span
+  | ast.Old(name, span) -> return span
+  | ast.Quantifier(quant, name, ty, domain, where_, body, span) -> return span
+  | ast.Closure(params, ret, effects, body, span) -> return span
+  | ast.Fake(capability, fields, span) -> return span
+  | ast.Hole(span) -> return span
+  | ast.FieldAccess(object, name, span) -> return span
+  | ast.Call(callee, targs, args, span) -> return span
+  | ast.Unary(op, operand, span) -> return span
+  | ast.Binary(op, left, right, span) -> return span
+  | ast.And(operands, span) -> return span
+  | ast.Or(operands, span) -> return span
+  | ast.Is(expr, pattern, span) -> return span
+}
+
+pub fn span_of_stmt(st: ast.Stmt) -> ast.Span {
+  match st with
+  | ast.Let(name, ty, value, span) -> return span
+  | ast.Var(name, ty, value, span) -> return span
+  | ast.Assign(name, value, span) -> return span
+  | ast.Return(value, span) -> return span
+  | ast.If(cond, then_block, else_block, span) -> return span
+  | ast.Match(scrutinee, arms, span) -> return span
+  | ast.Loop(cond, clauses, body, span) -> return span
+  | ast.For(name, ty, domain, body, span) -> return span
+  | ast.Assume(claim, justification, verify_block, span) -> return span
+  | ast.ExprStmt(expr, span) -> return span
+}
+
+-- True iff `e` is a call, or a `try` whose operand is one (a bare expression statement must be a call).
+fn is_call_for_effect(e: ast.Expr) -> Bool {
+  match e with
+  | ast.Call(callee, targs, args, span) -> return true
+  | ast.Try(expr, else_, span) -> return is_call_for_effect_of_try(e: expr)
+  | _ -> return false
+}
+
+-- One level of `try` is enough for the statement rule: `try try f()` is not written.
+fn is_call_for_effect_of_try(e: ast.Expr) -> Bool {
+  match e with
+  | ast.Call(callee, targs, args, span) -> return true
+  | ast.Try(expr, else_, span) -> return expr is ast.Call
+  | _ -> return false
+}
+
+-- Expressions --------------------------------------------------------------------
+pub fn parse_expr(p: inout Parser, rank: Int) -> Result[ast.Expr, Fail] may mutate, alloc
+  requires rank == r_expr
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  decreases (List.len(xs: p.toks) - p.pos) * 64 + rank
+  ensures result is Ok implies p.pos > old(p).pos
+{
+  let s: Int = here(p: p)
+  let left: ast.Expr = try or_expr(p: inout p, rank: r_or)
+  if not at_word(p: p, want: "implies") {
+    return Ok(value: left)
+  }
+  skip(p: inout p)
+  let right: ast.Expr = try or_expr(p: inout p, rank: r_or)
+  let span: ast.Span = span_from(p: p, start: s)
+  if at_word(p: p, want: "implies") {
+    let t: tokens.Token = peek(p: p, n: 0)
+    report(
+      p: inout p,
+      code: "E0011",
+      start: t.start,
+      end: t.end,
+      detail: "parenthesise one side: `(a implies b) implies c` or `a implies (b implies c)`"
+    )
+    skip(p: inout p)
+    let extra: ast.Expr = try or_expr(p: inout p, rank: r_or)
+  }
+  return Ok(value: ast.Binary(op: "implies", left: left, right: right, span: span))
+}
+
+fn or_expr(p: inout Parser, rank: Int) -> Result[ast.Expr, Fail] may mutate, alloc
+  requires rank == r_or
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  ensures result is Ok implies p.pos > old(p).pos
+  decreases (List.len(xs: p.toks) - p.pos) * 64 + rank
+{
+  let s: Int = here(p: p)
+  let first: Chained = try and_expr(p: inout p, rank: r_and)
+  if not at_word(p: p, want: "or") {
+    return Ok(value: first.expr)
+  }
+  var operands: Builder[ast.Expr] = List.builder()
+  List.push(b: inout operands, x: first.expr)
+  var mixed: Bool = first.chained
+  let toks0: List[tokens.Token] = p.toks
+  let start0: Int = p.pos
+  loop while at_word(p: p, want: "or") and p.pos < List.len(xs: p.toks) - 1
+    invariant p.pos >= start0 and p.toks == toks0
+    decreases List.len(xs: p.toks) - p.pos
+  {
+    skip(p: inout p)
+    let next: Chained = try and_expr(p: inout p, rank: r_and)
+    if next.chained {
+      mixed = true
+    }
+    List.push(b: inout operands, x: next.expr)
+  }
+  let span: ast.Span = span_from(p: p, start: s)
+  if mixed {
+    report(
+      p: inout p,
+      code: "E0007",
+      start: span.start,
+      end: span.end,
+      detail: "write `(a and b) or c` or `a and (b or c)`"
+    )
+  }
+  return Ok(value: ast.Or(operands: List.finish(b: operands), span: span))
+}
+
+fn and_expr(p: inout Parser, rank: Int) -> Result[Chained, Fail] may mutate, alloc
+  requires rank == r_and
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  ensures result is Ok implies p.pos > old(p).pos
+  decreases (List.len(xs: p.toks) - p.pos) * 64 + rank
+{
+  let s: Int = here(p: p)
+  let first: ast.Expr = try not_expr(p: inout p, rank: r_not)
+  if not at_word(p: p, want: "and") {
+    return Ok(value: Chained { expr: first, chained: false })
+  }
+  var operands: Builder[ast.Expr] = List.builder()
+  List.push(b: inout operands, x: first)
+  let toks0: List[tokens.Token] = p.toks
+  let start0: Int = p.pos
+  loop while at_word(p: p, want: "and") and p.pos < List.len(xs: p.toks) - 1
+    invariant p.pos >= start0 and p.toks == toks0
+    decreases List.len(xs: p.toks) - p.pos
+  {
+    skip(p: inout p)
+    let next: ast.Expr = try not_expr(p: inout p, rank: r_not)
+    List.push(b: inout operands, x: next)
+  }
+  return Ok(
+    value: Chained {
+      expr: ast.And(operands: List.finish(b: operands), span: span_from(p: p, start: s)),
+      chained: true
+    }
+  )
+}
+
+fn not_expr(p: inout Parser, rank: Int) -> Result[ast.Expr, Fail] may mutate, alloc
+  requires rank == r_not
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  decreases (List.len(xs: p.toks) - p.pos) * 64 + rank
+  ensures result is Ok implies p.pos > old(p).pos
+{
+  let s: Int = here(p: p)
+  if accept_word(p: inout p, want: "not") {
+    let operand: ast.Expr = try cmp_expr(p: inout p, rank: r_cmp)
+    return Ok(value: ast.Unary(op: "not", operand: operand, span: span_from(p: p, start: s)))
+  }
+  return cmp_expr(p: inout p, rank: r_cmp)
+}
+
+fn is_cmp_op(kind: tokens.Kind) -> Bool {
+  match kind with
+  | tokens.Punct(text) -> return text == "==" or text == "!=" or text == "<" or text == "<=" or text == ">" or text == ">="
+  | _ -> return false
+}
+
+fn is_add_op(kind: tokens.Kind) -> Bool {
+  match kind with
+  | tokens.Punct(text) -> return text == "+" or text == "-" or text == "++"
+  | _ -> return false
+}
+
+fn is_mul_op(kind: tokens.Kind) -> Bool {
+  match kind with
+  | tokens.Punct(text) -> return text == "*" or text == "/" or text == "%"
+  | _ -> return false
+}
+
+fn cmp_expr(p: inout Parser, rank: Int) -> Result[ast.Expr, Fail] may mutate, alloc
+  requires rank == r_cmp
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  decreases (List.len(xs: p.toks) - p.pos) * 64 + rank
+  ensures result is Ok implies p.pos > old(p).pos
+{
+  let s: Int = here(p: p)
+  let left: ast.Expr = try add_expr(p: inout p, rank: r_add)
+  if at_word(p: p, want: "is") {
+    skip(p: inout p)
+    let pattern: ast.Pattern = try parse_pattern(p: inout p, rank: r_pattern)
+    return Ok(value: ast.Is(expr: left, pattern: pattern, span: span_from(p: p, start: s)))
+  }
+  if not is_cmp_op(kind: kind_at(p: p, n: 0)) {
+    return Ok(value: left)
+  }
+  let op_tok: tokens.Token = advance(p: inout p)
+  let right: ast.Expr = try add_expr(p: inout p, rank: r_add)
+  let span: ast.Span = span_from(p: p, start: s)
+  if is_cmp_op(kind: kind_at(p: p, n: 0)) {
+    let t: tokens.Token = peek(p: p, n: 0)
+    report(p: inout p, code: "E0006", start: t.start, end: t.end, detail: "write `a < b and b < c`")
+    skip(p: inout p)
+    let extra: ast.Expr = try add_expr(p: inout p, rank: r_add)
+  }
+  return Ok(value: ast.Binary(op: ident_of(t: op_tok).text, left: left, right: right, span: span))
+}
+
+fn add_expr(p: inout Parser, rank: Int) -> Result[ast.Expr, Fail] may mutate, alloc
+  requires rank == r_add
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  decreases (List.len(xs: p.toks) - p.pos) * 64 + rank
+  ensures result is Ok implies p.pos > old(p).pos
+{
+  let s: Int = here(p: p)
+  var left: ast.Expr = try mul_expr(p: inout p, rank: r_mul)
+  let toks0: List[tokens.Token] = p.toks
+  let start0: Int = p.pos
+  loop while is_add_op(kind: kind_at(p: p, n: 0)) and p.pos < List.len(xs: p.toks) - 1
+    invariant p.pos >= start0 and p.toks == toks0
+    decreases List.len(xs: p.toks) - p.pos
+  {
+    let op_tok: tokens.Token = advance(p: inout p)
+    let right: ast.Expr = try mul_expr(p: inout p, rank: r_mul)
+    left = ast.Binary(
+      op: ident_of(t: op_tok).text,
+      left: left,
+      right: right,
+      span: span_from(p: p, start: s)
+    )
+  }
+  return Ok(value: left)
+}
+
+fn mul_expr(p: inout Parser, rank: Int) -> Result[ast.Expr, Fail] may mutate, alloc
+  requires rank == r_mul
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  decreases (List.len(xs: p.toks) - p.pos) * 64 + rank
+  ensures result is Ok implies p.pos > old(p).pos
+{
+  let s: Int = here(p: p)
+  var left: ast.Expr = try unary_expr(p: inout p, rank: r_unary)
+  let toks0: List[tokens.Token] = p.toks
+  let start0: Int = p.pos
+  loop while is_mul_op(kind: kind_at(p: p, n: 0)) and p.pos < List.len(xs: p.toks) - 1
+    invariant p.pos >= start0 and p.toks == toks0
+    decreases List.len(xs: p.toks) - p.pos
+  {
+    let op_tok: tokens.Token = advance(p: inout p)
+    let right: ast.Expr = try unary_expr(p: inout p, rank: r_unary)
+    left = ast.Binary(
+      op: ident_of(t: op_tok).text,
+      left: left,
+      right: right,
+      span: span_from(p: p, start: s)
+    )
+  }
+  return Ok(value: left)
+}
+
+fn unary_expr(p: inout Parser, rank: Int) -> Result[ast.Expr, Fail] may mutate, alloc
+  requires rank == r_unary
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  decreases (List.len(xs: p.toks) - p.pos) * 64 + rank
+  ensures result is Ok implies p.pos > old(p).pos
+{
+  let s: Int = here(p: p)
+  if accept_punct(p: inout p, want: "-") {
+    let operand: ast.Expr = try postfix_expr(p: inout p, rank: r_postfix)
+    return Ok(value: ast.Unary(op: "neg", operand: operand, span: span_from(p: p, start: s)))
+  }
+  return postfix_expr(p: inout p, rank: r_postfix)
+}
+
+-- If `e` is `a.b.c` over a plain name, its segments.
+fn name_chain(e: ast.Expr) -> Option[List[ast.Ident]] may alloc {
+  match e with
+  | ast.Name(name, span) -> return Some(value: [name])
+  | ast.FieldAccess(object, name, span) -> {
+    match name_chain_of_object(e: object) with
+    | Some(value) -> return Some(value: List.append(xs: value, x: name))
+    | None -> return None
+  }
+  | _ -> return None
+}
+
+-- Chains of two and three segments cover every qualified type name the language admits.
+fn name_chain_of_object(e: ast.Expr) -> Option[List[ast.Ident]] may alloc {
+  match e with
+  | ast.Name(name, span) -> return Some(value: [name])
+  | ast.FieldAccess(object, name, span) -> {
+    match single_name(e: object) with
+    | Some(value) -> return Some(value: [value, name])
+    | None -> return None
+  }
+  | _ -> return None
+}
+
+fn single_name(e: ast.Expr) -> Option[ast.Ident] {
+  match e with
+  | ast.Name(name, span) -> return Some(value: name)
+  | _ -> return None
+}
+
+fn postfix_expr(p: inout Parser, rank: Int) -> Result[ast.Expr, Fail] may mutate, alloc
+  requires rank == r_postfix
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  decreases (List.len(xs: p.toks) - p.pos) * 64 + rank
+  ensures result is Ok implies p.pos > old(p).pos
+{
+  let s: Int = here(p: p)
+  var e: ast.Expr = try primary(p: inout p, rank: r_primary)
+  var more: Bool = true
+  let toks0: List[tokens.Token] = p.toks
+  let start0: Int = p.pos
+  loop while more and p.pos < List.len(xs: p.toks) - 1
+    invariant p.pos >= start0 and p.toks == toks0
+    decreases List.len(xs: p.toks) - p.pos
+  {
+    if at_punct(p: p, want: ".") {
+      if at_name(p: p, n: 1) {
+        skip(p: inout p)
+        let name: ast.Ident = try expect_name(p: inout p)
+        e = ast.FieldAccess(object: e, name: name, span: span_from(p: p, start: s))
+      } else {
+        if at_tname(p: p, n: 1) {
+          match name_chain(e: e) with
+          | Some(value) -> {
+            skip(p: inout p)
+            let tn: ast.Ident = try expect_tname(p: inout p)
+            let qn: ast.QName = qname_of(segments: List.append(xs: value, x: tn))
+            e = try ctor_rest(p: inout p, rank: r_ctor_rest, start: s, name: qn)
+          }
+          | None -> {
+            let t: tokens.Token = peek(p: p, n: 1)
+            return Err(error: fail_at(p: inout p, expected: "a field name after `.`", t: t))
+          }
+        } else {
+          skip(p: inout p)
+          return Err(error: fail(p: inout p, expected: "a field name after `.`"))
+        }
+      }
+    } else {
+      if at_punct(p: p, want: "[") {
+        let targs: List[ast.TypeArg] = try type_args(p: inout p, rank: r_type_args)
+        let args: List[ast.Arg] = try call_args(p: inout p, rank: r_call_args)
+        e = ast.Call(
+          callee: e,
+          targs: Some(value: targs),
+          args: args,
+          span: span_from(p: p, start: s)
+        )
+      } else {
+        if at_punct(p: p, want: "(") {
+          let args: List[ast.Arg] = try call_args(p: inout p, rank: r_call_args)
+          e = ast.Call(callee: e, targs: None, args: args, span: span_from(p: p, start: s))
+        } else {
+          more = false
+        }
+      }
+    }
+  }
+  return Ok(value: e)
+}
+
+fn call_args(p: inout Parser, rank: Int) -> Result[List[ast.Arg], Fail] may mutate, alloc
+  requires rank == r_call_args
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  decreases (List.len(xs: p.toks) - p.pos) * 64 + rank
+{
+  try need_punct(p: inout p, want: "(")
+  var out: Builder[ast.Arg] = List.builder()
+  let saved: Bool = p.no_brace
+  p = { p with no_brace: false }
+  if not at_punct(p: p, want: ")") {
+    var more: Bool = true
+    let toks0: List[tokens.Token] = p.toks
+    let start0: Int = p.pos
+    loop while more and p.pos < List.len(xs: p.toks) - 1
+      invariant p.pos >= start0 and p.toks == toks0
+      decreases List.len(xs: p.toks) - p.pos
+    {
+      let s: Int = here(p: p)
+      let name: ast.Ident = try expect_name(p: inout p)
+      try need_punct(p: inout p, want: ":")
+      let is_inout: Bool = accept_word(p: inout p, want: "inout")
+      let value: ast.Expr = try parse_expr(p: inout p, rank: r_expr)
+      List.push(
+        b: inout out,
+        x: ast.Arg { name: name, is_inout: is_inout, value: value, span: span_from(p: p, start: s) }
+      )
+      more = accept_punct(p: inout p, want: ",")
+    }
+  }
+  p = { p with no_brace: saved }
+  try need_punct(p: inout p, want: ")")
+  return Ok(value: List.finish(b: out))
+}
+
+-- `[ call_args ] [ "{" field_inits "}" ]` after a qualified type name.
+fn ctor_rest(
+  p: inout Parser,
+  rank: Int,
+  start: Int where it >= 0,
+  name: ast.QName
+) -> Result[ast.Expr, Fail] may mutate, alloc
+  requires rank == r_ctor_rest
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  decreases (List.len(xs: p.toks) - p.pos) * 64 + rank
+{
+  var args: Option[List[ast.Arg]] = None
+  if at_punct(p: p, want: "(") {
+    let a: List[ast.Arg] = try call_args(p: inout p, rank: r_call_args)
+    args = Some(value: a)
+  }
+  var fields: Option[List[ast.FieldInit]] = None
+  if not p.no_brace and at_punct(p: p, want: "{") {
+    let f: List[ast.FieldInit] = try field_inits(p: inout p, rank: r_field_inits)
+    fields = Some(value: f)
+  }
+  return Ok(
+    value: ast.Ctor(name: name, args: args, fields: fields, span: span_from(p: p, start: start))
+  )
+}
+
+-- `"{" [ NL ] [ field_init { "," [ NL ] field_init } ] [ NL ] "}"`
+fn field_inits(p: inout Parser, rank: Int) -> Result[List[ast.FieldInit], Fail] may mutate, alloc
+  requires rank == r_field_inits
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  decreases (List.len(xs: p.toks) - p.pos) * 64 + rank
+{
+  try need_punct(p: inout p, want: "{")
+  var out: Builder[ast.FieldInit] = List.builder()
+  let saved: Bool = p.no_brace
+  p = { p with no_brace: false }
+  skip_newline(p: inout p)
+  if not at_punct(p: p, want: "}") {
+    var more: Bool = true
+    let toks0: List[tokens.Token] = p.toks
+    let start0: Int = p.pos
+    loop while more and p.pos < List.len(xs: p.toks) - 1
+      invariant p.pos >= start0 and p.toks == toks0
+      decreases List.len(xs: p.toks) - p.pos
+    {
+      skip_newline(p: inout p)
+      let s: Int = here(p: p)
+      let name: ast.Ident = try expect_name(p: inout p)
+      try need_punct(p: inout p, want: ":")
+      let value: ast.Expr = try parse_expr(p: inout p, rank: r_expr)
+      List.push(
+        b: inout out,
+        x: ast.FieldInit { name: name, value: value, span: span_from(p: p, start: s) }
+      )
+      more = accept_punct(p: inout p, want: ",")
+    }
+    skip_newline(p: inout p)
+  }
+  p = { p with no_brace: saved }
+  try need_punct(p: inout p, want: "}")
+  return Ok(value: List.finish(b: out))
+}
+
+fn primary(p: inout Parser, rank: Int) -> Result[ast.Expr, Fail] may mutate, alloc
+  requires rank == r_primary
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  decreases (List.len(xs: p.toks) - p.pos) * 64 + rank
+  ensures result is Ok implies p.pos > old(p).pos
+{
+  let s: Int = here(p: p)
+  let t: tokens.Token = peek(p: p, n: 0)
+  match t.kind with
+  | tokens.IntLit(value) -> {
+    skip(p: inout p)
+    return Ok(value: ast.IntLit(value: value, span: span_of(t: t)))
+  }
+  | tokens.FloatLit(value) -> {
+    skip(p: inout p)
+    return Ok(value: ast.FloatLit(value: value, span: span_of(t: t)))
+  }
+  | tokens.TextLit(value) -> {
+    skip(p: inout p)
+    return Ok(value: ast.TextLit(value: value, span: span_of(t: t)))
+  }
+  | tokens.DurationLit(nanos) -> {
+    skip(p: inout p)
+    return Ok(value: ast.DurationLit(nanos: nanos, span: span_of(t: t)))
+  }
+  | tokens.TName(text) -> {
+    let tn: ast.Ident = try expect_tname(p: inout p)
+    return ctor_rest(p: inout p, rank: r_ctor_rest, start: s, name: qname_of(segments: [tn]))
+  }
+  | tokens.Keyword(word) -> {
+    if word == "true" or word == "false" {
+      skip(p: inout p)
+      return Ok(value: ast.BoolLit(value: word == "true", span: span_of(t: t)))
+    }
+    if word == "it" {
+      skip(p: inout p)
+      return Ok(value: ast.It(span: span_of(t: t)))
+    }
+    if word == "result" {
+      skip(p: inout p)
+      return Ok(value: ast.ResultRef(span: span_of(t: t)))
+    }
+    if word == "try" {
+      skip(p: inout p)
+      let expr: ast.Expr = try parse_expr(p: inout p, rank: r_expr)
+      var else_: Option[ast.TryElse] = None
+      if at_word(p: p, want: "else") {
+        let es: Int = here(p: p)
+        skip(p: inout p)
+        var name: ast.Ident = ast.Ident { text: "_", span: span_of(t: peek(p: p, n: 0)) }
+        if at_punct(p: p, want: "_") {
+          skip(p: inout p)
+        } else {
+          name = try expect_name(p: inout p)
+        }
+        try need_punct(p: inout p, want: ":")
+        let eexpr: ast.Expr = try parse_expr(p: inout p, rank: r_expr)
+        else_ = Some(
+          value: ast.TryElse { name: name, expr: eexpr, span: span_from(p: p, start: es) }
+        )
+      }
+      return Ok(value: ast.Try(expr: expr, else_: else_, span: span_from(p: p, start: s)))
+    }
+    if word == "recover" {
+      skip(p: inout p)
+      let body: ast.Block = try parse_assertion_block(p: inout p, rank: r_block)
+      return Ok(value: ast.Recover(body: body, span: span_from(p: p, start: s)))
+    }
+    if word == "old" {
+      skip(p: inout p)
+      try need_punct(p: inout p, want: "(")
+      let name: ast.Ident = try expect_name(p: inout p)
+      try need_punct(p: inout p, want: ")")
+      return Ok(value: ast.Old(name: name, span: span_from(p: p, start: s)))
+    }
+    if word == "forall" or word == "exists" {
+      skip(p: inout p)
+      let name: ast.Ident = try expect_name(p: inout p)
+      try need_punct(p: inout p, want: ":")
+      let ty: ast.Type = try parse_binder_type(p: inout p, rank: r_binder_type)
+      var domain: Option[ast.Domain] = None
+      if accept_word(p: inout p, want: "in") {
+        let d: ast.Domain = try parse_domain(p: inout p, rank: r_domain)
+        domain = Some(value: d)
+      }
+      var where_: Option[ast.Expr] = None
+      if accept_word(p: inout p, want: "where") {
+        let w: ast.Expr = try parse_expr(p: inout p, rank: r_expr)
+        where_ = Some(value: w)
+      }
+      try need_punct(p: inout p, want: ":")
+      let body: ast.Expr = try parse_expr(p: inout p, rank: r_expr)
+      return Ok(
+        value: ast.Quantifier(
+          quant: word,
+          name: name,
+          ty: ty,
+          domain: domain,
+          where_: where_,
+          body: body,
+          span: span_from(p: p, start: s)
+        )
+      )
+    }
+    if word == "fn" {
+      skip(p: inout p)
+      let params: List[ast.Param] = try param_list(p: inout p, rank: r_param_list)
+      try need_punct(p: inout p, want: "->")
+      let saved: Bool = p.no_brace
+      p = { p with no_brace: true }
+      let ret: ast.Type = try parse_type(p: inout p, rank: r_type)
+      p = { p with no_brace: saved }
+      let effects: List[ast.EffectRef] = try effects_opt(p: inout p)
+      let body: ast.Block = try parse_block(p: inout p, rank: r_block, allow_elided: false)
+      return Ok(
+        value: ast.Closure(
+          params: params,
+          ret: ret,
+          effects: effects,
+          body: body,
+          span: span_from(p: p, start: s)
+        )
+      )
+    }
+    if word == "fake" {
+      skip(p: inout p)
+      if not p.is_test_module {
+        report(
+          p: inout p,
+          code: "E0012",
+          start: t.start,
+          end: t.end,
+          detail: "`fake` constructs capabilities only inside a `test module`"
+        )
+      }
+      let capability: ast.QName = try qtname(p: inout p)
+      let fields: List[ast.FieldInit] = try field_inits(p: inout p, rank: r_field_inits)
+      return Ok(
+        value: ast.Fake(capability: capability, fields: fields, span: span_from(p: p, start: s))
+      )
+    }
+    if tokens.is_soft_keyword(word: word) {
+      let name: ast.Ident = try expect_name(p: inout p)
+      return Ok(value: ast.Name(name: name, span: name.span))
+    }
+    return Err(error: fail(p: inout p, expected: "an expression"))
+  }
+  | tokens.Punct(text) -> {
+    if text == "{" {
+      if p.no_brace {
+        return Err(
+          error: fail(
+            p: inout p,
+            expected: "an expression (parenthesise a record update in this position)"
+          )
+        )
+      }
+      skip(p: inout p)
+      let base: ast.Expr = try parse_expr(p: inout p, rank: r_expr)
+      try need_word(p: inout p, want: "with")
+      var fields: Builder[ast.FieldInit] = List.builder()
+      var more: Bool = true
+      let toks0: List[tokens.Token] = p.toks
+      let start0: Int = p.pos
+      loop while more and p.pos < List.len(xs: p.toks) - 1
+        invariant p.pos >= start0 and p.toks == toks0
+        decreases List.len(xs: p.toks) - p.pos
+      {
+        skip_newline(p: inout p)
+        let fs: Int = here(p: p)
+        let fname: ast.Ident = try expect_name(p: inout p)
+        try need_punct(p: inout p, want: ":")
+        let value: ast.Expr = try parse_expr(p: inout p, rank: r_expr)
+        List.push(
+          b: inout fields,
+          x: ast.FieldInit { name: fname, value: value, span: span_from(p: p, start: fs) }
+        )
+        more = accept_punct(p: inout p, want: ",")
+      }
+      skip_newline(p: inout p)
+      try need_punct(p: inout p, want: "}")
+      return Ok(
+        value: ast.RecordUpdate(
+          base: base,
+          fields: List.finish(b: fields),
+          span: span_from(p: p, start: s)
+        )
+      )
+    }
+    if text == "(" {
+      skip(p: inout p)
+      let saved: Bool = p.no_brace
+      p = { p with no_brace: false }
+      let inner: ast.Expr = try parse_expr(p: inout p, rank: r_expr)
+      p = { p with no_brace: saved }
+      try need_punct(p: inout p, want: ")")
+      return Ok(value: inner)
+    }
+    if text == "[" {
+      skip(p: inout p)
+      var elems: Builder[ast.Expr] = List.builder()
+      let saved: Bool = p.no_brace
+      p = { p with no_brace: false }
+      if not at_punct(p: p, want: "]") {
+        var more: Bool = true
+        let toks0: List[tokens.Token] = p.toks
+        let start0: Int = p.pos
+        loop while more and p.pos < List.len(xs: p.toks) - 1
+          invariant p.pos >= start0 and p.toks == toks0
+          decreases List.len(xs: p.toks) - p.pos
+        {
+          let e: ast.Expr = try parse_expr(p: inout p, rank: r_expr)
+          List.push(b: inout elems, x: e)
+          more = accept_punct(p: inout p, want: ",")
+        }
+      }
+      p = { p with no_brace: saved }
+      try need_punct(p: inout p, want: "]")
+      return Ok(value: ast.ListLit(elems: List.finish(b: elems), span: span_from(p: p, start: s)))
+    }
+    return Err(error: fail(p: inout p, expected: "an expression"))
+  }
+  | tokens.Name(text) -> {
+    let name: ast.Ident = try expect_name(p: inout p)
+    return Ok(value: ast.Name(name: name, span: name.span))
+  }
+  | _ -> return Err(error: fail(p: inout p, expected: "an expression"))
+}
+
+-- Patterns ---------------------------------------------------------------------------
+fn parse_pattern(p: inout Parser, rank: Int) -> Result[ast.Pattern, Fail] may mutate, alloc
+  requires rank == r_pattern
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  decreases (List.len(xs: p.toks) - p.pos) * 64 + rank
+  ensures result is Ok implies p.pos > old(p).pos
+{
+  let s: Int = here(p: p)
+  let t: tokens.Token = peek(p: p, n: 0)
+  if accept_punct(p: inout p, want: "_") {
+    return Ok(value: ast.WildcardPat(span: span_of(t: t)))
+  }
+  if starts_literal_pattern(kind: t.kind) {
+    let lit: ast.Expr = try unary_expr(p: inout p, rank: r_unary)
+    if not is_literal(e: lit) {
+      return Err(error: fail_at(p: inout p, expected: "a literal pattern", t: t))
+    }
+    return Ok(value: ast.LitPat(literal: lit, span: span_from(p: p, start: s)))
+  }
+  if at_tname(p: p, n: 0) {
+    return variant_pattern(p: inout p, rank: r_variant_pattern, start: s)
+  }
+  if at_name(p: p, n: 0) {
+    if not qtname_ahead(p: p) {
+      let name: ast.Ident = try expect_name(p: inout p)
+      return Ok(value: ast.BindPat(name: name, span: name.span))
+    }
+    return variant_pattern(p: inout p, rank: r_variant_pattern, start: s)
+  }
+  return Err(error: fail(p: inout p, expected: "a pattern"))
+}
+
+fn starts_literal_pattern(kind: tokens.Kind) -> Bool {
+  match kind with
+  | tokens.IntLit(value) -> return true
+  | tokens.FloatLit(value) -> return true
+  | tokens.TextLit(value) -> return true
+  | tokens.DurationLit(nanos) -> return true
+  | tokens.Keyword(word) -> return word == "true" or word == "false"
+  | tokens.Punct(text) -> return text == "-"
+  | _ -> return false
+}
+
+fn is_literal(e: ast.Expr) -> Bool {
+  match e with
+  | ast.IntLit(value, span) -> return true
+  | ast.FloatLit(value, span) -> return true
+  | ast.TextLit(value, span) -> return true
+  | ast.BoolLit(value, span) -> return true
+  | ast.DurationLit(nanos, span) -> return true
+  | ast.Unary(op, operand, span) -> return op == "neg" and (operand is ast.IntLit or operand is ast.FloatLit or operand is ast.DurationLit)
+  | _ -> return false
+}
+
+fn variant_pattern(
+  p: inout Parser,
+  rank: Int,
+  start: Int where it >= 0
+) -> Result[ast.Pattern, Fail] may mutate, alloc
+  requires rank == r_variant_pattern
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  decreases (List.len(xs: p.toks) - p.pos) * 64 + rank
+  ensures result is Ok implies p.pos > old(p).pos
+{
+  let name: ast.QName = try qtname(p: inout p)
+  var fields: Option[List[ast.PatField]] = None
+  if accept_punct(p: inout p, want: "(") {
+    var out: Builder[ast.PatField] = List.builder()
+    var more: Bool = true
+    let toks0: List[tokens.Token] = p.toks
+    let start0: Int = p.pos
+    loop while more and p.pos < List.len(xs: p.toks) - 1
+      invariant p.pos >= start0 and p.toks == toks0
+      decreases List.len(xs: p.toks) - p.pos
+    {
+      let fs: Int = here(p: p)
+      if accept_punct(p: inout p, want: "_") {
+        List.push(b: inout out, x: ast.PatFieldSkip(span: span_from(p: p, start: fs)))
+      } else {
+        if accept_punct(p: inout p, want: "..") {
+          List.push(b: inout out, x: ast.PatFieldRest(span: span_from(p: p, start: fs)))
+        } else {
+          let n: ast.Ident = try expect_name(p: inout p)
+          List.push(b: inout out, x: ast.PatFieldName(name: n, span: n.span))
+        }
+      }
+      more = accept_punct(p: inout p, want: ",")
+    }
+    try need_punct(p: inout p, want: ")")
+    fields = Some(value: List.finish(b: out))
+  }
+  return Ok(value: ast.VariantPat(name: name, fields: fields, span: span_from(p: p, start: start)))
+}

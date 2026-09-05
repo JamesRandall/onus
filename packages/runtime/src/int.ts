@@ -50,3 +50,11 @@ export function floor(x: number): { readonly tag: 'Ok'; readonly value: number }
   if (!Number.isSafeInteger(f)) return { tag: 'Err', error: { tag: 'OutOfRange' } };
   return { tag: 'Ok', value: f };
 }
+
+/** A decimal integer with an optional sign; None when malformed or outside 64 bits (std.int.parse). */
+export function parse(t: string): { readonly tag: 'Some'; readonly value: number } | { readonly tag: 'None' } {
+  if (!/^[+-]?[0-9]+$/.test(t)) return { tag: 'None' };
+  const v = BigInt(t);
+  if (v > 9223372036854775807n || v < -9223372036854775808n) return { tag: 'None' };
+  return { tag: 'Some', value: Number(v) };
+}

@@ -1,0 +1,80 @@
+module lexdump
+import std.io
+import tokens
+import lexer
+
+-- Prints the token stream of a file, one token per line, in the form the
+-- differential test compares with the TypeScript lexer's output.
+pub fn main(
+  args: List[Text],
+  files: io.Files,
+  console: io.Console
+) -> Result[Unit, io.Error] may io.file, alloc {
+  if List.len(xs: args) < 1 {
+    io.eprint(console: console, text: "usage: lexdump <file.onus>\n")
+    return Err(error: Other(detail: "usage"))
+  }
+  let source: Text = try io.read(files: files, path: List.get(xs: args, i: 0))
+  if Text.count(t: source) > lexer.max_source {
+    return Err(error: Other(detail: "source too long"))
+  }
+  let r: lexer.LexResult = lexer.lex(source: source)
+  let cps: List[Int] = Text.code_points(t: source)
+  for t: tokens.Token in r.tokens {
+    io.print(console: console, text: dump_token(t: t, src: cps) ++ "\n")
+  }
+  for c: tokens.Comment in r.comments {
+    io.print(
+      console: console,
+      text: "comment " ++ Int.to_text(x: c.start) ++ " " ++ Int.to_text(
+        x: c.end
+      ) ++ " " ++ Bool.to_text(b: c.own_line) ++ "\n"
+    )
+  }
+  for d: tokens.Diagnostic in r.diagnostics {
+    io.print(
+      console: console,
+      text: d.code ++ " " ++ Int.to_text(x: d.start) ++ " " ++ Int.to_text(x: d.end) ++ "\n"
+    )
+  }
+  return Ok(value: Unit)
+}
+
+fn dump_token(t: tokens.Token, src: List[Int]) -> Text may alloc {
+  let where_: Text = " " ++ Int.to_text(x: t.start) ++ " " ++ Int.to_text(x: t.end)
+  match t.kind with
+  | tokens.Name(text) -> return "name" ++ where_ ++ " " ++ text
+  | tokens.TName(text) -> return "tname" ++ where_ ++ " " ++ text
+  | tokens.IntLit(value) -> return "int" ++ where_ ++ " " ++ digits(
+    src: src,
+    from: t.start,
+    to: t.end
+  )
+  | tokens.FloatLit(value) -> return "float" ++ where_ ++ " " ++ Float.to_text(x: value)
+  | tokens.TextLit(value) -> return "text" ++ where_ ++ " " ++ code_point_list(t: value)
+  | tokens.DurationLit(nanos) -> return "duration" ++ where_ ++ " " ++ Int.to_text(x: nanos)
+  | tokens.Keyword(word) -> return word ++ where_
+  | tokens.Punct(text) -> return text ++ where_
+  | tokens.Newline -> return "nl" ++ where_
+  | tokens.Eof -> return "eof" ++ where_
+}
+
+fn code_point_list(t: Text) -> Text may alloc {
+  var parts: Builder[Text] = List.builder()
+  for cp: Int in Text.code_points(t: t) {
+    List.push(b: inout parts, x: Int.to_text(x: cp))
+  }
+  return Text.join(parts: List.finish(b: parts), sep: ",")
+}
+
+-- The digits of a literal as written, underscores removed: what both lexers agree on even past 2^53 on the JavaScript target (docs/CHANGES.md item 99).
+fn digits(src: List[Int], from: Int where it >= 0, to: Int where it >= 0) -> Text may alloc {
+  if from > to or to > List.len(xs: src) {
+    return ""
+  }
+  return Text.replace(
+    t: Text.of_code_points(cps: List.slice(xs: src, from: from, to: to)),
+    from: "_",
+    to: ""
+  )
+}

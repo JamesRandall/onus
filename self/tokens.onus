@@ -1,0 +1,313 @@
+module tokens
+
+-- The tokens of the Onus lexical grammar (spec §2; docs/grammar-v0.md), for
+-- the compiler in Onus (impl spec M15.1). Positions count code points.
+pub union Kind =
+  | Name of text: Text
+  | TName of text: Text
+  | IntLit of value: Int
+  | FloatLit of value: Float
+  | TextLit of value: Text
+  | DurationLit of nanos: Int
+  | Keyword of word: Text
+  | Punct of text: Text
+  | Newline
+  | Eof
+
+pub record Token {
+  kind: Kind
+  start: Int where it >= 0
+  end: Int where it >= 0
+}
+
+pub record Comment {
+  start: Int where it >= 0
+  end: Int where it >= 0
+  own_line: Bool
+}
+
+pub record Diagnostic {
+  code: Text
+  start: Int where it >= 0
+  end: Int where it >= 0
+  detail: Text
+}
+
+pub const keywords: List[Text] = [
+  "module",
+  "import",
+  "test",
+  "pub",
+  "sealed",
+  "fn",
+  "const",
+  "type",
+  "record",
+  "union",
+  "of",
+  "interface",
+  "impl",
+  "law",
+  "claim",
+  "capability",
+  "grants",
+  "when",
+  "path",
+  "entry",
+  "effects",
+  "forbid",
+  "require",
+  "policy",
+  "assume",
+  "outside",
+  "except",
+  "example",
+  "property",
+  "requires",
+  "ensures",
+  "proved",
+  "claims",
+  "let",
+  "var",
+  "return",
+  "if",
+  "else",
+  "match",
+  "with",
+  "loop",
+  "while",
+  "invariant",
+  "decreases",
+  "for",
+  "in",
+  "and",
+  "or",
+  "not",
+  "implies",
+  "is",
+  "it",
+  "result",
+  "try",
+  "recover",
+  "old",
+  "forall",
+  "exists",
+  "fake",
+  "inout",
+  "where",
+  "true",
+  "false",
+  "self",
+  "intrinsic",
+  "may",
+  "verify"
+]
+
+-- Longest first within a shared prefix, so a greedy match is right.
+pub const punctuation: List[Text] = [
+  "...",
+  "..<",
+  "..",
+  "->",
+  ":=",
+  "==",
+  "!=",
+  "<=",
+  ">=",
+  "++",
+  "(",
+  ")",
+  "[",
+  "]",
+  "{",
+  "}",
+  ",",
+  ":",
+  ".",
+  "=",
+  "<",
+  ">",
+  "+",
+  "-",
+  "*",
+  "/",
+  "%",
+  "|",
+  "_"
+]
+
+-- Tokens before which a newline is not emitted (multi-line signatures, `try ... else`).
+pub const continuation_words: List[Text] = [
+  "else",
+  "claims",
+  "requires",
+  "ensures",
+  "invariant",
+  "decreases",
+  "verify"
+]
+
+pub fn is_keyword(word: Text) -> Bool {
+  for k: Text in keywords {
+    if k == word {
+      return true
+    }
+  }
+  return false
+}
+
+pub fn is_continuation(kind: Kind) -> Bool {
+  match kind with
+  | Punct(text) -> return text == "->" or text == "{"
+  | Keyword(word) -> return is_continuation_word(word: word)
+  | _ -> return false
+}
+
+fn is_continuation_word(word: Text) -> Bool {
+  for k: Text in continuation_words {
+    if k == word {
+      return true
+    }
+  }
+  return false
+}
+
+pub fn is_digit(c: Int) -> Bool
+  ensures result implies c >= 48
+{
+  return c >= 48 and c <= 57
+}
+
+pub fn is_lower(c: Int) -> Bool
+  ensures result implies c >= 97
+{
+  return c >= 97 and c <= 122
+}
+
+pub fn is_upper(c: Int) -> Bool
+  ensures result implies c >= 65
+{
+  return c >= 65 and c <= 90
+}
+
+pub fn is_ident_char(c: Int) -> Bool
+  ensures result implies c >= 48
+{
+  return is_digit(c: c) or is_lower(c: c) or is_upper(c: c) or c == 95
+}
+
+-- `[a-z][a-z0-9_]*`
+pub fn is_name(cps: List[Int]) -> Bool {
+  if List.len(xs: cps) == 0 {
+    return false
+  }
+  if not is_lower(c: List.get(xs: cps, i: 0)) {
+    return false
+  }
+  for c: Int in cps {
+    if not (is_lower(c: c) or is_digit(c: c) or c == 95) {
+      return false
+    }
+  }
+  return true
+}
+
+-- `[A-Z][A-Za-z0-9]*`
+pub fn is_type_name(cps: List[Int]) -> Bool {
+  if List.len(xs: cps) == 0 {
+    return false
+  }
+  if not is_upper(c: List.get(xs: cps, i: 0)) {
+    return false
+  }
+  for c: Int in cps {
+    if not (is_lower(c: c) or is_upper(c: c) or is_digit(c: c)) {
+      return false
+    }
+  }
+  return true
+}
+
+example predicates {
+  is_keyword(word: "fn")
+  not is_keyword(word: "fnord")
+  is_name(cps: Text.code_points(t: "snake_case2"))
+  not is_name(cps: Text.code_points(t: "xValue"))
+  is_type_name(cps: Text.code_points(t: "Viewport"))
+  is_continuation(kind: Punct(text: "->"))
+  not is_continuation(kind: Newline)
+}
+
+-- Soft keywords: reserved only where an item or clause can begin, and
+-- otherwise ordinary names (`Float.of`, `auth.require`, `path: "x"`).
+pub const soft_keywords: List[Text] = [
+  "module",
+  "import",
+  "test",
+  "type",
+  "record",
+  "union",
+  "interface",
+  "impl",
+  "law",
+  "claim",
+  "capability",
+  "grants",
+  "path",
+  "entry",
+  "effects",
+  "forbid",
+  "require",
+  "policy",
+  "outside",
+  "except",
+  "example",
+  "property",
+  "of",
+  "self",
+  "intrinsic"
+]
+
+pub fn is_soft_keyword(word: Text) -> Bool {
+  for k: Text in soft_keywords {
+    if k == word {
+      return true
+    }
+  }
+  return false
+}
+
+-- Whether a token of this kind may serve as a name in a name position.
+pub fn is_name_kind(kind: Kind) -> Bool {
+  match kind with
+  | Name(text) -> return true
+  | Keyword(word) -> return is_soft_keyword(word: word)
+  | _ -> return false
+}
+
+-- Human-readable name of a token kind for diagnostics.
+pub fn describe_kind(kind: Kind) -> Text may alloc {
+  match kind with
+  | Name(text) -> return "a name"
+  | TName(text) -> return "a type name"
+  | IntLit(value) -> return "an integer literal"
+  | FloatLit(value) -> return "a float literal"
+  | TextLit(value) -> return "a text literal"
+  | DurationLit(nanos) -> return "a duration literal"
+  | Keyword(word) -> return "`" ++ word ++ "`"
+  | Punct(text) -> return "`" ++ text ++ "`"
+  | Newline -> return "newline"
+  | Eof -> return "end of file"
+}
+
+pub fn is_punct(kind: Kind, want: Text) -> Bool {
+  match kind with
+  | Punct(text) -> return text == want
+  | _ -> return false
+}
+
+pub fn is_word(kind: Kind, want: Text) -> Bool {
+  match kind with
+  | Keyword(word) -> return word == want
+  | _ -> return false
+}

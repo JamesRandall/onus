@@ -22,11 +22,12 @@
  * `sql`, and `Text` operations that need grapheme tables.
  */
 import type { ClaimTables } from '../claims/tables.js';
+import type { Value } from '../consteval/values.js';
 import type { Context } from '../context.js';
 import type { Def, DefId, ResolveTables } from '../resolve/defs.js';
 import type { Span } from '../source.js';
 import type { TypeTables } from '../types/tables.js';
-import { stripRefinements, type Type } from '../types/type.js';
+import { stripRefinements, substitute, typeToString, type Type, type TypeArg } from '../types/type.js';
 import type { IrBlock, IrDecoder, IrExpr, IrFn, IrModule, IrStmt, ObRef } from './ir.js';
 
 /** A construct the native backend does not compile in v0, at the definition that uses it. */
@@ -81,6 +82,69 @@ class NativeEmitter {
   private readonly globals: string[] = [];
   private readonly strings = new Map<string, string>();
   private readonly texts = new Map<string, string>();
+  /** A compile-time aggregate value (a `const` list, record or variant) built at the point of use. */
+  private constValue(v: Value): Val {
+    switch (v.k) {
+      case 'int':
+      case 'duration':
+        return { v: String(Math.trunc(v.v)), t: 'i64' };
+      case 'bool':
+        return { v: v.v ? '1' : '0', t: 'i1' };
+      case 'float':
+        return { v: doubleLiteral(v.v), t: 'double' };
+      case 'text':
+        return { v: this.textConst(v.v), t: 'ptr' };
+      case 'unit':
+        return { v: '0', t: 'i64' };
+      case 'list': {
+        const list = this.tmp();
+        this.emit(`${list} = call ptr @onus_rt_list_new(i64 ${v.items.length})`);
+        v.items.forEach((x, i) => this.emit(`call void @onus_rt_list_set(ptr ${list}, i64 ${i}, i64 ${this.toSlot(this.constValue(x))})`));
+        return { v: list, t: 'ptr' };
+      }
+      case 'record': {
+        const fields = this.ty.fields.get(v.def) ?? [];
+        const obj = this.tmp();
+        this.emit(`${obj} = call ptr @onus_alloc(i64 ${8 * Math.max(1, fields.length)})`);
+        fields.forEach((f, i) => {
+          const x = v.fields.get(f.name);
+          if (x !== undefined) this.storeSlot(obj, i, this.toSlot(this.constValue(x)));
+        });
+        return { v: obj, t: 'ptr' };
+      }
+      case 'variant': {
+        const union = this.t.def(v.def).parent;
+        const fields = this.ty.fields.get(v.def) ?? [];
+        const obj = this.tmp();
+        this.emit(`${obj} = call ptr @onus_alloc(i64 ${8 * (1 + fields.length)})`);
+        this.storeSlot(obj, 0, String(union === null ? 0 : this.variantIndex(union, v.def)));
+        fields.forEach((f, i) => {
+          const x = v.fields.get(f.name);
+          if (x !== undefined) this.storeSlot(obj, 1 + i, this.toSlot(this.constValue(x)));
+        });
+        return { v: obj, t: 'ptr' };
+      }
+      case 'bytes':
+      case 'typeinfo':
+        throw new UnsupportedError(`\`${v.k}\` compile-time values`);
+    }
+  }
+
+  /** Constants emitted as lazily filled slots (aggregates and computed values), by definition. */
+  private readonly lazyConsts = new Set<DefId>();
+  /** Whether a constant will be emitted lazily: its value is not a scalar literal. */
+  private aggregateConst(def: DefId): boolean {
+    for (const m of this.modules) {
+      for (const item of m.items) {
+        if (item.k !== 'const' || item.def.id !== def) continue;
+        const v = item.value;
+        return !(v.k === 'value' && (v.value.k === 'int' || v.value.k === 'duration' || v.value.k === 'float' || v.value.k === 'bool' || v.value.k === 'text'));
+      }
+    }
+    return false;
+  }
+  /** Structural comparers generated so far, by type text (see `eqFn`). */
+  private readonly eqFns = new Map<string, string>();
   private readonly declared = new Set<string>();
   private readonly fns: string[] = [];
   private readonly unsupported: Unsupported[] = [];
@@ -417,7 +481,7 @@ class NativeEmitter {
         return 'ptr';
       case 'opaque': {
         const q = this.t.qualifiedName(s.def);
-        if (q === 'std.list.List' || q === 'std.grid.Grid' || q === 'std.sql.Select' || q === 'std.sql.Param' || q === 'std.sql.Statement') return 'ptr';
+        if (q === 'std.list.List' || q === 'std.list.Builder' || q === 'std.grid.Grid' || q === 'std.sql.Select' || q === 'std.sql.Param' || q === 'std.sql.Statement') return 'ptr';
         throw new UnsupportedError(`\`${this.t.def(s.def).name}\` values`);
       }
       case 'param':
@@ -568,7 +632,8 @@ class NativeEmitter {
   }
 
   private finishFn(header: string, tail: string): void {
-    this.fns.push(header, ...this.allocas, ...this.lines, tail, '}', '');
+    // The entry block is labelled so that a branch or phi from the function's first statements can name it.
+    this.fns.push(header, 'entry:', ...this.allocas, ...this.lines, tail, '}', '');
   }
 
   private fnItem(m: IrModule, f: IrFn): void {
@@ -618,7 +683,31 @@ class NativeEmitter {
       else if (literal !== null && literal.k === 'float') this.globals.push(`${name} = constant double ${doubleLiteral(literal.v)}`);
       else if (literal !== null && literal.k === 'bool') this.globals.push(`${name} = constant i1 ${literal.v ? 1 : 0}`);
       else if (literal !== null && literal.k === 'text') this.globals.push(`${name} = constant ptr ${this.textConst(literal.v)}`);
-      else throw new UnsupportedError(`\`const\` items of type ${t === 'ptr' ? 'an aggregate' : type.k}`);
+      else {
+        // An aggregate or computed constant: a slot filled on first use by a getter that evaluates the expression once.
+        this.lazyConsts.add(def.id);
+        this.globals.push(`${name} = global i64 0`);
+        const getter = `${name.slice(0, -1)}$get"`;
+        this.nested(() => {
+          this.fnRetLl = 'i64';
+          const cur = this.tmp();
+          this.emit(`${cur} = load i64, ptr ${name}`);
+          const empty = this.tmp();
+          this.emit(`${empty} = icmp eq i64 ${cur}, 0`);
+          const init = this.label('cinit');
+          const done = this.label('cdone');
+          this.condBr(empty, init, done);
+          this.startBlock(init);
+          const slot = this.toSlot(this.coerce(this.expr(value), t));
+          this.emit(`store i64 ${slot}, ptr ${name}`);
+          this.br(done);
+          this.startBlock(done);
+          const out = this.tmp();
+          this.emit(`${out} = load i64, ptr ${name}`);
+          this.emit(`ret i64 ${out}`);
+          this.finishFn(`define i64 ${getter}() {`, '');
+        });
+      }
     } catch (e) {
       if (!(e instanceof UnsupportedError)) throw e;
       this.unsupported.push({ def: this.t.qualifiedName(def.id), span: def.span, what: e.what });
@@ -934,8 +1023,14 @@ class NativeEmitter {
       }
       case 'global': {
         const t = this.ll(e.type);
+        const name = this.fnName(this.t.moduleOf(e.def.module).name, e.def.name);
+        if (this.lazyConsts.has(e.def.id) || this.aggregateConst(e.def.id)) {
+          const slot = this.tmp();
+          this.emit(`${slot} = call i64 ${name.slice(0, -1)}$get"()`);
+          return this.fromSlot(slot, t);
+        }
         const r = this.tmp();
-        this.emit(`${r} = load ${t}, ptr ${this.fnName(this.t.moduleOf(e.def.module).name, e.def.name)}`);
+        this.emit(`${r} = load ${t}, ptr ${name}`);
         return { v: r, t };
       }
       case 'call':
@@ -1030,7 +1125,19 @@ class NativeEmitter {
       }
       case 'eq': {
         const s = stripRefinements(e.type);
-        if (s.k !== 'prim') throw new UnsupportedError('structural equality on records, variants and lists');
+        if (s.k === 'param') throw new UnsupportedError('equality on a value of a type parameter');
+        if (s.k !== 'prim') {
+          // Structural equality (§19.1): a comparer generated per type, over slots.
+          const fn = this.eqFn(s);
+          const l = this.toSlot(this.expr(e.left));
+          const r = this.toSlot(this.expr(e.right));
+          const same = this.tmp();
+          this.emit(`${same} = call i1 ${fn}(i64 ${l}, i64 ${r})`);
+          if (!e.negate) return { v: same, t: 'i1' };
+          const out = this.tmp();
+          this.emit(`${out} = xor i1 ${same}, true`);
+          return { v: out, t: 'i1' };
+        }
         const out = this.tmp();
         if (s.name === 'Float') {
           const l = this.coerce(this.expr(e.left), 'double');
@@ -1101,7 +1208,7 @@ class NativeEmitter {
         if (c.k === 'bool') return { v: c.v ? '1' : '0', t: 'i1' };
         if (c.k === 'float') return { v: doubleLiteral(c.v), t: 'double' };
         if (c.k === 'text') return { v: this.textConst(c.v), t: 'ptr' };
-        throw new UnsupportedError('aggregate compile-time values');
+        return this.constValue(e.value);
       }
       case 'fnref':
       case 'call-value':
@@ -1159,6 +1266,143 @@ class NativeEmitter {
     const out = this.tmp();
     this.emit(`${out} = call ptr @onus_recover(ptr ${name}, ptr ${env})`);
     return { v: out, t: 'ptr' };
+  }
+
+  /**
+   * The comparer `@eq$N(i64, i64) -> i1` for a type: prims by value, `Text`
+   * by the runtime, records field by field, unions by tag then the variant's
+   * fields, lists element by element through the runtime with the element
+   * comparer. Generated once per type; recursive types refer to their own
+   * name. Effects: emits a function.
+   */
+  private eqFn(type: Type): string {
+    const s = stripRefinements(type);
+    const key = typeToString(s, this.t);
+    const existing = this.eqFns.get(key);
+    if (existing !== undefined) return existing;
+    const name = `@"eq$${(this.counter += 1)}"`;
+    this.eqFns.set(key, name);
+    this.nested(() => {
+      this.fnRetLl = 'i1';
+      const r = this.eqSlots(s, '%a', '%b');
+      this.emit(`ret i1 ${r}`);
+      this.finishFn(`define i1 ${name}(i64 %a, i64 %b) {`, '');
+    });
+    return name;
+  }
+
+  /** Whether two slots holding values of `type` are equal, as an i1 in the current block. */
+  private eqSlots(type: Type, a: string, b: string): string {
+    const s = stripRefinements(type);
+    const out = this.tmp();
+    switch (s.k) {
+      case 'prim':
+        switch (s.name) {
+          case 'Float': {
+            const fa = this.fromSlot(a, 'double');
+            const fb = this.fromSlot(b, 'double');
+            this.emit(`${out} = fcmp oeq double ${fa.v}, ${fb.v}`);
+            return out;
+          }
+          case 'Text': {
+            const pa = this.fromSlot(a, 'ptr');
+            const pb = this.fromSlot(b, 'ptr');
+            this.emit(`${out} = call i1 @onus_rt_text_eq(ptr ${pa.v}, ptr ${pb.v})`);
+            return out;
+          }
+          case 'Int':
+          case 'Duration':
+          case 'Unit':
+          case 'Bool':
+            this.emit(`${out} = icmp eq i64 ${a}, ${b}`);
+            return out;
+          default:
+            throw new UnsupportedError(`equality on \`${s.name}\` values`);
+        }
+      case 'record': {
+        const subst = this.substOf(s.def, s.args);
+        const pa = this.fromSlot(a, 'ptr');
+        const pb = this.fromSlot(b, 'ptr');
+        let acc: string | null = null;
+        (this.ty.fields.get(s.def) ?? []).forEach((f, i) => {
+          const e = this.eqSlots(substitute(f.type, subst), this.loadSlot(pa.v, i), this.loadSlot(pb.v, i));
+          if (acc === null) acc = e;
+          else {
+            const both = this.tmp();
+            this.emit(`${both} = and i1 ${acc}, ${e}`);
+            acc = both;
+          }
+        });
+        this.emit(`${out} = ${acc === null ? 'icmp eq i1 true, true' : `and i1 ${acc}, true`}`);
+        return out;
+      }
+      case 'union': {
+        const subst = this.substOf(s.def, s.args);
+        const pa = this.fromSlot(a, 'ptr');
+        const pb = this.fromSlot(b, 'ptr');
+        const ta = this.loadSlot(pa.v, 0);
+        const tb = this.loadSlot(pb.v, 0);
+        const sameTag = this.tmp();
+        this.emit(`${sameTag} = icmp eq i64 ${ta}, ${tb}`);
+        const dispatch = this.label('eqsw');
+        const differ = this.label('eqno');
+        const done = this.label('eqdone');
+        this.condBr(sameTag, dispatch, differ);
+        this.startBlock(dispatch);
+        const variants = this.ty.variants.get(s.def) ?? [];
+        const labels = variants.map(() => this.label('eqv'));
+        this.emit(`switch i64 ${ta}, label %${differ} [${variants.map((v, i) => ` i64 ${this.variantIndex(s.def, v)}, label %${labels[i] ?? differ}`).join('')} ]`);
+        this.terminated = true;
+        const incoming: string[] = [];
+        variants.forEach((v, i) => {
+          this.startBlock(labels[i] ?? differ);
+          let acc: string | null = null;
+          (this.ty.fields.get(v) ?? []).forEach((f, j) => {
+            const e = this.eqSlots(substitute(f.type, subst), this.loadSlot(pa.v, 1 + j), this.loadSlot(pb.v, 1 + j));
+            if (acc === null) acc = e;
+            else {
+              const both = this.tmp();
+              this.emit(`${both} = and i1 ${acc}, ${e}`);
+              acc = both;
+            }
+          });
+          incoming.push(`[ ${acc ?? 'true'}, %${this.block} ]`);
+          this.br(done);
+        });
+        this.startBlock(differ);
+        incoming.push(`[ false, %${this.block} ]`);
+        this.br(done);
+        this.startBlock(done);
+        this.emit(`${out} = phi i1 ${incoming.join(', ')}`);
+        return out;
+      }
+      case 'opaque': {
+        const q = this.t.qualifiedName(s.def);
+        const elem = s.args[0];
+        if (q !== 'std.list.List' || elem === undefined || elem.k !== 'type') throw new UnsupportedError(`equality on \`${this.t.def(s.def).name}\` values`);
+        this.declare('declare i1 @onus_rt_list_eq(ptr, ptr, ptr)');
+        const fn = this.eqFn(elem.type);
+        const pa = this.fromSlot(a, 'ptr');
+        const pb = this.fromSlot(b, 'ptr');
+        this.emit(`${out} = call i1 @onus_rt_list_eq(ptr ${pa.v}, ptr ${pb.v}, ptr ${fn})`);
+        return out;
+      }
+      case 'param':
+        throw new UnsupportedError('equality on a value of a type parameter');
+      default:
+        throw new UnsupportedError(`equality on \`${typeToString(s, this.t)}\` values`);
+    }
+  }
+
+  /** The type arguments of a record or union type, by its parameters. */
+  private substOf(def: DefId, args: readonly TypeArg[]): Map<DefId, TypeArg> {
+    const params = this.ty.typeParams.get(def) ?? [];
+    const subst = new Map<DefId, TypeArg>();
+    params.forEach((p, i) => {
+      const a = args[i];
+      if (a !== undefined) subst.set(p.def, a);
+    });
+    return subst;
   }
 
   private loadSlot(obj: string, idx: number): string {

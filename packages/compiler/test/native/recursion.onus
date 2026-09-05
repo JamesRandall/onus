@@ -1,0 +1,35 @@
+module recursion
+
+-- The measure does not decrease: the obligation at the recursive call is checked and fails at runtime (§5.1, §10.2).
+fn climb(n: Int where 0 <= it and it <= 10) -> Int may panic
+  decreases n
+{
+  if n == 10 {
+    return n
+  }
+  return climb(n: n + 1)
+}
+
+fn countdown(n: Int where it >= 0) -> Int
+  decreases n
+{
+  if n == 0 {
+    return 0
+  }
+  return countdown(n: n - 1)
+}
+
+fn caught() -> Result[Int, Panicked] {
+  let r: Result[Int, Panicked] = recover {
+    climb(n: 0)
+  }
+  return r
+}
+
+example a_bad_measure_panics {
+  caught() is Err
+}
+
+example a_good_measure_recurses {
+  countdown(n: 5) == 0
+}

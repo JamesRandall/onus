@@ -63,7 +63,9 @@ export function emitAll(ctx: Context, opts: BuildOptions): BuildResult {
   const entry = ctx.resolve.modules[0] ?? null;
   for (const m of ctx.resolve.modules) {
     const emitOpts: EmitOptions = { ts: opts.ts, runtime, ...(opts.verify === true ? { verify: true } : {}), ...(opts.negateGuard === undefined ? {} : { negateGuard: opts.negateGuard }) };
-    const out = emitModule(ctx, m, emitOpts);
+    // A program's test run is its own examples: the standard library's run with the library, not with every program.
+    const raw = emitModule(ctx, m, emitOpts);
+    const out: EmittedModule = m.isStd && entry !== null && !entry.isStd ? { ...raw, tests: null } : raw;
     emitted.push(out);
     const path = join(opts.outDir, ...m.name.split('.')) + `.${ext}`;
     mkdirSync(dirname(path), { recursive: true });

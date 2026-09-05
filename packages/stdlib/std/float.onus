@@ -10,3 +10,14 @@ pub const intrinsic fn of(x: Int) -> Float
 pub const intrinsic fn classify(x: Float) -> Class
 
 pub const intrinsic fn to_text(x: Float) -> Text may alloc
+
+-- A decimal number with an optional sign, fraction and exponent; None for
+-- anything malformed, and infinities and NaN are never produced.
+pub const intrinsic fn parse(t: Text) -> Option[Float]
+
+example parsing {
+  parse(t: "1.5") == Some(value: 1.5)
+  parse(t: "-2e3") == Some(value: -2000.0)
+  parse(t: "abc") is None
+  parse(t: "") is None
+}

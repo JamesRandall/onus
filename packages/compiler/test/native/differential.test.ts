@@ -22,9 +22,9 @@ const clang = findClang();
 
 function sources(): string[] {
   const out: string[] = [];
-  for (const dir of [join(here, '..', 'checker'), join(here, '..', 'paths'), join(here, '..', 'codegen'), here]) {
+  for (const dir of [join(here, '..', 'checker'), join(here, '..', 'paths'), join(here, '..', 'codegen'), join(here, '..', 'stdlib'), here]) {
     for (const f of readdirSync(dir)) {
-      if (!f.endsWith('.onus') || f.startsWith('e0')) continue;
+      if (!f.endsWith('.onus') || f.startsWith('e0') || f.startsWith('.')) continue;
       const path = join(dir, f);
       if (/^example |^\s*example /m.test(readFileSync(path, 'utf8'))) out.push(path);
     }

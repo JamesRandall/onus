@@ -14,3 +14,10 @@ export function classify(x: number): Class {
 export function to_text(x: number): string {
   return String(x);
 }
+
+/** A decimal number with optional sign, fraction and exponent; None when malformed or not finite (std.float.parse). */
+export function parse(t: string): { readonly tag: 'Some'; readonly value: number } | { readonly tag: 'None' } {
+  if (!/^[+-]?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?$/.test(t)) return { tag: 'None' };
+  const v = Number(t);
+  return Number.isFinite(v) ? { tag: 'Some', value: v } : { tag: 'None' };
+}

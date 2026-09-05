@@ -13,7 +13,7 @@ reviews contracts, and the compiler is the only checker.
 
 ## Status
 
-Milestones 1–14 done: lexer, parser, canonical printer, `onus fmt`; module
+Milestones 1–14 done, and of 15 the prerequisites stage and the lexer and parser in Onus (`self/`), verified to terminate: lexer, parser, canonical printer, `onus fmt`; module
 loading, name resolution, the type checker, the check-time evaluator, the
 effects pass, obligation objects and the z3-backed verifier (`onus check`,
 `--ledger` shows every obligation's status; `--to <pass>` stops early);

@@ -19,10 +19,10 @@ import type { Context } from '../context.js';
 import type { Obligation, ObligationId } from '../contracts/obligations.js';
 import type { Def, DefId, ResolveTables } from '../resolve/defs.js';
 import type * as A from '../syntax/ast.js';
-import { walk, isExpr } from '../syntax/walk.js';
+import { children, isExpr, walk } from '../syntax/walk.js';
 import type { TypeTables } from '../types/tables.js';
 import { stripRefinements, type Type } from '../types/type.js';
-import { and, app, BOOL, eq, implies, INT, int, not, type Formula, type Sort } from './formula.js';
+import { and, app, BOOL, eq, implies, INT, int, not, TRUE, type Formula, type Sort } from './formula.js';
 import { Lowerer, Unlowerable, type Binding, type Env } from './lower.js';
 
 export interface VC {
@@ -94,6 +94,9 @@ class BodyWalker {
   private ensures: readonly A.Contract[] = [];
   private returnCount = 0;
 
+  /** The recursive function's measure at entry (§5.1), or null when it has none or it could not be lowered. */
+  private measure0: Formula | null = null;
+
   constructor(
     private readonly ctx: Context,
     private readonly def: Def,
@@ -137,6 +140,20 @@ class BodyWalker {
         this.facts.push(this.lowerer.lower(c.expr, this.env));
       } catch (err) {
         if (!(err instanceof Unlowerable)) throw err;
+      }
+    }
+    // The measure of a recursive function, taken at entry (§5.1): non-negative here, and every call in the cycle must go strictly below it.
+    for (const c of f.contracts) {
+      if (c.clause !== 'decreases') continue;
+      try {
+        this.measure0 = this.lowerer.lower(c.expr, this.env);
+      } catch (err) {
+        if (!(err instanceof Unlowerable)) throw err;
+      }
+      for (const o of this.obligationsAt(c.id, 'decreases')) {
+        const m0 = this.measure0;
+        if (m0 === null) this.skip(o, 'measure not lowered');
+        else this.tryGoal(o, () => app('>=', [m0, int(0)], BOOL));
       }
     }
     this.block(f.body);
@@ -285,6 +302,7 @@ class BodyWalker {
         this.env = new Map(before.env);
         this.facts = [...before.facts, not(cond)];
         if (s.else) this.block(s.else);
+        const afterElse = { env: new Map(this.env), facts: [...this.facts] };
         const elseReturns = s.else !== null && blockReturns(s.else);
         if (thenReturns && !elseReturns) return; // continue on the else path
         if (elseReturns && !thenReturns) {
@@ -292,10 +310,25 @@ class BodyWalker {
           this.facts = afterThen.facts;
           return;
         }
-        // Join: keep what held before, forget what either branch assigned.
+        // Join: what held before still holds; what a branch learned holds under its condition; a
+        // variable a branch assigned is fresh, and equal to each branch's value under that condition.
+        const assigned = new Set([...this.assigned(s.then), ...(s.else ? this.assigned(s.else) : [])]);
+        const thenNew = afterThen.facts.slice(before.facts.length + 1);
+        const elseNew = afterElse.facts.slice(before.facts.length + 1);
         this.env = new Map(before.env);
         this.facts = [...before.facts];
-        this.havoc(new Set([...this.assigned(s.then), ...(s.else ? this.assigned(s.else) : [])]));
+        const thenEqs: Formula[] = [];
+        const elseEqs: Formula[] = [];
+        for (const d of assigned) {
+          const b = before.env.get(d);
+          if (b === undefined) continue;
+          const t1 = afterThen.env.get(d);
+          const t2 = afterElse.env.get(d);
+          const fresh = this.bind(d, this.t.def(d).name, b.type, null);
+          if (t1 !== undefined) thenEqs.push(eq(fresh, t1.term));
+          if (t2 !== undefined) elseEqs.push(eq(fresh, t2.term));
+        }
+        this.facts.push(implies(cond, conj([...thenNew, ...thenEqs])), implies(not(cond), conj([...elseNew, ...elseEqs])));
         return;
       }
       case 'Match':
@@ -500,21 +533,49 @@ class BodyWalker {
       });
       return this.lowerer.freshConst('unlowered', this.safeSort(e));
     }
-    walk(e, (n) => {
-      if (n.kind === 'Closure' || n.kind === 'Quantifier' || n.kind === 'Recover') {
-        // Obligations under binders are not discharged in v0.
-        walk(n, (m) => {
-          if (m !== n) for (const o of this.ctx.contracts.at(m.id)) if (this.pending.has(o.id)) this.skip(o, 'inside a quantifier or closure');
-          return true;
-        });
-        return false;
-      }
-      if (n.kind === 'Call') this.callObligations(n);
-      if (n.kind === 'Binary') this.overflowObligation(n);
-      if (n.kind === 'Ctor' || n.kind === 'RecordUpdate') this.fieldObligations(n);
-      return true;
-    });
+    this.dischargeUnder(e);
     return term;
+  }
+
+  /**
+   * Discharges the obligations under `e` after it was lowered. The right
+   * operand of `and`, `or` and `implies` is evaluated only when the left
+   * decides nothing, so its obligations may assume the left operand (or its
+   * negation), as a call after an `if` may assume the condition.
+   */
+  private dischargeUnder(e: A.Node): void {
+    if (e.kind === 'And' || e.kind === 'Or') {
+      const saved = this.facts.length;
+      for (const operand of e.operands) {
+        this.dischargeUnder(operand);
+        const term = this.termOf(operand);
+        if (term !== null) this.facts.push(e.kind === 'Or' ? not(term) : term);
+      }
+      this.facts.length = saved;
+      return;
+    }
+    if (e.kind === 'Binary' && e.op === 'implies') {
+      this.dischargeUnder(e.left);
+      const left = this.termOf(e.left);
+      const saved = this.facts.length;
+      if (left !== null) this.facts.push(left);
+      this.dischargeUnder(e.right);
+      this.facts.length = saved;
+      this.overflowObligation(e);
+      return;
+    }
+    if (e.kind === 'Closure' || e.kind === 'Quantifier' || e.kind === 'Recover') {
+      // Obligations under binders are not discharged in v0.
+      walk(e, (m) => {
+        if (m !== e) for (const o of this.ctx.contracts.at(m.id)) if (this.pending.has(o.id)) this.skip(o, 'inside a quantifier or closure');
+        return true;
+      });
+      return;
+    }
+    if (e.kind === 'Call') this.callObligations(e);
+    if (e.kind === 'Binary') this.overflowObligation(e);
+    if (e.kind === 'Ctor' || e.kind === 'RecordUpdate') this.fieldObligations(e);
+    for (const child of children(e)) this.dischargeUnder(child);
   }
 
   private safeSort(e: A.Expr): Sort {
@@ -531,6 +592,19 @@ class BodyWalker {
 
   private callObligations(call: A.Call): void {
     const info = this.lowerer.calls.get(call.id);
+    for (const o of this.obligationsAt(call.id, 'decreases')) {
+      const clause = o.source === null ? null : this.t.node(o.source);
+      const m0 = this.measure0;
+      if (info === undefined || clause === null || clause.kind !== 'Contract') {
+        this.skip(o, 'call not lowered');
+        continue;
+      }
+      if (m0 === null) {
+        this.skip(o, 'measure not lowered');
+        continue;
+      }
+      this.tryGoal(o, () => app('<', [this.lowerer.withSubst(info.subst, () => this.lowerer.lower(clause.expr, info.args)), m0], BOOL));
+    }
     for (const o of this.obligationsAt(call.id, 'requires')) {
       const clause = o.source === null ? null : this.t.node(o.source);
       if (info === undefined || clause === null || clause.kind !== 'Contract') {
@@ -682,4 +756,9 @@ function blockReturns(b: A.Block): boolean {
   return b.stmts.some(stmtReturns);
 }
 
-
+/** The conjunction of `fs`, `true` when empty. */
+function conj(fs: readonly Formula[]): Formula {
+  if (fs.length === 0) return TRUE;
+  if (fs.length === 1) return fs[0] ?? TRUE;
+  return and(...fs);
+}

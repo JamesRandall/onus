@@ -37,6 +37,7 @@ export interface LowerOptions {
 }
 
 const ERROR: Type = { k: 'error' };
+const INT_TYPE: Type = { k: 'prim', name: 'Int' };
 const UNIT: IrExpr = { k: 'unit' };
 
 /**
@@ -56,12 +57,16 @@ interface FnCtx {
   readonly def: Def | null;
   readonly dicts: ReadonlyMap<DefId, string>;
   result: IrExpr | null;
+  /** The local holding the recursion measure taken at entry, when a decreases obligation is checked at runtime (§5.1). */
+  readonly measure: string | null;
 }
 
 class Lowerer {
   private readonly t: ResolveTables;
   private readonly ty: TypeTables;
   private fn: FnCtx | null = null;
+  /** Parameters of a callee denoting the arguments, while its measure is lowered at a recursive call (§5.1). */
+  private subst: ReadonlyMap<DefId, IrExpr> = new Map();
   /** The value `it` names inside a refinement predicate. */
   private it: IrExpr | null = null;
   /** Inside a record or variant literal's field checks: sibling fields read from the literal. */
@@ -317,15 +322,28 @@ class Lowerer {
       return { ...head, intrinsic: { ns: q.split('.')[1] ?? '', name: def.name }, entry: [], body: null, earlyReturn: false };
     }
     if (f.body === null) return null;
+    // `old(x)` snapshots are taken only for contracts some obligation of which is checked at runtime:
+    // a proved postcondition emits no check, and copying a large `inout` value on every call is what a
+    // recursive-descent parser cannot afford.
     const olds = new Set<string>();
     for (const c of f.contracts) {
+      const checkedSomewhere = this.ctx.contracts.obligations.some((o) => o.source === c.id && o.status !== 'proved');
+      if (!checkedSomewhere) continue;
       walk(c.expr, (n) => {
         if (n.kind === 'Old') olds.add(n.name.text);
         return true;
       });
     }
-    this.fn = { inout: params.filter((p) => p.inout).map((p) => p.name), ret: sig.ret, ensures: f.contracts.filter((c) => c.clause === 'ensures'), def, dicts: new Map(dictParams.map((d) => [d.def, d.name])), result: null };
+    const measureClause = f.contracts.find((c) => c.clause === 'decreases') ?? null;
+    const measured = measureClause !== null && this.ctx.contracts.obligations.some((o) => o.def === def.id && o.kind === 'decreases' && (o.callee !== null || o.at === measureClause.id) && o.status !== 'proved');
+    this.fn = { inout: params.filter((p) => p.inout).map((p) => p.name), ret: sig.ret, ensures: f.contracts.filter((c) => c.clause === 'ensures'), def, dicts: new Map(dictParams.map((d) => [d.def, d.name])), result: null, measure: measured ? '$measure' : null };
     const entry: IrStmt[] = this.collect(() => this.entryChecks(sig, f.contracts, def.name));
+    if (measureClause !== null && measured) {
+      const value = this.collect(() => [{ k: 'let', name: '$measure', type: INT_TYPE, mutable: false, value: this.expr(measureClause.expr) }]);
+      entry.push(...value);
+      const atEntry = this.ctx.contracts.obligations.find((o) => o.def === def.id && o.kind === 'decreases' && o.at === measureClause.id);
+      if (atEntry !== undefined && atEntry.status !== 'proved') entry.push({ k: 'check', cond: { k: 'cmp', op: '>=', left: { k: 'local', name: '$measure', type: INT_TYPE }, right: { k: 'int', v: 0n }, float: false }, ob: this.obRefOf(atEntry) });
+    }
     for (const o of olds) {
       const type = params.find((p) => p.name === o)?.type ?? ERROR;
       entry.push({ k: 'let', name: `$old_${o}`, type, mutable: false, value: { k: 'snapshot', value: { k: 'local', name: o, type }, type } });
@@ -637,6 +655,8 @@ class Lowerer {
     const type = this.typeOfExpr(e);
     const res = this.t.refs.get(e.id);
     if (res === undefined || res.k !== 'def') return { k: 'local', name: e.name.text, type };
+    const substituted = this.subst.get(res.def);
+    if (substituted !== undefined) return substituted;
     const def = this.t.def(res.def);
     if (def.kind === 'fn') return this.fnValue(def);
     if (def.kind === 'const') return { k: 'global', def, type };
@@ -748,7 +768,7 @@ class Lowerer {
       return { name: p.name.text, type: (pd === undefined ? undefined : this.ty.declTypes.get(pd)) ?? ERROR, inout: p.inout };
     });
     const saved = this.fn;
-    this.fn = { inout: params.filter((p) => p.inout).map((p) => p.name), ret: fnType?.ret ?? ERROR, ensures: [], def: saved?.def ?? null, dicts: saved?.dicts ?? new Map(), result: null };
+    this.fn = { inout: params.filter((p) => p.inout).map((p) => p.name), ret: fnType?.ret ?? ERROR, ensures: [], def: saved?.def ?? null, dicts: saved?.dicts ?? new Map(), result: null, measure: saved?.measure ?? null };
     const entry: IrStmt[] = [];
     e.params.forEach((p, i) => {
       const param = params[i];
@@ -812,10 +832,11 @@ class Lowerer {
           consts.push(a !== undefined && a.k === 'const' ? this.constLiteral(a.value) : UNIT);
         }
       });
-      const args = sig.params.map((p) => {
+      let args = sig.params.map((p) => {
         const a = e.args.find((x) => x.name.text === p.name);
         return a === undefined ? UNIT : this.expr(a.value);
       });
+      args = this.decreasesCheck(e, sig, args);
       const decoder = this.t.qualifiedName(target.id) === 'std.sql.select' ? this.selectDecoder(e, sig) : null;
       const call: IrExpr = decoder === null ? { k: 'call', target: callTarget, sig, dicts, consts, args, type } : { k: 'call', target: callTarget, sig, dicts, consts, args, type, decoder };
       const inoutParams = sig.params.filter((p) => p.inout);
@@ -830,6 +851,38 @@ class Lowerer {
     const inout = ct.params.map((p, i) => (p.inout ? ordered[i] : undefined)).filter((_, i) => ct.params[i]?.inout === true);
     if (inout.length === 0) return call;
     return this.inoutCall(call, type, inout, discard);
+  }
+
+  /**
+   * The runtime check of a checked `decreases` obligation at a recursive call (§5.1): the callee's
+   * measure over the arguments must be below the caller's measure taken at entry. Arguments are
+   * bound to temporaries first so they are evaluated once; the call then uses those temporaries.
+   */
+  private decreasesCheck(e: A.Call, sig: Signature, args: readonly IrExpr[]): IrExpr[] {
+    const ob = this.ctx.contracts.obligations.find((o) => o.at === e.id && o.kind === 'decreases' && o.status !== 'proved');
+    const measure = this.fn?.measure ?? null;
+    const clause = ob === undefined || ob.source === null ? null : this.t.node(ob.source);
+    if (ob === undefined || measure === null || clause === null || clause.kind !== 'Contract') return [...args];
+    const bound: IrExpr[] = [];
+    const subst = new Map<DefId, IrExpr>();
+    sig.params.forEach((p, i) => {
+      const value = args[i] ?? UNIT;
+      const pd = sig.paramDefs[i];
+      let local = value;
+      if (!p.inout && value.k !== 'local' && value.k !== 'int' && value.k !== 'bool' && value.k !== 'text') {
+        const name = this.tmp('arg');
+        this.pre.push({ k: 'let', name, type: p.type, mutable: false, value });
+        local = { k: 'local', name, type: p.type };
+      }
+      bound.push(local);
+      if (pd !== undefined) subst.set(pd, local);
+    });
+    const saved = this.subst;
+    this.subst = subst;
+    const calleeMeasure = this.expr(clause.expr);
+    this.subst = saved;
+    this.pre.push({ k: 'check', cond: { k: 'cmp', op: '<', left: calleeMeasure, right: { k: 'local', name: measure, type: INT_TYPE }, float: false }, ob: this.obRefOf(ob) });
+    return bound;
   }
 
   /** The row decoder of a `std.sql.select` whose row type is a record: one column per primitive field, then the record's refinements (§18.2). */
@@ -1079,7 +1132,7 @@ class Lowerer {
           return s !== undefined && s.k === 'capability' ? [{ name: p.name.text, capability: s.def, node: p.id }] : [];
         });
         const pos = lineColOf(this.ctx.fileOf(n.span), n.span.start);
-        this.fn = { inout: [], ret: BOOL, ensures: [], def: this.t.def(vd), dicts: new Map(), result: null };
+        this.fn = { inout: [], ret: BOOL, ensures: [], def: this.t.def(vd), dicts: new Map(), result: null, measure: null };
         this.verifying = true;
         const body = this.assertionBlock(v.body);
         this.verifying = false;

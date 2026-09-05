@@ -736,6 +736,134 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     are logged in `docs/BENCHMARK.md`, and `packages/loop/bench/run.mjs`
     appends a row per model so the log can be revisited.
 
+## M15.0 — prerequisites for the compiler in Onus
+
+120. **Recursion measures are obligations (§5.1).** The effects pass
+    records every recursive cycle; the contracts pass puts a `decreases`
+    obligation at every call within a cycle (the callee's measure over the
+    arguments strictly below the caller's measure taken at entry) and one
+    at entry (the measure non-negative); the verifier discharges both; a
+    checked one becomes a runtime check on both targets, the arguments
+    bound to temporaries so they are evaluated once. Before this, a
+    recursive function only had to *declare* a measure. Fixtures: direct,
+    mutual, structural over a list through `slice`'s length contract, and
+    a measure over record fields, all proved; a measure that grows,
+    checked and panicking on both targets.
+121. **A cycle shares one measure (§5.1).** `E0320` now also fires when the
+    functions of a cycle declare measures that differ once parameters are
+    numbered by position, which is the spec's "same expression up to
+    renaming" made mechanical.
+122. **The standard library grew (§16, provisional).** `std.text`:
+    `count`, `code_points`, `of_code_points`, `of_code_point`, `slice`,
+    `index_of`, `contains`, `ends_with`, `split`, `join`, `repeat`,
+    `replace`, `compare`, `upper`, positions counted in code points (`len`
+    stays grapheme-based and JavaScript-only); an empty separator splits
+    into code points and an empty `from` leaves `replace` alone, since a
+    refinement `count(t: it) > 0` on those arguments cannot be proved for
+    a literal. `std.int.parse` and `std.float.parse` return `Option`.
+    `std.list`: `Builder[T]` with `builder`, `push`, `built`, `finish`, and
+    `map`, `filter`, `fold`, `index_of`, `contains`, `reverse` written in
+    Onus. `std.io`: `read`, and a `Console` capability with `print` and
+    `eprint`, a fifth root the runtime supplies to `main`. Every new
+    function has contracts and examples; the examples run at check time,
+    as generated tests on JavaScript, and natively through the harness.
+    A builder is a value the runtime shares: bind it once and push through
+    that binding (a rule the type system does not yet enforce).
+123. **Structural equality natively (§19.1).** The native emitter
+    generates a comparer per concrete type: primitives by value, `Text` by
+    the runtime, records field by field, unions by tag then fields, lists
+    element by element through `onus_rt_list_eq` with the element
+    comparer. Equality on a value of a type parameter stays `E0800`, so
+    `List.index_of` and `List.contains` are JavaScript-only, like the
+    closure-taking combinators.
+124. **Two runtime fixes the library work exposed.** A native file write
+    is flushed at once, so a read after a write sees it as on JavaScript;
+    and the JavaScript emitter gives each `inout` call its own temporaries,
+    since two such calls on one variable in a block redeclared them. A
+    program's build no longer emits the standard library's own test files,
+    which the library's examples had just introduced.
+125. **Deferred from M15.0.** `Map` on the native target and the `Process`
+    capability for z3, which the checker and verifier stages need, not the
+    front end; the stack-depth story, which the parser stage will settle.
+
+## M15.1 — the front end in Onus, first part: the lexer
+
+126. **The lexer in Onus (`self/`).** `self/tokens.onus`, `self/lexer.onus`
+    and `self/lexdump.onus`: the token stream of `lexer.ts` reproduced,
+    positions in code points rather than UTF-16 units, every loop and helper
+    contracted so that the verifier proves termination and every index
+    obligation; the file checks with no diagnostic and no `may panic`. The
+    differential test runs the dump program over every `.onus` file in the
+    repository and compares it with the TypeScript lexer's stream, tokens,
+    comments and diagnostics alike, and the same natively on Mandelbrot.
+    One agreed-on limit: past 2^53 the JavaScript runtime's `Int` cannot
+    hold a literal exactly (item 99), so the dump compares digits as
+    written and the value stays a known gap.
+127. **What writing it taught the compiler.** (a) The verifier now gives the
+    right operand of `and`, `or` and `implies` the left operand (or its
+    negation) as a fact, so `i < n and List.get(xs: xs, i: i)` proves its
+    index. (b) A float literal lowers to an opaque constant instead of
+    sinking every obligation around it; an obligation the solver cannot
+    settle is still tried by constant evaluation afterwards. (c) The native
+    emitter labels every function's entry block, without which a
+    short-circuit as a function's first statement referred to a block that
+    did not exist; it emits aggregate and computed `const` items as slots
+    filled on first use, and builds compile-time lists, records and
+    variants. (d) Grammar facts a model would also need: constants are
+    names, not upper-case; a multi-statement match arm needs braces; there
+    is no conditional expression; patterns bind a variant's field by its
+    own name and may not rename it; a name from an imported module is
+    always qualified by the alias.
+128. **Still to come in M15.1.** The canonical printer in Onus, then
+    `onus fmt` reimplemented and the byte-identical acceptance.
+
+## M15.1 — the front end in Onus, second part: the parser
+
+129. **The parser in Onus (`self/ast.onus`, `self/parser.onus`,
+    `self/astdump.onus`).** The syntax tree of `ast.ts` as records and
+    recursive unions (field names that are reserved words carry a suffix
+    or prefix: `ty`, `where_`, `is_pub`), and the recursive-descent parser
+    of `parser.ts` reproduced: the thrown `ParseError` became `Result` and
+    `try`, with recovery at statement and item boundaries; the parser
+    state is one record passed `inout`, its position bound by the record's
+    own refinements; and every function of the recursive cycle takes a
+    `rank` and shares the measure `(tokens left) * 64 + rank`, so a call at
+    a lower rank, or after a token was consumed, is strictly smaller. The
+    verifier proves the whole parser: 160 measure obligations, 287
+    postconditions, every index. Not carried over: the cursor and hole of
+    `onus next` (§14). A dump program prints the tree one node per line,
+    spans in code points, and the differential test compares it with the
+    TypeScript parser's tree on every source in the repository, syntax
+    diagnostics included; they agree on all of them.
+130. **What the parser taught the compiler.** (a) The verifier's join after
+    an `if` forgot everything a branch assigned; it now keeps each branch's
+    new facts under that branch's condition and relates a joined variable
+    to each branch's value, which is what `if p.pos < n { p = { p with pos:
+    p.pos + 1 } }` needs to keep `p.toks` known. (b) The code generator
+    snapshotted every `old(x)` at entry whether or not any obligation
+    would read it; a recursive-descent parser copying its token list on
+    every call ran in quadratic time (76 s on the lexer's own source, now
+    70 ms). Snapshots are taken only for contracts some obligation of
+    which is checked at runtime. (c) A `try` that returned early from a
+    function with `inout` parameters returned the bare value on
+    JavaScript, not the value with the parameters; pinned by
+    `test/codegen/inout_try.onus`. (d) More language facts a model needs:
+    `it` is reserved even as a variable name; a call's non-`Unit` result
+    may not be discarded, so token-consuming helpers come in `Unit`
+    flavours; `old(...)` is not allowed in a loop invariant, so a loop
+    binds what it needs before it; a pattern cannot shadow an enclosing
+    binding, so nested matches on two `Option`s move into a helper.
+131. **Contract shapes that proved.** `advance` promises a step only below
+    the last token, since the stream's final `eof` is a lexer invariant the
+    record does not state; the helpers that consume exactly one token say
+    `result implies p.pos == old(p).pos + 1`; every production that
+    always consumes says `result is Ok implies p.pos > old(p).pos`, which
+    is what the loops' measures and the up-rank calls rest on.
+132. **Still to come in M15.1.** The canonical printer in Onus, then
+    `onus fmt` reimplemented and the byte-identical acceptance; structural
+    recursion over the tree, which the printer needs and the verifier has
+    no measure for yet (the dump program declares `diverge`).
+
 ### Deferred, not changed
 
 - `Stream[T] ! e` as a type (§3.11) is not parsed: `-> Stream[T] ! e` is

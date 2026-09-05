@@ -501,7 +501,7 @@ for py: Int in 0 ..< height { ... }
 
 Loop `invariant` clauses are obligations at entry and at the end of every iteration, and are assumptions after exit.
 
-Recursion: a recursive function declares `decreases` on an expression over its parameters, as a contract clause after `requires`/`ensures` (`decreases n`), checked at every recursive call site. <!-- changed: M3, docs/CHANGES.md item 43 --> Mutual recursion requires the same expression (up to renaming) on every function in the cycle; the compiler computes the cycle and reports `E0320 recursive cycle without shared measure` otherwise.
+Recursion: a recursive function declares `decreases` on an expression over its parameters, as a contract clause after `requires`/`ensures` (`decreases n`), checked at every recursive call site. <!-- changed: M3, docs/CHANGES.md item 43 --> <!-- changed: 2026-09-05, docs/CHANGES.md items 120–121 — the call-site and entry obligations are generated, discharged and otherwise checked at runtime; "same expression up to renaming" is parameters numbered by position --> Mutual recursion requires the same expression (up to renaming) on every function in the cycle; the compiler computes the cycle and reports `E0320 recursive cycle without shared measure` otherwise.
 
 ### 5.3 Quantifiers
 
@@ -924,7 +924,7 @@ Onus assumes the developer is reviewing, not editing. The review tool is the sur
 
 ## 16. Standard library (**provisional**)
 
-Small, fully contracted, every function accompanied by examples. It is the corpus a model learns idioms from, so every function is also a worked example. v0 scope: `Int`, `Float`, `Text`, `List`, `Map`, `Option`, `Result`, `Grid`, `io.*` capabilities, `sql` (connect, narrow, restrict, deadline, query, execute), `config`.
+Small, fully contracted, every function accompanied by examples. It is the corpus a model learns idioms from, so every function is also a worked example. <!-- changed: 2026-09-05, docs/CHANGES.md item 122 — grown for the compiler in Onus: text by code points, parsing, list builders and combinators, file reading and a console --> v0 scope: `Int`, `Float`, `Text`, `List`, `Map`, `Option`, `Result`, `Grid`, `io.*` capabilities, `sql` (connect, narrow, restrict, deadline, query, execute), `config`.
 
 ---
 

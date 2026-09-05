@@ -1,0 +1,19 @@
+module io_program
+import std.io
+
+-- Writes a file, reads it back, and prints what it found (std.io.read, Console).
+pub fn main(
+  args: List[Text],
+  files: io.Files,
+  console: io.Console
+) -> Result[Unit, io.Error] may io.file, alloc {
+  let out: io.File = try io.create(files: files, path: "roundtrip.txt")
+  try io.write(file: out, text: "one\ntwo\n")
+  let back: Text = try io.read(files: files, path: "roundtrip.txt")
+  io.print(
+    console: console,
+    text: Int.to_text(x: List.len(xs: Text.split(t: back, sep: "\n"))) ++ " parts\n"
+  )
+  io.eprint(console: console, text: "done\n")
+  return Ok(value: Unit)
+}

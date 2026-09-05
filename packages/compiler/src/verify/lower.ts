@@ -255,7 +255,8 @@ export class Lowerer {
       case 'BoolLit':
         return e.value ? TRUE : FALSE;
       case 'FloatLit':
-        throw new Unlowerable('Float arithmetic is not verified in v0 (§3.2)');
+        // An opaque value: Float arithmetic is not verified in v0 (§3.2), but a literal in a record or call must not sink the obligations around it.
+        return this.freshConst('float', this.sortOf({ k: 'prim', name: 'Float' }));
       case 'TextLit':
         return variable(this.textLitName(e.value), this.namedSort('Text'));
       case 'Name':

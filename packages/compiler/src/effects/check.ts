@@ -26,6 +26,7 @@ import type { Code } from '../report/codes.js';
 import type { Def, DefId, ModuleRecord, ResolveTables } from '../resolve/defs.js';
 import type { Span } from '../source.js';
 import type * as A from '../syntax/ast.js';
+import { printExpr } from '../syntax/printer.js';
 import { walk } from '../syntax/walk.js';
 import type { Signature, TypeTables } from '../types/tables.js';
 import { effectsToString, stripRefinements, substitute, type Type, type TypeArg } from '../types/type.js';
@@ -478,6 +479,15 @@ class EffectChecker {
   // Recursion (§5.1)
   // -------------------------------------------------------------------------
 
+  /** A measure's text with the parameters replaced by their positions, so measures compare across a cycle. */
+  private measureKey(expr: A.Expr, sig: Signature): string {
+    let key = printExpr(expr);
+    sig.params.forEach((p, i) => {
+      key = key.replace(new RegExp(`(?<![.\\w])${p.name}(?![\\w]|\\s*:)`, 'g'), `$${i}`);
+    });
+    return key;
+  }
+
   private recursion(): void {
     const index = new Map<DefId, number>();
     const low = new Map<DefId, number>();
@@ -512,10 +522,29 @@ class EffectChecker {
       }
     };
     for (const v of this.callGraph.keys()) if (!index.has(v)) strong(v);
+    let cycle = 0;
     for (const scc of sccs) {
       const first = scc[0];
       const cyclic = scc.length > 1 || (first !== undefined && (this.callGraph.get(first)?.has(first) ?? false));
       if (!cyclic) continue;
+      cycle += 1;
+      for (const f of scc) this.ctx.effects.cycles.set(f, cycle);
+      // Mutual recursion shares one measure, up to renaming of the parameters by position (§5.1).
+      const measures = new Map<string, DefId>();
+      for (const f of scc) {
+        const def = this.t.def(f);
+        const sig = this.sig(def);
+        const clause = sig.contracts.find((c) => c.clause === 'decreases');
+        if (clause === undefined) continue;
+        const key = this.measureKey(clause.expr, sig);
+        const other = measures.get(key);
+        if (other === undefined && measures.size > 0) {
+          const [otherKey, otherDef] = [...measures][0] ?? ['', f];
+          this.currentDef = def.name;
+          this.report('E0320', clause.span, `\`${def.name}\` and \`${this.t.def(otherDef).name}\` are in one recursive cycle but declare different measures (\`${key}\` and \`${otherKey}\`, parameters numbered by position); a cycle shares one measure`);
+        }
+        if (other === undefined) measures.set(key, f);
+      }
       for (const f of scc) {
         const def = this.t.def(f);
         const sig = this.sig(def);

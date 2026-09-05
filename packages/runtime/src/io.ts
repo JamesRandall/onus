@@ -2,7 +2,7 @@
  * `std.io` capabilities over Node APIs (impl spec §5). Root capabilities are
  * constructed only by `runMain`.
  */
-import { closeSync, openSync, writeSync } from 'node:fs';
+import { closeSync, openSync, readFileSync, writeSync } from 'node:fs';
 import { Capability } from './capability.js';
 import type { Option, Result } from './panic.js';
 
@@ -48,6 +48,16 @@ export class Clock extends Capability {
   }
 }
 
+export class Console extends Capability {
+  private constructor() {
+    super('io.Console');
+  }
+  /** @internal */
+  static root(): Console {
+    return new Console();
+  }
+}
+
 export class File extends Capability {
   private constructor(readonly fd: number, readonly path: string) {
     super('io.File');
@@ -85,6 +95,27 @@ export function write(file: File, text: string): Result<undefined, Error> {
   } catch (e) {
     return { tag: 'Err', error: ioError(e, file.path) };
   }
+}
+
+export function read(files: Files, path: string): Result<string, Error> {
+  void files;
+  try {
+    return { tag: 'Ok', value: readFileSync(path, 'utf8') };
+  } catch (e) {
+    return { tag: 'Err', error: ioError(e, path) };
+  }
+}
+
+export function print(console: Console, text: string): undefined {
+  void console;
+  process.stdout.write(text);
+  return undefined;
+}
+
+export function eprint(console: Console, text: string): undefined {
+  void console;
+  process.stderr.write(text);
+  return undefined;
 }
 
 export function get_env(env: Env, name: string): Option<string> {

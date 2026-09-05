@@ -33,3 +33,29 @@ export function slice<T>(xs: readonly T[], from: number, to: number): readonly T
   if (from < 0 || to > xs.length || from > to) throw new Panic(sliceBounds, `${from} ..< ${to} is outside 0 ..< ${xs.length}`);
   return xs.slice(from, to);
 }
+
+// ---------------------------------------------------------------------------
+// Builders (std.list.Builder): in-place growth, one list at the end
+// ---------------------------------------------------------------------------
+
+export class Builder<T> {
+  readonly items: T[] = [];
+}
+
+export function builder<T>(): Builder<T> {
+  return new Builder<T>();
+}
+
+export function built<T>(b: Builder<T>): number {
+  return b.items.length;
+}
+
+/** `inout` convention: returns the unit result and the builder. */
+export function push<T>(b: Builder<T>, x: T): [undefined, Builder<T>] {
+  b.items.push(x);
+  return [undefined, b];
+}
+
+export function finish<T>(b: Builder<T>): readonly T[] {
+  return b.items.slice();
+}

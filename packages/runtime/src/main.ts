@@ -7,7 +7,7 @@ import * as io from './io.js';
 import * as sql from './sql.js';
 import { Panic, type Result } from './panic.js';
 
-export type RootKind = 'Files' | 'Env' | 'Net' | 'Clock';
+export type RootKind = 'Files' | 'Env' | 'Net' | 'Clock' | 'Console';
 
 export interface MainSpec {
   /** Parameter name → root capability kind, for every capability parameter of `main`. */
@@ -16,8 +16,10 @@ export interface MainSpec {
   readonly args: string;
 }
 
-function root(kind: RootKind): io.Files | io.Env | io.Net | io.Clock {
+function root(kind: RootKind): io.Files | io.Env | io.Net | io.Clock | io.Console {
   switch (kind) {
+    case 'Console':
+      return io.Console.root();
     case 'Files':
       return io.Files.root();
     case 'Env':

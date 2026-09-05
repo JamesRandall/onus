@@ -1,0 +1,378 @@
+module ast
+
+-- The syntax tree of Onus (spec §2.3; `packages/compiler/src/syntax/ast.ts`)
+-- for the compiler in Onus. Spans count code points. Field names that are
+-- reserved words in Onus carry a suffix or a prefix (`ty`, `where_`,
+-- `is_pub`).
+pub record Span {
+  start: Int where it >= 0
+  end: Int where it >= 0
+}
+
+pub record Ident {
+  text: Text
+  span: Span
+}
+
+pub record QName {
+  segments: List[Ident]
+  span: Span
+}
+
+pub record Visibility {
+  is_pub: Bool
+  is_sealed: Bool
+}
+
+-- Module and items ----------------------------------------------------------
+pub record Module {
+  is_test: Bool
+  name: QName
+  imports: List[Import]
+  items: List[Item]
+  span: Span
+}
+
+pub record Import {
+  name: QName
+  span: Span
+}
+
+pub union Item =
+  | FnItem of decl: FnDecl
+  | TypeAliasItem of decl: TypeAlias
+  | IntrinsicTypeItem of decl: IntrinsicType
+  | ConstItem of decl: ConstDecl
+  | RecordItem of decl: RecordDecl
+  | UnionItem of decl: UnionDecl
+  | InterfaceItem of decl: InterfaceDecl
+  | ImplItem of decl: ImplDecl
+  | ClaimItem of decl: ClaimDecl
+  | CapabilityItem of decl: CapabilityDecl
+  | PathItem of decl: PathDecl
+  | PolicyItem of decl: PolicyDecl
+  | ExampleItem of decl: ExampleDecl
+  | PropertyItem of decl: PropertyDecl
+
+pub record FnDecl {
+  vis: Visibility
+  is_const: Bool
+  is_intrinsic: Bool
+  name: Ident
+  tparams: List[TParam]
+  params: List[Param]
+  ret: Type
+  effects: List[EffectRef]
+  claim_list: List[QName]
+  contracts: List[Contract]
+  body: Option[Block]
+  span: Span
+}
+
+pub record TypeAlias {
+  vis: Visibility
+  name: Ident
+  ty: Type
+  span: Span
+}
+
+pub record IntrinsicType {
+  vis: Visibility
+  name: Ident
+  tparams: List[TParam]
+  span: Span
+}
+
+pub record ConstDecl {
+  vis: Visibility
+  name: Ident
+  ty: Type
+  value: Expr
+  span: Span
+}
+
+pub record RecordDecl {
+  vis: Visibility
+  name: Ident
+  tparams: List[TParam]
+  fields: List[Field]
+  span: Span
+}
+
+pub record Field {
+  name: Ident
+  ty: Type
+  span: Span
+}
+
+pub record UnionDecl {
+  vis: Visibility
+  name: Ident
+  tparams: List[TParam]
+  variants: List[Variant]
+  span: Span
+}
+
+pub record Variant {
+  name: Ident
+  fields: List[Field]
+  span: Span
+}
+
+pub record InterfaceDecl {
+  vis: Visibility
+  name: Ident
+  tparam: Ident
+  items: List[IfaceItem]
+  span: Span
+}
+
+pub union IfaceItem =
+  | IfaceFnItem of decl: IfaceFn
+  | LawItem of decl: Law
+
+pub record IfaceFn {
+  name: Ident
+  params: List[Param]
+  ret: Type
+  effects: List[EffectRef]
+  contracts: List[Contract]
+  span: Span
+}
+
+pub record Law {
+  name: Ident
+  params: List[Param]
+  body: Block
+  span: Span
+}
+
+pub record ImplDecl {
+  iface: Ident
+  target: Type
+  fns: List[FnDecl]
+  span: Span
+}
+
+pub record ClaimDecl {
+  vis: Visibility
+  name: Ident
+  body: ClaimBody
+  span: Span
+}
+
+pub union ClaimBody =
+  | Derived of pred: ClaimPred
+  | Asserted of description: Text
+
+pub union ClaimPred =
+  | ClaimAtom of name: QName, span: Span
+  | ClaimEffectsEq of effects: List[EffectRef], span: Span
+  | ClaimNot of operand: ClaimPred, span: Span
+  | ClaimAnd of operands: List[ClaimPred], span: Span
+  | ClaimOr of operands: List[ClaimPred], span: Span
+
+pub record CapabilityDecl {
+  vis: Visibility
+  name: Ident
+  tparams: List[TParam]
+  grant_list: List[Grant]
+  span: Span
+}
+
+pub record Grant {
+  effect: EffectRef
+  when_cond: Option[Expr]
+  span: Span
+}
+
+pub record PathDecl {
+  name: Ident
+  entry_fn: Ident
+  clauses: List[PathClause]
+  span: Span
+}
+
+pub union PathClause =
+  | PathEffects of effects: List[EffectRef], span: Span
+  | PathForbid of effects: List[EffectRef], span: Span
+  | PathRequire of claim_list: List[QName], span: Span
+  | PathPolicy of name: Ident, except_list: List[QName], span: Span
+
+pub record PolicyDecl {
+  name: Ident
+  outside_list: List[PolicyScope]
+  span: Span
+}
+
+-- `self`, or a module name, optionally with a trailing `.*` glob.
+pub record PolicyScope {
+  name: Option[QName]
+  glob: Bool
+  span: Span
+}
+
+pub record ExampleDecl {
+  name: Ident
+  body: Block
+  span: Span
+}
+
+pub record PropertyDecl {
+  name: Ident
+  params: List[Param]
+  body: Block
+  span: Span
+}
+
+-- Signatures --------------------------------------------------------------
+pub union TParam =
+  | TypeParam of name: Ident, bound: Option[Ident], span: Span
+  | ConstParam of name: Ident, ty: Type, span: Span
+  | EffectParam of name: Ident, span: Span
+
+pub record Param {
+  is_inout: Bool
+  name: Ident
+  ty: Type
+  span: Span
+}
+
+pub record EffectRef {
+  name: QName
+  span: Span
+}
+
+-- `clause` is `requires`, `ensures` or `decreases`.
+pub record Contract {
+  clause: Text
+  is_proved: Bool
+  expr: Expr
+  span: Span
+}
+
+-- Types -------------------------------------------------------------------
+pub union Type =
+  | NamedType of name: QName, args: List[TypeArg], where_: Option[Expr], span: Span
+  | FnType of params: List[Param], ret: Type, effects: List[EffectRef], span: Span
+
+pub union TypeArg =
+  | TypeArgType of label: Option[Ident], ty: Type, span: Span
+  | TypeArgConst of label: Option[Ident], expr: Expr, span: Span
+
+-- Statements --------------------------------------------------------------
+pub record Block {
+  stmts: List[Stmt]
+  elided: Bool
+  span: Span
+}
+
+pub union Stmt =
+  | Let of name: Ident, ty: Type, value: Expr, span: Span
+  | Var of name: Ident, ty: Type, value: Expr, span: Span
+  | Assign of name: Ident, value: Expr, span: Span
+  | Return of value: Expr, span: Span
+  | If of cond: Expr, then_block: Block, else_block: Option[Block], span: Span
+  | Match of scrutinee: Expr, arms: List[Arm], span: Span
+  | Loop of cond: Expr, clauses: List[LoopClause], body: Block, span: Span
+  | For of name: Ident, ty: Type, domain: Domain, body: Block, span: Span
+  | Assume of claim: QName, justification: Text, verify_block: Option[VerifyBlock], span: Span
+  | ExprStmt of expr: Expr, span: Span
+
+pub record Arm {
+  pattern: Pattern
+  guard: Option[Expr]
+  body: ArmBody
+  span: Span
+}
+
+pub union ArmBody =
+  | ArmStmt of stmt: Stmt
+  | ArmBlock of block: Block
+
+-- `clause` is `invariant` or `decreases`.
+pub record LoopClause {
+  clause: Text
+  expr: Expr
+  span: Span
+}
+
+pub union Domain =
+  | RangeDomain of lo: Expr, hi: Expr, span: Span
+  | InDomain of expr: Expr, span: Span
+
+pub record VerifyBlock {
+  params: List[Param]
+  effects: List[EffectRef]
+  body: Block
+  span: Span
+}
+
+-- Expressions -------------------------------------------------------------
+pub union Expr =
+  | IntLit of value: Int, span: Span
+  | FloatLit of value: Float, span: Span
+  | TextLit of value: Text, span: Span
+  | BoolLit of value: Bool, span: Span
+  | DurationLit of nanos: Int, span: Span
+  | Name of name: Ident, span: Span
+  | It of span: Span
+  | ResultRef of span: Span
+  | Ctor of name: QName, args: Option[List[Arg]], fields: Option[List[FieldInit]], span: Span
+  | RecordUpdate of base: Expr, fields: List[FieldInit], span: Span
+  | ListLit of elems: List[Expr], span: Span
+  | Try of expr: Expr, else_: Option[TryElse], span: Span
+  | Recover of body: Block, span: Span
+  | Old of name: Ident, span: Span
+  | Quantifier of quant: Text, name: Ident, ty: Type, domain: Option[Domain], where_: Option[Expr], body: Expr, span: Span
+  | Closure of params: List[Param], ret: Type, effects: List[EffectRef], body: Block, span: Span
+  | Fake of capability: QName, fields: List[FieldInit], span: Span
+  | Hole of span: Span
+  | FieldAccess of object: Expr, name: Ident, span: Span
+  | Call of callee: Expr, targs: Option[List[TypeArg]], args: List[Arg], span: Span
+  | Unary of op: Text, operand: Expr, span: Span
+  | Binary of op: Text, left: Expr, right: Expr, span: Span
+  | And of operands: List[Expr], span: Span
+  | Or of operands: List[Expr], span: Span
+  | Is of expr: Expr, pattern: Pattern, span: Span
+
+pub record FieldInit {
+  name: Ident
+  value: Expr
+  span: Span
+}
+
+pub record TryElse {
+  name: Ident
+  expr: Expr
+  span: Span
+}
+
+pub record Arg {
+  name: Ident
+  is_inout: Bool
+  value: Expr
+  span: Span
+}
+
+-- Patterns ----------------------------------------------------------------
+pub union Pattern =
+  | WildcardPat of span: Span
+  | BindPat of name: Ident, span: Span
+  | LitPat of literal: Expr, span: Span
+  | VariantPat of name: QName, fields: Option[List[PatField]], span: Span
+
+pub union PatField =
+  | PatFieldName of name: Ident, span: Span
+  | PatFieldSkip of span: Span
+  | PatFieldRest of span: Span
+
+example spans {
+  let e: Expr = Binary(
+    op: "+",
+    left: IntLit(value: 1, span: Span { start: 0, end: 1 }),
+    right: IntLit(value: 2, span: Span { start: 4, end: 5 }),
+    span: Span { start: 0, end: 5 }
+  )
+  e is Binary
+}

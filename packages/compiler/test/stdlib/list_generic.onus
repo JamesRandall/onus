@@ -1,0 +1,27 @@
+module list_generic
+
+-- Closures and equality on a type parameter: outside the native subset (§19.1), JavaScript only.
+example combinators {
+  List.map(
+    xs: [1, 2, 3],
+    f: fn(x: Int) -> Int {
+      return x + 1
+    }
+  ) == [2, 3, 4]
+  List.filter(
+    xs: [1, 2, 3, 4],
+    keep: fn(x: Int) -> Bool {
+      return x > 2
+    }
+  ) == [3, 4]
+  List.fold(
+    xs: [1, 2, 3],
+    init: 10,
+    step: fn(acc: Int, x: Int) -> Int {
+      return acc + x
+    }
+  ) == 16
+  List.contains(xs: [4, 16], x: 16)
+  List.index_of(xs: ["x", "y"], x: "y") == Some(value: 1)
+  List.index_of(xs: ["x", "y"], x: "z") is None
+}

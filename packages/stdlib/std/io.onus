@@ -26,3 +26,13 @@ pub intrinsic fn create(files: Files, path: Text) -> Result[File, Error] may io.
 pub intrinsic fn write(file: File, text: Text) -> Result[Unit, Error] may io.file
 
 pub intrinsic fn get_env(env: Env, name: Text) -> Option[Text] may io.env, alloc
+
+-- The process's standard output and error streams.
+pub capability Console
+  grants io.file
+
+pub intrinsic fn read(files: Files, path: Text) -> Result[Text, Error] may io.file, alloc
+
+pub intrinsic fn print(console: Console, text: Text) -> Unit may io.file
+
+pub intrinsic fn eprint(console: Console, text: Text) -> Unit may io.file

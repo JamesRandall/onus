@@ -110,6 +110,8 @@ class JsEmitter {
   private readonly obRefs = new Map<string, string>();
   private selfAlias: string | null = null;
   private fn: FnCtx | null = null;
+  /** Counter for the temporaries of `call-inout` statements. */
+  private inoutSeq = 0;
   /** How a bare assertion renders: as a vitest expectation, or as an early `return false`. */
   private assertMode: 'expect' | 'return-false' = 'return-false';
 
@@ -226,6 +228,8 @@ class JsEmitter {
         switch (q) {
           case 'std.list.List':
             return `readonly ${wrap(targs[0] ?? 'unknown')}[]`;
+          case 'std.list.Builder':
+            return `$rt.list.Builder<${targs[0] ?? 'unknown'}>`;
           case 'std.grid.Grid':
             return `$rt.grid.Grid<${targs[0] ?? 'unknown'}>`;
           case 'std.map.Map':
@@ -319,6 +323,7 @@ class JsEmitter {
           q === 'std.list.List' ? `readonly ${params[0] ?? 'unknown'}[]` :
           q === 'std.grid.Grid' ? `$rt.grid.Grid<${params[0] ?? 'unknown'}>` :
           q === 'std.map.Map' ? `$rt.map.Map<${params[0] ?? 'unknown'}, ${params[1] ?? 'unknown'}>` :
+          q === 'std.list.Builder' ? `$rt.list.Builder<${params[0] ?? 'unknown'}>` :
           q === 'std.sql.Select' ? `$rt.sql.Select<${params[0] ?? 'unknown'}>` :
           q === 'std.sql.Param' ? '$rt.sql.Param' :
           q === 'std.sql.Statement' ? '$rt.sql.Statement' : 'unknown';
@@ -418,7 +423,9 @@ class JsEmitter {
     }
     this.w.block('try {', emit, '} catch ($e) {');
     this.w.indent();
-    this.w.line('if ($e instanceof $rt.EarlyReturn) return $e.value;');
+    // A function with `inout` parameters returns them alongside its value, on an early return too.
+    const inouts = (this.fn?.inout ?? []).map((n) => this.local(n));
+    this.w.line(`if ($e instanceof $rt.EarlyReturn) return ${inouts.length === 0 ? '$e.value' : `[$e.value, ${inouts.join(', ')}]`};`);
     this.w.line('throw $e;');
     this.w.dedent();
     this.w.line('}');
@@ -511,7 +518,9 @@ class JsEmitter {
       }
       case 'call-inout': {
         const names = s.targets.map((x) => this.local(x.name));
-        const tmps = names.map((n) => `${n}$`);
+        // Unique per call: two `inout` calls on one variable in a block must not redeclare a temporary.
+        this.inoutSeq += 1;
+        const tmps = names.map((n) => `${n}$${this.inoutSeq}`);
         this.w.line(`const [${s.result === null ? '' : this.local(s.result.name)}, ${tmps.join(', ')}] = ${this.expr(s.call).code};`);
         names.forEach((n, i) => this.w.line(`${n} = ${tmps[i] ?? n};`));
         return;

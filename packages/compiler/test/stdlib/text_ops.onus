@@ -1,0 +1,29 @@
+module text_ops
+
+-- The standard library's own examples run at check time; these exercise the
+-- same functions at runtime on both targets (impl spec M15.0).
+fn shout(t: Text) -> Text may alloc {
+  return Text.join(parts: Text.split(t: t, sep: " "), sep: "!") ++ "!"
+}
+
+fn count_char(t: Text, c: Int where 0 <= it and it <= 1114111) -> Int where it >= 0 may alloc {
+  var n: Int where it >= 0 = 0
+  for cp: Int in Text.code_points(t: t) {
+    if cp == c {
+      n = n + 1
+    }
+  }
+  return n
+}
+
+example text_operations {
+  shout(t: "a b c") == "a!b!c!"
+  count_char(t: "banana", c: 97) == 3
+  Text.slice(t: "héllo", from: 1, to: 4) == "éll"
+  Text.index_of(t: "héllo", needle: "llo", from: 0) == Some(value: 2)
+  Text.of_code_points(cps: Text.code_points(t: "日本")) == "日本"
+  Text.compare(a: "abc", b: "abd") == -1
+  Text.replace(t: "1-2-3", from: "-", to: "+") == "1+2+3"
+  Int.parse(t: "-12") == Some(value: -12)
+  Float.parse(t: "2.5e1") == Some(value: 25.0)
+}

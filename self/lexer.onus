@@ -1,0 +1,689 @@
+module lexer
+import tokens
+
+-- The Onus lexer in Onus (spec §2; impl spec M15.1): the same token stream
+-- as `packages/compiler/src/lexer/lexer.ts`, positions in code points.
+--   - newlines appear only outside `(`/`[`, never twice running, never
+--     first, never before a continuation token, and once before `eof`;
+--   - comments are kept aside with whether they stand on their own line;
+--   - lexical errors are diagnostics, and lexing continues.
+pub record LexResult {
+  tokens: List[tokens.Token]
+  comments: List[tokens.Comment]
+  diagnostics: List[tokens.Diagnostic]
+}
+
+-- Sources longer than this are refused before lexing, which keeps every
+-- position arithmetic below overflow.
+pub const max_source: Int = 1000000000
+
+-- The code point at `i`, or -1 past either end.
+fn at(src: List[Int], i: Int) -> Int
+  ensures result >= 0 implies i >= 0 and i < List.len(xs: src)
+{
+  if i < 0 or i >= List.len(xs: src) {
+    return -1
+  }
+  return List.get(xs: src, i: i)
+}
+
+fn is_space(c: Int) -> Bool {
+  return c == 32 or c == 9 or c == 13
+}
+
+-- The end of the identifier starting at `start`, whose first code point is an identifier character.
+fn ident_end(src: List[Int], start: Int where it >= 0) -> Int where it >= start and it <= List.len(
+  xs: src
+) may alloc
+  requires List.len(xs: src) <= max_source
+{
+  var p: Int where it >= start and it <= List.len(xs: src) = start
+  loop while tokens.is_ident_char(c: at(src: src, i: p))
+    invariant p >= start and p <= List.len(xs: src)
+    decreases List.len(xs: src) - p
+  {
+    p = p + 1
+  }
+  return p
+}
+
+-- The end of the run of digits and underscores starting at `start`.
+fn digits_end(src: List[Int], start: Int where it >= 0) -> Int where it >= start and it <= List.len(
+  xs: src
+) may alloc
+  requires List.len(xs: src) <= max_source
+{
+  var p: Int where it >= start and it <= List.len(xs: src) = start
+  loop while tokens.is_digit(c: at(src: src, i: p)) or at(src: src, i: p) == 95
+    invariant p >= start and p <= List.len(xs: src)
+    decreases List.len(xs: src) - p
+  {
+    p = p + 1
+  }
+  return p
+}
+
+-- The index of the newline ending the line that starts at `start`, or the length.
+fn line_end(src: List[Int], start: Int where it >= 0) -> Int where it >= start and it <= List.len(
+  xs: src
+) may alloc
+  requires List.len(xs: src) <= max_source
+{
+  var p: Int where it >= start and it <= List.len(xs: src) = start
+  loop while p < List.len(xs: src) and at(src: src, i: p) != 10
+    invariant p >= start and p <= List.len(xs: src)
+    decreases List.len(xs: src) - p
+  {
+    p = p + 1
+  }
+  return p
+}
+
+-- `end` moved back over trailing spaces, but not before `start`.
+fn trim_end(
+  src: List[Int],
+  start: Int where it >= 0,
+  end: Int where it >= start
+) -> Int where it >= start and it <= end may alloc
+  requires end <= List.len(xs: src)
+{
+  var e: Int where it >= start and it <= end = end
+  loop while e > start and is_space(c: at(src: src, i: e - 1))
+    invariant e >= start and e <= end
+    decreases e - start
+  {
+    e = e - 1
+  }
+  return e
+}
+
+fn text_of(
+  src: List[Int],
+  from: Int where it >= 0,
+  to: Int where it >= from and it <= List.len(xs: src)
+) -> Text may alloc {
+  return Text.of_code_points(cps: List.slice(xs: src, from: from, to: to))
+}
+
+-- The digits of a number with the underscores removed.
+fn digits_of(
+  src: List[Int],
+  from: Int where it >= 0,
+  to: Int where it >= from and it <= List.len(xs: src)
+) -> Text may alloc {
+  var b: Builder[Int] = List.builder()
+  for c: Int in List.slice(xs: src, from: from, to: to) {
+    if c != 95 {
+      List.push(b: inout b, x: c)
+    }
+  }
+  return Text.of_code_points(cps: List.finish(b: b))
+}
+
+fn duration_unit(
+  suffix: Text
+) -> Option[Int where it == 1 or it == 1000 or it == 1000000 or it == 1000000000] {
+  if suffix == "ns" {
+    return Some(value: 1)
+  }
+  if suffix == "us" {
+    return Some(value: 1000)
+  }
+  if suffix == "ms" {
+    return Some(value: 1000000)
+  }
+  if suffix == "s" {
+    return Some(value: 1000000000)
+  }
+  return None
+}
+
+-- Whether `p` starts with the code points of `text` at `pos`.
+fn has_at(src: List[Int], pos: Int where it >= 0, text: Text) -> Bool may alloc {
+  let cps: List[Int] = Text.code_points(t: text)
+  for i: Int in 0 ..< List.len(xs: cps) {
+    if at(src: src, i: pos + i) != List.get(xs: cps, i: i) {
+      return false
+    }
+  }
+  return true
+}
+
+fn match_punct(src: List[Int], pos: Int where it >= 0) -> Option[Text] may alloc {
+  for p: Text in tokens.punctuation {
+    if has_at(src: src, pos: pos, text: p) {
+      return Some(value: p)
+    }
+  }
+  return None
+}
+
+-- A number or duration literal from `start`; the token and any diagnostic are pushed; returns the end.
+fn scan_number(
+  src: List[Int],
+  start: Int where it >= 0 and it < List.len(xs: src),
+  tokens: inout Builder[tokens.Token],
+  diagnostics: inout Builder[tokens.Diagnostic]
+) -> Int where it > start and it <= List.len(xs: src) may alloc, mutate
+  requires List.len(xs: src) <= max_source
+  requires tokens.is_digit(c: at(src: src, i: start))
+{
+  var pos: Int where it >= start and it <= List.len(xs: src) = digits_end(src: src, start: start)
+  var is_float: Bool = false
+  if at(src: src, i: pos) == 46 and tokens.is_digit(c: at(src: src, i: pos + 1)) {
+    is_float = true
+    pos = digits_end(src: src, start: pos + 1)
+  }
+  if at(src: src, i: pos) == 101 or at(src: src, i: pos) == 69 {
+    var p: Int where it >= start and it <= List.len(xs: src) = pos + 1
+    if at(src: src, i: p) == 43 or at(src: src, i: p) == 45 {
+      p = p + 1
+    }
+    if tokens.is_digit(c: at(src: src, i: p)) {
+      is_float = true
+      pos = digits_end(src: src, start: p)
+    }
+  }
+  let number: Text = digits_of(src: src, from: start, to: pos)
+  let unit_start: Int = pos
+  pos = ident_end(src: src, start: pos)
+  if pos > unit_start {
+    let suffix: Text = text_of(src: src, from: unit_start, to: pos)
+    match duration_unit(suffix: suffix) with
+    | Some(value) -> {
+      let unit: Int = value
+      if is_float {
+        List.push(
+          b: inout diagnostics,
+          x: tokens.Diagnostic {
+            code: "E0010",
+            start: start,
+            end: pos,
+            detail: "`" ++ text_of(src: src, from: start, to: pos) ++ "` is not a valid literal"
+          }
+        )
+        List.push(
+          b: inout tokens,
+          x: tokens.Token { kind: tokens.IntLit(value: 0), start: start, end: pos }
+        )
+      } else {
+        push_duration(
+          number: number,
+          unit: unit,
+          start: start,
+          end: pos,
+          tokens: inout tokens,
+          diagnostics: inout diagnostics
+        )
+      }
+    }
+    | None -> {
+      List.push(
+        b: inout diagnostics,
+        x: tokens.Diagnostic {
+          code: "E0010",
+          start: start,
+          end: pos,
+          detail: "`" ++ text_of(src: src, from: start, to: pos) ++ "` is not a valid literal"
+        }
+      )
+      List.push(
+        b: inout tokens,
+        x: tokens.Token { kind: tokens.IntLit(value: 0), start: start, end: pos }
+      )
+    }
+    return pos
+  }
+  if is_float {
+    match Float.parse(t: number) with
+    | Some(value) -> List.push(
+      b: inout tokens,
+      x: tokens.Token { kind: tokens.FloatLit(value: value), start: start, end: pos }
+    )
+    | None -> List.push(
+      b: inout tokens,
+      x: tokens.Token { kind: tokens.FloatLit(value: 0.0), start: start, end: pos }
+    )
+    return pos
+  }
+  match Int.parse(t: number) with
+  | Some(value) -> List.push(
+    b: inout tokens,
+    x: tokens.Token { kind: tokens.IntLit(value: value), start: start, end: pos }
+  )
+  | None -> {
+    List.push(
+      b: inout diagnostics,
+      x: tokens.Diagnostic {
+        code: "E0008",
+        start: start,
+        end: pos,
+        detail: number ++ " exceeds the 64-bit signed range"
+      }
+    )
+    List.push(
+      b: inout tokens,
+      x: tokens.Token { kind: tokens.IntLit(value: 0), start: start, end: pos }
+    )
+  }
+  return pos
+}
+
+-- The duration token for `number` in `unit` nanoseconds per unit; a value that overflows is `E0008`.
+fn push_duration(
+  number: Text,
+  unit: Int where it == 1 or it == 1000 or it == 1000000 or it == 1000000000,
+  start: Int where it >= 0,
+  end: Int where it >= start,
+  tokens: inout Builder[tokens.Token],
+  diagnostics: inout Builder[tokens.Diagnostic]
+) -> Unit may alloc, mutate {
+  match Int.parse(t: number) with
+  | Some(value) -> {
+    var nanos: Int = 0
+    var overflow: Bool = false
+    if unit == 1 {
+      nanos = value
+    } else {
+      if unit == 1000 {
+        if value > 9223372036854775 {
+          overflow = true
+        } else {
+          nanos = value * 1000
+        }
+      } else {
+        if unit == 1000000 {
+          if value > 9223372036854 {
+            overflow = true
+          } else {
+            nanos = value * 1000000
+          }
+        } else {
+          if value > 9223372036 {
+            overflow = true
+          } else {
+            nanos = value * 1000000000
+          }
+        }
+      }
+    }
+    if overflow {
+      List.push(
+        b: inout diagnostics,
+        x: tokens.Diagnostic {
+          code: "E0008",
+          start: start,
+          end: end,
+          detail: number ++ " exceeds the 64-bit signed range"
+        }
+      )
+      List.push(
+        b: inout tokens,
+        x: tokens.Token { kind: tokens.DurationLit(nanos: 0), start: start, end: end }
+      )
+    } else {
+      List.push(
+        b: inout tokens,
+        x: tokens.Token { kind: tokens.DurationLit(nanos: nanos), start: start, end: end }
+      )
+    }
+  }
+  | None -> {
+    List.push(
+      b: inout diagnostics,
+      x: tokens.Diagnostic {
+        code: "E0008",
+        start: start,
+        end: end,
+        detail: number ++ " exceeds the 64-bit signed range"
+      }
+    )
+    List.push(
+      b: inout tokens,
+      x: tokens.Token { kind: tokens.DurationLit(nanos: 0), start: start, end: end }
+    )
+  }
+}
+
+-- A text literal from the opening quote at `start`; returns the end.
+fn scan_text(
+  src: List[Int],
+  start: Int where it >= 0 and it < List.len(xs: src),
+  tokens: inout Builder[tokens.Token],
+  diagnostics: inout Builder[tokens.Diagnostic]
+) -> Int where it > start and it <= List.len(xs: src) may alloc, mutate
+  requires List.len(xs: src) <= max_source
+{
+  let n: Int = List.len(xs: src)
+  var pos: Int where it > start and it <= List.len(xs: src) = start + 1
+  var chars: Builder[Int] = List.builder()
+  var terminated: Bool = false
+  loop while pos < n and not terminated
+    invariant pos > start and pos <= List.len(xs: src)
+    decreases List.len(xs: src) - pos
+  {
+    let d: Int = at(src: src, i: pos)
+    if d == 34 {
+      pos = pos + 1
+      terminated = true
+    } else {
+      if d == 10 {
+        -- An unterminated literal ends at the newline, which is the loop's exit below.
+        terminated = true
+        List.push(
+          b: inout diagnostics,
+          x: tokens.Diagnostic {
+            code: "E0004",
+            start: start,
+            end: pos,
+            detail: "a text literal must close on the same line; use \\n for a newline"
+          }
+        )
+        List.push(
+          b: inout tokens,
+          x: tokens.Token {
+            kind: tokens.TextLit(value: Text.of_code_points(cps: List.finish(b: chars))),
+            start: start,
+            end: pos
+          }
+        )
+        return pos
+      } else {
+        if d == 92 {
+          let e: Int = at(src: src, i: pos + 1)
+          match escape_of(c: e) with
+          | Some(value) -> List.push(b: inout chars, x: value)
+          | None -> {
+            var stop: Int = n
+            if pos + 2 < n {
+              stop = pos + 2
+            }
+            List.push(
+              b: inout diagnostics,
+              x: tokens.Diagnostic {
+                code: "E0009",
+                start: pos,
+                end: stop,
+                detail: "`\\" ++ text_of_code(
+                  c: e
+                ) ++ "` is not a valid escape; use \\n \\t \\r \\0 \\\\ or \\\""
+              }
+            )
+          }
+          if pos + 2 <= n {
+            pos = pos + 2
+          } else {
+            pos = n
+          }
+        } else {
+          List.push(b: inout chars, x: d)
+          pos = pos + 1
+        }
+      }
+    }
+  }
+  if not terminated {
+    List.push(
+      b: inout diagnostics,
+      x: tokens.Diagnostic {
+        code: "E0004",
+        start: start,
+        end: pos,
+        detail: "a text literal must close on the same line; use \\n for a newline"
+      }
+    )
+  }
+  List.push(
+    b: inout tokens,
+    x: tokens.Token {
+      kind: tokens.TextLit(value: Text.of_code_points(cps: List.finish(b: chars))),
+      start: start,
+      end: pos
+    }
+  )
+  return pos
+}
+
+fn text_of_code(c: Int) -> Text may alloc {
+  if c < 0 or c > 1114111 {
+    return ""
+  }
+  return Text.of_code_point(cp: c)
+}
+
+fn escape_of(c: Int) -> Option[Int] {
+  if c == 110 {
+    return Some(value: 10)
+  }
+  if c == 116 {
+    return Some(value: 9)
+  }
+  if c == 114 {
+    return Some(value: 13)
+  }
+  if c == 48 {
+    return Some(value: 0)
+  }
+  if c == 92 {
+    return Some(value: 92)
+  }
+  if c == 34 {
+    return Some(value: 34)
+  }
+  return None
+}
+
+pub fn lex(source: Text) -> LexResult may alloc
+  requires Text.count(t: source) <= max_source
+{
+  let src: List[Int] = Text.code_points(t: source)
+  let n: Int = List.len(xs: src)
+  var raw: Builder[tokens.Token] = List.builder()
+  var comments: Builder[tokens.Comment] = List.builder()
+  var diagnostics: Builder[tokens.Diagnostic] = List.builder()
+  var pos: Int where it >= 0 and it <= List.len(xs: src) = 0
+  var depth: Int where it >= 0 = 0
+  var line_has_code: Bool = false
+  loop while pos < n
+    invariant pos >= 0 and pos <= List.len(xs: src)
+    decreases List.len(xs: src) - pos
+  {
+    let c: Int = at(src: src, i: pos)
+    if c == 10 {
+      if depth == 0 {
+        List.push(b: inout raw, x: tokens.Token { kind: tokens.Newline, start: pos, end: pos + 1 })
+      }
+      pos = pos + 1
+      line_has_code = false
+    } else {
+      if is_space(c: c) {
+        pos = pos + 1
+      } else {
+        if c == 45 and at(src: src, i: pos + 1) == 45 {
+          let end: Int = line_end(src: src, start: pos)
+          let trimmed: Int = trim_end(src: src, start: pos, end: end)
+          List.push(
+            b: inout comments,
+            x: tokens.Comment { start: pos, end: trimmed, own_line: not line_has_code }
+          )
+          if end > pos {
+            pos = end
+          } else {
+            pos = pos + 1
+          }
+        } else {
+          line_has_code = true
+          if tokens.is_lower(c: c) or tokens.is_upper(c: c) or (c == 95 and tokens.is_ident_char(
+            c: at(src: src, i: pos + 1)
+          )) {
+            let end: Int = ident_end(src: src, start: pos)
+            var stop: Int = pos + 1
+            if end > pos {
+              stop = end
+            }
+            let cps: List[Int] = List.slice(xs: src, from: pos, to: stop)
+            let word: Text = Text.of_code_points(cps: cps)
+            if tokens.is_keyword(word: word) {
+              List.push(
+                b: inout raw,
+                x: tokens.Token { kind: tokens.Keyword(word: word), start: pos, end: stop }
+              )
+            } else {
+              if tokens.is_name(cps: cps) {
+                List.push(
+                  b: inout raw,
+                  x: tokens.Token { kind: tokens.Name(text: word), start: pos, end: stop }
+                )
+              } else {
+                if tokens.is_type_name(cps: cps) {
+                  List.push(
+                    b: inout raw,
+                    x: tokens.Token { kind: tokens.TName(text: word), start: pos, end: stop }
+                  )
+                } else {
+                  List.push(
+                    b: inout diagnostics,
+                    x: tokens.Diagnostic {
+                      code: "E0005",
+                      start: pos,
+                      end: stop,
+                      detail: "`" ++ word ++ "` is neither a name ([a-z][a-z0-9_]*) nor a type name ([A-Z][A-Za-z0-9]*)"
+                    }
+                  )
+                }
+              }
+            }
+            pos = stop
+          } else {
+            if tokens.is_digit(c: c) {
+              pos = scan_number(
+                src: src,
+                start: pos,
+                tokens: inout raw,
+                diagnostics: inout diagnostics
+              )
+            } else {
+              if c == 34 {
+                pos = scan_text(
+                  src: src,
+                  start: pos,
+                  tokens: inout raw,
+                  diagnostics: inout diagnostics
+                )
+              } else {
+                match match_punct(src: src, pos: pos) with
+                | Some(value) -> {
+                  let p: Text = value
+                  let width: Int = Text.count(t: p)
+                  var stop: Int = pos + 1
+                  if pos + width <= n and width > 0 {
+                    stop = pos + width
+                  }
+                  List.push(
+                    b: inout raw,
+                    x: tokens.Token { kind: tokens.Punct(text: p), start: pos, end: stop }
+                  )
+                  if p == "(" or p == "[" {
+                    depth = depth + 1
+                  } else {
+                    if (p == ")" or p == "]") and depth > 0 {
+                      depth = depth - 1
+                    }
+                  }
+                  pos = stop
+                }
+                | None -> {
+                  List.push(
+                    b: inout diagnostics,
+                    x: tokens.Diagnostic {
+                      code: "E0005",
+                      start: pos,
+                      end: pos + 1,
+                      detail: "`" ++ text_of_code(c: c) ++ "` cannot appear here"
+                    }
+                  )
+                  pos = pos + 1
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  return LexResult {
+    tokens: normalise(raw: List.finish(b: raw), end: n),
+    comments: List.finish(b: comments),
+    diagnostics: List.finish(b: diagnostics)
+  }
+}
+
+-- Collapses newlines, drops leading and continuation newlines, and appends the final newline and `eof`.
+fn normalise(raw: List[tokens.Token], end: Int where it >= 0) -> List[tokens.Token] may alloc {
+  var out: Builder[tokens.Token] = List.builder()
+  var last_was_newline: Bool = true
+  let n: Int = List.len(xs: raw)
+  for i: Int in 0 ..< n {
+    let t: tokens.Token = List.get(xs: raw, i: i)
+    match t.kind with
+    | tokens.Newline -> {
+      if not last_was_newline and not continuation_follows(raw: raw, from: i + 1) {
+        List.push(b: inout out, x: t)
+        last_was_newline = true
+      }
+    }
+    | _ -> {
+      List.push(b: inout out, x: t)
+      last_was_newline = false
+    }
+  }
+  if not last_was_newline {
+    List.push(b: inout out, x: tokens.Token { kind: tokens.Newline, start: end, end: end })
+  }
+  List.push(b: inout out, x: tokens.Token { kind: tokens.Eof, start: end, end: end })
+  return List.finish(b: out)
+}
+
+-- Whether the first non-newline token at or after `from` is a continuation token.
+fn continuation_follows(raw: List[tokens.Token], from: Int where it >= 0) -> Bool {
+  let n: Int = List.len(xs: raw)
+  var j: Int where it >= 0 = from
+  loop while j < n and List.get(xs: raw, i: j).kind is tokens.Newline
+    invariant j >= 0
+    decreases n - j
+  {
+    j = j + 1
+  }
+  if j < n {
+    return tokens.is_continuation(kind: List.get(xs: raw, i: j).kind)
+  }
+  return false
+}
+
+example lexes {
+  let r: LexResult = lex(source: "fn f(x: Int) -> Int {\n  return x + 1\n}\n")
+  List.len(xs: r.diagnostics) == 0
+  List.len(xs: r.tokens) == 19
+  List.get(xs: r.tokens, i: 0).kind == tokens.Keyword(word: "fn")
+  List.get(xs: r.tokens, i: 1).kind == tokens.Name(text: "f")
+  List.get(xs: r.tokens, i: 18).kind == tokens.Eof
+}
+
+example literals {
+  let r: LexResult = lex(source: "1_000 2.5 3ms \"a\\n\" -- note\n")
+  List.len(xs: r.diagnostics) == 0
+  List.get(xs: r.tokens, i: 0).kind == tokens.IntLit(value: 1000)
+  List.get(xs: r.tokens, i: 1).kind == tokens.FloatLit(value: 2.5)
+  List.get(xs: r.tokens, i: 2).kind == tokens.DurationLit(nanos: 3000000)
+  List.get(xs: r.tokens, i: 3).kind == tokens.TextLit(value: "a\n")
+  List.len(xs: r.comments) == 1
+  List.get(xs: r.comments, i: 0).own_line == false
+}
+
+example errors {
+  let r: LexResult = lex(source: "xValue 99999999999999999999 \"open\n")
+  List.len(xs: r.diagnostics) == 3
+  List.get(xs: r.diagnostics, i: 0).code == "E0005"
+  List.get(xs: r.diagnostics, i: 1).code == "E0008"
+  List.get(xs: r.diagnostics, i: 2).code == "E0004"
+}

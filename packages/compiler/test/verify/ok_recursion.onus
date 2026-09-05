@@ -1,0 +1,68 @@
+module ok_recursion
+
+-- Direct recursion: the measure is the parameter (§5.1).
+fn countdown(n: Int where it >= 0) -> Int
+  decreases n
+{
+  if n == 0 {
+    return 0
+  }
+  return countdown(n: n - 1)
+}
+
+-- Mutual recursion shares one measure.
+fn even(n: Int where it >= 0) -> Bool
+  decreases n
+{
+  if n == 0 {
+    return true
+  }
+  return odd(n: n - 1)
+}
+
+fn odd(n: Int where it >= 0) -> Bool
+  decreases n
+{
+  if n == 0 {
+    return false
+  }
+  return even(n: n - 1)
+}
+
+-- Structural recursion over a list: the measure is its length, and `slice` promises the shorter one.
+fn all_small(xs: List[Int]) -> Bool may alloc
+  decreases List.len(xs: xs)
+{
+  if List.len(xs: xs) == 0 {
+    return true
+  }
+  if List.get(xs: xs, i: 0) > 1000 {
+    return false
+  }
+  return all_small(xs: List.slice(xs: xs, from: 1, to: List.len(xs: xs)))
+}
+
+record Cursor {
+  items: List[Int]
+  pos: Int where it >= 0
+}
+
+-- A measure over record fields: what remains of the cursor.
+fn remaining(c: Cursor) -> Int where it >= 0 may alloc
+  requires c.pos <= List.len(xs: c.items)
+  decreases List.len(xs: c.items) - c.pos
+{
+  if c.pos == List.len(xs: c.items) {
+    return 0
+  }
+  return 1 + remaining(c: { c with pos: c.pos + 1 })
+}
+
+example recursion {
+  countdown(n: 3) == 0
+  even(n: 4)
+  odd(n: 3)
+  all_small(xs: [1, 2, 3])
+  not all_small(xs: [1, 2000])
+  remaining(c: Cursor { items: [1, 2, 3], pos: 1 }) == 2
+}

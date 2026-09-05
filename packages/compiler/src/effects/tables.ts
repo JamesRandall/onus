@@ -12,4 +12,6 @@ export class EffectTables {
   readonly calls = new Map<A.NodeId, EffectSet>();
   /** Closures, by node, with their inferred body effects. */
   readonly closures = new Map<A.NodeId, EffectSet>();
+  /** Functions in a recursive cycle, by the cycle's number (§5.1): the contracts pass puts a measure obligation at every call within a cycle. */
+  readonly cycles = new Map<DefId, number>();
 }

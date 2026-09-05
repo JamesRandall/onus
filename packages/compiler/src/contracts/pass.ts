@@ -75,6 +75,7 @@ class ContractsPass {
   }
 
   private fn(f: A.FnDecl, def: Def): void {
+    this.measureEntry(f, def);
     if (f.body === null) return;
     const sig = this.ctx.types.signatures.get(def.id);
     sig?.params.forEach((p, i) => {
@@ -213,6 +214,21 @@ class ContractsPass {
       });
     }
     for (const a of call.args) this.flow(a.value, def, 'argument', fnDef.id, a.name.text);
+    // A call within a recursive cycle must strictly decrease the shared measure (§5.1).
+    const cycle = this.ctx.effects.cycles.get(def.id);
+    const calleeMeasure = sig.contracts.find((c) => c.clause === 'decreases');
+    if (cycle !== undefined && cycle === this.ctx.effects.cycles.get(fnDef.id) && calleeMeasure !== undefined) {
+      this.ctx.contracts.add({ kind: 'decreases', at: call.id, def: def.id, text: `${printExpr(calleeMeasure.expr)} at the call to ${fnDef.name}`, source: calleeMeasure.id, site: 'other', pinned: null, callee: fnDef.id, param: null, status: 'checked', by: null });
+    }
+  }
+
+  /** A recursive function's measure is non-negative at entry (§5.1); with the call-site obligations, the recursion terminates. */
+  private measureEntry(f: A.FnDecl, def: Def): void {
+    if (!this.ctx.effects.cycles.has(def.id)) return;
+    for (const c of f.contracts) {
+      if (c.clause !== 'decreases') continue;
+      this.ctx.contracts.add({ kind: 'decreases', at: c.id, def: def.id, text: `${printExpr(c.expr)} >= 0 at entry`, source: c.id, site: 'other', pinned: null, callee: null, param: null, status: 'checked', by: null });
+    }
   }
 
   private arith(b: A.Binary, def: Def): void {

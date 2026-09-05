@@ -1,0 +1,30 @@
+module inout_try
+
+-- A `try` that returns early from a function with an `inout` parameter
+-- hands the parameter back with the error (docs/CHANGES.md item 130).
+fn refuse(n: Int) -> Result[Int, Text] {
+  if n < 0 {
+    return Err(error: "negative")
+  }
+  return Ok(value: n)
+}
+
+fn bump_if_ok(v: inout Int, n: Int) -> Result[Int, Text] may mutate {
+  let checked: Int = try refuse(n: n)
+  v = v + 1
+  return Ok(value: checked)
+}
+
+fn drive(n: Int) -> Int may mutate {
+  var v: Int = 10
+  let r: Result[Int, Text] = bump_if_ok(v: inout v, n: n)
+  if r is Err {
+    return v
+  }
+  return v + 100
+}
+
+example early_return_keeps_inout {
+  drive(n: -1) == 10
+  drive(n: 5) == 111
+}

@@ -1,0 +1,25 @@
+module list_ops
+
+fn squares(n: Int where 0 <= it and it <= 1000) -> List[Int] may alloc {
+  var b: Builder[Int] = List.builder()
+  for i: Int in 0 ..< n {
+    List.push(b: inout b, x: i * i)
+  }
+  return List.finish(b: b)
+}
+
+fn total(xs: List[Int where 0 <= it and it <= 1000]) -> Int where it >= 0 may alloc
+  decreases List.len(xs: xs)
+{
+  if List.len(xs: xs) == 0 {
+    return 0
+  }
+  return List.get(xs: xs, i: 0) + total(xs: List.slice(xs: xs, from: 1, to: List.len(xs: xs)))
+}
+
+example builders_and_recursion {
+  squares(n: 4) == [0, 1, 4, 9]
+  List.built(b: List.builder[Int]()) == 0
+  total(xs: [1, 2, 3]) == 6
+  List.reverse(xs: squares(n: 3)) == [4, 1, 0]
+}

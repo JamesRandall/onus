@@ -1,0 +1,356 @@
+{
+  "diagnostics": [],
+  "obligations": [
+    {
+      "kind": "decreases",
+      "at": [
+        5,
+        3
+      ],
+      "text": "n >= 0 at entry",
+      "status": "proved"
+    },
+    {
+      "kind": "representation",
+      "at": [
+        4,
+        14
+      ],
+      "text": "n within ±2^53 - 1",
+      "status": "checked"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        10,
+        23
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "decreases",
+      "at": [
+        10,
+        10
+      ],
+      "text": "n at the call to countdown",
+      "status": "proved"
+    },
+    {
+      "kind": "overflow",
+      "at": [
+        10,
+        23
+      ],
+      "text": "n - 1 within Int",
+      "status": "checked"
+    },
+    {
+      "kind": "decreases",
+      "at": [
+        15,
+        3
+      ],
+      "text": "n >= 0 at entry",
+      "status": "proved"
+    },
+    {
+      "kind": "representation",
+      "at": [
+        14,
+        9
+      ],
+      "text": "n within ±2^53 - 1",
+      "status": "checked"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        20,
+        17
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "decreases",
+      "at": [
+        20,
+        10
+      ],
+      "text": "n at the call to odd",
+      "status": "proved"
+    },
+    {
+      "kind": "overflow",
+      "at": [
+        20,
+        17
+      ],
+      "text": "n - 1 within Int",
+      "status": "checked"
+    },
+    {
+      "kind": "decreases",
+      "at": [
+        24,
+        3
+      ],
+      "text": "n >= 0 at entry",
+      "status": "proved"
+    },
+    {
+      "kind": "representation",
+      "at": [
+        23,
+        8
+      ],
+      "text": "n within ±2^53 - 1",
+      "status": "checked"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        29,
+        18
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "decreases",
+      "at": [
+        29,
+        10
+      ],
+      "text": "n at the call to even",
+      "status": "proved"
+    },
+    {
+      "kind": "overflow",
+      "at": [
+        29,
+        18
+      ],
+      "text": "n - 1 within Int",
+      "status": "checked"
+    },
+    {
+      "kind": "decreases",
+      "at": [
+        34,
+        3
+      ],
+      "text": "List.len(xs: xs) >= 0 at entry",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        39,
+        26
+      ],
+      "text": "0 <= it and it < len(xs: xs)",
+      "status": "proved"
+    },
+    {
+      "kind": "decreases",
+      "at": [
+        42,
+        10
+      ],
+      "text": "List.len(xs: xs) at the call to all_small",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        42,
+        49
+      ],
+      "text": "0 <= it",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        42,
+        56
+      ],
+      "text": "from <= it and it <= len(xs: xs)",
+      "status": "proved"
+    },
+    {
+      "kind": "decreases",
+      "at": [
+        53,
+        3
+      ],
+      "text": "List.len(xs: c.items) - c.pos >= 0 at entry",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        56,
+        12
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        58,
+        10
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "overflow",
+      "at": [
+        58,
+        10
+      ],
+      "text": "1 + remaining(c: { c with pos: c.pos + 1 }) within Int",
+      "status": "checked"
+    },
+    {
+      "kind": "requires",
+      "at": [
+        58,
+        14
+      ],
+      "text": "c.pos <= List.len(xs: c.items)",
+      "status": "proved"
+    },
+    {
+      "kind": "decreases",
+      "at": [
+        58,
+        14
+      ],
+      "text": "List.len(xs: c.items) - c.pos at the call to remaining",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        58,
+        41
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "overflow",
+      "at": [
+        58,
+        41
+      ],
+      "text": "c.pos + 1 within Int",
+      "status": "checked"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        62,
+        16
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        63,
+        11
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        64,
+        10
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "requires",
+      "at": [
+        67,
+        3
+      ],
+      "text": "c.pos <= List.len(xs: c.items)",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        67,
+        48
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "assertion",
+      "at": [
+        62,
+        3
+      ],
+      "text": "countdown(n: 3) == 0",
+      "status": "checked"
+    },
+    {
+      "kind": "assertion",
+      "at": [
+        63,
+        3
+      ],
+      "text": "even(n: 4)",
+      "status": "checked"
+    },
+    {
+      "kind": "assertion",
+      "at": [
+        64,
+        3
+      ],
+      "text": "odd(n: 3)",
+      "status": "checked"
+    },
+    {
+      "kind": "assertion",
+      "at": [
+        65,
+        3
+      ],
+      "text": "all_small(xs: [1, 2, 3])",
+      "status": "checked"
+    },
+    {
+      "kind": "assertion",
+      "at": [
+        66,
+        3
+      ],
+      "text": "not all_small(xs: [1, 2000])",
+      "status": "checked"
+    },
+    {
+      "kind": "assertion",
+      "at": [
+        67,
+        3
+      ],
+      "text": "remaining(c: Cursor { items: [1, 2, 3], pos: 1 }) == 2",
+      "status": "checked"
+    }
+  ]
+}

@@ -402,6 +402,7 @@ onus_slot onus_io_write(onus_slot file, onus_slot text) {
   onus_file *f = slot_ptr(file);
   onus_text *t = slot_ptr(text);
   if (fwrite(t->bytes, 1, (size_t)t->len, f->fp) != (size_t)t->len) return ptr_slot(err(ptr_slot(io_error(f->path))));
+  fflush(f->fp); /* a write is visible at once, as on the JavaScript target */
   return ptr_slot(ok(0));
 }
 
@@ -469,4 +470,311 @@ int onus_examples_done(void) {
   close_all();
   printf("%d examples, %d failed\n", examples_run, examples_failed);
   return examples_failed == 0 ? 0 : 1;
+}
+
+/* ------------------------------------------------------------------------ */
+/* std.text by code points (UTF-8 in memory), std.int/float parsing,        */
+/* std.list builders, std.io read and console — milestone 15.0              */
+/* ------------------------------------------------------------------------ */
+
+static int64_t utf8_decode(const char *s, int64_t len, int64_t *i) {
+  unsigned char c = (unsigned char)s[*i];
+  int64_t cp;
+  int n;
+  if (c < 0x80) { cp = c; n = 1; }
+  else if ((c & 0xE0) == 0xC0) { cp = c & 0x1F; n = 2; }
+  else if ((c & 0xF0) == 0xE0) { cp = c & 0x0F; n = 3; }
+  else { cp = c & 0x07; n = 4; }
+  for (int k = 1; k < n; k++) {
+    if (*i + k >= len) { n = k; break; }
+    cp = (cp << 6) | ((unsigned char)s[*i + k] & 0x3F);
+  }
+  *i += n;
+  return cp;
+}
+
+static int utf8_encode(int64_t cp, char *out) {
+  if (cp < 0x80) { out[0] = (char)cp; return 1; }
+  if (cp < 0x800) { out[0] = (char)(0xC0 | (cp >> 6)); out[1] = (char)(0x80 | (cp & 0x3F)); return 2; }
+  if (cp < 0x10000) { out[0] = (char)(0xE0 | (cp >> 12)); out[1] = (char)(0x80 | ((cp >> 6) & 0x3F)); out[2] = (char)(0x80 | (cp & 0x3F)); return 3; }
+  out[0] = (char)(0xF0 | (cp >> 18)); out[1] = (char)(0x80 | ((cp >> 12) & 0x3F)); out[2] = (char)(0x80 | ((cp >> 6) & 0x3F)); out[3] = (char)(0x80 | (cp & 0x3F));
+  return 4;
+}
+
+static int64_t text_count(onus_text *t) {
+  int64_t n = 0;
+  for (int64_t i = 0; i < t->len; i++) if (((unsigned char)t->bytes[i] & 0xC0) != 0x80) n++;
+  return n;
+}
+
+/* Byte offset of code point index `cp` (t->len when cp is the count). */
+static int64_t byte_offset(onus_text *t, int64_t cp) {
+  int64_t i = 0;
+  int64_t seen = 0;
+  while (i < t->len && seen < cp) {
+    utf8_decode(t->bytes, t->len, &i);
+    seen++;
+  }
+  return i;
+}
+
+static int64_t cp_index(onus_text *t, int64_t byte) {
+  int64_t n = 0;
+  for (int64_t i = 0; i < byte && i < t->len; i++) if (((unsigned char)t->bytes[i] & 0xC0) != 0x80) n++;
+  return n;
+}
+
+static onus_slot some(onus_slot v) { return ptr_slot(onus_union(0, 1, &v)); }
+static onus_slot none(void) { onus_slot z[1] = {0}; return ptr_slot(onus_union(1, 0, z)); }
+
+onus_slot onus_text_count(onus_slot t) { return text_count(slot_ptr(t)); }
+
+onus_slot onus_text_code_points(onus_slot t) {
+  onus_text *a = slot_ptr(t);
+  onus_list *out = onus_rt_list_new(text_count(a));
+  int64_t i = 0;
+  int64_t k = 0;
+  while (i < a->len) out->slots[k++] = utf8_decode(a->bytes, a->len, &i);
+  return ptr_slot(out);
+}
+
+onus_slot onus_text_of_code_points(onus_slot cps) {
+  onus_list *xs = slot_ptr(cps);
+  char *buf = malloc((size_t)(4 * xs->len + 1));
+  int64_t n = 0;
+  for (int64_t i = 0; i < xs->len; i++) n += utf8_encode(xs->slots[i], buf + n);
+  onus_text *out = onus_text_from(buf, n);
+  free(buf);
+  return ptr_slot(out);
+}
+
+onus_slot onus_text_of_code_point(onus_slot cp) {
+  char buf[4];
+  int n = utf8_encode(cp, buf);
+  return ptr_slot(onus_text_from(buf, n));
+}
+
+onus_slot onus_text_slice(onus_slot t, onus_slot from, onus_slot to) {
+  onus_text *a = slot_ptr(t);
+  int64_t lo = byte_offset(a, from);
+  int64_t hi = byte_offset(a, to);
+  if (hi < lo) hi = lo;
+  return ptr_slot(onus_text_from(a->bytes + lo, hi - lo));
+}
+
+static int64_t find_bytes(onus_text *hay, onus_text *pin, int64_t start) {
+  if (pin->len == 0) return start <= hay->len ? start : -1;
+  for (int64_t i = start; i + pin->len <= hay->len; i++) {
+    if (memcmp(hay->bytes + i, pin->bytes, (size_t)pin->len) == 0) return i;
+  }
+  return -1;
+}
+
+onus_slot onus_text_index_of(onus_slot t, onus_slot needle, onus_slot from) {
+  onus_text *a = slot_ptr(t);
+  int64_t at = find_bytes(a, slot_ptr(needle), byte_offset(a, from));
+  return at < 0 ? none() : some(cp_index(a, at));
+}
+
+onus_slot onus_text_contains(onus_slot t, onus_slot needle) {
+  return find_bytes(slot_ptr(t), slot_ptr(needle), 0) >= 0;
+}
+
+onus_slot onus_text_ends_with(onus_slot t, onus_slot suffix) {
+  onus_text *a = slot_ptr(t);
+  onus_text *s = slot_ptr(suffix);
+  return s->len <= a->len && memcmp(a->bytes + a->len - s->len, s->bytes, (size_t)s->len) == 0;
+}
+
+onus_slot onus_text_split(onus_slot t, onus_slot sep) {
+  onus_text *a = slot_ptr(t);
+  onus_text *s = slot_ptr(sep);
+  if (s->len == 0) {
+    /* An empty separator splits into code points; an empty text is one empty part. */
+    if (a->len == 0) {
+      onus_list *one = onus_rt_list_new(1);
+      one->slots[0] = ptr_slot(onus_text_from("", 0));
+      return ptr_slot(one);
+    }
+    onus_list *out = onus_rt_list_new(text_count(a));
+    int64_t i = 0;
+    int64_t k = 0;
+    while (i < a->len) {
+      int64_t start = i;
+      utf8_decode(a->bytes, a->len, &i);
+      out->slots[k++] = ptr_slot(onus_text_from(a->bytes + start, i - start));
+    }
+    return ptr_slot(out);
+  }
+  int64_t parts = 1;
+  for (int64_t i = 0; (i = find_bytes(a, s, i)) >= 0; i += s->len) parts++;
+  onus_list *out = onus_rt_list_new(parts);
+  int64_t k = 0;
+  int64_t start = 0;
+  for (;;) {
+    int64_t at = find_bytes(a, s, start);
+    if (at < 0) {
+      out->slots[k++] = ptr_slot(onus_text_from(a->bytes + start, a->len - start));
+      break;
+    }
+    out->slots[k++] = ptr_slot(onus_text_from(a->bytes + start, at - start));
+    start = at + s->len;
+  }
+  return ptr_slot(out);
+}
+
+onus_slot onus_text_join(onus_slot parts, onus_slot sep) {
+  onus_list *xs = slot_ptr(parts);
+  onus_text *s = slot_ptr(sep);
+  int64_t total = 0;
+  for (int64_t i = 0; i < xs->len; i++) total += ((onus_text *)slot_ptr(xs->slots[i]))->len + (i > 0 ? s->len : 0);
+  char *buf = malloc((size_t)total + 1);
+  int64_t n = 0;
+  for (int64_t i = 0; i < xs->len; i++) {
+    if (i > 0) { memcpy(buf + n, s->bytes, (size_t)s->len); n += s->len; }
+    onus_text *p = slot_ptr(xs->slots[i]);
+    memcpy(buf + n, p->bytes, (size_t)p->len);
+    n += p->len;
+  }
+  onus_text *out = onus_text_from(buf, n);
+  free(buf);
+  return ptr_slot(out);
+}
+
+onus_slot onus_text_repeat(onus_slot t, onus_slot n) {
+  onus_text *a = slot_ptr(t);
+  char *buf = malloc((size_t)(a->len * n) + 1);
+  for (int64_t i = 0; i < n; i++) memcpy(buf + i * a->len, a->bytes, (size_t)a->len);
+  onus_text *out = onus_text_from(buf, a->len * n);
+  free(buf);
+  return ptr_slot(out);
+}
+
+onus_slot onus_text_replace(onus_slot t, onus_slot from, onus_slot to) {
+  if (((onus_text *)slot_ptr(from))->len == 0) return t;
+  onus_slot parts = onus_text_split(t, from);
+  return onus_text_join(parts, to);
+}
+
+onus_slot onus_text_compare(onus_slot a, onus_slot b) {
+  onus_text *x = slot_ptr(a);
+  onus_text *y = slot_ptr(b);
+  int64_t n = x->len < y->len ? x->len : y->len;
+  int c = memcmp(x->bytes, y->bytes, (size_t)n);
+  if (c != 0) return c < 0 ? -1 : 1;
+  return x->len == y->len ? 0 : (x->len < y->len ? -1 : 1);
+}
+
+onus_slot onus_int_parse(onus_slot t) {
+  onus_text *a = slot_ptr(t);
+  if (a->len == 0) return none();
+  const char *s = a->bytes;
+  int64_t i = 0;
+  if (s[0] == '+' || s[0] == '-') i = 1;
+  if (i >= a->len) return none();
+  for (int64_t k = i; k < a->len; k++) if (s[k] < '0' || s[k] > '9') return none();
+  errno = 0;
+  char *end = NULL;
+  long long v = strtoll(s, &end, 10);
+  if (errno == ERANGE || end != s + a->len) return none();
+  return some((onus_slot)v);
+}
+
+onus_slot onus_float_parse(onus_slot t) {
+  onus_text *a = slot_ptr(t);
+  if (a->len == 0) return none();
+  const char *s = a->bytes;
+  int64_t i = 0;
+  if (s[0] == '+' || s[0] == '-') i = 1;
+  int digits = 0;
+  int64_t k = i;
+  while (k < a->len && s[k] >= '0' && s[k] <= '9') { k++; digits++; }
+  if (k < a->len && s[k] == '.') { k++; while (k < a->len && s[k] >= '0' && s[k] <= '9') { k++; digits++; } }
+  if (digits == 0) return none();
+  if (k < a->len && (s[k] == 'e' || s[k] == 'E')) {
+    k++;
+    if (k < a->len && (s[k] == '+' || s[k] == '-')) k++;
+    int ed = 0;
+    while (k < a->len && s[k] >= '0' && s[k] <= '9') { k++; ed++; }
+    if (ed == 0) return none();
+  }
+  if (k != a->len) return none();
+  char *end = NULL;
+  double v = strtod(s, &end);
+  if (end != s + a->len || isnan(v) || isinf(v)) return none();
+  return some(double_slot(v));
+}
+
+typedef struct {
+  int64_t len;
+  int64_t cap;
+  onus_slot *data;
+} onus_builder;
+
+onus_slot onus_list_builder(void) {
+  onus_builder *b = onus_alloc((int64_t)sizeof(onus_builder));
+  b->len = 0;
+  b->cap = 0;
+  b->data = NULL;
+  return ptr_slot(b);
+}
+
+onus_slot onus_list_built(onus_slot b) { return ((onus_builder *)slot_ptr(b))->len; }
+
+onus_slot onus_list_push(onus_slot *b, onus_slot x) {
+  onus_builder *bb = slot_ptr(*b);
+  if (bb->len == bb->cap) {
+    bb->cap = bb->cap == 0 ? 16 : bb->cap * 2;
+    bb->data = realloc(bb->data, sizeof(onus_slot) * (size_t)bb->cap);
+  }
+  bb->data[bb->len++] = x;
+  return 0;
+}
+
+onus_slot onus_list_finish(onus_slot b) {
+  onus_builder *bb = slot_ptr(b);
+  onus_list *out = onus_rt_list_new(bb->len);
+  if (bb->len > 0) memcpy(out->slots, bb->data, sizeof(onus_slot) * (size_t)bb->len);
+  return ptr_slot(out);
+}
+
+onus_slot onus_io_read(onus_slot files, onus_slot path) {
+  (void)files;
+  onus_text *p = slot_ptr(path);
+  FILE *fp = fopen(p->bytes, "rb");
+  if (fp == NULL) return ptr_slot(err(ptr_slot(io_error(p))));
+  size_t cap = 1 << 16;
+  size_t n = 0;
+  char *buf = malloc(cap);
+  for (;;) {
+    size_t got = fread(buf + n, 1, cap - n, fp);
+    n += got;
+    if (got == 0) break;
+    if (n == cap) { cap *= 2; buf = realloc(buf, cap); }
+  }
+  fclose(fp);
+  onus_text *out = onus_text_from(buf, (int64_t)n);
+  free(buf);
+  return ptr_slot(ok(ptr_slot(out)));
+}
+
+onus_slot onus_io_print(onus_slot console, onus_slot text) {
+  (void)console;
+  onus_text *t = slot_ptr(text);
+  fwrite(t->bytes, 1, (size_t)t->len, stdout);
+  return 0;
+}
+
+onus_slot onus_io_eprint(onus_slot console, onus_slot text) {
+  (void)console;
+  onus_text *t = slot_ptr(text);
+  fwrite(t->bytes, 1, (size_t)t->len, stderr);
+  return 0;
+}
+
+/* Structural equality of lists, element by element through the compiler-generated comparer (§19.1). */
+bool onus_rt_list_eq(onus_list *a, onus_list *b, bool (*eq)(onus_slot, onus_slot)) {
+  if (a->len != b->len) return false;
+  for (int64_t i = 0; i < a->len; i++) if (!eq(a->slots[i], b->slots[i])) return false;
+  return true;
 }

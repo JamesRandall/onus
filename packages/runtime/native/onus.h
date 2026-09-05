@@ -48,6 +48,7 @@ int64_t onus_rt_list_len(onus_list *xs);
 onus_slot onus_rt_list_get(onus_list *xs, int64_t i);
 void onus_rt_list_set(onus_list *xs, int64_t i, onus_slot v);
 onus_list *onus_rt_list_concat(onus_list *a, onus_list *b);
+bool onus_rt_list_eq(onus_list *a, onus_list *b, bool (*eq)(onus_slot, onus_slot));
 
 onus_list *onus_args(int argc, char **argv);
 int onus_start(int argc, char **argv);

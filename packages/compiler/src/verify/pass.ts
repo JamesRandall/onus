@@ -72,6 +72,11 @@ class Verifier {
           continue;
         }
         this.discharge(o, vc, z3.path, z3.version, cache, opts.budgetMs);
+        // A closed predicate over constants the solver could not settle (floats are opaque to it) may still evaluate.
+        if (o.status === 'checked' && o.pinned === null && constDischarge(this.ctx, o) === true) {
+          o.status = 'proved';
+          o.by = 'constant evaluation';
+        }
       }
     }
     this.rules();

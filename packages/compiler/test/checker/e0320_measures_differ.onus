@@ -1,0 +1,20 @@
+module e0320_measures_differ
+
+-- Mutual recursion must share one measure (§5.1): `n` and `m + 1` are not the same expression up to renaming.
+fn even(n: Int where it >= 0) -> Bool
+  decreases n
+{
+  if n == 0 {
+    return true
+  }
+  return odd(m: n - 1)
+}
+
+fn odd(m: Int where it >= 0) -> Bool
+  decreases m + 1
+{
+  if m == 0 {
+    return false
+  }
+  return even(n: m - 1)
+}

@@ -24,3 +24,101 @@ pub const intrinsic fn slice[T](
   to: Int where from <= it and it <= len(xs: xs)
 ) -> List[T] may alloc
   ensures len(xs: result) == to - from
+
+-- A builder collects elements in place and yields a list once; `append`
+-- copies, so a loop that grows a list should push into a builder. A
+-- builder is a value like any other, but the runtime shares its storage:
+-- bind one builder once and push through that binding only.
+pub intrinsic type Builder[T]
+
+pub intrinsic fn builder[T]() -> Builder[T] may alloc
+  ensures built(b: result) == 0
+
+pub intrinsic fn built[T](b: Builder[T]) -> Int where it >= 0
+
+pub intrinsic fn push[T](b: inout Builder[T], x: T) -> Unit may mutate, alloc
+  ensures built(b: b) == built(b: old(b)) + 1
+
+pub intrinsic fn finish[T](b: Builder[T]) -> List[T] may alloc
+  ensures len(xs: result) == built(b: b)
+
+pub fn map[T, U, e](xs: List[T], f: fn(x: T) -> U may e) -> List[U] may e, alloc {
+  var b: Builder[U] = builder()
+  for x: T in xs {
+    push(b: inout b, x: f(x: x))
+  }
+  return finish(b: b)
+}
+
+pub fn filter[T, e](xs: List[T], keep: fn(x: T) -> Bool may e) -> List[T] may e, alloc {
+  var b: Builder[T] = builder()
+  for x: T in xs {
+    if keep(x: x) {
+      push(b: inout b, x: x)
+    }
+  }
+  return finish(b: b)
+}
+
+pub fn fold[T, A, e](xs: List[T], init: A, step: fn(acc: A, x: T) -> A may e) -> A may e {
+  var acc: A = init
+  for x: T in xs {
+    acc = step(acc: acc, x: x)
+  }
+  return acc
+}
+
+pub fn index_of[T](xs: List[T], x: T) -> Option[Int where it >= 0] {
+  for i: Int in 0 ..< len(xs: xs) {
+    if get(xs: xs, i: i) == x {
+      return Some(value: i)
+    }
+  }
+  return None
+}
+
+pub fn contains[T](xs: List[T], x: T) -> Bool {
+  return index_of(xs: xs, x: x) is Some
+}
+
+pub fn reverse[T](xs: List[T]) -> List[T] may alloc {
+  var b: Builder[T] = builder()
+  for i: Int in 0 ..< len(xs: xs) {
+    push(b: inout b, x: get(xs: xs, i: len(xs: xs) - 1 - i))
+  }
+  return finish(b: b)
+}
+
+example builders {
+  var b: Builder[Int] = builder()
+  let first: Unit = push(b: inout b, x: 1)
+  let second: Unit = push(b: inout b, x: 2)
+  built(b: b) == 2
+  finish(b: b) == [1, 2]
+}
+
+example combinators {
+  map(
+    xs: [1, 2, 3],
+    f: fn(x: Int) -> Int {
+      return x * 2
+    }
+  ) == [2, 4, 6]
+  filter(
+    xs: [1, 2, 3, 4],
+    keep: fn(x: Int) -> Bool {
+      return x % 2 == 0
+    }
+  ) == [2, 4]
+  fold(
+    xs: [1, 2, 3],
+    init: 0,
+    step: fn(acc: Int, x: Int) -> Int {
+      return acc + x
+    }
+  ) == 6
+  index_of(xs: ["a", "b"], x: "b") == Some(value: 1)
+  index_of(xs: ["a", "b"], x: "c") is None
+  contains(xs: [1, 2], x: 2)
+  reverse(xs: [1, 2, 3]) == [3, 2, 1]
+}

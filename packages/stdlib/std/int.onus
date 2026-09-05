@@ -16,3 +16,15 @@ pub fn abs(x: Int) -> Int where it >= 0
   }
   return x
 }
+
+-- A decimal integer with an optional sign, nothing else; None for anything
+-- malformed or outside 64 bits.
+pub const intrinsic fn parse(t: Text) -> Option[Int]
+
+example parsing {
+  parse(t: "42") == Some(value: 42)
+  parse(t: "-7") == Some(value: -7)
+  parse(t: "4x") is None
+  parse(t: "") is None
+  parse(t: "99999999999999999999") is None
+}

@@ -18,3 +18,83 @@ pub const intrinsic fn lower(t: Text) -> Text may alloc
 
 pub const intrinsic fn trim(t: Text) -> Text may alloc
   claims host.js
+
+-- Code points (Unicode scalar values) are the unit of position in the
+-- functions below; `len` counts graphemes and is JavaScript-only.
+pub const intrinsic fn count(t: Text) -> Int where it >= 0
+
+pub const intrinsic fn code_points(t: Text) -> List[Int where 0 <= it and it <= 1114111] may alloc
+  ensures List.len(xs: result) == count(t: t)
+
+pub const intrinsic fn of_code_points(
+  cps: List[Int where 0 <= it and it <= 1114111]
+) -> Text may alloc
+  ensures count(t: result) == List.len(xs: cps)
+
+pub const intrinsic fn of_code_point(cp: Int where 0 <= it and it <= 1114111) -> Text may alloc
+  ensures count(t: result) == 1
+
+pub const intrinsic fn slice(
+  t: Text,
+  from: Int where 0 <= it,
+  to: Int where from <= it and it <= count(t: t)
+) -> Text may alloc
+  ensures count(t: result) == to - from
+
+pub const intrinsic fn index_of(
+  t: Text,
+  needle: Text,
+  from: Int where 0 <= it and it <= count(t: t)
+) -> Option[Int where it >= 0]
+
+pub const intrinsic fn contains(t: Text, needle: Text) -> Bool
+
+pub const intrinsic fn ends_with(t: Text, suffix: Text) -> Bool
+
+-- An empty separator splits into code points.
+pub const intrinsic fn split(t: Text, sep: Text) -> List[Text] may alloc
+  ensures List.len(xs: result) >= 1
+
+pub const intrinsic fn join(parts: List[Text], sep: Text) -> Text may alloc
+
+pub const intrinsic fn repeat(t: Text, n: Int where it >= 0) -> Text may alloc
+
+-- Every occurrence; an empty `from` leaves `t` as it is.
+pub const intrinsic fn replace(t: Text, from: Text, to: Text) -> Text may alloc
+
+-- Code point order: -1, 0 or 1.
+pub const intrinsic fn compare(a: Text, b: Text) -> Int where -1 <= it and it <= 1
+
+pub const intrinsic fn upper(t: Text) -> Text may alloc
+  claims host.js
+
+example code_points {
+  count(t: "héllo") == 5
+  code_points(t: "hé") == [104, 233]
+  of_code_points(cps: [104, 105]) == "hi"
+  of_code_point(cp: 65) == "A"
+}
+
+example slicing_and_search {
+  slice(t: "hello", from: 1, to: 3) == "el"
+  index_of(t: "hello", needle: "l", from: 0) == Some(value: 2)
+  index_of(t: "hello", needle: "l", from: 3) == Some(value: 3)
+  index_of(t: "hello", needle: "z", from: 0) is None
+  contains(t: "hello", needle: "ell")
+  not contains(t: "hello", needle: "elo")
+  ends_with(t: "hello", suffix: "lo")
+}
+
+example building {
+  split(t: "a,b,,c", sep: ",") == ["a", "b", "", "c"]
+  split(t: "", sep: ",") == [""]
+  split(t: "héy", sep: "") == ["h", "é", "y"]
+  replace(t: "abc", from: "", to: "-") == "abc"
+  join(parts: ["a", "b", "c"], sep: "-") == "a-b-c"
+  join(parts: [], sep: "-") == ""
+  repeat(t: "ab", n: 3) == "ababab"
+  replace(t: "a.b.c", from: ".", to: "/") == "a/b/c"
+  compare(a: "a", b: "b") == -1
+  compare(a: "b", b: "b") == 0
+  compare(a: "é", b: "z") == 1
+}

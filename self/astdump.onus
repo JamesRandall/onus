@@ -1,0 +1,721 @@
+module astdump
+import std.io
+import tokens
+import lexer
+import ast
+import parser
+
+-- Prints a file's syntax tree in one line per node, in the form the
+-- differential test builds from the TypeScript parser's tree, then the
+-- diagnostics. Tree walks recurse over the tree itself, which the verifier
+-- has no measure for yet (impl spec M15.1), so they declare `diverge`.
+pub fn main(
+  args: List[Text],
+  files: io.Files,
+  console: io.Console
+) -> Result[Unit, io.Error] may io.file, alloc, mutate, diverge {
+  if List.len(xs: args) < 1 {
+    return Err(error: Other(detail: "usage: astdump <file.onus>"))
+  }
+  let source: Text = try io.read(files: files, path: List.get(xs: args, i: 0))
+  if Text.count(t: source) > lexer.max_source {
+    return Err(error: Other(detail: "source too long"))
+  }
+  let lexed: lexer.LexResult = lexer.lex(source: source)
+  let toks: List[tokens.Token] = lexed.tokens
+  if List.len(xs: toks) < 1 or List.len(xs: toks) > 100000000 {
+    return Err(error: Other(detail: "no tokens"))
+  }
+  let cps: List[Int] = Text.code_points(t: source)
+  let r: parser.ParseResult = parser.parse(toks: toks, source_end: List.len(xs: cps))
+  match r.module with
+  | Some(value) -> io.print(console: console, text: dump_module(m: value, src: cps) ++ "\n")
+  | None -> io.print(console: console, text: "(no module)\n")
+  for d: tokens.Diagnostic in lexed.diagnostics {
+    io.print(
+      console: console,
+      text: d.code ++ " " ++ Int.to_text(x: d.start) ++ " " ++ Int.to_text(x: d.end) ++ "\n"
+    )
+  }
+  for d: tokens.Diagnostic in r.diagnostics {
+    io.print(
+      console: console,
+      text: d.code ++ " " ++ Int.to_text(x: d.start) ++ " " ++ Int.to_text(x: d.end) ++ "\n"
+    )
+  }
+  return Ok(value: Unit)
+}
+
+fn sp(s: ast.Span) -> Text may alloc {
+  return "@" ++ Int.to_text(x: s.start) ++ "-" ++ Int.to_text(x: s.end)
+}
+
+fn id(i: ast.Ident) -> Text may alloc {
+  return i.text ++ sp(s: i.span)
+}
+
+fn qn(q: ast.QName) -> Text may alloc {
+  var parts: Builder[Text] = List.builder()
+  for seg: ast.Ident in q.segments {
+    List.push(b: inout parts, x: seg.text)
+  }
+  return "q(" ++ Text.join(parts: List.finish(b: parts), sep: ".") ++ ")" ++ sp(s: q.span)
+}
+
+fn bool_text(b: Bool) -> Text {
+  if b {
+    return "true"
+  }
+  return "false"
+}
+
+fn quoted(t: Text) -> Text may alloc {
+  var parts: Builder[Text] = List.builder()
+  for cp: Int in Text.code_points(t: t) {
+    List.push(b: inout parts, x: Int.to_text(x: cp))
+  }
+  return "t[" ++ Text.join(parts: List.finish(b: parts), sep: ",") ++ "]"
+}
+
+fn list(parts: List[Text]) -> Text may alloc {
+  return "[" ++ Text.join(parts: parts, sep: " ") ++ "]"
+}
+
+fn opt(o: Option[Text]) -> Text {
+  match o with
+  | Some(value) -> return value
+  | None -> return "-"
+}
+
+fn digits(src: List[Int], s: ast.Span) -> Text may alloc {
+  if s.start > s.end or s.end > List.len(xs: src) {
+    return ""
+  }
+  return Text.replace(
+    t: Text.of_code_points(cps: List.slice(xs: src, from: s.start, to: s.end)),
+    from: "_",
+    to: ""
+  )
+}
+
+fn vis(v: ast.Visibility) -> Text may alloc {
+  return "vis(" ++ bool_text(b: v.is_pub) ++ "," ++ bool_text(b: v.is_sealed) ++ ")"
+}
+
+pub fn dump_module(m: ast.Module, src: List[Int]) -> Text may alloc, mutate, diverge {
+  var imports: Builder[Text] = List.builder()
+  for i: ast.Import in m.imports {
+    List.push(b: inout imports, x: "(Import " ++ qn(q: i.name) ++ sp(s: i.span) ++ ")")
+  }
+  var items: Builder[Text] = List.builder()
+  for item: ast.Item in m.items {
+    List.push(b: inout items, x: dump_item(item: item, src: src))
+  }
+  return "(Module test=" ++ bool_text(b: m.is_test) ++ " " ++ qn(q: m.name) ++ " " ++ list(
+    parts: List.finish(b: imports)
+  ) ++ " " ++ list(parts: List.finish(b: items)) ++ sp(s: m.span) ++ ")"
+}
+
+fn dump_item(item: ast.Item, src: List[Int]) -> Text may alloc, mutate, diverge {
+  match item with
+  | ast.FnItem(decl) -> return dump_fn(f: decl, src: src)
+  | ast.TypeAliasItem(decl) -> return "(TypeAlias " ++ vis(v: decl.vis) ++ " " ++ id(
+    i: decl.name
+  ) ++ " " ++ dump_type(t: decl.ty, src: src) ++ sp(s: decl.span) ++ ")"
+  | ast.IntrinsicTypeItem(decl) -> return "(IntrinsicType " ++ vis(v: decl.vis) ++ " " ++ id(
+    i: decl.name
+  ) ++ " " ++ dump_tparams(ps: decl.tparams, src: src) ++ sp(s: decl.span) ++ ")"
+  | ast.ConstItem(decl) -> return "(Const " ++ vis(v: decl.vis) ++ " " ++ id(
+    i: decl.name
+  ) ++ " " ++ dump_type(t: decl.ty, src: src) ++ " " ++ dump_expr(e: decl.value, src: src) ++ sp(
+    s: decl.span
+  ) ++ ")"
+  | ast.RecordItem(decl) -> return "(Record " ++ vis(v: decl.vis) ++ " " ++ id(
+    i: decl.name
+  ) ++ " " ++ dump_tparams(ps: decl.tparams, src: src) ++ " " ++ dump_fields(
+    fs: decl.fields,
+    src: src
+  ) ++ sp(s: decl.span) ++ ")"
+  | ast.UnionItem(decl) -> return dump_union(u: decl, src: src)
+  | ast.InterfaceItem(decl) -> return dump_interface(d: decl, src: src)
+  | ast.ImplItem(decl) -> return dump_impl(d: decl, src: src)
+  | ast.ClaimItem(decl) -> return dump_claim(d: decl, src: src)
+  | ast.CapabilityItem(decl) -> return dump_capability(d: decl, src: src)
+  | ast.PathItem(decl) -> return dump_path(d: decl, src: src)
+  | ast.PolicyItem(decl) -> return dump_policy(d: decl)
+  | ast.ExampleItem(decl) -> return "(Example " ++ id(i: decl.name) ++ " " ++ dump_block(
+    b: decl.body,
+    src: src
+  ) ++ sp(s: decl.span) ++ ")"
+  | ast.PropertyItem(decl) -> return "(Property " ++ id(i: decl.name) ++ " " ++ dump_params(
+    ps: decl.params,
+    src: src
+  ) ++ " " ++ dump_block(b: decl.body, src: src) ++ sp(s: decl.span) ++ ")"
+}
+
+fn dump_fn(f: ast.FnDecl, src: List[Int]) -> Text may alloc, mutate, diverge {
+  var claims_: Builder[Text] = List.builder()
+  for c: ast.QName in f.claim_list {
+    List.push(b: inout claims_, x: qn(q: c))
+  }
+  var body: Text = "-"
+  match f.body with
+  | Some(value) -> body = dump_block(b: value, src: src)
+  | None -> body = "-"
+  return "(Fn " ++ vis(v: f.vis) ++ " const=" ++ bool_text(
+    b: f.is_const
+  ) ++ " intrinsic=" ++ bool_text(b: f.is_intrinsic) ++ " " ++ id(i: f.name) ++ " " ++ dump_tparams(
+    ps: f.tparams,
+    src: src
+  ) ++ " " ++ dump_params(ps: f.params, src: src) ++ " " ++ dump_type(
+    t: f.ret,
+    src: src
+  ) ++ " " ++ dump_effects(es: f.effects) ++ " " ++ list(
+    parts: List.finish(b: claims_)
+  ) ++ " " ++ dump_contracts(cs: f.contracts, src: src) ++ " " ++ body ++ sp(s: f.span) ++ ")"
+}
+
+fn dump_tparams(ps: List[ast.TParam], src: List[Int]) -> Text may alloc, mutate, diverge {
+  var out: Builder[Text] = List.builder()
+  for tp: ast.TParam in ps {
+    match tp with
+    | ast.TypeParam(name, bound, span) -> {
+      var b: Text = "-"
+      match bound with
+      | Some(value) -> b = id(i: value)
+      | None -> b = "-"
+      List.push(b: inout out, x: "(TypeParam " ++ id(i: name) ++ " " ++ b ++ sp(s: span) ++ ")")
+    }
+    | ast.ConstParam(name, ty, span) -> List.push(
+      b: inout out,
+      x: "(ConstParam " ++ id(i: name) ++ " " ++ dump_type(t: ty, src: src) ++ sp(s: span) ++ ")"
+    )
+    | ast.EffectParam(name, span) -> List.push(
+      b: inout out,
+      x: "(EffectParam " ++ id(i: name) ++ sp(s: span) ++ ")"
+    )
+  }
+  return list(parts: List.finish(b: out))
+}
+
+fn dump_params(ps: List[ast.Param], src: List[Int]) -> Text may alloc, mutate, diverge {
+  var out: Builder[Text] = List.builder()
+  for pa: ast.Param in ps {
+    List.push(
+      b: inout out,
+      x: "(Param inout=" ++ bool_text(b: pa.is_inout) ++ " " ++ id(i: pa.name) ++ " " ++ dump_type(
+        t: pa.ty,
+        src: src
+      ) ++ sp(s: pa.span) ++ ")"
+    )
+  }
+  return list(parts: List.finish(b: out))
+}
+
+fn dump_effects(es: List[ast.EffectRef]) -> Text may alloc, mutate {
+  var out: Builder[Text] = List.builder()
+  for e: ast.EffectRef in es {
+    List.push(b: inout out, x: "(Effect " ++ qn(q: e.name) ++ sp(s: e.span) ++ ")")
+  }
+  return list(parts: List.finish(b: out))
+}
+
+fn dump_contracts(cs: List[ast.Contract], src: List[Int]) -> Text may alloc, mutate, diverge {
+  var out: Builder[Text] = List.builder()
+  for c: ast.Contract in cs {
+    List.push(
+      b: inout out,
+      x: "(Contract " ++ c.clause ++ " proved=" ++ bool_text(b: c.is_proved) ++ " " ++ dump_expr(
+        e: c.expr,
+        src: src
+      ) ++ sp(s: c.span) ++ ")"
+    )
+  }
+  return list(parts: List.finish(b: out))
+}
+
+fn dump_fields(fs: List[ast.Field], src: List[Int]) -> Text may alloc, mutate, diverge {
+  var out: Builder[Text] = List.builder()
+  for f: ast.Field in fs {
+    List.push(
+      b: inout out,
+      x: "(Field " ++ id(i: f.name) ++ " " ++ dump_type(t: f.ty, src: src) ++ sp(s: f.span) ++ ")"
+    )
+  }
+  return list(parts: List.finish(b: out))
+}
+
+fn dump_union(u: ast.UnionDecl, src: List[Int]) -> Text may alloc, mutate, diverge {
+  var vs: Builder[Text] = List.builder()
+  for v: ast.Variant in u.variants {
+    List.push(
+      b: inout vs,
+      x: "(Variant " ++ id(i: v.name) ++ " " ++ dump_fields(fs: v.fields, src: src) ++ sp(
+        s: v.span
+      ) ++ ")"
+    )
+  }
+  return "(Union " ++ vis(v: u.vis) ++ " " ++ id(i: u.name) ++ " " ++ dump_tparams(
+    ps: u.tparams,
+    src: src
+  ) ++ " " ++ list(parts: List.finish(b: vs)) ++ sp(s: u.span) ++ ")"
+}
+
+fn dump_interface(d: ast.InterfaceDecl, src: List[Int]) -> Text may alloc, mutate, diverge {
+  var items: Builder[Text] = List.builder()
+  for item: ast.IfaceItem in d.items {
+    match item with
+    | ast.IfaceFnItem(decl) -> List.push(
+      b: inout items,
+      x: "(IfaceFn " ++ id(i: decl.name) ++ " " ++ dump_params(
+        ps: decl.params,
+        src: src
+      ) ++ " " ++ dump_type(t: decl.ret, src: src) ++ " " ++ dump_effects(
+        es: decl.effects
+      ) ++ " " ++ dump_contracts(cs: decl.contracts, src: src) ++ sp(s: decl.span) ++ ")"
+    )
+    | ast.LawItem(decl) -> List.push(
+      b: inout items,
+      x: "(Law " ++ id(i: decl.name) ++ " " ++ dump_params(
+        ps: decl.params,
+        src: src
+      ) ++ " " ++ dump_block(b: decl.body, src: src) ++ sp(s: decl.span) ++ ")"
+    )
+  }
+  return "(Interface " ++ vis(v: d.vis) ++ " " ++ id(i: d.name) ++ " " ++ id(
+    i: d.tparam
+  ) ++ " " ++ list(parts: List.finish(b: items)) ++ sp(s: d.span) ++ ")"
+}
+
+fn dump_impl(d: ast.ImplDecl, src: List[Int]) -> Text may alloc, mutate, diverge {
+  var fns: Builder[Text] = List.builder()
+  for f: ast.FnDecl in d.fns {
+    List.push(b: inout fns, x: dump_fn(f: f, src: src))
+  }
+  return "(Impl " ++ id(i: d.iface) ++ " " ++ dump_type(t: d.target, src: src) ++ " " ++ list(
+    parts: List.finish(b: fns)
+  ) ++ sp(s: d.span) ++ ")"
+}
+
+fn dump_claim(d: ast.ClaimDecl, src: List[Int]) -> Text may alloc, mutate, diverge {
+  var body: Text = ""
+  match d.body with
+  | ast.Derived(pred) -> body = "(Derived " ++ dump_claim_pred(c: pred) ++ ")"
+  | ast.Asserted(description) -> body = "(Asserted " ++ quoted(t: description) ++ ")"
+  return "(Claim " ++ vis(v: d.vis) ++ " " ++ id(i: d.name) ++ " " ++ body ++ sp(s: d.span) ++ ")"
+}
+
+fn dump_claim_pred(c: ast.ClaimPred) -> Text may alloc, mutate, diverge {
+  match c with
+  | ast.ClaimAtom(name, span) -> return "(ClaimAtom " ++ qn(q: name) ++ sp(s: span) ++ ")"
+  | ast.ClaimEffectsEq(effects, span) -> return "(ClaimEffectsEq " ++ dump_effects(
+    es: effects
+  ) ++ sp(s: span) ++ ")"
+  | ast.ClaimNot(operand, span) -> return "(ClaimNot " ++ dump_claim_pred(c: operand) ++ sp(
+    s: span
+  ) ++ ")"
+  | ast.ClaimAnd(operands, span) -> return "(ClaimAnd " ++ dump_claim_preds(cs: operands) ++ sp(
+    s: span
+  ) ++ ")"
+  | ast.ClaimOr(operands, span) -> return "(ClaimOr " ++ dump_claim_preds(cs: operands) ++ sp(
+    s: span
+  ) ++ ")"
+}
+
+fn dump_claim_preds(cs: List[ast.ClaimPred]) -> Text may alloc, mutate, diverge {
+  var out: Builder[Text] = List.builder()
+  for c: ast.ClaimPred in cs {
+    List.push(b: inout out, x: dump_claim_pred(c: c))
+  }
+  return list(parts: List.finish(b: out))
+}
+
+fn dump_capability(d: ast.CapabilityDecl, src: List[Int]) -> Text may alloc, mutate, diverge {
+  var gs: Builder[Text] = List.builder()
+  for g: ast.Grant in d.grant_list {
+    var w: Text = "-"
+    match g.when_cond with
+    | Some(value) -> w = dump_expr(e: value, src: src)
+    | None -> w = "-"
+    List.push(
+      b: inout gs,
+      x: "(Grant (Effect " ++ qn(q: g.effect.name) ++ sp(s: g.effect.span) ++ ") " ++ w ++ sp(
+        s: g.span
+      ) ++ ")"
+    )
+  }
+  return "(Capability " ++ vis(v: d.vis) ++ " " ++ id(i: d.name) ++ " " ++ dump_tparams(
+    ps: d.tparams,
+    src: src
+  ) ++ " " ++ list(parts: List.finish(b: gs)) ++ sp(s: d.span) ++ ")"
+}
+
+fn dump_path(d: ast.PathDecl, src: List[Int]) -> Text may alloc, mutate, diverge {
+  var cs: Builder[Text] = List.builder()
+  for c: ast.PathClause in d.clauses {
+    match c with
+    | ast.PathEffects(effects, span) -> List.push(
+      b: inout cs,
+      x: "(PathEffects " ++ dump_effects(es: effects) ++ sp(s: span) ++ ")"
+    )
+    | ast.PathForbid(effects, span) -> List.push(
+      b: inout cs,
+      x: "(PathForbid " ++ dump_effects(es: effects) ++ sp(s: span) ++ ")"
+    )
+    | ast.PathRequire(claim_list, span) -> List.push(
+      b: inout cs,
+      x: "(PathRequire " ++ dump_qnames(qs: claim_list) ++ sp(s: span) ++ ")"
+    )
+    | ast.PathPolicy(name, except_list, span) -> List.push(
+      b: inout cs,
+      x: "(PathPolicy " ++ id(i: name) ++ " " ++ dump_qnames(qs: except_list) ++ sp(s: span) ++ ")"
+    )
+  }
+  return "(Path " ++ id(i: d.name) ++ " " ++ id(i: d.entry_fn) ++ " " ++ list(
+    parts: List.finish(b: cs)
+  ) ++ sp(s: d.span) ++ ")"
+}
+
+fn dump_qnames(qs: List[ast.QName]) -> Text may alloc, mutate {
+  var out: Builder[Text] = List.builder()
+  for q: ast.QName in qs {
+    List.push(b: inout out, x: qn(q: q))
+  }
+  return list(parts: List.finish(b: out))
+}
+
+fn dump_policy(d: ast.PolicyDecl) -> Text may alloc, mutate {
+  var out: Builder[Text] = List.builder()
+  for s: ast.PolicyScope in d.outside_list {
+    var n: Text = "self"
+    match s.name with
+    | Some(value) -> n = qn(q: value)
+    | None -> n = "self"
+    List.push(
+      b: inout out,
+      x: "(Scope " ++ n ++ " glob=" ++ bool_text(b: s.glob) ++ sp(s: s.span) ++ ")"
+    )
+  }
+  return "(Policy " ++ id(i: d.name) ++ " " ++ list(parts: List.finish(b: out)) ++ sp(
+    s: d.span
+  ) ++ ")"
+}
+
+fn dump_type(t: ast.Type, src: List[Int]) -> Text may alloc, mutate, diverge {
+  match t with
+  | ast.NamedType(name, args, where_, span) -> {
+    var w: Text = "-"
+    match where_ with
+    | Some(value) -> w = dump_expr(e: value, src: src)
+    | None -> w = "-"
+    return "(NamedType " ++ qn(q: name) ++ " " ++ dump_targs(ts: args, src: src) ++ " " ++ w ++ sp(
+      s: span
+    ) ++ ")"
+  }
+  | ast.FnType(params, ret, effects, span) -> return "(FnType " ++ dump_params(
+    ps: params,
+    src: src
+  ) ++ " " ++ dump_type(t: ret, src: src) ++ " " ++ dump_effects(es: effects) ++ sp(s: span) ++ ")"
+}
+
+fn dump_targs(ts: List[ast.TypeArg], src: List[Int]) -> Text may alloc, mutate, diverge {
+  var out: Builder[Text] = List.builder()
+  for a: ast.TypeArg in ts {
+    match a with
+    | ast.TypeArgType(label, ty, span) -> List.push(
+      b: inout out,
+      x: "(TypeArgType " ++ opt_id(o: label) ++ " " ++ dump_type(t: ty, src: src) ++ sp(
+        s: span
+      ) ++ ")"
+    )
+    | ast.TypeArgConst(label, expr, span) -> List.push(
+      b: inout out,
+      x: "(TypeArgConst " ++ opt_id(o: label) ++ " " ++ dump_expr(e: expr, src: src) ++ sp(
+        s: span
+      ) ++ ")"
+    )
+  }
+  return list(parts: List.finish(b: out))
+}
+
+fn opt_id(o: Option[ast.Ident]) -> Text may alloc {
+  match o with
+  | Some(value) -> return id(i: value)
+  | None -> return "-"
+}
+
+fn dump_block(b: ast.Block, src: List[Int]) -> Text may alloc, mutate, diverge {
+  var out: Builder[Text] = List.builder()
+  for s: ast.Stmt in b.stmts {
+    List.push(b: inout out, x: dump_stmt(s: s, src: src))
+  }
+  return "(Block elided=" ++ bool_text(b: b.elided) ++ " " ++ list(
+    parts: List.finish(b: out)
+  ) ++ sp(s: b.span) ++ ")"
+}
+
+fn dump_stmt(s: ast.Stmt, src: List[Int]) -> Text may alloc, mutate, diverge {
+  match s with
+  | ast.Let(name, ty, value, span) -> return "(Let " ++ id(i: name) ++ " " ++ dump_type(
+    t: ty,
+    src: src
+  ) ++ " " ++ dump_expr(e: value, src: src) ++ sp(s: span) ++ ")"
+  | ast.Var(name, ty, value, span) -> return "(Var " ++ id(i: name) ++ " " ++ dump_type(
+    t: ty,
+    src: src
+  ) ++ " " ++ dump_expr(e: value, src: src) ++ sp(s: span) ++ ")"
+  | ast.Assign(name, value, span) -> return "(Assign " ++ id(i: name) ++ " " ++ dump_expr(
+    e: value,
+    src: src
+  ) ++ sp(s: span) ++ ")"
+  | ast.Return(value, span) -> return "(Return " ++ dump_expr(e: value, src: src) ++ sp(
+    s: span
+  ) ++ ")"
+  | ast.If(cond, then_block, else_block, span) -> {
+    var e: Text = "-"
+    match else_block with
+    | Some(value) -> e = dump_block(b: value, src: src)
+    | None -> e = "-"
+    return "(If " ++ dump_expr(e: cond, src: src) ++ " " ++ dump_block(
+      b: then_block,
+      src: src
+    ) ++ " " ++ e ++ sp(s: span) ++ ")"
+  }
+  | ast.Match(scrutinee, arms, span) -> {
+    var out: Builder[Text] = List.builder()
+    for a: ast.Arm in arms {
+      var g: Text = "-"
+      match a.guard with
+      | Some(value) -> g = dump_expr(e: value, src: src)
+      | None -> g = "-"
+      var body: Text = ""
+      match a.body with
+      | ast.ArmStmt(stmt) -> body = dump_stmt(s: stmt, src: src)
+      | ast.ArmBlock(block) -> body = dump_block(b: block, src: src)
+      List.push(
+        b: inout out,
+        x: "(Arm " ++ dump_pattern(pt: a.pattern, src: src) ++ " " ++ g ++ " " ++ body ++ sp(
+          s: a.span
+        ) ++ ")"
+      )
+    }
+    return "(Match " ++ dump_expr(e: scrutinee, src: src) ++ " " ++ list(
+      parts: List.finish(b: out)
+    ) ++ sp(s: span) ++ ")"
+  }
+  | ast.Loop(cond, clauses, body, span) -> {
+    var out: Builder[Text] = List.builder()
+    for c: ast.LoopClause in clauses {
+      List.push(
+        b: inout out,
+        x: "(LoopClause " ++ c.clause ++ " " ++ dump_expr(e: c.expr, src: src) ++ sp(
+          s: c.span
+        ) ++ ")"
+      )
+    }
+    return "(Loop " ++ dump_expr(e: cond, src: src) ++ " " ++ list(
+      parts: List.finish(b: out)
+    ) ++ " " ++ dump_block(b: body, src: src) ++ sp(s: span) ++ ")"
+  }
+  | ast.For(name, ty, domain, body, span) -> return "(For " ++ id(i: name) ++ " " ++ dump_type(
+    t: ty,
+    src: src
+  ) ++ " " ++ dump_domain(d: domain, src: src) ++ " " ++ dump_block(b: body, src: src) ++ sp(
+    s: span
+  ) ++ ")"
+  | ast.Assume(claim, justification, verify_block, span) -> {
+    var v: Text = "-"
+    match verify_block with
+    | Some(value) -> v = "(Verify " ++ dump_params(
+      ps: value.params,
+      src: src
+    ) ++ " " ++ dump_effects(es: value.effects) ++ " " ++ dump_block(b: value.body, src: src) ++ sp(
+      s: value.span
+    ) ++ ")"
+    | None -> v = "-"
+    return "(Assume " ++ qn(q: claim) ++ " " ++ quoted(t: justification) ++ " " ++ v ++ sp(
+      s: span
+    ) ++ ")"
+  }
+  | ast.ExprStmt(expr, span) -> return "(ExprStmt " ++ dump_expr(e: expr, src: src) ++ sp(
+    s: span
+  ) ++ ")"
+}
+
+fn dump_domain(d: ast.Domain, src: List[Int]) -> Text may alloc, mutate, diverge {
+  match d with
+  | ast.RangeDomain(lo, hi, span) -> return "(Range " ++ dump_expr(
+    e: lo,
+    src: src
+  ) ++ " " ++ dump_expr(e: hi, src: src) ++ sp(s: span) ++ ")"
+  | ast.InDomain(expr, span) -> return "(In " ++ dump_expr(e: expr, src: src) ++ sp(s: span) ++ ")"
+}
+
+fn dump_exprs(es: List[ast.Expr], src: List[Int]) -> Text may alloc, mutate, diverge {
+  var out: Builder[Text] = List.builder()
+  for e: ast.Expr in es {
+    List.push(b: inout out, x: dump_expr(e: e, src: src))
+  }
+  return list(parts: List.finish(b: out))
+}
+
+fn dump_field_inits(fs: List[ast.FieldInit], src: List[Int]) -> Text may alloc, mutate, diverge {
+  var out: Builder[Text] = List.builder()
+  for f: ast.FieldInit in fs {
+    List.push(
+      b: inout out,
+      x: "(FieldInit " ++ id(i: f.name) ++ " " ++ dump_expr(e: f.value, src: src) ++ sp(
+        s: f.span
+      ) ++ ")"
+    )
+  }
+  return list(parts: List.finish(b: out))
+}
+
+fn dump_args(as_: List[ast.Arg], src: List[Int]) -> Text may alloc, mutate, diverge {
+  var out: Builder[Text] = List.builder()
+  for a: ast.Arg in as_ {
+    List.push(
+      b: inout out,
+      x: "(Arg " ++ id(i: a.name) ++ " inout=" ++ bool_text(b: a.is_inout) ++ " " ++ dump_expr(
+        e: a.value,
+        src: src
+      ) ++ sp(s: a.span) ++ ")"
+    )
+  }
+  return list(parts: List.finish(b: out))
+}
+
+fn dump_expr(e: ast.Expr, src: List[Int]) -> Text may alloc, mutate, diverge {
+  match e with
+  | ast.IntLit(value, span) -> return "(Int " ++ digits(src: src, s: span) ++ sp(s: span) ++ ")"
+  | ast.FloatLit(value, span) -> return "(Float " ++ Float.to_text(x: value) ++ sp(s: span) ++ ")"
+  | ast.TextLit(value, span) -> return "(Text " ++ quoted(t: value) ++ sp(s: span) ++ ")"
+  | ast.BoolLit(value, span) -> return "(Bool " ++ bool_text(b: value) ++ sp(s: span) ++ ")"
+  | ast.DurationLit(nanos, span) -> return "(Duration " ++ Int.to_text(x: nanos) ++ sp(
+    s: span
+  ) ++ ")"
+  | ast.Name(name, span) -> return "(Name " ++ id(i: name) ++ sp(s: span) ++ ")"
+  | ast.It(span) -> return "(It" ++ sp(s: span) ++ ")"
+  | ast.ResultRef(span) -> return "(Result" ++ sp(s: span) ++ ")"
+  | ast.Ctor(name, args, fields, span) -> {
+    var a: Text = "-"
+    match args with
+    | Some(value) -> a = dump_args(as_: value, src: src)
+    | None -> a = "-"
+    var f: Text = "-"
+    match fields with
+    | Some(value) -> f = dump_field_inits(fs: value, src: src)
+    | None -> f = "-"
+    return "(Ctor " ++ qn(q: name) ++ " " ++ a ++ " " ++ f ++ sp(s: span) ++ ")"
+  }
+  | ast.RecordUpdate(base, fields, span) -> return "(Update " ++ dump_expr(
+    e: base,
+    src: src
+  ) ++ " " ++ dump_field_inits(fs: fields, src: src) ++ sp(s: span) ++ ")"
+  | ast.ListLit(elems, span) -> return "(List " ++ dump_exprs(es: elems, src: src) ++ sp(
+    s: span
+  ) ++ ")"
+  | ast.Try(expr, else_, span) -> {
+    var el: Text = "-"
+    match else_ with
+    | Some(value) -> el = "(Else " ++ id(i: value.name) ++ " " ++ dump_expr(
+      e: value.expr,
+      src: src
+    ) ++ sp(s: value.span) ++ ")"
+    | None -> el = "-"
+    return "(Try " ++ dump_expr(e: expr, src: src) ++ " " ++ el ++ sp(s: span) ++ ")"
+  }
+  | ast.Recover(body, span) -> return "(Recover " ++ dump_block(b: body, src: src) ++ sp(
+    s: span
+  ) ++ ")"
+  | ast.Old(name, span) -> return "(Old " ++ id(i: name) ++ sp(s: span) ++ ")"
+  | ast.Quantifier(quant, name, ty, domain, where_, body, span) -> {
+    var d: Text = "-"
+    match domain with
+    | Some(value) -> d = dump_domain(d: value, src: src)
+    | None -> d = "-"
+    var w: Text = "-"
+    match where_ with
+    | Some(value) -> w = dump_expr(e: value, src: src)
+    | None -> w = "-"
+    return "(Quant " ++ quant ++ " " ++ id(i: name) ++ " " ++ dump_type(
+      t: ty,
+      src: src
+    ) ++ " " ++ d ++ " " ++ w ++ " " ++ dump_expr(e: body, src: src) ++ sp(s: span) ++ ")"
+  }
+  | ast.Closure(params, ret, effects, body, span) -> return "(Closure " ++ dump_params(
+    ps: params,
+    src: src
+  ) ++ " " ++ dump_type(t: ret, src: src) ++ " " ++ dump_effects(es: effects) ++ " " ++ dump_block(
+    b: body,
+    src: src
+  ) ++ sp(s: span) ++ ")"
+  | ast.Fake(capability, fields, span) -> return "(Fake " ++ qn(
+    q: capability
+  ) ++ " " ++ dump_field_inits(fs: fields, src: src) ++ sp(s: span) ++ ")"
+  | ast.Hole(span) -> return "(Hole" ++ sp(s: span) ++ ")"
+  | ast.FieldAccess(object, name, span) -> return "(Field " ++ dump_expr(
+    e: object,
+    src: src
+  ) ++ " " ++ id(i: name) ++ sp(s: span) ++ ")"
+  | ast.Call(callee, targs, args, span) -> {
+    var t: Text = "-"
+    match targs with
+    | Some(value) -> t = dump_targs(ts: value, src: src)
+    | None -> t = "-"
+    return "(Call " ++ dump_expr(e: callee, src: src) ++ " " ++ t ++ " " ++ dump_args(
+      as_: args,
+      src: src
+    ) ++ sp(s: span) ++ ")"
+  }
+  | ast.Unary(op, operand, span) -> return "(Unary " ++ op ++ " " ++ dump_expr(
+    e: operand,
+    src: src
+  ) ++ sp(s: span) ++ ")"
+  | ast.Binary(op, left, right, span) -> return "(Binary " ++ op ++ " " ++ dump_expr(
+    e: left,
+    src: src
+  ) ++ " " ++ dump_expr(e: right, src: src) ++ sp(s: span) ++ ")"
+  | ast.And(operands, span) -> return "(And " ++ dump_exprs(es: operands, src: src) ++ sp(
+    s: span
+  ) ++ ")"
+  | ast.Or(operands, span) -> return "(Or " ++ dump_exprs(es: operands, src: src) ++ sp(
+    s: span
+  ) ++ ")"
+  | ast.Is(expr, pattern, span) -> return "(Is " ++ dump_expr(
+    e: expr,
+    src: src
+  ) ++ " " ++ dump_pattern(pt: pattern, src: src) ++ sp(s: span) ++ ")"
+}
+
+fn dump_pattern(pt: ast.Pattern, src: List[Int]) -> Text may alloc, mutate, diverge {
+  match pt with
+  | ast.WildcardPat(span) -> return "(Wild" ++ sp(s: span) ++ ")"
+  | ast.BindPat(name, span) -> return "(Bind " ++ id(i: name) ++ sp(s: span) ++ ")"
+  | ast.LitPat(literal, span) -> return "(LitPat " ++ dump_expr(e: literal, src: src) ++ sp(
+    s: span
+  ) ++ ")"
+  | ast.VariantPat(name, fields, span) -> {
+    var f: Text = "-"
+    match fields with
+    | Some(value) -> f = dump_pat_fields(fs: value)
+    | None -> f = "-"
+    return "(VariantPat " ++ qn(q: name) ++ " " ++ f ++ sp(s: span) ++ ")"
+  }
+}
+
+fn dump_pat_fields(fs: List[ast.PatField]) -> Text may alloc, mutate {
+  var out: Builder[Text] = List.builder()
+  for pf: ast.PatField in fs {
+    List.push(b: inout out, x: dump_pat_field(pf: pf))
+  }
+  return list(parts: List.finish(b: out))
+}
+
+fn dump_pat_field(pf: ast.PatField) -> Text may alloc {
+  match pf with
+  | ast.PatFieldName(name, span) -> return "(PName " ++ id(i: name) ++ sp(s: span) ++ ")"
+  | ast.PatFieldSkip(span) -> return "(PSkip" ++ sp(s: span) ++ ")"
+  | ast.PatFieldRest(span) -> return "(PRest" ++ sp(s: span) ++ ")"
+}
