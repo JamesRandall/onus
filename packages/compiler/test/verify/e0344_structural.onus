@@ -1,0 +1,14 @@
+module e0344_structural
+
+union Tree =
+  | Leaf
+  | Node of child: Tree
+
+-- The recursive call passes the whole value again: not a part of the measure.
+fn depth(t: Tree) -> Int where it >= 0
+  decreases t
+{
+  match t with
+  | Leaf -> return 0
+  | Node(child) -> return 1 + depth(t: t)
+}

@@ -635,7 +635,17 @@ class Checker {
 
   private checkContracts(sig: Signature): void {
     for (const c of sig.contracts) {
-      this.inFn({ ret: sig.ret, assertion: false, recover: false, frame: 0 }, () => this.expr(c.expr, c.clause === 'decreases' ? INT : BOOL));
+      this.inFn({ ret: sig.ret, assertion: false, recover: false, frame: 0 }, () => {
+        if (c.clause !== 'decreases') {
+          this.expr(c.expr, BOOL);
+          return;
+        }
+        // A measure is numeric, or a record, union or list value taken in the structural order (§5.1).
+        const t = this.expr(c.expr, null);
+        const s = stripRefinements(t);
+        const ok = (s.k === 'prim' && (s.name === 'Int' || s.name === 'Duration')) || s.k === 'record' || s.k === 'union' || (s.k === 'opaque' && this.t.qualifiedName(s.def) === 'std.list.List') || s.k === 'error';
+        if (!ok) this.report('E0321', c.expr.span, `a \`decreases\` measure is an Int, or a record, union or list value; found ${this.show(t)}`);
+      });
     }
   }
 

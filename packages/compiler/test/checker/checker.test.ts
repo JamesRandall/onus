@@ -19,7 +19,7 @@ const LATER = new Set<string>(['E0203', 'E0204', 'E0205', 'E0206', 'E0207', 'E02
 /** Reported by the parser; its fixture lives in test/syntax. */
 const PARSER_REPORTED = new Set(['E0102']);
 /** Reported by the verifier; fixtures live in test/verify. */
-const VERIFIER = new Set(['E0302', 'E0342', 'E0343', 'E0501', 'E0703']);
+const VERIFIER = new Set(['E0302', 'E0342', 'E0343', 'E0344', 'E0501', 'E0703']);
 
 describe('checker fixtures', () => {
   const fixtures = fixturesIn(here);

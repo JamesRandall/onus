@@ -204,7 +204,7 @@ fn scan_number(
         )
         List.push(
           b: inout tokens,
-          x: tokens.Token { kind: tokens.IntLit(value: 0), start: start, end: pos }
+          x: tokens.Token { kind: tokens.IntLit(value: 0, text: "0"), start: start, end: pos }
         )
       } else {
         push_duration(
@@ -229,7 +229,7 @@ fn scan_number(
       )
       List.push(
         b: inout tokens,
-        x: tokens.Token { kind: tokens.IntLit(value: 0), start: start, end: pos }
+        x: tokens.Token { kind: tokens.IntLit(value: 0, text: "0"), start: start, end: pos }
       )
     }
     return pos
@@ -249,7 +249,11 @@ fn scan_number(
   match Int.parse(t: number) with
   | Some(value) -> List.push(
     b: inout tokens,
-    x: tokens.Token { kind: tokens.IntLit(value: value), start: start, end: pos }
+    x: tokens.Token {
+      kind: tokens.IntLit(value: value, text: canonical_digits(number: number)),
+      start: start,
+      end: pos
+    }
   )
   | None -> {
     List.push(
@@ -263,7 +267,7 @@ fn scan_number(
     )
     List.push(
       b: inout tokens,
-      x: tokens.Token { kind: tokens.IntLit(value: 0), start: start, end: pos }
+      x: tokens.Token { kind: tokens.IntLit(value: 0, text: "0"), start: start, end: pos }
     )
   }
   return pos
@@ -672,7 +676,7 @@ example lexes {
 example literals {
   let r: LexResult = lex(source: "1_000 2.5 3ms \"a\\n\" -- note\n")
   List.len(xs: r.diagnostics) == 0
-  List.get(xs: r.tokens, i: 0).kind == tokens.IntLit(value: 1000)
+  List.get(xs: r.tokens, i: 0).kind == tokens.IntLit(value: 1000, text: "1000")
   List.get(xs: r.tokens, i: 1).kind == tokens.FloatLit(value: 2.5)
   List.get(xs: r.tokens, i: 2).kind == tokens.DurationLit(nanos: 3000000)
   List.get(xs: r.tokens, i: 3).kind == tokens.TextLit(value: "a\n")
@@ -686,4 +690,26 @@ example errors {
   List.get(xs: r.diagnostics, i: 0).code == "E0005"
   List.get(xs: r.diagnostics, i: 1).code == "E0008"
   List.get(xs: r.diagnostics, i: 2).code == "E0004"
+}
+
+-- The digits of an integer literal as the canonical printer writes them: no
+-- leading zeros (a zero literal is `0`).
+fn canonical_digits(number: Text) -> Text may alloc, mutate {
+  let n: Int = Text.count(t: number)
+  let cps: List[Int] = Text.code_points(t: number)
+  var from: Int = 0
+  loop while from + 1 < n and List.get(xs: cps, i: from) == 48
+    invariant from >= 0 and from <= n
+    decreases n - from
+  {
+    from = from + 1
+  }
+  return Text.slice(t: number, from: from, to: n)
+}
+
+example canonical_digits_strips_leading_zeros {
+  canonical_digits(number: "007") == "7"
+  canonical_digits(number: "0") == "0"
+  canonical_digits(number: "000") == "0"
+  canonical_digits(number: "1234") == "1234"
 }

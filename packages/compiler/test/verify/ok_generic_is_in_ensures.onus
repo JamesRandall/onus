@@ -1,0 +1,24 @@
+module ok_generic_is_in_ensures
+
+-- A generic postcondition with a variant test (`result is None`) is
+-- instantiated at each call: `Option[T]` becomes the caller's `Option[Int]`.
+fn head[T](xs: List[T]) -> Option[T]
+  ensures List.len(xs: xs) == 0 implies result is None
+  ensures List.len(xs: xs) > 0 implies result is Some
+{
+  if List.len(xs: xs) == 0 {
+    return None
+  }
+  return Some(value: List.get(xs: xs, i: 0))
+}
+
+fn first_or(xs: List[Int], fallback: Int) -> Int {
+  match head(xs: xs) with
+  | Some(value) -> return value
+  | None -> return fallback
+}
+
+example heads {
+  first_or(xs: [], fallback: 7) == 7
+  first_or(xs: [3, 4], fallback: 7) == 3
+}

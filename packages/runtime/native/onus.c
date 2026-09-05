@@ -778,3 +778,16 @@ bool onus_rt_list_eq(onus_list *a, onus_list *b, bool (*eq)(onus_slot, onus_slot
   for (int64_t i = 0; i < a->len; i++) if (!eq(a->slots[i], b->slots[i])) return false;
   return true;
 }
+
+onus_slot onus_list_at(onus_slot b, onus_slot i) {
+  onus_builder *bb = slot_ptr(b);
+  if (i < 0 || i >= bb->len) onus_panic("requires", "0 <= i and i < built(b: b)", "std.list", "at");
+  return bb->data[i];
+}
+
+onus_slot onus_list_pop(onus_slot *b) {
+  onus_builder *bb = slot_ptr(*b);
+  if (bb->len == 0) return none();
+  bb->len -= 1;
+  return some(bb->data[bb->len]);
+}

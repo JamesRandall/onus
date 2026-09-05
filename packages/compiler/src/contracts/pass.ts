@@ -227,6 +227,9 @@ class ContractsPass {
     if (!this.ctx.effects.cycles.has(def.id)) return;
     for (const c of f.contracts) {
       if (c.clause !== 'decreases') continue;
+      // A structural measure (a record, union or list value, §5.1) has no lower bound to establish.
+      const mt = this.ctx.types.exprTypes.get(c.expr.id);
+      if (mt !== undefined && !isIntLike(mt)) continue;
       this.ctx.contracts.add({ kind: 'decreases', at: c.id, def: def.id, text: `${printExpr(c.expr)} >= 0 at entry`, source: c.id, site: 'other', pinned: null, callee: null, param: null, status: 'checked', by: null });
     }
   }
@@ -297,3 +300,8 @@ function isExpr(n: A.Node): n is A.Expr {
   }
 }
 
+/** Whether a measure is numeric (`Int` or `Duration`) rather than structural. */
+function isIntLike(t: Type): boolean {
+  const s = stripRefinements(t);
+  return s.k === 'prim' && (s.name === 'Int' || s.name === 'Duration');
+}

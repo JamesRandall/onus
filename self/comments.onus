@@ -1,0 +1,1236 @@
+module comments
+import std.map
+import tokens
+import ast
+import parser
+
+-- Comment attachment (`comments.ts`): a comment on a line with code trails
+-- the smallest line-level node on that line; any other comment leads the
+-- next child of the smallest container enclosing member, or dangles at the
+-- container's end, or at the module's. Nodes are keyed by their kind and
+-- span, which is unique among line-level nodes and containers.
+pub record CommentSet {
+  leading: List[Text]
+  trailing: List[Text]
+  dangling: List[Text]
+}
+
+pub type Table = Map[Text, CommentSet]
+
+pub fn key(kind: Text, span: ast.Span) -> Text may alloc {
+  return kind ++ "@" ++ Int.to_text(x: span.start) ++ "-" ++ Int.to_text(x: span.end)
+}
+
+pub fn lookup(table: Table, k: Text) -> CommentSet may alloc {
+  match Map.get(m: table, key: k) with
+  | Some(value) -> return value
+  | None -> return CommentSet { leading: [], trailing: [], dangling: [] }
+}
+
+-- A line-level node or a container, in pre-order.
+record Site {
+  k: Text
+  span: ast.Span
+  line_level: Bool
+  container: Bool
+  child_keys: List[Text]
+  child_starts: List[Int]
+}
+
+fn add_leading(table: inout Table, k: Text, text: Text) -> Unit may mutate, alloc {
+  let cs: CommentSet = lookup(table: table, k: k)
+  table = Map.put(
+    m: table,
+    key: k,
+    value: { cs with leading: List.append(xs: cs.leading, x: text) }
+  )
+}
+
+fn add_trailing(table: inout Table, k: Text, text: Text) -> Unit may mutate, alloc {
+  let cs: CommentSet = lookup(table: table, k: k)
+  table = Map.put(
+    m: table,
+    key: k,
+    value: { cs with trailing: List.append(xs: cs.trailing, x: text) }
+  )
+}
+
+fn add_dangling(table: inout Table, k: Text, text: Text) -> Unit may mutate, alloc {
+  let cs: CommentSet = lookup(table: table, k: k)
+  table = Map.put(
+    m: table,
+    key: k,
+    value: { cs with dangling: List.append(xs: cs.dangling, x: text) }
+  )
+}
+
+-- The line (from 1) a code point offset is on.
+fn line_of(line_starts: List[Int], offset: Int) -> Int may alloc {
+  var lo: Int = 0
+  var hi: Int = List.len(xs: line_starts)
+  loop while lo + 1 < hi
+    decreases hi - lo
+  {
+    let mid: Int = (lo + hi) / 2
+    if mid >= 0 and mid < List.len(xs: line_starts) and List.get(
+      xs: line_starts,
+      i: mid
+    ) <= offset {
+      lo = mid
+    } else {
+      hi = mid
+    }
+  }
+  return lo + 1
+}
+
+pub fn line_starts_of(src: List[Int]) -> List[Int] may alloc, mutate {
+  var out: Builder[Int] = List.builder()
+  List.push(b: inout out, x: 0)
+  for i: Int in 0 ..< List.len(xs: src) {
+    if List.get(xs: src, i: i) == 10 {
+      List.push(b: inout out, x: i + 1)
+    }
+  }
+  return List.finish(b: out)
+}
+
+fn smaller(a: Site, b: Site) -> Bool {
+  return a.span.end - a.span.start < b.span.end - b.span.start
+}
+
+-- The smallest line-level node whose lines cover `c_line`.
+fn trailing_target(all: List[Site], starts: List[Int], c_line: Int) -> Option[Text] may alloc {
+  var best: Option[Site] = None
+  for s: Site in all {
+    if s.line_level {
+      var last: Int = s.span.end - 1
+      if last < s.span.start {
+        last = s.span.start
+      }
+      if line_of(line_starts: starts, offset: s.span.start) <= c_line and c_line <= line_of(
+        line_starts: starts,
+        offset: last
+      ) {
+        best = better(best: best, s: s)
+      }
+    }
+  }
+  return key_of(o: best)
+}
+
+fn better(best: Option[Site], s: Site) -> Option[Site] {
+  match best with
+  | None -> return Some(value: s)
+  | Some(value) -> {
+    if smaller(a: s, b: value) {
+      return Some(value: s)
+    }
+    return best
+  }
+}
+
+fn key_of(o: Option[Site]) -> Option[Text] {
+  match o with
+  | Some(value) -> return Some(value: value.k)
+  | None -> return None
+}
+
+-- The smallest container strictly enclosing the comment.
+fn enclosing(all: List[Site], c_start: Int, c_end: Int) -> Option[Site] {
+  var best: Option[Site] = None
+  for s: Site in all {
+    if s.container and s.span.start < c_start and c_end <= s.span.end {
+      best = better(best: best, s: s)
+    }
+  }
+  return best
+}
+
+-- The first child starting after the comment.
+fn next_child(container: Site, c_start: Int) -> Option[Text] {
+  for i: Int in 0 ..< List.len(xs: container.child_keys) {
+    if i < List.len(xs: container.child_starts) and List.get(
+      xs: container.child_starts,
+      i: i
+    ) > c_start {
+      return Some(value: List.get(xs: container.child_keys, i: i))
+    }
+  }
+  return None
+}
+
+fn place(
+  table: inout Table,
+  all: List[Site],
+  starts: List[Int],
+  module_key: Text,
+  c: tokens.Comment,
+  text: Text
+) -> Unit may mutate, alloc {
+  if not c.own_line {
+    match trailing_target(
+      all: all,
+      starts: starts,
+      c_line: line_of(line_starts: starts, offset: c.start)
+    ) with
+    | Some(value) -> {
+      add_trailing(table: inout table, k: value, text: text)
+      return Unit
+    }
+    | None -> table = table
+  }
+  match enclosing(all: all, c_start: c.start, c_end: c.end) with
+  | None -> add_leading(table: inout table, k: module_key, text: text)
+  | Some(value) -> place_in(table: inout table, container: value, c_start: c.start, text: text)
+}
+
+fn place_in(
+  table: inout Table,
+  container: Site,
+  c_start: Int,
+  text: Text
+) -> Unit may mutate, alloc {
+  match next_child(container: container, c_start: c_start) with
+  | Some(value) -> add_leading(table: inout table, k: value, text: text)
+  | None -> add_dangling(table: inout table, k: container.k, text: text)
+}
+
+pub fn attach(
+  m: ast.Module,
+  comment_list: List[tokens.Comment],
+  src: List[Int]
+) -> Table may alloc, mutate {
+  var table: Table = Map.empty()
+  if List.len(xs: comment_list) == 0 {
+    return table
+  }
+  var sites: Builder[Site] = List.builder()
+  collect_module(m: m, sites: inout sites)
+  let all: List[Site] = List.finish(b: sites)
+  let starts: List[Int] = line_starts_of(src: src)
+  let module_key: Text = key(kind: "Module", span: m.span)
+  for c: tokens.Comment in comment_list {
+    var text: Text = ""
+    if c.start <= c.end and c.end <= List.len(xs: src) {
+      text = Text.of_code_points(cps: List.slice(xs: src, from: c.start, to: c.end))
+    }
+    place(table: inout table, all: all, starts: starts, module_key: module_key, c: c, text: text)
+  }
+  return table
+}
+
+-- The walk ---------------------------------------------------------------------
+fn push_site(
+  sites: inout Builder[Site],
+  kind: Text,
+  span: ast.Span,
+  line_level: Bool,
+  container: Bool,
+  child_keys: List[Text],
+  child_starts: List[Int]
+) -> Unit may mutate, alloc {
+  List.push(
+    b: inout sites,
+    x: Site {
+      k: key(kind: kind, span: span),
+      span: span,
+      line_level: line_level,
+      container: container,
+      child_keys: child_keys,
+      child_starts: child_starts
+    }
+  )
+}
+
+fn child(
+  keys: inout Builder[Text],
+  starts: inout Builder[Int],
+  kind: Text,
+  span: ast.Span
+) -> Unit may mutate, alloc {
+  List.push(b: inout keys, x: key(kind: kind, span: span))
+  List.push(b: inout starts, x: span.start)
+}
+
+fn item_kind(item: ast.Item) -> Text {
+  match item with
+  | ast.FnItem(decl) -> return "FnDecl"
+  | ast.TypeAliasItem(decl) -> return "TypeAlias"
+  | ast.IntrinsicTypeItem(decl) -> return "IntrinsicType"
+  | ast.ConstItem(decl) -> return "ConstDecl"
+  | ast.RecordItem(decl) -> return "RecordDecl"
+  | ast.UnionItem(decl) -> return "UnionDecl"
+  | ast.InterfaceItem(decl) -> return "InterfaceDecl"
+  | ast.ImplItem(decl) -> return "ImplDecl"
+  | ast.ClaimItem(decl) -> return "ClaimDecl"
+  | ast.CapabilityItem(decl) -> return "CapabilityDecl"
+  | ast.PathItem(decl) -> return "PathDecl"
+  | ast.PolicyItem(decl) -> return "PolicyDecl"
+  | ast.ExampleItem(decl) -> return "ExampleDecl"
+  | ast.PropertyItem(decl) -> return "PropertyDecl"
+}
+
+pub fn item_span(item: ast.Item) -> ast.Span {
+  match item with
+  | ast.FnItem(decl) -> return decl.span
+  | ast.TypeAliasItem(decl) -> return decl.span
+  | ast.IntrinsicTypeItem(decl) -> return decl.span
+  | ast.ConstItem(decl) -> return decl.span
+  | ast.RecordItem(decl) -> return decl.span
+  | ast.UnionItem(decl) -> return decl.span
+  | ast.InterfaceItem(decl) -> return decl.span
+  | ast.ImplItem(decl) -> return decl.span
+  | ast.ClaimItem(decl) -> return decl.span
+  | ast.CapabilityItem(decl) -> return decl.span
+  | ast.PathItem(decl) -> return decl.span
+  | ast.PolicyItem(decl) -> return decl.span
+  | ast.ExampleItem(decl) -> return decl.span
+  | ast.PropertyItem(decl) -> return decl.span
+}
+
+fn collect_module(m: ast.Module, sites: inout Builder[Site]) -> Unit may mutate, alloc {
+  var ckeys: Builder[Text] = List.builder()
+  var cstarts: Builder[Int] = List.builder()
+  for imp: ast.Import in m.imports {
+    child(keys: inout ckeys, starts: inout cstarts, kind: "Import", span: imp.span)
+  }
+  for item: ast.Item in m.items {
+    child(
+      keys: inout ckeys,
+      starts: inout cstarts,
+      kind: item_kind(item: item),
+      span: item_span(item: item)
+    )
+  }
+  push_site(
+    sites: inout sites,
+    kind: "Module",
+    span: m.span,
+    line_level: true,
+    container: true,
+    child_keys: List.finish(b: ckeys),
+    child_starts: List.finish(b: cstarts)
+  )
+  for imp: ast.Import in m.imports {
+    push_site(
+      sites: inout sites,
+      kind: "Import",
+      span: imp.span,
+      line_level: true,
+      container: false,
+      child_keys: [],
+      child_starts: []
+    )
+  }
+  for item: ast.Item in m.items {
+    collect_item(item: item, sites: inout sites)
+  }
+}
+
+fn collect_params(ps: List[ast.Param], sites: inout Builder[Site]) -> Unit may mutate, alloc
+  decreases ps
+{
+  for p: ast.Param in ps {
+    push_site(
+      sites: inout sites,
+      kind: "Param",
+      span: p.span,
+      line_level: true,
+      container: false,
+      child_keys: [],
+      child_starts: []
+    )
+    collect_type(t: p.ty, sites: inout sites)
+  }
+}
+
+fn collect_contracts(cs: List[ast.Contract], sites: inout Builder[Site]) -> Unit may mutate, alloc {
+  for c: ast.Contract in cs {
+    push_site(
+      sites: inout sites,
+      kind: "Contract",
+      span: c.span,
+      line_level: true,
+      container: false,
+      child_keys: [],
+      child_starts: []
+    )
+    collect_expr(e: c.expr, sites: inout sites)
+  }
+}
+
+fn params_children(
+  ps: List[ast.Param],
+  keys: inout Builder[Text],
+  starts: inout Builder[Int]
+) -> Unit may mutate, alloc {
+  for p: ast.Param in ps {
+    child(keys: inout keys, starts: inout starts, kind: "Param", span: p.span)
+  }
+}
+
+fn collect_fn(f: ast.FnDecl, sites: inout Builder[Site]) -> Unit may mutate, alloc {
+  var ckeys: Builder[Text] = List.builder()
+  var cstarts: Builder[Int] = List.builder()
+  params_children(ps: f.params, keys: inout ckeys, starts: inout cstarts)
+  for c: ast.Contract in f.contracts {
+    child(keys: inout ckeys, starts: inout cstarts, kind: "Contract", span: c.span)
+  }
+  push_site(
+    sites: inout sites,
+    kind: "FnDecl",
+    span: f.span,
+    line_level: true,
+    container: true,
+    child_keys: List.finish(b: ckeys),
+    child_starts: List.finish(b: cstarts)
+  )
+  for tp: ast.TParam in f.tparams {
+    collect_tparam(tp: tp, sites: inout sites)
+  }
+  collect_params(ps: f.params, sites: inout sites)
+  collect_type(t: f.ret, sites: inout sites)
+  collect_contracts(cs: f.contracts, sites: inout sites)
+  match f.body with
+  | Some(value) -> collect_block(b: value, sites: inout sites)
+  | None -> sites = sites
+}
+
+fn collect_tparam(tp: ast.TParam, sites: inout Builder[Site]) -> Unit may mutate, alloc {
+  match tp with
+  | ast.ConstParam(name, ty, span) -> collect_type(t: ty, sites: inout sites)
+  | _ -> sites = sites
+}
+
+fn collect_fields(fs: List[ast.Field], sites: inout Builder[Site]) -> Unit may mutate, alloc {
+  for f: ast.Field in fs {
+    push_site(
+      sites: inout sites,
+      kind: "Field",
+      span: f.span,
+      line_level: true,
+      container: false,
+      child_keys: [],
+      child_starts: []
+    )
+    collect_type(t: f.ty, sites: inout sites)
+  }
+}
+
+fn field_children(
+  fs: List[ast.Field],
+  keys: inout Builder[Text],
+  starts: inout Builder[Int]
+) -> Unit may mutate, alloc {
+  for f: ast.Field in fs {
+    child(keys: inout keys, starts: inout starts, kind: "Field", span: f.span)
+  }
+}
+
+fn collect_item(item: ast.Item, sites: inout Builder[Site]) -> Unit may mutate, alloc {
+  match item with
+  | ast.FnItem(decl) -> collect_fn(f: decl, sites: inout sites)
+  | ast.TypeAliasItem(decl) -> {
+    push_site(
+      sites: inout sites,
+      kind: "TypeAlias",
+      span: decl.span,
+      line_level: true,
+      container: false,
+      child_keys: [],
+      child_starts: []
+    )
+    collect_type(t: decl.ty, sites: inout sites)
+  }
+  | ast.IntrinsicTypeItem(decl) -> {
+    push_site(
+      sites: inout sites,
+      kind: "IntrinsicType",
+      span: decl.span,
+      line_level: true,
+      container: false,
+      child_keys: [],
+      child_starts: []
+    )
+    for tp: ast.TParam in decl.tparams {
+      collect_tparam(tp: tp, sites: inout sites)
+    }
+  }
+  | ast.ConstItem(decl) -> {
+    push_site(
+      sites: inout sites,
+      kind: "ConstDecl",
+      span: decl.span,
+      line_level: true,
+      container: false,
+      child_keys: [],
+      child_starts: []
+    )
+    collect_type(t: decl.ty, sites: inout sites)
+    collect_expr(e: decl.value, sites: inout sites)
+  }
+  | ast.RecordItem(decl) -> {
+    var ckeys: Builder[Text] = List.builder()
+    var cstarts: Builder[Int] = List.builder()
+    field_children(fs: decl.fields, keys: inout ckeys, starts: inout cstarts)
+    push_site(
+      sites: inout sites,
+      kind: "RecordDecl",
+      span: decl.span,
+      line_level: true,
+      container: true,
+      child_keys: List.finish(b: ckeys),
+      child_starts: List.finish(b: cstarts)
+    )
+    for tp: ast.TParam in decl.tparams {
+      collect_tparam(tp: tp, sites: inout sites)
+    }
+    collect_fields(fs: decl.fields, sites: inout sites)
+  }
+  | ast.UnionItem(decl) -> {
+    var ckeys: Builder[Text] = List.builder()
+    var cstarts: Builder[Int] = List.builder()
+    for v: ast.Variant in decl.variants {
+      child(keys: inout ckeys, starts: inout cstarts, kind: "Variant", span: v.span)
+    }
+    push_site(
+      sites: inout sites,
+      kind: "UnionDecl",
+      span: decl.span,
+      line_level: true,
+      container: true,
+      child_keys: List.finish(b: ckeys),
+      child_starts: List.finish(b: cstarts)
+    )
+    for tp: ast.TParam in decl.tparams {
+      collect_tparam(tp: tp, sites: inout sites)
+    }
+    for v: ast.Variant in decl.variants {
+      push_site(
+        sites: inout sites,
+        kind: "Variant",
+        span: v.span,
+        line_level: true,
+        container: false,
+        child_keys: [],
+        child_starts: []
+      )
+      collect_fields(fs: v.fields, sites: inout sites)
+    }
+  }
+  | ast.InterfaceItem(decl) -> {
+    var ckeys: Builder[Text] = List.builder()
+    var cstarts: Builder[Int] = List.builder()
+    for member: ast.IfaceItem in decl.items {
+      child(
+        keys: inout ckeys,
+        starts: inout cstarts,
+        kind: iface_kind(member: member),
+        span: iface_span(member: member)
+      )
+    }
+    push_site(
+      sites: inout sites,
+      kind: "InterfaceDecl",
+      span: decl.span,
+      line_level: true,
+      container: true,
+      child_keys: List.finish(b: ckeys),
+      child_starts: List.finish(b: cstarts)
+    )
+    for member: ast.IfaceItem in decl.items {
+      collect_iface_item(member: member, sites: inout sites)
+    }
+  }
+  | ast.ImplItem(decl) -> {
+    var ckeys: Builder[Text] = List.builder()
+    var cstarts: Builder[Int] = List.builder()
+    for f: ast.FnDecl in decl.fns {
+      child(keys: inout ckeys, starts: inout cstarts, kind: "FnDecl", span: f.span)
+    }
+    push_site(
+      sites: inout sites,
+      kind: "ImplDecl",
+      span: decl.span,
+      line_level: true,
+      container: true,
+      child_keys: List.finish(b: ckeys),
+      child_starts: List.finish(b: cstarts)
+    )
+    collect_type(t: decl.target, sites: inout sites)
+    for f: ast.FnDecl in decl.fns {
+      collect_fn(f: f, sites: inout sites)
+    }
+  }
+  | ast.ClaimItem(decl) -> push_site(
+    sites: inout sites,
+    kind: "ClaimDecl",
+    span: decl.span,
+    line_level: true,
+    container: false,
+    child_keys: [],
+    child_starts: []
+  )
+  | ast.CapabilityItem(decl) -> {
+    var ckeys: Builder[Text] = List.builder()
+    var cstarts: Builder[Int] = List.builder()
+    for g: ast.Grant in decl.grant_list {
+      child(keys: inout ckeys, starts: inout cstarts, kind: "Grant", span: g.span)
+    }
+    push_site(
+      sites: inout sites,
+      kind: "CapabilityDecl",
+      span: decl.span,
+      line_level: true,
+      container: true,
+      child_keys: List.finish(b: ckeys),
+      child_starts: List.finish(b: cstarts)
+    )
+    for tp: ast.TParam in decl.tparams {
+      collect_tparam(tp: tp, sites: inout sites)
+    }
+    for g: ast.Grant in decl.grant_list {
+      push_site(
+        sites: inout sites,
+        kind: "Grant",
+        span: g.span,
+        line_level: true,
+        container: false,
+        child_keys: [],
+        child_starts: []
+      )
+      match g.when_cond with
+      | Some(value) -> collect_expr(e: value, sites: inout sites)
+      | None -> sites = sites
+    }
+  }
+  | ast.PathItem(decl) -> {
+    var ckeys: Builder[Text] = List.builder()
+    var cstarts: Builder[Int] = List.builder()
+    for c: ast.PathClause in decl.clauses {
+      child(
+        keys: inout ckeys,
+        starts: inout cstarts,
+        kind: clause_kind(c: c),
+        span: clause_span(c: c)
+      )
+    }
+    push_site(
+      sites: inout sites,
+      kind: "PathDecl",
+      span: decl.span,
+      line_level: true,
+      container: true,
+      child_keys: List.finish(b: ckeys),
+      child_starts: List.finish(b: cstarts)
+    )
+    for c: ast.PathClause in decl.clauses {
+      push_site(
+        sites: inout sites,
+        kind: clause_kind(c: c),
+        span: clause_span(c: c),
+        line_level: true,
+        container: false,
+        child_keys: [],
+        child_starts: []
+      )
+    }
+  }
+  | ast.PolicyItem(decl) -> push_site(
+    sites: inout sites,
+    kind: "PolicyDecl",
+    span: decl.span,
+    line_level: true,
+    container: false,
+    child_keys: [],
+    child_starts: []
+  )
+  | ast.ExampleItem(decl) -> {
+    push_site(
+      sites: inout sites,
+      kind: "ExampleDecl",
+      span: decl.span,
+      line_level: true,
+      container: false,
+      child_keys: [],
+      child_starts: []
+    )
+    collect_block(b: decl.body, sites: inout sites)
+  }
+  | ast.PropertyItem(decl) -> {
+    var ckeys: Builder[Text] = List.builder()
+    var cstarts: Builder[Int] = List.builder()
+    params_children(ps: decl.params, keys: inout ckeys, starts: inout cstarts)
+    push_site(
+      sites: inout sites,
+      kind: "PropertyDecl",
+      span: decl.span,
+      line_level: true,
+      container: true,
+      child_keys: List.finish(b: ckeys),
+      child_starts: List.finish(b: cstarts)
+    )
+    collect_params(ps: decl.params, sites: inout sites)
+    collect_block(b: decl.body, sites: inout sites)
+  }
+}
+
+pub fn clause_kind(c: ast.PathClause) -> Text {
+  match c with
+  | ast.PathEffects(effects, span) -> return "PathEffects"
+  | ast.PathForbid(effects, span) -> return "PathForbid"
+  | ast.PathRequire(claim_list, span) -> return "PathRequire"
+  | ast.PathPolicy(name, except_list, span) -> return "PathPolicy"
+}
+
+pub fn clause_span(c: ast.PathClause) -> ast.Span {
+  match c with
+  | ast.PathEffects(effects, span) -> return span
+  | ast.PathForbid(effects, span) -> return span
+  | ast.PathRequire(claim_list, span) -> return span
+  | ast.PathPolicy(name, except_list, span) -> return span
+}
+
+fn collect_iface_item(member: ast.IfaceItem, sites: inout Builder[Site]) -> Unit may mutate, alloc {
+  match member with
+  | ast.IfaceFnItem(decl) -> {
+    var ckeys: Builder[Text] = List.builder()
+    var cstarts: Builder[Int] = List.builder()
+    params_children(ps: decl.params, keys: inout ckeys, starts: inout cstarts)
+    for c: ast.Contract in decl.contracts {
+      child(keys: inout ckeys, starts: inout cstarts, kind: "Contract", span: c.span)
+    }
+    push_site(
+      sites: inout sites,
+      kind: "IfaceFn",
+      span: decl.span,
+      line_level: true,
+      container: true,
+      child_keys: List.finish(b: ckeys),
+      child_starts: List.finish(b: cstarts)
+    )
+    collect_params(ps: decl.params, sites: inout sites)
+    collect_type(t: decl.ret, sites: inout sites)
+    collect_contracts(cs: decl.contracts, sites: inout sites)
+  }
+  | ast.LawItem(decl) -> {
+    var ckeys: Builder[Text] = List.builder()
+    var cstarts: Builder[Int] = List.builder()
+    params_children(ps: decl.params, keys: inout ckeys, starts: inout cstarts)
+    push_site(
+      sites: inout sites,
+      kind: "Law",
+      span: decl.span,
+      line_level: true,
+      container: true,
+      child_keys: List.finish(b: ckeys),
+      child_starts: List.finish(b: cstarts)
+    )
+    collect_params(ps: decl.params, sites: inout sites)
+    collect_block(b: decl.body, sites: inout sites)
+  }
+}
+
+pub fn type_span(t: ast.Type) -> ast.Span {
+  match t with
+  | ast.NamedType(name, args, where_, span) -> return span
+  | ast.FnType(params, ret, effects, span) -> return span
+}
+
+fn collect_type(t: ast.Type, sites: inout Builder[Site]) -> Unit may mutate, alloc
+  decreases t
+{
+  match t with
+  | ast.NamedType(name, args, where_, span) -> {
+    for a: ast.TypeArg in args {
+      collect_targ(a: a, sites: inout sites)
+    }
+    match where_ with
+    | Some(value) -> collect_expr(e: value, sites: inout sites)
+    | None -> sites = sites
+  }
+  | ast.FnType(params, ret, effects, span) -> {
+    for p: ast.Param in params {
+      collect_type(t: p.ty, sites: inout sites)
+    }
+    collect_type(t: ret, sites: inout sites)
+  }
+}
+
+fn collect_targ(a: ast.TypeArg, sites: inout Builder[Site]) -> Unit may mutate, alloc
+  decreases a
+{
+  match a with
+  | ast.TypeArgType(label, ty, span) -> {
+    push_site(
+      sites: inout sites,
+      kind: "TypeArgType",
+      span: span,
+      line_level: true,
+      container: false,
+      child_keys: [],
+      child_starts: []
+    )
+    collect_type(t: ty, sites: inout sites)
+  }
+  | ast.TypeArgConst(label, expr, span) -> {
+    push_site(
+      sites: inout sites,
+      kind: "TypeArgConst",
+      span: span,
+      line_level: true,
+      container: false,
+      child_keys: [],
+      child_starts: []
+    )
+    collect_expr(e: expr, sites: inout sites)
+  }
+}
+
+pub fn stmt_kind(s: ast.Stmt) -> Text {
+  match s with
+  | ast.Let(name, ty, value, span) -> return "Let"
+  | ast.Var(name, ty, value, span) -> return "Var"
+  | ast.Assign(name, value, span) -> return "Assign"
+  | ast.Return(value, span) -> return "Return"
+  | ast.If(cond, then_block, else_block, span) -> return "If"
+  | ast.Match(scrutinee, arms, span) -> return "Match"
+  | ast.Loop(cond, clauses, body, span) -> return "Loop"
+  | ast.For(name, ty, domain, body, span) -> return "For"
+  | ast.Assume(claim, justification, verify_block, span) -> return "Assume"
+  | ast.ExprStmt(expr, span) -> return "ExprStmt"
+}
+
+fn collect_block(b: ast.Block, sites: inout Builder[Site]) -> Unit may mutate, alloc
+  decreases b
+{
+  var ckeys: Builder[Text] = List.builder()
+  var cstarts: Builder[Int] = List.builder()
+  for s: ast.Stmt in b.stmts {
+    child(
+      keys: inout ckeys,
+      starts: inout cstarts,
+      kind: stmt_kind(s: s),
+      span: parser.span_of_stmt(st: s)
+    )
+  }
+  push_site(
+    sites: inout sites,
+    kind: "Block",
+    span: b.span,
+    line_level: false,
+    container: true,
+    child_keys: List.finish(b: ckeys),
+    child_starts: List.finish(b: cstarts)
+  )
+  for s: ast.Stmt in b.stmts {
+    collect_stmt(s: s, sites: inout sites)
+  }
+}
+
+fn collect_stmt(s: ast.Stmt, sites: inout Builder[Site]) -> Unit may mutate, alloc
+  decreases s
+{
+  match s with
+  | ast.Let(name, ty, value, span) -> {
+    push_site(
+      sites: inout sites,
+      kind: "Let",
+      span: span,
+      line_level: true,
+      container: false,
+      child_keys: [],
+      child_starts: []
+    )
+    collect_type(t: ty, sites: inout sites)
+    collect_expr(e: value, sites: inout sites)
+  }
+  | ast.Var(name, ty, value, span) -> {
+    push_site(
+      sites: inout sites,
+      kind: "Var",
+      span: span,
+      line_level: true,
+      container: false,
+      child_keys: [],
+      child_starts: []
+    )
+    collect_type(t: ty, sites: inout sites)
+    collect_expr(e: value, sites: inout sites)
+  }
+  | ast.Assign(name, value, span) -> {
+    push_site(
+      sites: inout sites,
+      kind: "Assign",
+      span: span,
+      line_level: true,
+      container: false,
+      child_keys: [],
+      child_starts: []
+    )
+    collect_expr(e: value, sites: inout sites)
+  }
+  | ast.Return(value, span) -> {
+    push_site(
+      sites: inout sites,
+      kind: "Return",
+      span: span,
+      line_level: true,
+      container: false,
+      child_keys: [],
+      child_starts: []
+    )
+    collect_expr(e: value, sites: inout sites)
+  }
+  | ast.If(cond, then_block, else_block, span) -> {
+    push_site(
+      sites: inout sites,
+      kind: "If",
+      span: span,
+      line_level: true,
+      container: false,
+      child_keys: [],
+      child_starts: []
+    )
+    collect_expr(e: cond, sites: inout sites)
+    collect_block(b: then_block, sites: inout sites)
+    match else_block with
+    | Some(value) -> collect_block(b: value, sites: inout sites)
+    | None -> sites = sites
+  }
+  | ast.Match(scrutinee, arms, span) -> {
+    var ckeys: Builder[Text] = List.builder()
+    var cstarts: Builder[Int] = List.builder()
+    for a: ast.Arm in arms {
+      child(keys: inout ckeys, starts: inout cstarts, kind: "Arm", span: a.span)
+    }
+    push_site(
+      sites: inout sites,
+      kind: "Match",
+      span: span,
+      line_level: true,
+      container: true,
+      child_keys: List.finish(b: ckeys),
+      child_starts: List.finish(b: cstarts)
+    )
+    collect_expr(e: scrutinee, sites: inout sites)
+    for a: ast.Arm in arms {
+      push_site(
+        sites: inout sites,
+        kind: "Arm",
+        span: a.span,
+        line_level: true,
+        container: false,
+        child_keys: [],
+        child_starts: []
+      )
+      match a.guard with
+      | Some(value) -> collect_expr(e: value, sites: inout sites)
+      | None -> sites = sites
+      match a.body with
+      | ast.ArmStmt(stmt) -> collect_stmt(s: stmt, sites: inout sites)
+      | ast.ArmBlock(block) -> collect_block(b: block, sites: inout sites)
+    }
+  }
+  | ast.Loop(cond, clauses, body, span) -> {
+    var ckeys: Builder[Text] = List.builder()
+    var cstarts: Builder[Int] = List.builder()
+    for c: ast.LoopClause in clauses {
+      child(keys: inout ckeys, starts: inout cstarts, kind: "LoopClause", span: c.span)
+    }
+    push_site(
+      sites: inout sites,
+      kind: "Loop",
+      span: span,
+      line_level: true,
+      container: true,
+      child_keys: List.finish(b: ckeys),
+      child_starts: List.finish(b: cstarts)
+    )
+    collect_expr(e: cond, sites: inout sites)
+    for c: ast.LoopClause in clauses {
+      push_site(
+        sites: inout sites,
+        kind: "LoopClause",
+        span: c.span,
+        line_level: true,
+        container: false,
+        child_keys: [],
+        child_starts: []
+      )
+      collect_expr(e: c.expr, sites: inout sites)
+    }
+    collect_block(b: body, sites: inout sites)
+  }
+  | ast.For(name, ty, domain, body, span) -> {
+    push_site(
+      sites: inout sites,
+      kind: "For",
+      span: span,
+      line_level: true,
+      container: false,
+      child_keys: [],
+      child_starts: []
+    )
+    collect_type(t: ty, sites: inout sites)
+    collect_domain(d: domain, sites: inout sites)
+    collect_block(b: body, sites: inout sites)
+  }
+  | ast.Assume(claim, justification, verify_block, span) -> {
+    push_site(
+      sites: inout sites,
+      kind: "Assume",
+      span: span,
+      line_level: true,
+      container: false,
+      child_keys: [],
+      child_starts: []
+    )
+    match verify_block with
+    | Some(value) -> {
+      push_site(
+        sites: inout sites,
+        kind: "VerifyBlock",
+        span: value.span,
+        line_level: true,
+        container: false,
+        child_keys: [],
+        child_starts: []
+      )
+      collect_params(ps: value.params, sites: inout sites)
+      collect_block(b: value.body, sites: inout sites)
+    }
+    | None -> sites = sites
+  }
+  | ast.ExprStmt(expr, span) -> {
+    push_site(
+      sites: inout sites,
+      kind: "ExprStmt",
+      span: span,
+      line_level: true,
+      container: false,
+      child_keys: [],
+      child_starts: []
+    )
+    collect_expr(e: expr, sites: inout sites)
+  }
+}
+
+fn collect_domain(d: ast.Domain, sites: inout Builder[Site]) -> Unit may mutate, alloc
+  decreases d
+{
+  match d with
+  | ast.RangeDomain(lo, hi, span) -> {
+    collect_expr(e: lo, sites: inout sites)
+    collect_expr(e: hi, sites: inout sites)
+  }
+  | ast.InDomain(expr, span) -> collect_expr(e: expr, sites: inout sites)
+}
+
+fn arg_children(
+  args: List[ast.Arg],
+  keys: inout Builder[Text],
+  starts: inout Builder[Int]
+) -> Unit may mutate, alloc {
+  for a: ast.Arg in args {
+    child(keys: inout keys, starts: inout starts, kind: "Arg", span: a.span)
+  }
+}
+
+fn field_init_children(
+  fs: List[ast.FieldInit],
+  keys: inout Builder[Text],
+  starts: inout Builder[Int]
+) -> Unit may mutate, alloc {
+  for f: ast.FieldInit in fs {
+    child(keys: inout keys, starts: inout starts, kind: "FieldInit", span: f.span)
+  }
+}
+
+fn collect_args(args: List[ast.Arg], sites: inout Builder[Site]) -> Unit may mutate, alloc
+  decreases args
+{
+  for a: ast.Arg in args {
+    push_site(
+      sites: inout sites,
+      kind: "Arg",
+      span: a.span,
+      line_level: true,
+      container: false,
+      child_keys: [],
+      child_starts: []
+    )
+    collect_expr(e: a.value, sites: inout sites)
+  }
+}
+
+fn collect_field_inits(
+  fs: List[ast.FieldInit],
+  sites: inout Builder[Site]
+) -> Unit may mutate, alloc
+  decreases fs
+{
+  for f: ast.FieldInit in fs {
+    push_site(
+      sites: inout sites,
+      kind: "FieldInit",
+      span: f.span,
+      line_level: true,
+      container: false,
+      child_keys: [],
+      child_starts: []
+    )
+    collect_expr(e: f.value, sites: inout sites)
+  }
+}
+
+fn collect_exprs(es: List[ast.Expr], sites: inout Builder[Site]) -> Unit may mutate, alloc
+  decreases es
+{
+  for e: ast.Expr in es {
+    collect_expr(e: e, sites: inout sites)
+  }
+}
+
+fn collect_expr(e: ast.Expr, sites: inout Builder[Site]) -> Unit may mutate, alloc
+  decreases e
+{
+  match e with
+  | ast.Ctor(name, args, fields, span) -> {
+    var ckeys: Builder[Text] = List.builder()
+    var cstarts: Builder[Int] = List.builder()
+    match args with
+    | Some(value) -> arg_children(args: value, keys: inout ckeys, starts: inout cstarts)
+    | None -> ckeys = ckeys
+    match fields with
+    | Some(value) -> field_init_children(fs: value, keys: inout ckeys, starts: inout cstarts)
+    | None -> ckeys = ckeys
+    push_site(
+      sites: inout sites,
+      kind: "Ctor",
+      span: span,
+      line_level: false,
+      container: true,
+      child_keys: List.finish(b: ckeys),
+      child_starts: List.finish(b: cstarts)
+    )
+    match args with
+    | Some(value) -> collect_args(args: value, sites: inout sites)
+    | None -> sites = sites
+    match fields with
+    | Some(value) -> collect_field_inits(fs: value, sites: inout sites)
+    | None -> sites = sites
+  }
+  | ast.RecordUpdate(base, fields, span) -> {
+    var ckeys: Builder[Text] = List.builder()
+    var cstarts: Builder[Int] = List.builder()
+    field_init_children(fs: fields, keys: inout ckeys, starts: inout cstarts)
+    push_site(
+      sites: inout sites,
+      kind: "RecordUpdate",
+      span: span,
+      line_level: false,
+      container: true,
+      child_keys: List.finish(b: ckeys),
+      child_starts: List.finish(b: cstarts)
+    )
+    collect_expr(e: base, sites: inout sites)
+    collect_field_inits(fs: fields, sites: inout sites)
+  }
+  | ast.ListLit(elems, span) -> collect_exprs(es: elems, sites: inout sites)
+  | ast.Try(expr, else_, span) -> {
+    collect_expr(e: expr, sites: inout sites)
+    match else_ with
+    | Some(value) -> collect_expr(e: value.expr, sites: inout sites)
+    | None -> sites = sites
+  }
+  | ast.Recover(body, span) -> collect_block(b: body, sites: inout sites)
+  | ast.Quantifier(quant, name, ty, domain, where_, body, span) -> {
+    collect_type(t: ty, sites: inout sites)
+    match domain with
+    | Some(value) -> collect_domain(d: value, sites: inout sites)
+    | None -> sites = sites
+    match where_ with
+    | Some(value) -> collect_expr(e: value, sites: inout sites)
+    | None -> sites = sites
+    collect_expr(e: body, sites: inout sites)
+  }
+  | ast.Closure(params, ret, effects, body, span) -> {
+    var ckeys: Builder[Text] = List.builder()
+    var cstarts: Builder[Int] = List.builder()
+    params_children(ps: params, keys: inout ckeys, starts: inout cstarts)
+    push_site(
+      sites: inout sites,
+      kind: "Closure",
+      span: span,
+      line_level: false,
+      container: true,
+      child_keys: List.finish(b: ckeys),
+      child_starts: List.finish(b: cstarts)
+    )
+    collect_params(ps: params, sites: inout sites)
+    collect_type(t: ret, sites: inout sites)
+    collect_block(b: body, sites: inout sites)
+  }
+  | ast.Fake(capability, fields, span) -> {
+    var ckeys: Builder[Text] = List.builder()
+    var cstarts: Builder[Int] = List.builder()
+    field_init_children(fs: fields, keys: inout ckeys, starts: inout cstarts)
+    push_site(
+      sites: inout sites,
+      kind: "Fake",
+      span: span,
+      line_level: false,
+      container: true,
+      child_keys: List.finish(b: ckeys),
+      child_starts: List.finish(b: cstarts)
+    )
+    collect_field_inits(fs: fields, sites: inout sites)
+  }
+  | ast.FieldAccess(object, name, span) -> collect_expr(e: object, sites: inout sites)
+  | ast.Call(callee, targs, args, span) -> {
+    var ckeys: Builder[Text] = List.builder()
+    var cstarts: Builder[Int] = List.builder()
+    arg_children(args: args, keys: inout ckeys, starts: inout cstarts)
+    push_site(
+      sites: inout sites,
+      kind: "Call",
+      span: span,
+      line_level: false,
+      container: true,
+      child_keys: List.finish(b: ckeys),
+      child_starts: List.finish(b: cstarts)
+    )
+    collect_expr(e: callee, sites: inout sites)
+    match targs with
+    | Some(value) -> {
+      for a: ast.TypeArg in value {
+        collect_targ(a: a, sites: inout sites)
+      }
+    }
+    | None -> sites = sites
+    collect_args(args: args, sites: inout sites)
+  }
+  | ast.Unary(op, operand, span) -> collect_expr(e: operand, sites: inout sites)
+  | ast.Binary(op, left, right, span) -> {
+    collect_expr(e: left, sites: inout sites)
+    collect_expr(e: right, sites: inout sites)
+  }
+  | ast.And(operands, span) -> collect_exprs(es: operands, sites: inout sites)
+  | ast.Or(operands, span) -> collect_exprs(es: operands, sites: inout sites)
+  | ast.Is(expr, pattern, span) -> collect_expr(e: expr, sites: inout sites)
+  | _ -> sites = sites
+}
+
+fn iface_kind(member: ast.IfaceItem) -> Text {
+  match member with
+  | ast.IfaceFnItem(decl) -> return "IfaceFn"
+  | ast.LawItem(decl) -> return "Law"
+}
+
+fn iface_span(member: ast.IfaceItem) -> ast.Span {
+  match member with
+  | ast.IfaceFnItem(decl) -> return decl.span
+  | ast.LawItem(decl) -> return decl.span
+}

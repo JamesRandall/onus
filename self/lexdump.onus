@@ -45,7 +45,7 @@ fn dump_token(t: tokens.Token, src: List[Int]) -> Text may alloc {
   match t.kind with
   | tokens.Name(text) -> return "name" ++ where_ ++ " " ++ text
   | tokens.TName(text) -> return "tname" ++ where_ ++ " " ++ text
-  | tokens.IntLit(value) -> return "int" ++ where_ ++ " " ++ digits(
+  | tokens.IntLit(value, text) -> return "int" ++ where_ ++ " " ++ digits(
     src: src,
     from: t.start,
     to: t.end

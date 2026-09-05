@@ -1,0 +1,46 @@
+module ok_structural
+
+-- Structural recursion (§5.1): the measure is the tree itself, and each
+-- recursive call passes a part of it obtained by pattern matching.
+union Expr =
+  | Lit of value: Int
+  | Add of left: Expr, right: Expr
+  | Neg of operand: Expr
+  | Block of stmts: List[Stmt]
+
+union Stmt =
+  | Eval of expr: Expr
+  | Skip
+
+fn size(e: Expr) -> Int where it >= 1
+  decreases e
+{
+  match e with
+  | Lit(value) -> return 1
+  | Add(left, right) -> return 1 + size(e: left) + size(e: right)
+  | Neg(operand) -> return 1 + size(e: operand)
+  | Block(stmts) -> return 1 + stmts_size(ss: stmts)
+}
+
+fn stmts_size(ss: List[Stmt]) -> Int where it >= 0
+  decreases ss
+{
+  var total: Int where it >= 0 = 0
+  for i: Int in 0 ..< List.len(xs: ss) {
+    total = total + stmt_size(s: List.get(xs: ss, i: i))
+  }
+  return total
+}
+
+fn stmt_size(s: Stmt) -> Int where it >= 1
+  decreases s
+{
+  match s with
+  | Eval(expr) -> return 1 + size(e: expr)
+  | Skip -> return 1
+}
+
+example sizes {
+  size(e: Add(left: Lit(value: 1), right: Neg(operand: Lit(value: 2)))) == 4
+  size(e: Block(stmts: [Eval(expr: Lit(value: 1)), Skip])) == 4
+}

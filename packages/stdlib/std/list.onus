@@ -42,6 +42,14 @@ pub intrinsic fn push[T](b: inout Builder[T], x: T) -> Unit may mutate, alloc
 pub intrinsic fn finish[T](b: Builder[T]) -> List[T] may alloc
   ensures len(xs: result) == built(b: b)
 
+-- The element pushed `i`th, still in the builder.
+pub intrinsic fn at[T](b: Builder[T], i: Int where 0 <= it and it < built(b: b)) -> T
+
+-- Takes the last element back out.
+pub intrinsic fn pop[T](b: inout Builder[T]) -> Option[T] may mutate
+  ensures built(b: old(b)) == 0 implies result is None
+  ensures built(b: old(b)) > 0 implies result is Some and built(b: b) == built(b: old(b)) - 1
+
 pub fn map[T, U, e](xs: List[T], f: fn(x: T) -> U may e) -> List[U] may e, alloc {
   var b: Builder[U] = builder()
   for x: T in xs {

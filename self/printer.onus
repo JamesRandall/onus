@@ -1,0 +1,1499 @@
+module printer
+import doc
+import comments
+import ast
+import parser
+
+-- The canonical printer (spec §2.2; `printer.ts`): the one form of every
+-- module, 100 columns wide, comments kept where they were attached. Every
+-- walk over the tree takes the node as its first parameter and recurses on
+-- a proper part of it, so the verifier proves the walks terminate.
+pub const line_width: Int = 100
+
+pub record Printer {
+  tab: comments.Table
+  elide: Bool
+}
+
+pub fn print_module(m: ast.Module, tab: comments.Table) -> Text may alloc, mutate {
+  let pr: Printer = Printer { tab: tab, elide: false }
+  return doc.render(d: module(m: m, pr: pr), width: line_width)
+}
+
+-- Comments ---------------------------------------------------------------------
+fn line_node(k: Text, d: doc.Doc, pr: Printer) -> doc.Doc may alloc, mutate {
+  let cs: comments.CommentSet = comments.lookup(table: pr.tab, k: k)
+  if List.len(xs: cs.leading) == 0 and List.len(xs: cs.trailing) == 0 {
+    return d
+  }
+  var parts: Builder[doc.Doc] = List.builder()
+  for c: Text in cs.leading {
+    List.push(b: inout parts, x: doc.str(text: c))
+    List.push(b: inout parts, x: doc.hardline)
+  }
+  if List.len(xs: cs.trailing) > 0 {
+    List.push(
+      b: inout parts,
+      x: doc.line_suffix(text: " " ++ Text.join(parts: cs.trailing, sep: " "))
+    )
+  }
+  List.push(b: inout parts, x: d)
+  return doc.concat(parts: List.finish(b: parts))
+}
+
+fn dangling(k: Text, pr: Printer) -> doc.Doc may alloc, mutate {
+  let cs: comments.CommentSet = comments.lookup(table: pr.tab, k: k)
+  if List.len(xs: cs.dangling) == 0 {
+    return doc.empty
+  }
+  var parts: Builder[doc.Doc] = List.builder()
+  for c: Text in cs.dangling {
+    List.push(b: inout parts, x: doc.hardline)
+    List.push(b: inout parts, x: doc.str(text: c))
+  }
+  return doc.concat(parts: List.finish(b: parts))
+}
+
+fn has_dangling(k: Text, pr: Printer) -> Bool may alloc {
+  return List.len(xs: comments.lookup(table: pr.tab, k: k).dangling) > 0
+}
+
+-- Helpers -----------------------------------------------------------------------
+fn s(text: Text) -> doc.Doc {
+  return doc.str(text: text)
+}
+
+fn qn(q: ast.QName) -> Text may alloc, mutate {
+  var parts: Builder[Text] = List.builder()
+  for seg: ast.Ident in q.segments {
+    List.push(b: inout parts, x: seg.text)
+  }
+  return Text.join(parts: List.finish(b: parts), sep: ".")
+}
+
+fn qns(qs: List[ast.QName]) -> List[doc.Doc] may alloc, mutate {
+  var out: Builder[doc.Doc] = List.builder()
+  for q: ast.QName in qs {
+    List.push(b: inout out, x: s(text: qn(q: q)))
+  }
+  return List.finish(b: out)
+}
+
+fn vis(v: ast.Visibility) -> Text may alloc {
+  var out: Text = ""
+  if v.is_pub {
+    out = out ++ "pub "
+  }
+  if v.is_sealed {
+    out = out ++ "sealed "
+  }
+  return out
+}
+
+fn effect_set(es: List[ast.EffectRef]) -> doc.Doc may alloc, mutate {
+  if List.len(xs: es) == 0 {
+    return s(text: "{}")
+  }
+  var names: Builder[Text] = List.builder()
+  for e: ast.EffectRef in es {
+    List.push(b: inout names, x: qn(q: e.name))
+  }
+  return s(text: "{ " ++ Text.join(parts: List.finish(b: names), sep: ", ") ++ " }")
+}
+
+fn effects_doc(es: List[ast.EffectRef]) -> doc.Doc may alloc, mutate {
+  if List.len(xs: es) == 0 {
+    return doc.empty
+  }
+  var names: Builder[Text] = List.builder()
+  for e: ast.EffectRef in es {
+    List.push(b: inout names, x: qn(q: e.name))
+  }
+  return s(text: " may " ++ Text.join(parts: List.finish(b: names), sep: ", "))
+}
+
+fn policy_scope(sc: ast.PolicyScope) -> Text may alloc, mutate {
+  match sc.name with
+  | None -> return "self"
+  | Some(value) -> {
+    if sc.glob {
+      return qn(q: value) ++ ".*"
+    }
+    return qn(q: value)
+  }
+}
+
+fn pat_field(f: ast.PatField) -> Text {
+  match f with
+  | ast.PatFieldName(name, span) -> return name.text
+  | ast.PatFieldSkip(span) -> return "_"
+  | ast.PatFieldRest(span) -> return ".."
+}
+
+fn wrap(d: doc.Doc, paren: Bool) -> doc.Doc may alloc {
+  if paren {
+    return doc.concat(parts: [s(text: "("), d, s(text: ")")])
+  }
+  return d
+}
+
+fn is_empty(d: doc.Doc) -> Bool {
+  match d with
+  | doc.Str(text) -> return text == ""
+  | _ -> return false
+}
+
+fn bracketed(
+  open: Text,
+  close: Text,
+  items: List[doc.Doc],
+  dang: doc.Doc,
+  tight: Bool
+) -> doc.Doc may alloc, mutate {
+  if List.len(xs: items) == 0 and is_empty(d: dang) {
+    return s(text: open ++ close)
+  }
+  var sep: doc.Doc = doc.line
+  if tight {
+    sep = doc.softline
+  }
+  return doc.group(
+    body: doc.concat(
+      parts: [
+        s(text: open),
+        doc.indent(
+          body: doc.concat(
+            parts: [
+              sep,
+              doc.join(sep: doc.concat(parts: [s(text: ","), doc.line]), docs: items),
+              dang
+            ]
+          )
+        ),
+        sep,
+        s(text: close)
+      ]
+    )
+  )
+}
+
+pub fn float_text(v: Float) -> Text may alloc {
+  let t: Text = Float.to_text(x: v)
+  if Text.contains(t: t, needle: ".") or Text.contains(t: t, needle: "e") {
+    return t
+  }
+  return t ++ ".0"
+}
+
+pub fn duration_text(nanos: Int) -> Text may alloc {
+  if nanos % 1000000000 == 0 {
+    return Int.to_text(x: nanos / 1000000000) ++ "s"
+  }
+  if nanos % 1000000 == 0 {
+    return Int.to_text(x: nanos / 1000000) ++ "ms"
+  }
+  if nanos % 1000 == 0 {
+    return Int.to_text(x: nanos / 1000) ++ "us"
+  }
+  return Int.to_text(x: nanos) ++ "ns"
+}
+
+pub fn quote(t: Text) -> Text may alloc, mutate {
+  var out: Builder[Int] = List.builder()
+  List.push(b: inout out, x: 34)
+  for cp: Int in Text.code_points(t: t) {
+    if cp == 92 {
+      List.push(b: inout out, x: 92)
+      List.push(b: inout out, x: 92)
+    } else {
+      if cp == 34 {
+        List.push(b: inout out, x: 92)
+        List.push(b: inout out, x: 34)
+      } else {
+        if cp == 10 {
+          List.push(b: inout out, x: 92)
+          List.push(b: inout out, x: 110)
+        } else {
+          if cp == 9 {
+            List.push(b: inout out, x: 92)
+            List.push(b: inout out, x: 116)
+          } else {
+            if cp == 13 {
+              List.push(b: inout out, x: 92)
+              List.push(b: inout out, x: 114)
+            } else {
+              if cp == 0 {
+                List.push(b: inout out, x: 92)
+                List.push(b: inout out, x: 48)
+              } else {
+                List.push(b: inout out, x: cp)
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  List.push(b: inout out, x: 34)
+  return Text.of_code_points(cps: List.finish(b: out))
+}
+
+fn is_cmp(op: Text) -> Bool {
+  return op == "==" or op == "!=" or op == "<" or op == "<=" or op == ">" or op == ">="
+}
+
+fn prec(e: ast.Expr) -> Int {
+  match e with
+  | ast.Try(expr, else_, span) -> return 1
+  | ast.Quantifier(quant, name, ty, domain, where_, body, span) -> return 1
+  | ast.Binary(op, left, right, span) -> {
+    if op == "implies" {
+      return 2
+    }
+    if is_cmp(op: op) {
+      return 5
+    }
+    if op == "*" or op == "/" or op == "%" {
+      return 7
+    }
+    return 6
+  }
+  | ast.And(operands, span) -> return 3
+  | ast.Or(operands, span) -> return 3
+  | ast.Unary(op, operand, span) -> {
+    if op == "not" {
+      return 4
+    }
+    return 8
+  }
+  | ast.Is(expr, pattern, span) -> return 5
+  | ast.FieldAccess(object, name, span) -> return 9
+  | ast.Call(callee, targs, args, span) -> return 9
+  | _ -> return 10
+}
+
+fn claim_prec(p: ast.ClaimPred) -> Int {
+  match p with
+  | ast.ClaimAnd(operands, span) -> return 1
+  | ast.ClaimOr(operands, span) -> return 1
+  | ast.ClaimNot(operand, span) -> return 2
+  | _ -> return 3
+}
+
+fn ends_with_open_try(e: ast.Expr) -> Bool
+  decreases e
+{
+  match e with
+  | ast.Try(expr, else_, span) -> {
+    match else_ with
+    | None -> return true
+    | Some(value) -> return ends_with_open_try(e: value.expr)
+  }
+  | ast.Quantifier(quant, name, ty, domain, where_, body, span) -> return ends_with_open_try(
+    e: body
+  )
+  | _ -> return false
+}
+
+-- Whether an expression in a no-brace position must be parenthesised.
+fn brace_led(e: ast.Expr) -> Bool {
+  match e with
+  | ast.RecordUpdate(base, fields, span) -> return true
+  | ast.Fake(capability, fields, span) -> return true
+  | ast.Ctor(name, args, fields, span) -> return fields is Some
+  | _ -> return false
+}
+
+-- Module and items ---------------------------------------------------------------
+fn module(m: ast.Module, pr: Printer) -> doc.Doc may alloc, mutate
+  decreases m
+{
+  var parts: Builder[doc.Doc] = List.builder()
+  var head: Text = "module " ++ qn(q: m.name)
+  if m.is_test {
+    head = "test " ++ head
+  }
+  let mkey: Text = comments.key(kind: "Module", span: m.span)
+  List.push(b: inout parts, x: line_node(k: mkey, d: s(text: head), pr: pr))
+  for imp: ast.Import in m.imports {
+    List.push(b: inout parts, x: doc.hardline)
+    List.push(
+      b: inout parts,
+      x: line_node(
+        k: comments.key(kind: "Import", span: imp.span),
+        d: s(text: "import " ++ qn(q: imp.name)),
+        pr: pr
+      )
+    )
+  }
+  for item: ast.Item in m.items {
+    List.push(b: inout parts, x: doc.hardline)
+    List.push(b: inout parts, x: doc.hardline)
+    List.push(b: inout parts, x: item_doc(item: item, pr: pr))
+  }
+  let cs: comments.CommentSet = comments.lookup(table: pr.tab, k: mkey)
+  if List.len(xs: cs.dangling) > 0 {
+    List.push(b: inout parts, x: doc.hardline)
+    for c: Text in cs.dangling {
+      List.push(b: inout parts, x: doc.hardline)
+      List.push(b: inout parts, x: s(text: c))
+    }
+  }
+  List.push(b: inout parts, x: doc.hardline)
+  return doc.concat(parts: List.finish(b: parts))
+}
+
+fn item_doc(item: ast.Item, pr: Printer) -> doc.Doc may alloc, mutate
+  decreases item
+{
+  match item with
+  | ast.FnItem(decl) -> return line_node(
+    k: comments.key(kind: "FnDecl", span: decl.span),
+    d: fn_decl(f: decl, pr: pr),
+    pr: pr
+  )
+  | ast.TypeAliasItem(decl) -> return line_node(
+    k: comments.key(kind: "TypeAlias", span: decl.span),
+    d: doc.concat(
+      parts: [
+        s(text: vis(v: decl.vis) ++ "type " ++ decl.name.text ++ " = "),
+        type_doc(t: decl.ty, pr: pr)
+      ]
+    ),
+    pr: pr
+  )
+  | ast.IntrinsicTypeItem(decl) -> return line_node(
+    k: comments.key(kind: "IntrinsicType", span: decl.span),
+    d: doc.concat(
+      parts: [
+        s(text: vis(v: decl.vis) ++ "intrinsic type " ++ decl.name.text),
+        tparams(ps: decl.tparams, pr: pr)
+      ]
+    ),
+    pr: pr
+  )
+  | ast.ConstItem(decl) -> return line_node(
+    k: comments.key(kind: "ConstDecl", span: decl.span),
+    d: doc.concat(
+      parts: [
+        s(text: vis(v: decl.vis) ++ "const " ++ decl.name.text ++ ": "),
+        type_doc(t: decl.ty, pr: pr),
+        s(text: " = "),
+        expr_doc(e: decl.value, nb: false, pr: pr)
+      ]
+    ),
+    pr: pr
+  )
+  | ast.RecordItem(decl) -> {
+    let k: Text = comments.key(kind: "RecordDecl", span: decl.span)
+    var body: Builder[doc.Doc] = List.builder()
+    for f: ast.Field in decl.fields {
+      List.push(b: inout body, x: doc.hardline)
+      List.push(b: inout body, x: field(f: f, pr: pr))
+    }
+    List.push(b: inout body, x: dangling(k: k, pr: pr))
+    return line_node(
+      k: k,
+      d: doc.concat(
+        parts: [
+          s(text: vis(v: decl.vis) ++ "record " ++ decl.name.text),
+          tparams(ps: decl.tparams, pr: pr),
+          s(text: " {"),
+          doc.indent(body: doc.concat(parts: List.finish(b: body))),
+          doc.hardline,
+          s(text: "}")
+        ]
+      ),
+      pr: pr
+    )
+  }
+  | ast.UnionItem(decl) -> {
+    var body: Builder[doc.Doc] = List.builder()
+    for v: ast.Variant in decl.variants {
+      List.push(b: inout body, x: doc.hardline)
+      List.push(b: inout body, x: variant(v: v, pr: pr))
+    }
+    return line_node(
+      k: comments.key(kind: "UnionDecl", span: decl.span),
+      d: doc.concat(
+        parts: [
+          s(text: vis(v: decl.vis) ++ "union " ++ decl.name.text),
+          tparams(ps: decl.tparams, pr: pr),
+          s(text: " ="),
+          doc.indent(body: doc.concat(parts: List.finish(b: body)))
+        ]
+      ),
+      pr: pr
+    )
+  }
+  | ast.InterfaceItem(decl) -> {
+    let k: Text = comments.key(kind: "InterfaceDecl", span: decl.span)
+    var body: Builder[doc.Doc] = List.builder()
+    var i: Int = 0
+    for member: ast.IfaceItem in decl.items {
+      List.push(b: inout body, x: doc.hardline)
+      if i > 0 {
+        List.push(b: inout body, x: doc.hardline)
+      }
+      List.push(b: inout body, x: iface_item(member: member, pr: pr))
+      i = i + 1
+    }
+    List.push(b: inout body, x: dangling(k: k, pr: pr))
+    return line_node(
+      k: k,
+      d: doc.concat(
+        parts: [
+          s(
+            text: vis(
+              v: decl.vis
+            ) ++ "interface " ++ decl.name.text ++ "[" ++ decl.tparam.text ++ "] {"
+          ),
+          doc.indent(body: doc.concat(parts: List.finish(b: body))),
+          doc.hardline,
+          s(text: "}")
+        ]
+      ),
+      pr: pr
+    )
+  }
+  | ast.ImplItem(decl) -> {
+    let k: Text = comments.key(kind: "ImplDecl", span: decl.span)
+    var body: Builder[doc.Doc] = List.builder()
+    var i: Int = 0
+    for f: ast.FnDecl in decl.fns {
+      List.push(b: inout body, x: doc.hardline)
+      if i > 0 {
+        List.push(b: inout body, x: doc.hardline)
+      }
+      List.push(
+        b: inout body,
+        x: line_node(
+          k: comments.key(kind: "FnDecl", span: f.span),
+          d: fn_decl(f: f, pr: pr),
+          pr: pr
+        )
+      )
+      i = i + 1
+    }
+    List.push(b: inout body, x: dangling(k: k, pr: pr))
+    return line_node(
+      k: k,
+      d: doc.concat(
+        parts: [
+          s(text: "impl " ++ decl.iface.text ++ "["),
+          type_doc(t: decl.target, pr: pr),
+          s(text: "] {"),
+          doc.indent(body: doc.concat(parts: List.finish(b: body))),
+          doc.hardline,
+          s(text: "}")
+        ]
+      ),
+      pr: pr
+    )
+  }
+  | ast.ClaimItem(decl) -> {
+    let k: Text = comments.key(kind: "ClaimDecl", span: decl.span)
+    match decl.body with
+    | ast.Derived(pred) -> return line_node(
+      k: k,
+      d: doc.concat(
+        parts: [
+          s(text: vis(v: decl.vis) ++ "claim " ++ decl.name.text ++ " := "),
+          claim_pred(p: pred, min_prec: 0, pr: pr)
+        ]
+      ),
+      pr: pr
+    )
+    | ast.Asserted(description) -> return line_node(
+      k: k,
+      d: s(text: vis(v: decl.vis) ++ "claim " ++ decl.name.text ++ " " ++ quote(t: description)),
+      pr: pr
+    )
+  }
+  | ast.CapabilityItem(decl) -> {
+    let k: Text = comments.key(kind: "CapabilityDecl", span: decl.span)
+    var body: Builder[doc.Doc] = List.builder()
+    for g: ast.Grant in decl.grant_list {
+      List.push(b: inout body, x: doc.hardline)
+      List.push(b: inout body, x: grant(g: g, pr: pr))
+    }
+    List.push(b: inout body, x: dangling(k: k, pr: pr))
+    return line_node(
+      k: k,
+      d: doc.concat(
+        parts: [
+          s(text: vis(v: decl.vis) ++ "capability " ++ decl.name.text),
+          tparams(ps: decl.tparams, pr: pr),
+          doc.indent(body: doc.concat(parts: List.finish(b: body)))
+        ]
+      ),
+      pr: pr
+    )
+  }
+  | ast.PathItem(decl) -> {
+    let k: Text = comments.key(kind: "PathDecl", span: decl.span)
+    var body: Builder[doc.Doc] = List.builder()
+    List.push(b: inout body, x: doc.hardline)
+    List.push(b: inout body, x: s(text: "entry " ++ decl.entry_fn.text))
+    for c: ast.PathClause in decl.clauses {
+      List.push(b: inout body, x: doc.hardline)
+      List.push(b: inout body, x: path_clause(c: c, pr: pr))
+    }
+    List.push(b: inout body, x: dangling(k: k, pr: pr))
+    return line_node(
+      k: k,
+      d: doc.concat(
+        parts: [
+          s(text: "path " ++ decl.name.text),
+          doc.indent(body: doc.concat(parts: List.finish(b: body)))
+        ]
+      ),
+      pr: pr
+    )
+  }
+  | ast.PolicyItem(decl) -> {
+    var scopes: Builder[Text] = List.builder()
+    for sc: ast.PolicyScope in decl.outside_list {
+      List.push(b: inout scopes, x: policy_scope(sc: sc))
+    }
+    return line_node(
+      k: comments.key(kind: "PolicyDecl", span: decl.span),
+      d: doc.concat(
+        parts: [
+          s(text: "policy " ++ decl.name.text),
+          doc.indent(
+            body: doc.concat(
+              parts: [
+                doc.hardline,
+                s(
+                  text: "forbid assume outside { " ++ Text.join(
+                    parts: List.finish(b: scopes),
+                    sep: ", "
+                  ) ++ " }"
+                )
+              ]
+            )
+          )
+        ]
+      ),
+      pr: pr
+    )
+  }
+  | ast.ExampleItem(decl) -> return line_node(
+    k: comments.key(kind: "ExampleDecl", span: decl.span),
+    d: doc.concat(
+      parts: [s(text: "example " ++ decl.name.text ++ " "), block_doc(b: decl.body, pr: pr)]
+    ),
+    pr: pr
+  )
+  | ast.PropertyItem(decl) -> return line_node(
+    k: comments.key(kind: "PropertyDecl", span: decl.span),
+    d: doc.concat(
+      parts: [
+        s(text: "property " ++ decl.name.text),
+        params_doc(ps: decl.params, pr: pr),
+        s(text: " "),
+        block_doc(b: decl.body, pr: pr)
+      ]
+    ),
+    pr: pr
+  )
+}
+
+fn fn_decl(f: ast.FnDecl, pr: Printer) -> doc.Doc may alloc, mutate
+  decreases f
+{
+  var head_text: Text = vis(v: f.vis)
+  if f.is_const {
+    head_text = head_text ++ "const "
+  }
+  if f.is_intrinsic {
+    head_text = head_text ++ "intrinsic "
+  }
+  head_text = head_text ++ "fn " ++ f.name.text
+  let head: doc.Doc = doc.concat(
+    parts: [
+      s(text: head_text),
+      tparams(ps: f.tparams, pr: pr),
+      params_doc(ps: f.params, pr: pr),
+      s(text: " -> "),
+      type_doc(t: f.ret, pr: pr),
+      effects_doc(es: f.effects)
+    ]
+  )
+  let k: Text = comments.key(kind: "FnDecl", span: f.span)
+  var tail: Builder[doc.Doc] = List.builder()
+  if List.len(xs: f.claim_list) > 0 {
+    List.push(b: inout tail, x: doc.hardline)
+    List.push(b: inout tail, x: s(text: "claims "))
+    List.push(b: inout tail, x: doc.join(sep: s(text: ", "), docs: qns(qs: f.claim_list)))
+  }
+  for c: ast.Contract in f.contracts {
+    List.push(b: inout tail, x: doc.hardline)
+    List.push(b: inout tail, x: contract(c: c, pr: pr))
+  }
+  List.push(b: inout tail, x: dangling(k: k, pr: pr))
+  match f.body with
+  | None -> return doc.concat(
+    parts: [head, doc.indent(body: doc.concat(parts: List.finish(b: tail)))]
+  )
+  | Some(value) -> {
+    var body_doc: doc.Doc = s(text: "{ ... }")
+    if not pr.elide and not value.elided {
+      body_doc = block_doc(b: value, pr: pr)
+    }
+    if List.len(xs: f.claim_list) == 0 and List.len(xs: f.contracts) == 0 and not has_dangling(
+      k: k,
+      pr: pr
+    ) {
+      return doc.concat(parts: [head, s(text: " "), body_doc])
+    }
+    return doc.concat(
+      parts: [
+        head,
+        doc.indent(body: doc.concat(parts: List.finish(b: tail))),
+        doc.hardline,
+        body_doc
+      ]
+    )
+  }
+}
+
+fn contract(c: ast.Contract, pr: Printer) -> doc.Doc may alloc, mutate
+  decreases c
+{
+  var head: Text = c.clause ++ " "
+  if c.is_proved {
+    head = head ++ "proved "
+  }
+  return line_node(
+    k: comments.key(kind: "Contract", span: c.span),
+    d: doc.concat(parts: [s(text: head), expr_doc(e: c.expr, nb: true, pr: pr)]),
+    pr: pr
+  )
+}
+
+fn field(f: ast.Field, pr: Printer) -> doc.Doc may alloc, mutate
+  decreases f
+{
+  return line_node(
+    k: comments.key(kind: "Field", span: f.span),
+    d: doc.concat(parts: [s(text: f.name.text ++ ": "), type_doc(t: f.ty, pr: pr)]),
+    pr: pr
+  )
+}
+
+fn variant(v: ast.Variant, pr: Printer) -> doc.Doc may alloc, mutate
+  decreases v
+{
+  var fields: Builder[doc.Doc] = List.builder()
+  for f: ast.Field in v.fields {
+    List.push(b: inout fields, x: field(f: f, pr: pr))
+  }
+  var d: doc.Doc = s(text: "| " ++ v.name.text)
+  if List.len(xs: v.fields) > 0 {
+    d = doc.concat(
+      parts: [d, s(text: " of "), doc.join(sep: s(text: ", "), docs: List.finish(b: fields))]
+    )
+  }
+  return line_node(k: comments.key(kind: "Variant", span: v.span), d: d, pr: pr)
+}
+
+fn iface_item(member: ast.IfaceItem, pr: Printer) -> doc.Doc may alloc, mutate
+  decreases member
+{
+  match member with
+  | ast.LawItem(decl) -> return line_node(
+    k: comments.key(kind: "Law", span: decl.span),
+    d: doc.concat(
+      parts: [
+        s(text: "law " ++ decl.name.text),
+        params_doc(ps: decl.params, pr: pr),
+        s(text: " "),
+        block_doc(b: decl.body, pr: pr)
+      ]
+    ),
+    pr: pr
+  )
+  | ast.IfaceFnItem(decl) -> {
+    let k: Text = comments.key(kind: "IfaceFn", span: decl.span)
+    let head: doc.Doc = doc.concat(
+      parts: [
+        s(text: "fn " ++ decl.name.text),
+        params_doc(ps: decl.params, pr: pr),
+        s(text: " -> "),
+        type_doc(t: decl.ret, pr: pr),
+        effects_doc(es: decl.effects)
+      ]
+    )
+    var tail: Builder[doc.Doc] = List.builder()
+    for c: ast.Contract in decl.contracts {
+      List.push(b: inout tail, x: doc.hardline)
+      List.push(b: inout tail, x: contract(c: c, pr: pr))
+    }
+    List.push(b: inout tail, x: dangling(k: k, pr: pr))
+    return line_node(
+      k: k,
+      d: doc.concat(parts: [head, doc.indent(body: doc.concat(parts: List.finish(b: tail)))]),
+      pr: pr
+    )
+  }
+}
+
+fn grant(g: ast.Grant, pr: Printer) -> doc.Doc may alloc, mutate
+  decreases g
+{
+  var d: doc.Doc = s(text: "grants " ++ qn(q: g.effect.name))
+  match g.when_cond with
+  | Some(value) -> d = doc.concat(
+    parts: [d, s(text: " when "), expr_doc(e: value, nb: true, pr: pr)]
+  )
+  | None -> d = d
+  return line_node(k: comments.key(kind: "Grant", span: g.span), d: d, pr: pr)
+}
+
+fn path_clause(c: ast.PathClause, pr: Printer) -> doc.Doc may alloc, mutate {
+  let k: Text = comments.key(kind: comments.clause_kind(c: c), span: comments.clause_span(c: c))
+  match c with
+  | ast.PathEffects(effects, span) -> return line_node(
+    k: k,
+    d: doc.concat(parts: [s(text: "effects <= "), effect_set(es: effects)]),
+    pr: pr
+  )
+  | ast.PathForbid(effects, span) -> return line_node(
+    k: k,
+    d: doc.concat(parts: [s(text: "forbid "), effect_set(es: effects)]),
+    pr: pr
+  )
+  | ast.PathRequire(claim_list, span) -> {
+    if List.len(xs: claim_list) == 0 {
+      return line_node(k: k, d: s(text: "require {}"), pr: pr)
+    }
+    return line_node(
+      k: k,
+      d: doc.concat(
+        parts: [
+          s(text: "require { "),
+          doc.join(sep: s(text: ", "), docs: qns(qs: claim_list)),
+          s(text: " }")
+        ]
+      ),
+      pr: pr
+    )
+  }
+  | ast.PathPolicy(name, except_list, span) -> {
+    if List.len(xs: except_list) == 0 {
+      return line_node(k: k, d: s(text: "policy " ++ name.text), pr: pr)
+    }
+    return line_node(
+      k: k,
+      d: doc.concat(
+        parts: [
+          s(text: "policy " ++ name.text ++ " except { "),
+          doc.join(sep: s(text: ", "), docs: qns(qs: except_list)),
+          s(text: " }")
+        ]
+      ),
+      pr: pr
+    )
+  }
+}
+
+fn claim_pred(p: ast.ClaimPred, min_prec: Int, pr: Printer) -> doc.Doc may alloc, mutate
+  decreases p
+{
+  var d: doc.Doc = doc.empty
+  match p with
+  | ast.ClaimAtom(name, span) -> d = s(text: qn(q: name))
+  | ast.ClaimEffectsEq(effects, span) -> d = doc.concat(
+    parts: [s(text: "effects == "), effect_set(es: effects)]
+  )
+  | ast.ClaimNot(operand, span) -> d = doc.concat(
+    parts: [s(text: "not "), claim_pred(p: operand, min_prec: 3, pr: pr)]
+  )
+  | ast.ClaimAnd(operands, span) -> {
+    var parts: Builder[doc.Doc] = List.builder()
+    for o: ast.ClaimPred in operands {
+      List.push(b: inout parts, x: claim_pred(p: o, min_prec: 2, pr: pr))
+    }
+    d = doc.join(sep: s(text: " and "), docs: List.finish(b: parts))
+  }
+  | ast.ClaimOr(operands, span) -> {
+    var parts: Builder[doc.Doc] = List.builder()
+    for o: ast.ClaimPred in operands {
+      List.push(b: inout parts, x: claim_pred(p: o, min_prec: 2, pr: pr))
+    }
+    d = doc.join(sep: s(text: " or "), docs: List.finish(b: parts))
+  }
+  return wrap(d: d, paren: claim_prec(p: p) < min_prec)
+}
+
+-- Signatures and types -------------------------------------------------------------
+fn tparams(ps: List[ast.TParam], pr: Printer) -> doc.Doc may alloc, mutate
+  decreases ps
+{
+  if List.len(xs: ps) == 0 {
+    return doc.empty
+  }
+  var items: Builder[doc.Doc] = List.builder()
+  for p: ast.TParam in ps {
+    List.push(b: inout items, x: tparam(p: p, pr: pr))
+  }
+  return bracketed(
+    open: "[",
+    close: "]",
+    items: List.finish(b: items),
+    dang: doc.empty,
+    tight: true
+  )
+}
+
+fn tparam(p: ast.TParam, pr: Printer) -> doc.Doc may alloc, mutate
+  decreases p
+{
+  match p with
+  | ast.TypeParam(name, bound, span) -> {
+    match bound with
+    | Some(value) -> return s(text: name.text ++ ": " ++ value.text)
+    | None -> return s(text: name.text)
+  }
+  | ast.ConstParam(name, ty, span) -> return doc.concat(
+    parts: [s(text: "const " ++ name.text ++ ": "), type_doc(t: ty, pr: pr)]
+  )
+  | ast.EffectParam(name, span) -> return s(text: name.text)
+}
+
+fn params_doc(ps: List[ast.Param], pr: Printer) -> doc.Doc may alloc, mutate
+  decreases ps
+{
+  var items: Builder[doc.Doc] = List.builder()
+  for p: ast.Param in ps {
+    var head: Text = p.name.text ++ ": "
+    if p.is_inout {
+      head = head ++ "inout "
+    }
+    List.push(
+      b: inout items,
+      x: line_node(
+        k: comments.key(kind: "Param", span: p.span),
+        d: doc.concat(parts: [s(text: head), type_doc(t: p.ty, pr: pr)]),
+        pr: pr
+      )
+    )
+  }
+  return bracketed(
+    open: "(",
+    close: ")",
+    items: List.finish(b: items),
+    dang: doc.empty,
+    tight: true
+  )
+}
+
+fn type_doc(t: ast.Type, pr: Printer) -> doc.Doc may alloc, mutate
+  decreases t
+{
+  match t with
+  | ast.FnType(params, ret, effects, span) -> {
+    var items: Builder[doc.Doc] = List.builder()
+    for p: ast.Param in params {
+      var head: Text = p.name.text ++ ": "
+      if p.is_inout {
+        head = head ++ "inout "
+      }
+      List.push(b: inout items, x: doc.concat(parts: [s(text: head), type_doc(t: p.ty, pr: pr)]))
+    }
+    return doc.concat(
+      parts: [
+        s(text: "fn("),
+        doc.join(sep: s(text: ", "), docs: List.finish(b: items)),
+        s(text: ") -> "),
+        type_doc(t: ret, pr: pr),
+        effects_doc(es: effects)
+      ]
+    )
+  }
+  | ast.NamedType(name, args, where_, span) -> {
+    var d: doc.Doc = s(text: qn(q: name))
+    if List.len(xs: args) > 0 {
+      var items: Builder[doc.Doc] = List.builder()
+      for a: ast.TypeArg in args {
+        List.push(b: inout items, x: type_arg(a: a, pr: pr))
+      }
+      -- Type argument lists never break: a type must read as one token-like unit.
+      d = doc.concat(
+        parts: [
+          d,
+          s(text: "["),
+          doc.join(sep: s(text: ", "), docs: List.finish(b: items)),
+          s(text: "]")
+        ]
+      )
+    }
+    match where_ with
+    | Some(value) -> d = doc.concat(
+      parts: [d, s(text: " where "), expr_doc(e: value, nb: false, pr: pr)]
+    )
+    | None -> d = d
+    return d
+  }
+}
+
+fn type_arg(a: ast.TypeArg, pr: Printer) -> doc.Doc may alloc, mutate
+  decreases a
+{
+  match a with
+  | ast.TypeArgType(label, ty, span) -> return line_node(
+    k: comments.key(kind: "TypeArgType", span: span),
+    d: doc.concat(parts: [s(text: label_text(label: label)), type_doc(t: ty, pr: pr)]),
+    pr: pr
+  )
+  | ast.TypeArgConst(label, expr, span) -> return line_node(
+    k: comments.key(kind: "TypeArgConst", span: span),
+    d: doc.concat(parts: [s(text: label_text(label: label)), expr_doc(e: expr, nb: false, pr: pr)]),
+    pr: pr
+  )
+}
+
+fn label_text(label: Option[ast.Ident]) -> Text may alloc {
+  match label with
+  | Some(value) -> return value.text ++ ": "
+  | None -> return ""
+}
+
+-- Statements ---------------------------------------------------------------------
+fn block_doc(b: ast.Block, pr: Printer) -> doc.Doc may alloc, mutate
+  decreases b
+{
+  if b.elided {
+    return s(text: "{ ... }")
+  }
+  var body: Builder[doc.Doc] = List.builder()
+  for st: ast.Stmt in b.stmts {
+    List.push(b: inout body, x: doc.hardline)
+    List.push(b: inout body, x: stmt_doc(st: st, pr: pr))
+  }
+  List.push(b: inout body, x: dangling(k: comments.key(kind: "Block", span: b.span), pr: pr))
+  return doc.concat(
+    parts: [
+      s(text: "{"),
+      doc.indent(body: doc.concat(parts: List.finish(b: body))),
+      doc.hardline,
+      s(text: "}")
+    ]
+  )
+}
+
+fn stmt_doc(st: ast.Stmt, pr: Printer) -> doc.Doc may alloc, mutate
+  decreases st
+{
+  let k: Text = comments.key(kind: comments.stmt_kind(s: st), span: parser.span_of_stmt(st: st))
+  match st with
+  | ast.Let(name, ty, value, span) -> return line_node(
+    k: k,
+    d: doc.concat(
+      parts: [
+        s(text: "let " ++ name.text ++ ": "),
+        type_doc(t: ty, pr: pr),
+        s(text: " = "),
+        expr_doc(e: value, nb: false, pr: pr)
+      ]
+    ),
+    pr: pr
+  )
+  | ast.Var(name, ty, value, span) -> return line_node(
+    k: k,
+    d: doc.concat(
+      parts: [
+        s(text: "var " ++ name.text ++ ": "),
+        type_doc(t: ty, pr: pr),
+        s(text: " = "),
+        expr_doc(e: value, nb: false, pr: pr)
+      ]
+    ),
+    pr: pr
+  )
+  | ast.Assign(name, value, span) -> return line_node(
+    k: k,
+    d: doc.concat(parts: [s(text: name.text ++ " = "), expr_doc(e: value, nb: false, pr: pr)]),
+    pr: pr
+  )
+  | ast.Return(value, span) -> return line_node(
+    k: k,
+    d: doc.concat(parts: [s(text: "return "), expr_doc(e: value, nb: false, pr: pr)]),
+    pr: pr
+  )
+  | ast.If(cond, then_block, else_block, span) -> {
+    var d: doc.Doc = doc.concat(
+      parts: [
+        s(text: "if "),
+        expr_doc(e: cond, nb: true, pr: pr),
+        s(text: " "),
+        block_doc(b: then_block, pr: pr)
+      ]
+    )
+    match else_block with
+    | Some(value) -> d = doc.concat(parts: [d, s(text: " else "), block_doc(b: value, pr: pr)])
+    | None -> d = d
+    return line_node(k: k, d: d, pr: pr)
+  }
+  | ast.Match(scrutinee, arms, span) -> {
+    var parts: Builder[doc.Doc] = List.builder()
+    List.push(b: inout parts, x: s(text: "match "))
+    List.push(b: inout parts, x: expr_doc(e: scrutinee, nb: true, pr: pr))
+    List.push(b: inout parts, x: s(text: " with"))
+    for a: ast.Arm in arms {
+      List.push(b: inout parts, x: doc.hardline)
+      List.push(b: inout parts, x: arm(a: a, pr: pr))
+    }
+    List.push(b: inout parts, x: dangling(k: k, pr: pr))
+    return line_node(k: k, d: doc.concat(parts: List.finish(b: parts)), pr: pr)
+  }
+  | ast.Loop(cond, clauses, body, span) -> {
+    let head: doc.Doc = doc.concat(
+      parts: [s(text: "loop while "), expr_doc(e: cond, nb: true, pr: pr)]
+    )
+    if List.len(xs: clauses) == 0 and not has_dangling(k: k, pr: pr) {
+      return line_node(
+        k: k,
+        d: doc.concat(parts: [head, s(text: " "), block_doc(b: body, pr: pr)]),
+        pr: pr
+      )
+    }
+    var cl: Builder[doc.Doc] = List.builder()
+    for c: ast.LoopClause in clauses {
+      List.push(b: inout cl, x: doc.hardline)
+      List.push(
+        b: inout cl,
+        x: line_node(
+          k: comments.key(kind: "LoopClause", span: c.span),
+          d: doc.concat(parts: [s(text: c.clause ++ " "), expr_doc(e: c.expr, nb: true, pr: pr)]),
+          pr: pr
+        )
+      )
+    }
+    List.push(b: inout cl, x: dangling(k: k, pr: pr))
+    return line_node(
+      k: k,
+      d: doc.concat(
+        parts: [
+          head,
+          doc.indent(body: doc.concat(parts: List.finish(b: cl))),
+          doc.hardline,
+          block_doc(b: body, pr: pr)
+        ]
+      ),
+      pr: pr
+    )
+  }
+  | ast.For(name, ty, domain, body, span) -> return line_node(
+    k: k,
+    d: doc.concat(
+      parts: [
+        s(text: "for " ++ name.text ++ ": "),
+        type_doc(t: ty, pr: pr),
+        s(text: " in "),
+        domain_doc(d: domain, nb: true, pr: pr),
+        s(text: " "),
+        block_doc(b: body, pr: pr)
+      ]
+    ),
+    pr: pr
+  )
+  | ast.Assume(claim, justification, verify_block, span) -> {
+    let head: doc.Doc = s(text: "assume " ++ qn(q: claim) ++ " " ++ quote(t: justification))
+    match verify_block with
+    | None -> return line_node(k: k, d: head, pr: pr)
+    | Some(value) -> return line_node(
+      k: k,
+      d: doc.concat(
+        parts: [
+          head,
+          doc.indent(
+            body: doc.concat(
+              parts: [
+                doc.hardline,
+                s(text: "verify"),
+                params_doc(ps: value.params, pr: pr),
+                effects_doc(es: value.effects),
+                s(text: " "),
+                block_doc(b: value.body, pr: pr)
+              ]
+            )
+          )
+        ]
+      ),
+      pr: pr
+    )
+  }
+  | ast.ExprStmt(expr, span) -> return line_node(
+    k: k,
+    d: expr_doc(e: expr, nb: false, pr: pr),
+    pr: pr
+  )
+}
+
+fn arm(a: ast.Arm, pr: Printer) -> doc.Doc may alloc, mutate
+  decreases a
+{
+  var guard: doc.Doc = doc.empty
+  match a.guard with
+  | Some(value) -> guard = doc.concat(
+    parts: [s(text: " when "), expr_doc(e: value, nb: false, pr: pr)]
+  )
+  | None -> guard = doc.empty
+  var body: doc.Doc = doc.empty
+  match a.body with
+  | ast.ArmBlock(block) -> body = block_doc(b: block, pr: pr)
+  | ast.ArmStmt(stmt) -> body = stmt_doc(st: stmt, pr: pr)
+  return line_node(
+    k: comments.key(kind: "Arm", span: a.span),
+    d: doc.concat(
+      parts: [s(text: "| "), pattern_doc(p: a.pattern, pr: pr), guard, s(text: " -> "), body]
+    ),
+    pr: pr
+  )
+}
+
+fn domain_doc(d: ast.Domain, nb: Bool, pr: Printer) -> doc.Doc may alloc, mutate
+  decreases d
+{
+  match d with
+  | ast.RangeDomain(lo, hi, span) -> return doc.concat(
+    parts: [expr_doc(e: lo, nb: nb, pr: pr), s(text: " ..< "), expr_doc(e: hi, nb: nb, pr: pr)]
+  )
+  | ast.InDomain(expr, span) -> return expr_doc(e: expr, nb: nb, pr: pr)
+}
+
+-- Expressions --------------------------------------------------------------------
+-- `nb` (no brace): the expression sits where a `{` would begin a block, so brace-led constructs are parenthesised.
+fn expr_doc(e: ast.Expr, nb: Bool, pr: Printer) -> doc.Doc may alloc, mutate
+  decreases e
+{
+  let parens: Bool = nb and brace_led(e: e)
+  var inner_nb: Bool = nb
+  if parens {
+    inner_nb = false
+  }
+  var d: doc.Doc = doc.empty
+  match e with
+  | ast.IntLit(value, text, span) -> d = s(text: text)
+  | ast.FloatLit(value, span) -> d = s(text: float_text(v: value))
+  | ast.TextLit(value, span) -> d = s(text: quote(t: value))
+  | ast.BoolLit(value, span) -> {
+    if value {
+      d = s(text: "true")
+    } else {
+      d = s(text: "false")
+    }
+  }
+  | ast.DurationLit(nanos, span) -> d = s(text: duration_text(nanos: nanos))
+  | ast.Name(name, span) -> d = s(text: name.text)
+  | ast.It(span) -> d = s(text: "it")
+  | ast.ResultRef(span) -> d = s(text: "result")
+  | ast.Ctor(name, args, fields, span) -> {
+    let k: Text = comments.key(kind: "Ctor", span: span)
+    var a: doc.Doc = doc.empty
+    match args with
+    | Some(value) -> {
+      var dang: doc.Doc = doc.empty
+      if fields is None {
+        dang = dangling(k: k, pr: pr)
+      }
+      a = args_doc(args: value, dang: dang, pr: pr)
+    }
+    | None -> a = doc.empty
+    var f: doc.Doc = doc.empty
+    match fields with
+    | Some(value) -> f = field_inits(fields: value, dang: dangling(k: k, pr: pr), pr: pr)
+    | None -> f = doc.empty
+    d = doc.concat(parts: [s(text: qn(q: name)), a, f])
+  }
+  | ast.RecordUpdate(base, fields, span) -> {
+    var items: Builder[doc.Doc] = List.builder()
+    for f: ast.FieldInit in fields {
+      List.push(b: inout items, x: field_init(f: f, pr: pr))
+    }
+    d = doc.group(
+      body: doc.concat(
+        parts: [
+          s(text: "{ "),
+          expr_doc(e: base, nb: false, pr: pr),
+          s(text: " with"),
+          doc.indent(
+            body: doc.concat(
+              parts: [
+                doc.line,
+                doc.join(
+                  sep: doc.concat(parts: [s(text: ","), doc.line]),
+                  docs: List.finish(b: items)
+                ),
+                dangling(k: comments.key(kind: "RecordUpdate", span: span), pr: pr)
+              ]
+            )
+          ),
+          doc.line,
+          s(text: "}")
+        ]
+      )
+    )
+  }
+  | ast.ListLit(elems, span) -> {
+    var items: Builder[doc.Doc] = List.builder()
+    for x: ast.Expr in elems {
+      List.push(b: inout items, x: expr_doc(e: x, nb: false, pr: pr))
+    }
+    d = bracketed(open: "[", close: "]", items: List.finish(b: items), dang: doc.empty, tight: true)
+  }
+  | ast.Try(expr, else_, span) -> {
+    var operand: doc.Doc = doc.empty
+    var else_doc: doc.Doc = doc.empty
+    match else_ with
+    | Some(value) -> {
+      -- An operand whose greedy tail is an else-less `try` would capture this clause on re-parse.
+      if ends_with_open_try(e: expr) {
+        operand = wrap(d: expr_doc(e: expr, nb: false, pr: pr), paren: true)
+      } else {
+        operand = expr_doc(e: expr, nb: inner_nb, pr: pr)
+      }
+      else_doc = doc.group(
+        body: doc.indent(
+          body: doc.concat(
+            parts: [
+              doc.line,
+              s(text: "else " ++ value.name.text ++ ": "),
+              expr_doc(e: value.expr, nb: inner_nb, pr: pr)
+            ]
+          )
+        )
+      )
+    }
+    | None -> operand = expr_doc(e: expr, nb: inner_nb, pr: pr)
+    d = doc.concat(parts: [s(text: "try "), operand, else_doc])
+  }
+  | ast.Recover(body, span) -> d = doc.concat(
+    parts: [s(text: "recover "), block_doc(b: body, pr: pr)]
+  )
+  | ast.Old(name, span) -> d = s(text: "old(" ++ name.text ++ ")")
+  | ast.Quantifier(quant, name, ty, domain, where_, body, span) -> {
+    var parts: Builder[doc.Doc] = List.builder()
+    List.push(b: inout parts, x: s(text: quant ++ " " ++ name.text ++ ": "))
+    List.push(b: inout parts, x: type_doc(t: ty, pr: pr))
+    match domain with
+    | Some(value) -> {
+      List.push(b: inout parts, x: s(text: " in "))
+      List.push(b: inout parts, x: domain_doc(d: value, nb: inner_nb, pr: pr))
+    }
+    | None -> parts = parts
+    match where_ with
+    | Some(value) -> {
+      List.push(b: inout parts, x: s(text: " where "))
+      List.push(b: inout parts, x: expr_doc(e: value, nb: inner_nb, pr: pr))
+    }
+    | None -> parts = parts
+    List.push(b: inout parts, x: s(text: ": "))
+    List.push(b: inout parts, x: expr_doc(e: body, nb: inner_nb, pr: pr))
+    d = doc.concat(parts: List.finish(b: parts))
+  }
+  | ast.Closure(params, ret, effects, body, span) -> d = doc.concat(
+    parts: [
+      s(text: "fn"),
+      params_doc(ps: params, pr: pr),
+      s(text: " -> "),
+      type_doc(t: ret, pr: pr),
+      effects_doc(es: effects),
+      s(text: " "),
+      block_doc(b: body, pr: pr)
+    ]
+  )
+  | ast.Fake(capability, fields, span) -> d = doc.concat(
+    parts: [
+      s(text: "fake " ++ qn(q: capability)),
+      field_inits(
+        fields: fields,
+        dang: dangling(k: comments.key(kind: "Fake", span: span), pr: pr),
+        pr: pr
+      )
+    ]
+  )
+  | ast.Hole(span) -> d = s(text: "?")
+  | ast.FieldAccess(object, name, span) -> d = doc.concat(
+    parts: [
+      wrap(d: expr_doc(e: object, nb: inner_nb, pr: pr), paren: prec(e: object) < 9),
+      s(text: "." ++ name.text)
+    ]
+  )
+  | ast.Call(callee, targs, args, span) -> {
+    -- `Foo(...)` is a constructor; a call whose callee is a bare type name is kept distinct as `(Foo)(...)`.
+    var callee_doc: doc.Doc = doc.empty
+    if bare_ctor(callee: callee, targs: targs) {
+      callee_doc = wrap(d: expr_doc(e: callee, nb: false, pr: pr), paren: true)
+    } else {
+      callee_doc = wrap(d: expr_doc(e: callee, nb: inner_nb, pr: pr), paren: prec(e: callee) < 9)
+    }
+    var targs_doc: doc.Doc = doc.empty
+    match targs with
+    | Some(value) -> {
+      var items: Builder[doc.Doc] = List.builder()
+      for a: ast.TypeArg in value {
+        List.push(b: inout items, x: type_arg(a: a, pr: pr))
+      }
+      targs_doc = bracketed(
+        open: "[",
+        close: "]",
+        items: List.finish(b: items),
+        dang: doc.empty,
+        tight: true
+      )
+    }
+    | None -> targs_doc = doc.empty
+    d = doc.concat(
+      parts: [
+        callee_doc,
+        targs_doc,
+        args_doc(
+          args: args,
+          dang: dangling(k: comments.key(kind: "Call", span: span), pr: pr),
+          pr: pr
+        )
+      ]
+    )
+  }
+  | ast.Unary(op, operand, span) -> {
+    if op == "neg" {
+      d = doc.concat(
+        parts: [
+          s(text: "-"),
+          wrap(d: expr_doc(e: operand, nb: inner_nb, pr: pr), paren: prec(e: operand) < 9)
+        ]
+      )
+    } else {
+      d = doc.concat(
+        parts: [
+          s(text: "not "),
+          wrap(d: expr_doc(e: operand, nb: inner_nb, pr: pr), paren: prec(e: operand) < 5)
+        ]
+      )
+    }
+  }
+  | ast.Binary(op, left, right, span) -> {
+    let p: Int = prec(e: e)
+    var left_min: Int = p
+    if op == "implies" or is_cmp(op: op) {
+      left_min = p + 1
+    }
+    d = doc.concat(
+      parts: [
+        wrap(d: expr_doc(e: left, nb: inner_nb, pr: pr), paren: prec(e: left) < left_min),
+        s(text: " " ++ op ++ " "),
+        wrap(d: expr_doc(e: right, nb: inner_nb, pr: pr), paren: prec(e: right) < p + 1)
+      ]
+    )
+  }
+  | ast.And(operands, span) -> {
+    var items: Builder[doc.Doc] = List.builder()
+    for o: ast.Expr in operands {
+      List.push(
+        b: inout items,
+        x: wrap(d: expr_doc(e: o, nb: inner_nb, pr: pr), paren: prec(e: o) < 4)
+      )
+    }
+    d = doc.join(sep: s(text: " and "), docs: List.finish(b: items))
+  }
+  | ast.Or(operands, span) -> {
+    var items: Builder[doc.Doc] = List.builder()
+    for o: ast.Expr in operands {
+      List.push(
+        b: inout items,
+        x: wrap(d: expr_doc(e: o, nb: inner_nb, pr: pr), paren: prec(e: o) < 4)
+      )
+    }
+    d = doc.join(sep: s(text: " or "), docs: List.finish(b: items))
+  }
+  | ast.Is(expr, pattern, span) -> d = doc.concat(
+    parts: [
+      wrap(d: expr_doc(e: expr, nb: inner_nb, pr: pr), paren: prec(e: expr) < 6),
+      s(text: " is "),
+      pattern_doc(p: pattern, pr: pr)
+    ]
+  )
+  return wrap(d: d, paren: parens)
+}
+
+fn bare_ctor(callee: ast.Expr, targs: Option[List[ast.TypeArg]]) -> Bool {
+  match callee with
+  | ast.Ctor(name, args, fields, span) -> return args is None and fields is None and targs is None
+  | _ -> return false
+}
+
+fn args_doc(args: List[ast.Arg], dang: doc.Doc, pr: Printer) -> doc.Doc may alloc, mutate
+  decreases args
+{
+  var items: Builder[doc.Doc] = List.builder()
+  for a: ast.Arg in args {
+    var head: Text = a.name.text ++ ": "
+    if a.is_inout {
+      head = head ++ "inout "
+    }
+    List.push(
+      b: inout items,
+      x: line_node(
+        k: comments.key(kind: "Arg", span: a.span),
+        d: doc.concat(parts: [s(text: head), expr_doc(e: a.value, nb: false, pr: pr)]),
+        pr: pr
+      )
+    )
+  }
+  return bracketed(open: "(", close: ")", items: List.finish(b: items), dang: dang, tight: true)
+}
+
+fn field_inits(fields: List[ast.FieldInit], dang: doc.Doc, pr: Printer) -> doc.Doc may alloc, mutate
+  decreases fields
+{
+  if List.len(xs: fields) == 0 and is_empty(d: dang) {
+    return s(text: " {}")
+  }
+  var items: Builder[doc.Doc] = List.builder()
+  for f: ast.FieldInit in fields {
+    List.push(b: inout items, x: field_init(f: f, pr: pr))
+  }
+  return doc.concat(
+    parts: [
+      s(text: " "),
+      bracketed(open: "{", close: "}", items: List.finish(b: items), dang: dang, tight: false)
+    ]
+  )
+}
+
+fn field_init(f: ast.FieldInit, pr: Printer) -> doc.Doc may alloc, mutate
+  decreases f
+{
+  return line_node(
+    k: comments.key(kind: "FieldInit", span: f.span),
+    d: doc.concat(parts: [s(text: f.name.text ++ ": "), expr_doc(e: f.value, nb: false, pr: pr)]),
+    pr: pr
+  )
+}
+
+-- Patterns -----------------------------------------------------------------------
+fn pattern_doc(p: ast.Pattern, pr: Printer) -> doc.Doc may alloc, mutate
+  decreases p
+{
+  match p with
+  | ast.WildcardPat(span) -> return s(text: "_")
+  | ast.BindPat(name, span) -> return s(text: name.text)
+  | ast.LitPat(literal, span) -> return expr_doc(e: literal, nb: false, pr: pr)
+  | ast.VariantPat(name, fields, span) -> {
+    match fields with
+    | None -> return s(text: qn(q: name))
+    | Some(value) -> {
+      var names: Builder[Text] = List.builder()
+      for f: ast.PatField in value {
+        List.push(b: inout names, x: pat_field(f: f))
+      }
+      return s(
+        text: qn(q: name) ++ "(" ++ Text.join(parts: List.finish(b: names), sep: ", ") ++ ")"
+      )
+    }
+  }
+}

@@ -860,9 +860,79 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     always consumes says `result is Ok implies p.pos > old(p).pos`, which
     is what the loops' measures and the up-rank calls rest on.
 132. **Still to come in M15.1.** The canonical printer in Onus, then
-    `onus fmt` reimplemented and the byte-identical acceptance; structural
-    recursion over the tree, which the printer needs and the verifier has
-    no measure for yet (the dump program declares `diverge`).
+    `onus fmt` reimplemented and the byte-identical acceptance.
+
+## M15.1 — the front end in Onus, third part: structural recursion and the printer
+
+133. **Structural measures (§5.1, spec change).** `decreases` may name a
+    value of a record, union or list type, meaning the structural order:
+    at each recursive call the argument must be a proper part of the
+    measure at entry, reached by pattern matching, field access or
+    `List.get`. The verifier decides this from the terms themselves (a
+    pattern field is a projection of the scrutinee, an element read is a
+    projection of the list) and marks the obligation proved by the
+    structural order; otherwise it reports `E0344` and never falls back to
+    a runtime check, since no general size exists to compare. No entry
+    obligation is generated for a structural measure. Every walk over a
+    syntax tree in the compiler in Onus needs this; the dump program
+    declared `diverge` until now.
+134. **The document renderer and comment attachment in Onus.**
+    `self/doc.onus` is `doc.ts`: the same `Doc` forms, the same `fits` and
+    `render`, driven by a `Builder` used as a stack (`List.at` and
+    `List.pop`, added to `std.list` for it). `self/comments.onus` is
+    `comments.ts`: the site walk over the tree, keyed by node kind and
+    span, the leading, trailing and dangling sets, and the same choice of
+    owner for every comment. One known divergence: the renderer measures
+    width in code points where the TypeScript renderer counts UTF-16
+    units, so a line holding a character outside the basic plane could
+    break differently; no source in the repository has one.
+135. **The printer and `fmt` in Onus.** `self/printer.onus` is
+    `printer.ts` with one structural change: where the TypeScript printer
+    has an `operand` helper, the Onus printer has `wrap(d, paren)` with the
+    precedence test at each call, so that every recursive call passes a
+    proper part of the node and `decreases <node>` is proved for every
+    walk. `self/fmt.onus` is `onus fmt --stdout`: read, lex, parse, attach
+    comments, print; syntax diagnostics go to the error stream and the
+    exit code is nonzero. `packages/compiler/test/self/printer.test.ts`
+    builds it once and runs it over every source in the repository: a
+    source without syntax errors must print byte-for-byte as the
+    TypeScript printer prints it, and a source with syntax errors must be
+    refused by both. All agree, which is the M15.1 acceptance.
+136. **Integer literals carry their digits.** `tokens.IntLit` and
+    `ast.IntLit` in Onus have a `text` field beside `value`: the digits with
+    underscores and leading zeros removed, which is what the canonical
+    printer writes. `value` alone was not enough: `Int` on the JavaScript
+    target is a double (item 99), so a literal above 2^53 such as the
+    `9223372036854775807` in `test/roundtrip/21_expr_arith.onus` loses
+    precision in the lexer's own arithmetic and printed wrongly. The same
+    limitation means the lexer in Onus does not hold such a literal's
+    value exactly; it is the `representation` concern of §19.3 and is
+    left for the arbitrary-precision path.
+137. **What the printer taught the compiler.** (a) A pattern binder
+    shadows a top-level function of the same name, and a call to the
+    function inside the arm is then `E0323 not callable: Expr is not a
+    function`; binders cannot be renamed (item 130), so the walkers are
+    `expr_doc`, `block_doc`, `stmt_doc`, `params_doc`, `effects_doc` and
+    `pattern_doc`. The diagnostic is correct but does not say why the name
+    changed meaning; a better message is deferred. (b) A closure's
+    parameters put the parameter walk into the expression cycle, so
+    `collect_params` needs a structural measure too; the effects pass
+    reports the cycle member without one (`E0320`). (c) An example that
+    calls a generic function evaluates that function's body at check time
+    with its type parameter unsubstituted, so an intrinsic returning `T`
+    (`List.get` in `head[T]`) handed the evaluator a value it could not
+    convert, and the pass threw (`cannot convert a T`, reported as
+    `E0999`). Such a call is now not a constant: the example is left to
+    test time, as any non-constant example is. (d) `ensures result is
+    None` in a function returning `Option[T]` for a type parameter `T`
+    lowered the variant test in the wrong sort and z3 rejected the query
+    (`E0999`); the test is now lowered in the context of the scrutinee's
+    type. Both are pinned by `test/verify/ok_generic_is_in_ensures.onus`,
+    whose example reached the first and whose contracts reached the
+    second.
+138. **No `diverge` left in `self/`.** `self/astdump.onus` now gives every
+    walk the node as its measure (item 133) and drops `diverge`; the
+    parser's differential test is unchanged.
 
 ### Deferred, not changed
 
@@ -873,10 +943,6 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
   py: Int where (px, py) != (x, y)`) are not in the grammar; nested
   quantifiers (§5.3 allows depth two) express the same thing.
 - `budget` annotations (§12.3) and `proves float` (§3.2) have no syntax yet.
-- Structural recursion over a union (`depth(t: Tree[T])`) has no `Int`
-  measure to write in `decreases`; such functions declare `diverge` for now.
-  A well-founded measure on algebraic data (size, or a `decreases` over a
-  field) is needed before the verifier handles them (§5.1, §17.8).
 - Generated tests import `vitest` and `fast-check` by name and resolve them
   from the nearest `node_modules`; a project outside this repository needs
   both installed.

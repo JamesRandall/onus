@@ -310,7 +310,7 @@ pub record VerifyBlock {
 
 -- Expressions -------------------------------------------------------------
 pub union Expr =
-  | IntLit of value: Int, span: Span
+  | IntLit of value: Int, text: Text, span: Span
   | FloatLit of value: Float, span: Span
   | TextLit of value: Text, span: Span
   | BoolLit of value: Bool, span: Span
@@ -370,8 +370,8 @@ pub union PatField =
 example spans {
   let e: Expr = Binary(
     op: "+",
-    left: IntLit(value: 1, span: Span { start: 0, end: 1 }),
-    right: IntLit(value: 2, span: Span { start: 4, end: 5 }),
+    left: IntLit(value: 1, text: "1", span: Span { start: 0, end: 1 }),
+    right: IntLit(value: 2, text: "2", span: Span { start: 4, end: 5 }),
     span: Span { start: 0, end: 5 }
   )
   e is Binary

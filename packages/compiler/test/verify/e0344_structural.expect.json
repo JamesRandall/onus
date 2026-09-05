@@ -1,0 +1,55 @@
+{
+  "diagnostics": [
+    {
+      "code": "E0344",
+      "span": [
+        [
+          13,
+          31
+        ],
+        [
+          13,
+          42
+        ]
+      ]
+    }
+  ],
+  "obligations": [
+    {
+      "kind": "refinement",
+      "at": [
+        12,
+        20
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        13,
+        27
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "overflow",
+      "at": [
+        13,
+        27
+      ],
+      "text": "1 + depth(t: t) within Int",
+      "status": "checked"
+    },
+    {
+      "kind": "decreases",
+      "at": [
+        13,
+        31
+      ],
+      "text": "t at the call to depth",
+      "status": "failed"
+    }
+  ]
+}

@@ -7,13 +7,13 @@ import parser
 
 -- Prints a file's syntax tree in one line per node, in the form the
 -- differential test builds from the TypeScript parser's tree, then the
--- diagnostics. Tree walks recurse over the tree itself, which the verifier
--- has no measure for yet (impl spec M15.1), so they declare `diverge`.
+-- diagnostics. Every tree walk takes the node it prints as its measure
+-- (spec §5.1, structural measures), so the walks are proved to terminate.
 pub fn main(
   args: List[Text],
   files: io.Files,
   console: io.Console
-) -> Result[Unit, io.Error] may io.file, alloc, mutate, diverge {
+) -> Result[Unit, io.Error] may io.file, alloc, mutate {
   if List.len(xs: args) < 1 {
     return Err(error: Other(detail: "usage: astdump <file.onus>"))
   }
@@ -102,7 +102,9 @@ fn vis(v: ast.Visibility) -> Text may alloc {
   return "vis(" ++ bool_text(b: v.is_pub) ++ "," ++ bool_text(b: v.is_sealed) ++ ")"
 }
 
-pub fn dump_module(m: ast.Module, src: List[Int]) -> Text may alloc, mutate, diverge {
+pub fn dump_module(m: ast.Module, src: List[Int]) -> Text may alloc, mutate
+  decreases m
+{
   var imports: Builder[Text] = List.builder()
   for i: ast.Import in m.imports {
     List.push(b: inout imports, x: "(Import " ++ qn(q: i.name) ++ sp(s: i.span) ++ ")")
@@ -116,7 +118,9 @@ pub fn dump_module(m: ast.Module, src: List[Int]) -> Text may alloc, mutate, div
   ) ++ " " ++ list(parts: List.finish(b: items)) ++ sp(s: m.span) ++ ")"
 }
 
-fn dump_item(item: ast.Item, src: List[Int]) -> Text may alloc, mutate, diverge {
+fn dump_item(item: ast.Item, src: List[Int]) -> Text may alloc, mutate
+  decreases item
+{
   match item with
   | ast.FnItem(decl) -> return dump_fn(f: decl, src: src)
   | ast.TypeAliasItem(decl) -> return "(TypeAlias " ++ vis(v: decl.vis) ++ " " ++ id(
@@ -153,7 +157,9 @@ fn dump_item(item: ast.Item, src: List[Int]) -> Text may alloc, mutate, diverge 
   ) ++ " " ++ dump_block(b: decl.body, src: src) ++ sp(s: decl.span) ++ ")"
 }
 
-fn dump_fn(f: ast.FnDecl, src: List[Int]) -> Text may alloc, mutate, diverge {
+fn dump_fn(f: ast.FnDecl, src: List[Int]) -> Text may alloc, mutate
+  decreases f
+{
   var claims_: Builder[Text] = List.builder()
   for c: ast.QName in f.claim_list {
     List.push(b: inout claims_, x: qn(q: c))
@@ -175,7 +181,9 @@ fn dump_fn(f: ast.FnDecl, src: List[Int]) -> Text may alloc, mutate, diverge {
   ) ++ " " ++ dump_contracts(cs: f.contracts, src: src) ++ " " ++ body ++ sp(s: f.span) ++ ")"
 }
 
-fn dump_tparams(ps: List[ast.TParam], src: List[Int]) -> Text may alloc, mutate, diverge {
+fn dump_tparams(ps: List[ast.TParam], src: List[Int]) -> Text may alloc, mutate
+  decreases ps
+{
   var out: Builder[Text] = List.builder()
   for tp: ast.TParam in ps {
     match tp with
@@ -198,7 +206,9 @@ fn dump_tparams(ps: List[ast.TParam], src: List[Int]) -> Text may alloc, mutate,
   return list(parts: List.finish(b: out))
 }
 
-fn dump_params(ps: List[ast.Param], src: List[Int]) -> Text may alloc, mutate, diverge {
+fn dump_params(ps: List[ast.Param], src: List[Int]) -> Text may alloc, mutate
+  decreases ps
+{
   var out: Builder[Text] = List.builder()
   for pa: ast.Param in ps {
     List.push(
@@ -220,7 +230,9 @@ fn dump_effects(es: List[ast.EffectRef]) -> Text may alloc, mutate {
   return list(parts: List.finish(b: out))
 }
 
-fn dump_contracts(cs: List[ast.Contract], src: List[Int]) -> Text may alloc, mutate, diverge {
+fn dump_contracts(cs: List[ast.Contract], src: List[Int]) -> Text may alloc, mutate
+  decreases cs
+{
   var out: Builder[Text] = List.builder()
   for c: ast.Contract in cs {
     List.push(
@@ -234,7 +246,9 @@ fn dump_contracts(cs: List[ast.Contract], src: List[Int]) -> Text may alloc, mut
   return list(parts: List.finish(b: out))
 }
 
-fn dump_fields(fs: List[ast.Field], src: List[Int]) -> Text may alloc, mutate, diverge {
+fn dump_fields(fs: List[ast.Field], src: List[Int]) -> Text may alloc, mutate
+  decreases fs
+{
   var out: Builder[Text] = List.builder()
   for f: ast.Field in fs {
     List.push(
@@ -245,7 +259,9 @@ fn dump_fields(fs: List[ast.Field], src: List[Int]) -> Text may alloc, mutate, d
   return list(parts: List.finish(b: out))
 }
 
-fn dump_union(u: ast.UnionDecl, src: List[Int]) -> Text may alloc, mutate, diverge {
+fn dump_union(u: ast.UnionDecl, src: List[Int]) -> Text may alloc, mutate
+  decreases u
+{
   var vs: Builder[Text] = List.builder()
   for v: ast.Variant in u.variants {
     List.push(
@@ -261,7 +277,9 @@ fn dump_union(u: ast.UnionDecl, src: List[Int]) -> Text may alloc, mutate, diver
   ) ++ " " ++ list(parts: List.finish(b: vs)) ++ sp(s: u.span) ++ ")"
 }
 
-fn dump_interface(d: ast.InterfaceDecl, src: List[Int]) -> Text may alloc, mutate, diverge {
+fn dump_interface(d: ast.InterfaceDecl, src: List[Int]) -> Text may alloc, mutate
+  decreases d
+{
   var items: Builder[Text] = List.builder()
   for item: ast.IfaceItem in d.items {
     match item with
@@ -287,7 +305,9 @@ fn dump_interface(d: ast.InterfaceDecl, src: List[Int]) -> Text may alloc, mutat
   ) ++ " " ++ list(parts: List.finish(b: items)) ++ sp(s: d.span) ++ ")"
 }
 
-fn dump_impl(d: ast.ImplDecl, src: List[Int]) -> Text may alloc, mutate, diverge {
+fn dump_impl(d: ast.ImplDecl, src: List[Int]) -> Text may alloc, mutate
+  decreases d
+{
   var fns: Builder[Text] = List.builder()
   for f: ast.FnDecl in d.fns {
     List.push(b: inout fns, x: dump_fn(f: f, src: src))
@@ -297,7 +317,9 @@ fn dump_impl(d: ast.ImplDecl, src: List[Int]) -> Text may alloc, mutate, diverge
   ) ++ sp(s: d.span) ++ ")"
 }
 
-fn dump_claim(d: ast.ClaimDecl, src: List[Int]) -> Text may alloc, mutate, diverge {
+fn dump_claim(d: ast.ClaimDecl, src: List[Int]) -> Text may alloc, mutate
+  decreases d
+{
   var body: Text = ""
   match d.body with
   | ast.Derived(pred) -> body = "(Derived " ++ dump_claim_pred(c: pred) ++ ")"
@@ -305,7 +327,9 @@ fn dump_claim(d: ast.ClaimDecl, src: List[Int]) -> Text may alloc, mutate, diver
   return "(Claim " ++ vis(v: d.vis) ++ " " ++ id(i: d.name) ++ " " ++ body ++ sp(s: d.span) ++ ")"
 }
 
-fn dump_claim_pred(c: ast.ClaimPred) -> Text may alloc, mutate, diverge {
+fn dump_claim_pred(c: ast.ClaimPred) -> Text may alloc, mutate
+  decreases c
+{
   match c with
   | ast.ClaimAtom(name, span) -> return "(ClaimAtom " ++ qn(q: name) ++ sp(s: span) ++ ")"
   | ast.ClaimEffectsEq(effects, span) -> return "(ClaimEffectsEq " ++ dump_effects(
@@ -322,7 +346,9 @@ fn dump_claim_pred(c: ast.ClaimPred) -> Text may alloc, mutate, diverge {
   ) ++ ")"
 }
 
-fn dump_claim_preds(cs: List[ast.ClaimPred]) -> Text may alloc, mutate, diverge {
+fn dump_claim_preds(cs: List[ast.ClaimPred]) -> Text may alloc, mutate
+  decreases cs
+{
   var out: Builder[Text] = List.builder()
   for c: ast.ClaimPred in cs {
     List.push(b: inout out, x: dump_claim_pred(c: c))
@@ -330,7 +356,9 @@ fn dump_claim_preds(cs: List[ast.ClaimPred]) -> Text may alloc, mutate, diverge 
   return list(parts: List.finish(b: out))
 }
 
-fn dump_capability(d: ast.CapabilityDecl, src: List[Int]) -> Text may alloc, mutate, diverge {
+fn dump_capability(d: ast.CapabilityDecl, src: List[Int]) -> Text may alloc, mutate
+  decreases d
+{
   var gs: Builder[Text] = List.builder()
   for g: ast.Grant in d.grant_list {
     var w: Text = "-"
@@ -350,7 +378,9 @@ fn dump_capability(d: ast.CapabilityDecl, src: List[Int]) -> Text may alloc, mut
   ) ++ " " ++ list(parts: List.finish(b: gs)) ++ sp(s: d.span) ++ ")"
 }
 
-fn dump_path(d: ast.PathDecl, src: List[Int]) -> Text may alloc, mutate, diverge {
+fn dump_path(d: ast.PathDecl, src: List[Int]) -> Text may alloc, mutate
+  decreases d
+{
   var cs: Builder[Text] = List.builder()
   for c: ast.PathClause in d.clauses {
     match c with
@@ -401,7 +431,9 @@ fn dump_policy(d: ast.PolicyDecl) -> Text may alloc, mutate {
   ) ++ ")"
 }
 
-fn dump_type(t: ast.Type, src: List[Int]) -> Text may alloc, mutate, diverge {
+fn dump_type(t: ast.Type, src: List[Int]) -> Text may alloc, mutate
+  decreases t
+{
   match t with
   | ast.NamedType(name, args, where_, span) -> {
     var w: Text = "-"
@@ -418,7 +450,9 @@ fn dump_type(t: ast.Type, src: List[Int]) -> Text may alloc, mutate, diverge {
   ) ++ " " ++ dump_type(t: ret, src: src) ++ " " ++ dump_effects(es: effects) ++ sp(s: span) ++ ")"
 }
 
-fn dump_targs(ts: List[ast.TypeArg], src: List[Int]) -> Text may alloc, mutate, diverge {
+fn dump_targs(ts: List[ast.TypeArg], src: List[Int]) -> Text may alloc, mutate
+  decreases ts
+{
   var out: Builder[Text] = List.builder()
   for a: ast.TypeArg in ts {
     match a with
@@ -444,7 +478,9 @@ fn opt_id(o: Option[ast.Ident]) -> Text may alloc {
   | None -> return "-"
 }
 
-fn dump_block(b: ast.Block, src: List[Int]) -> Text may alloc, mutate, diverge {
+fn dump_block(b: ast.Block, src: List[Int]) -> Text may alloc, mutate
+  decreases b
+{
   var out: Builder[Text] = List.builder()
   for s: ast.Stmt in b.stmts {
     List.push(b: inout out, x: dump_stmt(s: s, src: src))
@@ -454,7 +490,9 @@ fn dump_block(b: ast.Block, src: List[Int]) -> Text may alloc, mutate, diverge {
   ) ++ sp(s: b.span) ++ ")"
 }
 
-fn dump_stmt(s: ast.Stmt, src: List[Int]) -> Text may alloc, mutate, diverge {
+fn dump_stmt(s: ast.Stmt, src: List[Int]) -> Text may alloc, mutate
+  decreases s
+{
   match s with
   | ast.Let(name, ty, value, span) -> return "(Let " ++ id(i: name) ++ " " ++ dump_type(
     t: ty,
@@ -542,7 +580,9 @@ fn dump_stmt(s: ast.Stmt, src: List[Int]) -> Text may alloc, mutate, diverge {
   ) ++ ")"
 }
 
-fn dump_domain(d: ast.Domain, src: List[Int]) -> Text may alloc, mutate, diverge {
+fn dump_domain(d: ast.Domain, src: List[Int]) -> Text may alloc, mutate
+  decreases d
+{
   match d with
   | ast.RangeDomain(lo, hi, span) -> return "(Range " ++ dump_expr(
     e: lo,
@@ -551,7 +591,9 @@ fn dump_domain(d: ast.Domain, src: List[Int]) -> Text may alloc, mutate, diverge
   | ast.InDomain(expr, span) -> return "(In " ++ dump_expr(e: expr, src: src) ++ sp(s: span) ++ ")"
 }
 
-fn dump_exprs(es: List[ast.Expr], src: List[Int]) -> Text may alloc, mutate, diverge {
+fn dump_exprs(es: List[ast.Expr], src: List[Int]) -> Text may alloc, mutate
+  decreases es
+{
   var out: Builder[Text] = List.builder()
   for e: ast.Expr in es {
     List.push(b: inout out, x: dump_expr(e: e, src: src))
@@ -559,7 +601,9 @@ fn dump_exprs(es: List[ast.Expr], src: List[Int]) -> Text may alloc, mutate, div
   return list(parts: List.finish(b: out))
 }
 
-fn dump_field_inits(fs: List[ast.FieldInit], src: List[Int]) -> Text may alloc, mutate, diverge {
+fn dump_field_inits(fs: List[ast.FieldInit], src: List[Int]) -> Text may alloc, mutate
+  decreases fs
+{
   var out: Builder[Text] = List.builder()
   for f: ast.FieldInit in fs {
     List.push(
@@ -572,7 +616,9 @@ fn dump_field_inits(fs: List[ast.FieldInit], src: List[Int]) -> Text may alloc, 
   return list(parts: List.finish(b: out))
 }
 
-fn dump_args(as_: List[ast.Arg], src: List[Int]) -> Text may alloc, mutate, diverge {
+fn dump_args(as_: List[ast.Arg], src: List[Int]) -> Text may alloc, mutate
+  decreases as_
+{
   var out: Builder[Text] = List.builder()
   for a: ast.Arg in as_ {
     List.push(
@@ -586,9 +632,13 @@ fn dump_args(as_: List[ast.Arg], src: List[Int]) -> Text may alloc, mutate, dive
   return list(parts: List.finish(b: out))
 }
 
-fn dump_expr(e: ast.Expr, src: List[Int]) -> Text may alloc, mutate, diverge {
+fn dump_expr(e: ast.Expr, src: List[Int]) -> Text may alloc, mutate
+  decreases e
+{
   match e with
-  | ast.IntLit(value, span) -> return "(Int " ++ digits(src: src, s: span) ++ sp(s: span) ++ ")"
+  | ast.IntLit(value, text, span) -> return "(Int " ++ digits(src: src, s: span) ++ sp(
+    s: span
+  ) ++ ")"
   | ast.FloatLit(value, span) -> return "(Float " ++ Float.to_text(x: value) ++ sp(s: span) ++ ")"
   | ast.TextLit(value, span) -> return "(Text " ++ quoted(t: value) ++ sp(s: span) ++ ")"
   | ast.BoolLit(value, span) -> return "(Bool " ++ bool_text(b: value) ++ sp(s: span) ++ ")"
@@ -689,7 +739,9 @@ fn dump_expr(e: ast.Expr, src: List[Int]) -> Text may alloc, mutate, diverge {
   ) ++ " " ++ dump_pattern(pt: pattern, src: src) ++ sp(s: span) ++ ")"
 }
 
-fn dump_pattern(pt: ast.Pattern, src: List[Int]) -> Text may alloc, mutate, diverge {
+fn dump_pattern(pt: ast.Pattern, src: List[Int]) -> Text may alloc, mutate
+  decreases pt
+{
   match pt with
   | ast.WildcardPat(span) -> return "(Wild" ++ sp(s: span) ++ ")"
   | ast.BindPat(name, span) -> return "(Bind " ++ id(i: name) ++ sp(s: span) ++ ")"

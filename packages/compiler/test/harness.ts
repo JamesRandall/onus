@@ -6,7 +6,7 @@
  * 1-based `[[line, col], [line, col]]` spans. Running with
  * `UPDATE_FIXTURES=1` rewrites the expectation files from actual output.
  */
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Context, type ContextOptions } from '../src/context.js';
@@ -29,7 +29,7 @@ export interface Fixture {
 export function fixturesIn(dir: string): Fixture[] {
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
-    .filter((f) => f.endsWith('.onus'))
+    .filter((f) => f.endsWith('.onus') && statSync(join(dir, f)).isFile())
     .sort()
     .map((f) => ({ name: f, path: join(dir, f), text: readFileSync(join(dir, f), 'utf8') }));
 }

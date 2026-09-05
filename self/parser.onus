@@ -2276,7 +2276,7 @@ fn parse_domain(p: inout Parser, rank: Int) -> Result[ast.Domain, Fail] may muta
 
 pub fn span_of_expr(e: ast.Expr) -> ast.Span {
   match e with
-  | ast.IntLit(value, span) -> return span
+  | ast.IntLit(value, text, span) -> return span
   | ast.FloatLit(value, span) -> return span
   | ast.TextLit(value, span) -> return span
   | ast.BoolLit(value, span) -> return span
@@ -2757,9 +2757,9 @@ fn primary(p: inout Parser, rank: Int) -> Result[ast.Expr, Fail] may mutate, all
   let s: Int = here(p: p)
   let t: tokens.Token = peek(p: p, n: 0)
   match t.kind with
-  | tokens.IntLit(value) -> {
+  | tokens.IntLit(value, text) -> {
     skip(p: inout p)
-    return Ok(value: ast.IntLit(value: value, span: span_of(t: t)))
+    return Ok(value: ast.IntLit(value: value, text: text, span: span_of(t: t)))
   }
   | tokens.FloatLit(value) -> {
     skip(p: inout p)
@@ -3011,7 +3011,7 @@ fn parse_pattern(p: inout Parser, rank: Int) -> Result[ast.Pattern, Fail] may mu
 
 fn starts_literal_pattern(kind: tokens.Kind) -> Bool {
   match kind with
-  | tokens.IntLit(value) -> return true
+  | tokens.IntLit(value, text) -> return true
   | tokens.FloatLit(value) -> return true
   | tokens.TextLit(value) -> return true
   | tokens.DurationLit(nanos) -> return true
@@ -3022,7 +3022,7 @@ fn starts_literal_pattern(kind: tokens.Kind) -> Bool {
 
 fn is_literal(e: ast.Expr) -> Bool {
   match e with
-  | ast.IntLit(value, span) -> return true
+  | ast.IntLit(value, text, span) -> return true
   | ast.FloatLit(value, span) -> return true
   | ast.TextLit(value, span) -> return true
   | ast.BoolLit(value, span) -> return true

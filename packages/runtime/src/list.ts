@@ -59,3 +59,15 @@ export function push<T>(b: Builder<T>, x: T): [undefined, Builder<T>] {
 export function finish<T>(b: Builder<T>): readonly T[] {
   return b.items.slice();
 }
+
+export function at<T>(b: Builder<T>, i: number): T {
+  const x = b.items[i];
+  if (x === undefined) throw new Panic({ kind: 'requires', text: '0 <= i and i < built(b: b)', at: 'std.list', def: 'at' });
+  return x;
+}
+
+/** `inout` convention: the popped element, if any, and the builder. */
+export function pop<T>(b: Builder<T>): [{ readonly tag: 'Some'; readonly value: T } | { readonly tag: 'None' }, Builder<T>] {
+  const x = b.items.pop();
+  return [x === undefined ? { tag: 'None' } : { tag: 'Some', value: x }, b];
+}

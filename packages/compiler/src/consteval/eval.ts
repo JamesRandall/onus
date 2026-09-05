@@ -17,7 +17,7 @@ import type * as A from '../syntax/ast.js';
 import { printExpr } from '../syntax/printer.js';
 import type { Signature, TypeTables } from '../types/tables.js';
 import { stripRefinements, substitute, typeToString, type Type, type TypeArg } from '../types/type.js';
-import { callImpl, hasImpl, stdType, type Conversion } from './intrinsics.js';
+import { callImpl, ConversionError, hasImpl, stdType, type Conversion } from './intrinsics.js';
 import { bool, int, ofConst, text, UNIT, valueEquals, type Value } from './values.js';
 
 export class NotConst extends Error {
@@ -476,7 +476,13 @@ export class Evaluator {
     if (qualified.startsWith('std.typeinfo.')) return this.typeinfoIntrinsic(qualified, argValues, span);
     const ret = substitute(sig.ret, subst);
     try {
-      return callImpl(qualified, argValues, ret, this.conv);
+      try {
+        return callImpl(qualified, argValues, ret, this.conv);
+      } catch (err) {
+        // A value the evaluator cannot represent (a type parameter's) is not a check-time constant.
+        if (err instanceof ConversionError) throw new NotConst(err.message, null);
+        throw err;
+      }
     } catch (err) {
       if (err instanceof Panic) throw new EvalPanic(`${err.obligation.kind} \`${err.obligation.text}\` of ${err.obligation.def}: ${err.detail}`, span);
       throw err;

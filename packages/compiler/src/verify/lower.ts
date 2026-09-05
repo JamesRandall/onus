@@ -327,7 +327,9 @@ export class Lowerer {
         if (p.kind === 'LitPat') return eq(v, this.lower(p.literal, env));
         const res = this.t.refs.get(p.id);
         if (res === undefined || res.k !== 'def') throw new Unlowerable('unresolved pattern');
-        return this.isVariant(v, this.typeOfExpr(e.expr), res.def);
+        // The subject's type is instantiated for the current call context: a generic callee's
+        // `ensures result is None` must test the caller's `Option[Cmd]`, not `Option[T]`.
+        return this.isVariant(v, this.inContext(this.typeOfExpr(e.expr)), res.def);
       }
       case 'Recover':
       case 'Closure':
@@ -402,7 +404,39 @@ export class Lowerer {
   /** The projection `f` of `term` of record/variant `owner` (a record def or a variant def). */
   projectionOf(term: Formula, type: Type, owner: DefId, field: string, fieldType: Type): Formula {
     const name = this.declareFn(`${this.slug(type)}.${this.t.def(owner).name}.${field}`, [this.sortOf(type)], this.sortOf(fieldType));
+    this.projections.add(name);
     return app(name, [term], this.sortOf(fieldType));
+  }
+
+  /** Functions whose first argument is the container of their result: field projections and list element reads (§5.1, structural measures). */
+  readonly projections = new Set<string>();
+
+  /** What a bound name stands for: the walker binds every name to a fresh constant equal to its value. */
+  readonly aliases = new Map<string, Formula>();
+
+  private resolveAlias(term: Formula): Formula {
+    let cur = term;
+    for (let i = 0; i < 64 && cur.k === 'var'; i += 1) {
+      const next = this.aliases.get(cur.name);
+      if (next === undefined) return cur;
+      cur = next;
+    }
+    return cur;
+  }
+
+  /** Whether `term` is a proper part of `whole`: a chain of one or more projections or element reads from it. Effects: none. */
+  isProperPart(term: Formula, whole: Formula): boolean {
+    const target = this.resolveAlias(whole);
+    let cur = this.resolveAlias(term);
+    let steps = 0;
+    for (;;) {
+      if (steps > 0 && (formulaEquals(cur, target) || formulaEquals(cur, whole))) return true;
+      if (cur.k !== 'app' || !this.projections.has(cur.fn)) return false;
+      const inner = cur.args[0];
+      if (inner === undefined) return false;
+      cur = this.resolveAlias(inner);
+      steps += 1;
+    }
   }
 
   private substOfType(type: Type): Map<DefId, TypeArg> {
@@ -481,6 +515,7 @@ export class Lowerer {
 
   listGet(term: Formula, type: Type, index: Formula): Formula {
     const { get, elem } = this.listFns(type);
+    this.projections.add(get);
     return app(get, [term, index], this.sortOf(elem));
   }
 
@@ -667,7 +702,17 @@ export class Lowerer {
     this.calls.set(e.id, { args: argTerms, paramTypes, subst });
     const pure = sig.effects.values().every((x) => x.k === 'prim' && x.name === 'alloc');
     let result: Formula;
-    if (pure && !hasInout(sig)) {
+    const q = this.t.qualifiedName(fnDef.id);
+    const xsParam = sig.paramDefs[sig.params.findIndex((p) => p.name === 'xs')];
+    const iParam = sig.paramDefs[sig.params.findIndex((p) => p.name === 'i')];
+    const xsArg = xsParam === undefined ? undefined : argTerms.get(xsParam);
+    const iArg = iParam === undefined ? undefined : argTerms.get(iParam);
+    if (q === 'std.list.get' && xsArg !== undefined && iArg !== undefined) {
+      // An element read is the list's projection (§5.1 structural measures; the same function the loops use).
+      result = this.listGet(xsArg.term, xsArg.type, iArg.term);
+    } else if (q === 'std.list.len' && xsArg !== undefined) {
+      result = this.listLen(xsArg.term, xsArg.type);
+    } else if (pure && !hasInout(sig)) {
       // One uninterpreted function per instantiation, named by its sorts so that instantiations never clash.
       const retSort = this.sortOf(ret);
       const name = this.declareFn(`${this.t.qualifiedName(fnDef.id)}[${[...sorts, retSort].map((s) => (s.k === 'sort' ? s.name : s.k)).join(',')}]`, sorts, retSort);
@@ -821,3 +866,22 @@ function hasInout(sig: Signature): boolean {
   return sig.params.some((p) => p.inout);
 }
 
+/** Structural equality of formulas. Effects: none. */
+export function formulaEquals(a: Formula, b: Formula): boolean {
+  if (a === b) return true;
+  if (a.k !== b.k) return false;
+  switch (a.k) {
+    case 'int':
+      return b.k === 'int' && a.v === b.v;
+    case 'bool':
+      return b.k === 'bool' && a.v === b.v;
+    case 'var':
+      return b.k === 'var' && a.name === b.name;
+    case 'app':
+      return b.k === 'app' && a.fn === b.fn && a.args.length === b.args.length && a.args.every((x, i) => formulaEquals(x, b.args[i] ?? x));
+    case 'ite':
+      return b.k === 'ite' && formulaEquals(a.cond, b.cond) && formulaEquals(a.then, b.then) && formulaEquals(a.else, b.else);
+    case 'quant':
+      return false;
+  }
+}

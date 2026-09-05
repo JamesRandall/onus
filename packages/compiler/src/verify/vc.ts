@@ -15,6 +15,7 @@
  * goal and the facts in scope at its site. Obligations whose expressions
  * cannot be lowered (floats, closures) get no condition and stay `checked`.
  */
+import { diagnostic } from '../report/diagnostic.js';
 import type { Context } from '../context.js';
 import type { Obligation, ObligationId } from '../contracts/obligations.js';
 import type { Def, DefId, ResolveTables } from '../resolve/defs.js';
@@ -198,6 +199,7 @@ class BodyWalker {
     const term = this.lowerer.freshConst(`${name}`, sort);
     if (term.k === 'var') this.names.set(term.name, name);
     if (value !== null) this.facts.push(eq(term, value));
+    if (value !== null && term.k === 'var') this.lowerer.aliases.set(term.name, value);
     this.env.set(def, { term, type });
     this.lowerer.typeFacts(term, type, this.env);
     return term;
@@ -601,6 +603,28 @@ class BodyWalker {
       }
       if (m0 === null) {
         this.skip(o, 'measure not lowered');
+        continue;
+      }
+      const mt = this.ty.exprTypes.get(clause.expr.id);
+      const ms = mt === undefined ? undefined : stripRefinements(mt);
+      if (ms !== undefined && !(ms.k === 'prim' && (ms.name === 'Int' || ms.name === 'Duration'))) {
+        // A structural measure (§5.1): the argument must be a proper part of the value at entry, which is
+        // decided from how it was obtained, never checked at runtime; anything else is an error.
+        let argTerm: Formula | null = null;
+        try {
+          argTerm = this.lowerer.withSubst(info.subst, () => this.lowerer.lower(clause.expr, info.args));
+        } catch (err) {
+          if (!(err instanceof Unlowerable)) throw err;
+        }
+        if (argTerm !== null && this.lowerer.isProperPart(argTerm, m0)) {
+          o.status = 'proved';
+          o.by = 'structural order';
+        } else {
+          o.status = 'failed';
+          o.by = 'not a part of the measure';
+          const span = this.t.node(call.id).span;
+          this.ctx.sink.report(diagnostic({ code: 'E0344', span, def: this.def.name, context: [`the argument of this recursive call is not a field, or an element of a list field, of the measure \`${o.text.replace(/ at the call to .*$/, '')}\` reached by pattern matching or field access (§5.1)`], obligation: { kind: o.kind, text: o.text, status: 'unprovable', counterexample: null } }));
+        }
         continue;
       }
       this.tryGoal(o, () => app('<', [this.lowerer.withSubst(info.subst, () => this.lowerer.lower(clause.expr, info.args)), m0], BOOL));

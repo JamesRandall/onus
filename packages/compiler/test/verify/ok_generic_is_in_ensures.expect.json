@@ -1,0 +1,77 @@
+{
+  "diagnostics": [],
+  "obligations": [
+    {
+      "kind": "ensures",
+      "at": [
+        10,
+        5
+      ],
+      "text": "List.len(xs: xs) == 0 implies result is None",
+      "status": "proved"
+    },
+    {
+      "kind": "ensures",
+      "at": [
+        10,
+        5
+      ],
+      "text": "List.len(xs: xs) > 0 implies result is Some",
+      "status": "proved"
+    },
+    {
+      "kind": "ensures",
+      "at": [
+        12,
+        3
+      ],
+      "text": "List.len(xs: xs) == 0 implies result is None",
+      "status": "proved"
+    },
+    {
+      "kind": "ensures",
+      "at": [
+        12,
+        3
+      ],
+      "text": "List.len(xs: xs) > 0 implies result is Some",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        12,
+        42
+      ],
+      "text": "0 <= it and it < len(xs: xs)",
+      "status": "proved"
+    },
+    {
+      "kind": "representation",
+      "at": [
+        15,
+        28
+      ],
+      "text": "fallback within ±2^53 - 1",
+      "status": "checked"
+    },
+    {
+      "kind": "assertion",
+      "at": [
+        22,
+        3
+      ],
+      "text": "first_or(xs: [], fallback: 7) == 7",
+      "status": "checked"
+    },
+    {
+      "kind": "assertion",
+      "at": [
+        23,
+        3
+      ],
+      "text": "first_or(xs: [3, 4], fallback: 7) == 3",
+      "status": "checked"
+    }
+  ]
+}

@@ -1,0 +1,273 @@
+module doc
+
+-- The document algebra of the canonical printer (spec §2.2; `doc.ts`): a
+-- document is text, a concatenation, a group that prints flat when it
+-- fits and breaks otherwise, an indented document, a line that is a space
+-- (or nothing when soft) flat and a newline broken, or a suffix printed at
+-- the end of the current line. `hard` is true when a hard line is inside,
+-- which forces every enclosing group to break.
+pub union Doc =
+  | Str of text: Text
+  | Concat of parts: List[Doc], hard: Bool
+  | Group of body: Doc, hard: Bool
+  | Indent of body: Doc, hard: Bool
+  | Line of soft: Bool, hard: Bool
+  | Suffix of text: Text, hard: Bool
+
+pub fn is_hard(d: Doc) -> Bool {
+  match d with
+  | Str(text) -> return false
+  | Concat(parts, hard) -> return hard
+  | Group(body, hard) -> return hard
+  | Indent(body, hard) -> return hard
+  | Line(soft, hard) -> return hard
+  | Suffix(text, hard) -> return hard
+}
+
+pub fn str(text: Text) -> Doc {
+  return Str(text: text)
+}
+
+pub const empty: Doc = Str(text: "")
+
+pub const line: Doc = Line(soft: false, hard: false)
+
+pub const softline: Doc = Line(soft: true, hard: false)
+
+pub const hardline: Doc = Line(soft: false, hard: true)
+
+pub fn concat(parts: List[Doc]) -> Doc {
+  var hard: Bool = false
+  for p: Doc in parts {
+    if is_hard(d: p) {
+      hard = true
+    }
+  }
+  return Concat(parts: parts, hard: hard)
+}
+
+pub fn concat2(a: Doc, b: Doc) -> Doc may alloc {
+  return concat(parts: [a, b])
+}
+
+pub fn concat3(a: Doc, b: Doc, c: Doc) -> Doc may alloc {
+  return concat(parts: [a, b, c])
+}
+
+pub fn group(body: Doc) -> Doc {
+  return Group(body: body, hard: is_hard(d: body))
+}
+
+pub fn indent(body: Doc) -> Doc {
+  return Indent(body: body, hard: is_hard(d: body))
+}
+
+pub fn line_suffix(text: Text) -> Doc {
+  return Suffix(text: text, hard: false)
+}
+
+pub fn join(sep: Doc, docs: List[Doc]) -> Doc may alloc, mutate {
+  var parts: Builder[Doc] = List.builder()
+  for i: Int in 0 ..< List.len(xs: docs) {
+    if i > 0 {
+      List.push(b: inout parts, x: sep)
+    }
+    List.push(b: inout parts, x: List.get(xs: docs, i: i))
+  }
+  return concat(parts: List.finish(b: parts))
+}
+
+-- A pending command of the renderer: a document at an indentation, flat or breaking.
+record Cmd {
+  ind: Int where it >= 0
+  flat: Bool
+  body: Doc
+}
+
+-- Whether the rest of the current line fits in `width` columns when `next`
+-- is printed flat, looking into the outer stack after it.
+fn fits(next: Cmd, rest: Builder[Cmd], width0: Int) -> Bool may alloc, mutate {
+  var width: Int = width0
+  var rest_idx: Int where it >= 0 = List.built(b: rest)
+  var cmds: Builder[Cmd] = List.builder()
+  List.push(b: inout cmds, x: next)
+  var steps: Int where it >= 0 = 0
+  loop while width >= 0 and steps < 100000
+    invariant steps >= 0
+    decreases 100000 - steps
+  {
+    steps = steps + 1
+    match List.pop(b: inout cmds) with
+    | None -> {
+      if rest_idx == 0 {
+        return true
+      }
+      rest_idx = rest_idx - 1
+      if rest_idx >= List.built(b: rest) {
+        return true
+      }
+      List.push(b: inout cmds, x: List.at(b: rest, i: rest_idx))
+    }
+    | Some(value) -> {
+      let cmd: Cmd = value
+      match cmd.body with
+      | Str(text) -> width = width - Text.count(t: text)
+      | Concat(parts, hard) -> {
+        var i: Int = List.len(xs: parts) - 1
+        loop while i >= 0
+          decreases i + 1
+        {
+          List.push(
+            b: inout cmds,
+            x: Cmd { ind: cmd.ind, flat: cmd.flat, body: List.get(xs: parts, i: i) }
+          )
+          i = i - 1
+        }
+      }
+      | Indent(body, hard) -> List.push(
+        b: inout cmds,
+        x: Cmd { ind: cmd.ind + 2, flat: cmd.flat, body: body }
+      )
+      | Group(body, hard) -> {
+        var flat: Bool = cmd.flat
+        if hard {
+          flat = false
+        }
+        List.push(b: inout cmds, x: Cmd { ind: cmd.ind, flat: flat, body: body })
+      }
+      | Line(soft, hard) -> {
+        if not cmd.flat or hard {
+          return true
+        }
+        if not soft {
+          width = width - 1
+        }
+      }
+      | Suffix(text, hard) -> width = width
+    }
+  }
+  return false
+}
+
+fn is_blank(t: Text) -> Bool may alloc {
+  if Text.count(t: t) == 0 {
+    return false
+  }
+  for cp: Int in Text.code_points(t: t) {
+    if cp != 32 {
+      return false
+    }
+  }
+  return true
+}
+
+-- Prints a document within `width` columns.
+pub fn render(d: Doc, width: Int) -> Text may alloc, mutate {
+  var out: Builder[Text] = List.builder()
+  var pos: Int = 0
+  var suffixes: Builder[Text] = List.builder()
+  var cmds: Builder[Cmd] = List.builder()
+  List.push(b: inout cmds, x: Cmd { ind: 0, flat: false, body: d })
+  var steps: Int where it >= 0 = 0
+  loop while List.built(b: cmds) > 0 and steps < 100000000
+    invariant steps >= 0
+    decreases 100000000 - steps
+  {
+    steps = steps + 1
+    match List.pop(b: inout cmds) with
+    | None -> steps = steps
+    | Some(value) -> {
+      let cmd: Cmd = value
+      match cmd.body with
+      | Str(text) -> {
+        List.push(b: inout out, x: text)
+        pos = pos + Text.count(t: text)
+      }
+      | Concat(parts, hard) -> {
+        var i: Int = List.len(xs: parts) - 1
+        loop while i >= 0
+          decreases i + 1
+        {
+          List.push(
+            b: inout cmds,
+            x: Cmd { ind: cmd.ind, flat: cmd.flat, body: List.get(xs: parts, i: i) }
+          )
+          i = i - 1
+        }
+      }
+      | Indent(body, hard) -> List.push(
+        b: inout cmds,
+        x: Cmd { ind: cmd.ind + 2, flat: cmd.flat, body: body }
+      )
+      | Group(body, hard) -> {
+        if cmd.flat and not hard {
+          List.push(b: inout cmds, x: Cmd { ind: cmd.ind, flat: true, body: body })
+        } else {
+          let flat: Cmd = Cmd { ind: cmd.ind, flat: true, body: body }
+          if not hard and fits(next: flat, rest: cmds, width0: width - pos) {
+            List.push(b: inout cmds, x: flat)
+          } else {
+            List.push(b: inout cmds, x: Cmd { ind: cmd.ind, flat: false, body: body })
+          }
+        }
+      }
+      | Line(soft, hard) -> {
+        if cmd.flat and not hard {
+          if not soft {
+            List.push(b: inout out, x: " ")
+            pos = pos + 1
+          }
+        } else {
+          if List.built(b: suffixes) > 0 {
+            List.push(b: inout out, x: Text.join(parts: List.finish(b: suffixes), sep: ""))
+            suffixes = List.builder()
+          }
+          -- Never leave indentation on an otherwise empty line.
+          var trimming: Bool = true
+          var guard: Int where it >= 0 = 0
+          loop while trimming and List.built(b: out) > 0 and guard < 1000000
+            invariant guard >= 0
+            decreases 1000000 - guard
+          {
+            guard = guard + 1
+            if is_blank(t: List.at(b: out, i: List.built(b: out) - 1)) {
+              let dropped: Option[Text] = List.pop(b: inout out)
+            } else {
+              trimming = false
+            }
+          }
+          List.push(b: inout out, x: "\n")
+          if cmd.ind > 0 {
+            List.push(b: inout out, x: Text.repeat(t: " ", n: cmd.ind))
+          }
+          pos = cmd.ind
+        }
+      }
+      | Suffix(text, hard) -> List.push(b: inout suffixes, x: text)
+    }
+  }
+  if List.built(b: suffixes) > 0 {
+    List.push(b: inout out, x: Text.join(parts: List.finish(b: suffixes), sep: ""))
+  }
+  return Text.join(parts: List.finish(b: out), sep: "")
+}
+
+example renders {
+  render(d: concat(parts: [str(text: "a"), line, str(text: "b")]), width: 100) == "a b"
+  render(d: group(body: concat(parts: [str(text: "a"), line, str(text: "b")])), width: 100) == "a b"
+  render(
+    d: group(body: concat(parts: [str(text: "aaaaaaaaaa"), line, str(text: "bbbbbbbbbb")])),
+    width: 12
+  ) == "aaaaaaaaaa\nbbbbbbbbbb"
+  render(
+    d: concat(
+      parts: [
+        str(text: "x"),
+        indent(body: concat(parts: [hardline, str(text: "y")])),
+        hardline,
+        str(text: "z")
+      ]
+    ),
+    width: 100
+  ) == "x\n  y\nz"
+}

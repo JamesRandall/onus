@@ -1,0 +1,230 @@
+{
+  "diagnostics": [],
+  "obligations": [
+    {
+      "kind": "refinement",
+      "at": [
+        19,
+        26
+      ],
+      "text": "it >= 1",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        20,
+        32
+      ],
+      "text": "it >= 1",
+      "status": "proved"
+    },
+    {
+      "kind": "overflow",
+      "at": [
+        20,
+        32
+      ],
+      "text": "1 + size(e: left) + size(e: right) within Int",
+      "status": "checked"
+    },
+    {
+      "kind": "overflow",
+      "at": [
+        20,
+        32
+      ],
+      "text": "1 + size(e: left) within Int",
+      "status": "checked"
+    },
+    {
+      "kind": "decreases",
+      "at": [
+        20,
+        36
+      ],
+      "text": "e at the call to size",
+      "status": "proved"
+    },
+    {
+      "kind": "decreases",
+      "at": [
+        20,
+        52
+      ],
+      "text": "e at the call to size",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        21,
+        28
+      ],
+      "text": "it >= 1",
+      "status": "proved"
+    },
+    {
+      "kind": "overflow",
+      "at": [
+        21,
+        28
+      ],
+      "text": "1 + size(e: operand) within Int",
+      "status": "checked"
+    },
+    {
+      "kind": "decreases",
+      "at": [
+        21,
+        32
+      ],
+      "text": "e at the call to size",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        22,
+        28
+      ],
+      "text": "it >= 1",
+      "status": "proved"
+    },
+    {
+      "kind": "overflow",
+      "at": [
+        22,
+        28
+      ],
+      "text": "1 + stmts_size(ss: stmts) within Int",
+      "status": "checked"
+    },
+    {
+      "kind": "decreases",
+      "at": [
+        22,
+        32
+      ],
+      "text": "ss at the call to stmts_size",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        28,
+        34
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "representation",
+      "at": [
+        28,
+        3
+      ],
+      "text": "total within ±2^53 - 1",
+      "status": "checked"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        30,
+        13
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "overflow",
+      "at": [
+        30,
+        13
+      ],
+      "text": "total + stmt_size(s: List.get(xs: ss, i: i)) within Int",
+      "status": "checked"
+    },
+    {
+      "kind": "decreases",
+      "at": [
+        30,
+        21
+      ],
+      "text": "s at the call to stmt_size",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        30,
+        54
+      ],
+      "text": "0 <= it and it < len(xs: xs)",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        32,
+        10
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        39,
+        26
+      ],
+      "text": "it >= 1",
+      "status": "proved"
+    },
+    {
+      "kind": "overflow",
+      "at": [
+        39,
+        26
+      ],
+      "text": "1 + size(e: expr) within Int",
+      "status": "checked"
+    },
+    {
+      "kind": "decreases",
+      "at": [
+        39,
+        30
+      ],
+      "text": "e at the call to size",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        40,
+        20
+      ],
+      "text": "it >= 1",
+      "status": "proved"
+    },
+    {
+      "kind": "assertion",
+      "at": [
+        44,
+        3
+      ],
+      "text": "size(e: Add(left: Lit(value: 1), right: Neg(operand: Lit(value: 2)))) == 4",
+      "status": "checked"
+    },
+    {
+      "kind": "assertion",
+      "at": [
+        45,
+        3
+      ],
+      "text": "size(e: Block(stmts: [Eval(expr: Lit(value: 1)), Skip])) == 4",
+      "status": "checked"
+    }
+  ]
+}

@@ -1,0 +1,60 @@
+module fmt
+import std.io
+import tokens
+import lexer
+import ast
+import parser
+import comments
+import printer
+
+-- `onus fmt --stdout` in Onus (impl spec M15.1): prints a file in canonical
+-- form, or its syntax diagnostics to the error stream.
+pub fn main(
+  args: List[Text],
+  files: io.Files,
+  console: io.Console
+) -> Result[Unit, io.Error] may io.file, alloc, mutate {
+  if List.len(xs: args) < 1 {
+    return Err(error: Other(detail: "usage: fmt <file.onus>"))
+  }
+  let source: Text = try io.read(files: files, path: List.get(xs: args, i: 0))
+  if Text.count(t: source) > lexer.max_source {
+    return Err(error: Other(detail: "source too long"))
+  }
+  let lexed: lexer.LexResult = lexer.lex(source: source)
+  let toks: List[tokens.Token] = lexed.tokens
+  if List.len(xs: toks) < 1 or List.len(xs: toks) > 100000000 {
+    return Err(error: Other(detail: "no tokens"))
+  }
+  let cps: List[Int] = Text.code_points(t: source)
+  let r: parser.ParseResult = parser.parse(toks: toks, source_end: List.len(xs: cps))
+  var failed: Bool = false
+  for d: tokens.Diagnostic in lexed.diagnostics {
+    io.eprint(
+      console: console,
+      text: d.code ++ " " ++ Int.to_text(x: d.start) ++ " " ++ Int.to_text(
+        x: d.end
+      ) ++ ": " ++ d.detail ++ "\n"
+    )
+    failed = true
+  }
+  for d: tokens.Diagnostic in r.diagnostics {
+    io.eprint(
+      console: console,
+      text: d.code ++ " " ++ Int.to_text(x: d.start) ++ " " ++ Int.to_text(
+        x: d.end
+      ) ++ ": " ++ d.detail ++ "\n"
+    )
+    failed = true
+  }
+  if failed {
+    return Err(error: Other(detail: "syntax errors"))
+  }
+  match r.module with
+  | None -> return Err(error: Other(detail: "no module"))
+  | Some(value) -> {
+    let tab: comments.Table = comments.attach(m: value, comment_list: lexed.comments, src: cps)
+    io.print(console: console, text: printer.print_module(m: value, tab: tab))
+    return Ok(value: Unit)
+  }
+}

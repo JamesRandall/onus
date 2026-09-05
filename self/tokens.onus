@@ -5,7 +5,7 @@ module tokens
 pub union Kind =
   | Name of text: Text
   | TName of text: Text
-  | IntLit of value: Int
+  | IntLit of value: Int, text: Text
   | FloatLit of value: Float
   | TextLit of value: Text
   | DurationLit of nanos: Int
@@ -290,7 +290,7 @@ pub fn describe_kind(kind: Kind) -> Text may alloc {
   match kind with
   | Name(text) -> return "a name"
   | TName(text) -> return "a type name"
-  | IntLit(value) -> return "an integer literal"
+  | IntLit(value, text) -> return "an integer literal"
   | FloatLit(value) -> return "a float literal"
   | TextLit(value) -> return "a text literal"
   | DurationLit(nanos) -> return "a duration literal"
