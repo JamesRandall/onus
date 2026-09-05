@@ -62,6 +62,7 @@ class PathChecker {
     const entry = entryRes.def;
     let bound: EffectSet | null = null;
     let forbid = EffectSet.empty();
+    const forbidClaims: DefId[] = [];
     const required: DefId[] = [];
     let policy: { def: DefId; except: readonly string[]; span: Span } | null = null;
     let verifiedOnly: Span | null = null;
@@ -73,8 +74,12 @@ class PathChecker {
           bound = (bound ?? EffectSet.empty()).union(this.effectsOf(c.effects));
           break;
         case 'PathForbid':
-          if (forbid.size === 0) spans.forbid = c.span;
+          if (forbid.size === 0 && forbidClaims.length === 0) spans.forbid = c.span;
           forbid = forbid.union(this.effectsOf(c.effects));
+          for (const ref of c.effects) {
+            const res = t.refs.get(ref.id);
+            if (res !== undefined && res.k === 'def' && t.def(res.def).kind === 'claim') forbidClaims.push(res.def);
+          }
           break;
         case 'PathRequire':
           if (required.length === 0) spans.require = c.span;
@@ -112,6 +117,9 @@ class PathChecker {
       if (forbidden.length > 0) {
         this.report('E0413', spans.forbid, `\`${t.qualifiedName(fn)}\` is reachable and has forbidden effect${forbidden.length === 1 ? '' : 's'} { ${forbidden.map((e) => effectName(this.ctx, e)).join(', ')} }`);
       }
+      for (const claim of forbidClaims) {
+        if (this.ctx.claims.carries(fn, claim)) this.report('E0413', spans.forbid, `\`${t.qualifiedName(fn)}\` is reachable and carries forbidden claim \`${claimDisplay(this.ctx, claim)}\``);
+      }
     }
     let satisfied = true;
     for (const claim of required) {
@@ -147,6 +155,7 @@ class PathChecker {
       reachable,
       bound,
       forbid,
+      forbidClaims,
       actual,
       required,
       satisfied,
@@ -207,7 +216,7 @@ class PathChecker {
             queue.push(callee.def);
             edges.push({ from: fn, to: callee.def, at: n.id, effects: calleeEffects(this.ctx, n, callee.def) });
             const produced = capabilityIn(this.ctx.types.exprTypes.get(n.id) ?? null);
-            if (produced !== null) capabilities.push({ fn, at: n.id, typeText: this.capabilityText(produced) });
+            if (produced !== null) capabilities.push({ fn, at: n.id, typeText: this.capabilityText(produced), callee: callee.def });
             return true;
           }
           case 'dispatch':
@@ -315,6 +324,12 @@ function capabilityIn(t: Type | null): Type | null {
     }
   }
   return null;
+}
+
+/** How a claim reads in a report: `host.js` for the host claims, qualified otherwise. Effects: none. */
+export function claimDisplay(ctx: Context, claim: DefId): string {
+  const def = ctx.resolve.def(claim);
+  return ctx.resolve.moduleOf(def.module).name === 'std.host' ? `host.${def.name}` : ctx.resolve.qualifiedName(claim);
 }
 
 /** Source spelling of an effect. Effects: none. */

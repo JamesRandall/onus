@@ -92,6 +92,8 @@ export function printIr(ir: IrModule, t: ResolveTables): string {
         return ['unreachable'];
       case 'comment':
         return [`-- ${s.text}`];
+      case 'reject':
+        return [`reject ${s.column} unless ${expr(s.cond)}`];
     }
   }
 
@@ -115,7 +117,8 @@ export function printIr(ir: IrModule, t: ResolveTables): string {
         return `fnref ${e.name}`;
       case 'call': {
         const target = e.target.k === 'fn' ? e.target.name : `${expr(e.target.dict)}.${e.target.name}`;
-        return `${target}(${[...e.dicts.map((d) => `dict ${expr(d)}`), ...e.consts.map((c) => `const ${expr(c)}`), ...e.args.map(expr)].join(', ')})`;
+        const decode = e.decoder === undefined ? '' : ` decode(${e.decoder.fields.map((f) => `${f.name}: ${f.kind}`).join(', ')}${e.decoder.checks.length > 0 ? `; ${e.decoder.checks.flatMap(stmt).join('; ')}` : ''})`;
+        return `${target}(${[...e.dicts.map((d) => `dict ${expr(d)}`), ...e.consts.map((c) => `const ${expr(c)}`), ...e.args.map(expr)].join(', ')})${decode}`;
       }
       case 'call-value':
         return `${expr(e.callee)}(${e.args.map(expr).join(', ')})`;

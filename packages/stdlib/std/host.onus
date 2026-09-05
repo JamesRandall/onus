@@ -1,0 +1,10 @@
+module std.host
+
+-- Host claims (§19.2): a function carrying one runs only on that host. They are
+-- asserted claims introduced at `assume` leaves and on the intrinsics a single
+-- runtime provides; a `path` may `forbid` them to require portability.
+pub claim js "Runs only on the JavaScript host."
+
+pub claim native "Runs only on the native host."
+
+pub claim wasm "Runs only on the WebAssembly host."

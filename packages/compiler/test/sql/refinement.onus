@@ -1,0 +1,45 @@
+module refinement
+import std.io
+import std.sql
+
+record Total {
+  month: Text
+  total_pence: Int where it >= 0
+}
+
+fn report(
+  db: sql.Db[ReadOnly, schema: "bad"]
+) -> Result[List[Total], sql.Error] may sql.read, alloc {
+  let stmt: sql.Select[Total] = sql.select[
+    text: "select to_char(created, 'YYYY-MM') as month, sum(amount_pence) as total_pence from orders group by 1 order by 1"
+  ](params: [], row: Total)
+  return sql.query(db: db, statement: stmt)
+}
+
+pub fn main(
+  args: List[Text],
+  env: io.Env,
+  files: io.Files,
+  net: io.Net
+) -> Result[Unit, sql.Error] may io.env, io.file, io.net, sql.read, alloc {
+  let dsn: Text = try io.get_env(env: env, name: "ONUS_TEST_DSN")
+    else _: Malformed(detail: "ONUS_TEST_DSN is not set")
+  let db: sql.Db[ReadOnly] = try sql.connect(net: net, dsn: dsn, mode: ReadOnly)
+  let bad: sql.Db[ReadOnly, schema: "bad"] = sql.restrict(db: db, schema: "bad")
+  let out: io.File = try io.create(files: files, path: "refinement.txt")
+    else e: Malformed(detail: "cannot write")
+  match report(db: bad) with
+  | Ok(value) -> try io.write(file: out, text: "ok\n") else e: Malformed(detail: "cannot write")
+  | Err(error) -> match error with
+  | Refinement(row, column) -> try io.write(
+    file: out,
+    text: "refinement " ++ Int.to_text(x: row) ++ " " ++ column ++ "\n"
+  ) else e: Malformed(detail: "cannot write")
+  | Connection(detail) -> try io.write(file: out, text: "connection " ++ detail ++ "\n")
+    else e: Malformed(detail: "cannot write")
+  | Timeout(after) -> try io.write(file: out, text: "timeout\n")
+    else e: Malformed(detail: "cannot write")
+  | Malformed(detail) -> try io.write(file: out, text: "malformed " ++ detail ++ "\n")
+    else e: Malformed(detail: "cannot write")
+  return Ok(value: Unit)
+}

@@ -143,7 +143,19 @@ export type IrStmt =
   /** A call with `inout` arguments: its result (if wanted) and the updated arguments are assigned back. */
   | { readonly k: 'call-inout'; readonly result: { readonly name: string; readonly type: Type } | null; readonly call: IrExpr; readonly targets: readonly { readonly name: string; readonly type: Type }[] }
   | { readonly k: 'unreachable' }
-  | { readonly k: 'comment'; readonly text: string };
+  | { readonly k: 'comment'; readonly text: string }
+  /** In a row decoder: the row is rejected at `column` when `cond` is false (§18.2, `Err(Refinement)`). */
+  | { readonly k: 'reject'; readonly cond: IrExpr; readonly column: string };
+
+/** The row decoder of a `std.sql.select` (§18.2): builds the record from the raw row and applies its refinements. */
+export interface IrDecoder {
+  /** The record under construction, as a local the checks read. */
+  readonly it: string;
+  readonly type: Type;
+  readonly fields: readonly { readonly name: string; readonly kind: string }[];
+  /** `reject` statements over `it`. */
+  readonly checks: readonly IrStmt[];
+}
 
 export type IrCallTarget =
   | { readonly k: 'fn'; readonly def: Def; readonly name: string }
@@ -168,7 +180,7 @@ export type IrExpr =
   | { readonly k: 'global'; readonly def: Def; readonly type: Type }
   /** A declared function used as a value: an adapter to the positional convention of function values. */
   | { readonly k: 'fnref'; readonly def: Def; readonly name: string; readonly sig: Signature }
-  | { readonly k: 'call'; readonly target: IrCallTarget; readonly sig: Signature; readonly dicts: readonly IrExpr[]; readonly consts: readonly IrExpr[]; readonly args: readonly IrExpr[]; readonly type: Type }
+  | { readonly k: 'call'; readonly target: IrCallTarget; readonly sig: Signature; readonly dicts: readonly IrExpr[]; readonly consts: readonly IrExpr[]; readonly args: readonly IrExpr[]; readonly type: Type; readonly decoder?: IrDecoder }
   | { readonly k: 'call-value'; readonly callee: IrExpr; readonly fnType: Extract<Type, { k: 'fn' }>; readonly args: readonly IrExpr[]; readonly type: Type }
   | { readonly k: 'record'; readonly def: Def; readonly type: Type; readonly fields: readonly { readonly name: string; readonly value: IrExpr }[] }
   | { readonly k: 'variant'; readonly def: Def; readonly type: Type; readonly fields: readonly { readonly name: string; readonly value: IrExpr }[] }

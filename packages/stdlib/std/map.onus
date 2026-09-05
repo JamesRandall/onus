@@ -1,11 +1,16 @@
 module std.map
+import std.host
 
 pub intrinsic type Map[K, V]
 
 pub intrinsic fn empty[K, V]() -> Map[K, V]
+  claims host.js
 
 pub intrinsic fn size[K, V](m: Map[K, V]) -> Int where it >= 0
+  claims host.js
 
 pub intrinsic fn get[K, V](m: Map[K, V], key: K) -> Option[V]
+  claims host.js
 
 pub intrinsic fn put[K, V](m: Map[K, V], key: K, value: V) -> Map[K, V] may alloc
+  claims host.js

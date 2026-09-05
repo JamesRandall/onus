@@ -16,12 +16,30 @@
   ],
   "obligations": [
     {
+      "kind": "representation",
+      "at": [
+        3,
+        11
+      ],
+      "text": "x within ±2^53 - 1",
+      "status": "checked"
+    },
+    {
       "kind": "refinement",
       "at": [
         4,
         10
       ],
       "text": "it >= 0",
+      "status": "checked"
+    },
+    {
+      "kind": "representation",
+      "at": [
+        7,
+        13
+      ],
+      "text": "x within ±2^53 - 1",
       "status": "checked"
     },
     {

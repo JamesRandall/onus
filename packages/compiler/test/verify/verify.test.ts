@@ -39,7 +39,7 @@ describe.skipIf(z3 === null)('verification fixtures', () => {
     const entry = ctx.files[0];
     const mine = ctx.contracts.obligations.filter((o) => entry !== undefined && ctx.resolve.node(o.at).span.file === entry.id);
     expect(mine.length).toBeGreaterThan(20);
-    const notProved = mine.filter((o) => o.status !== 'proved' && o.kind !== 'property');
+    const notProved = mine.filter((o) => o.status !== 'proved' && o.kind !== 'property' && o.kind !== 'representation');
     expect(notProved.map((o) => `${o.kind} ${o.text} [${o.by ?? ''}]`)).toEqual([]);
   });
 });

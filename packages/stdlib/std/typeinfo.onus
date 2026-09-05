@@ -1,4 +1,5 @@
 module std.typeinfo
+import std.host
 
 -- What a `const fn` sees of a type passed as a value (§3.8.1).
 pub record Field {
@@ -7,5 +8,7 @@ pub record Field {
 }
 
 pub const intrinsic fn name(t: TypeInfo) -> Text may alloc
+  claims host.js
 
 pub const intrinsic fn fields(t: TypeInfo) -> List[Field] may alloc
+  claims host.js

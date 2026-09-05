@@ -27,7 +27,7 @@ import { printExpr } from '../syntax/printer.js';
 import { isExpr, walk } from '../syntax/walk.js';
 import type { Signature, TypeTables } from '../types/tables.js';
 import { BOOL, prim, stripRefinements, substitute, type ConstValue, type Type, type TypeArg } from '../types/type.js';
-import type { IrArm, IrBlock, IrCallTarget, IrDomain, IrExpr, IrFn, IrGen, IrGenBase, IrImpl, IrItem, IrModule, IrParam, IrStmt, IrTests, IrVerify, ObRef } from './ir.js';
+import type { IrArm, IrBlock, IrCallTarget, IrDecoder, IrDomain, IrExpr, IrFn, IrGen, IrGenBase, IrImpl, IrItem, IrModule, IrParam, IrStmt, IrTests, IrVerify, ObRef } from './ir.js';
 
 export interface LowerOptions {
   /** Lower every `verify` block too (`onus test --assumptions`, §20.2). */
@@ -814,7 +814,8 @@ class Lowerer {
         const a = e.args.find((x) => x.name.text === p.name);
         return a === undefined ? UNIT : this.expr(a.value);
       });
-      const call: IrExpr = { k: 'call', target: callTarget, sig, dicts, consts, args, type };
+      const decoder = this.t.qualifiedName(target.id) === 'std.sql.select' ? this.selectDecoder(e, sig) : null;
+      const call: IrExpr = decoder === null ? { k: 'call', target: callTarget, sig, dicts, consts, args, type } : { k: 'call', target: callTarget, sig, dicts, consts, args, type, decoder };
       const inoutParams = sig.params.filter((p) => p.inout);
       if (inoutParams.length === 0) return call;
       return this.inoutCall(call, type, inoutParams.map((p) => e.args.find((a) => a.name.text === p.name)), discard);
@@ -827,6 +828,32 @@ class Lowerer {
     const inout = ct.params.map((p, i) => (p.inout ? ordered[i] : undefined)).filter((_, i) => ct.params[i]?.inout === true);
     if (inout.length === 0) return call;
     return this.inoutCall(call, type, inout, discard);
+  }
+
+  /** The row decoder of a `std.sql.select` whose row type is a record: one column per primitive field, then the record's refinements (§18.2). */
+  private selectDecoder(e: A.Call, sig: Signature): IrDecoder | null {
+    const targs = this.ty.instantiations.get(e.id) ?? [];
+    const index = sig.tparams.findIndex((p) => p.k === 'type');
+    const arg = index < 0 ? undefined : targs[index];
+    if (arg === undefined || arg.k !== 'type') return null;
+    const type = arg.type;
+    const s = stripRefinements(type);
+    if (s.k !== 'record') return null;
+    const def = this.t.def(s.def);
+    const it = this.tmp('row');
+    const object: IrExpr = { k: 'local', name: it, type };
+    const fields: { name: string; kind: string }[] = [];
+    const checks: IrStmt[] = [];
+    const saved = this.fieldObject;
+    this.fieldObject = { record: def.id, name: it, type };
+    for (const f of this.ty.fields.get(def.id) ?? []) {
+      const fs = stripRefinements(f.type);
+      fields.push({ name: f.name, kind: fs.k === 'prim' ? fs.name : 'other' });
+      const value: IrExpr = { k: 'field', object, name: f.name, type: f.type, owner: def };
+      for (const p of this.refinementPreds(f.type)) checks.push(...this.collect(() => [{ k: 'reject', cond: this.withIt(value, () => this.expr(p)), column: f.name }]));
+    }
+    this.fieldObject = saved;
+    return { it, type, fields, checks };
   }
 
   /** A call with `inout` arguments becomes a statement assigning its results back; the expression is the result temporary. */

@@ -4,6 +4,7 @@
  * `Panic` into an exit status with the failed obligation in the report.
  */
 import * as io from './io.js';
+import * as sql from './sql.js';
 import { Panic, type Result } from './panic.js';
 
 export type RootKind = 'Files' | 'Env' | 'Net' | 'Clock';
@@ -46,5 +47,6 @@ export function runMain(main: (params: Record<string, unknown>) => Result<unknow
     throw e;
   } finally {
     io.closeAll();
+    sql.closeAll();
   }
 }

@@ -2,6 +2,33 @@
   "diagnostics": [],
   "obligations": [
     {
+      "kind": "representation",
+      "at": [
+        8,
+        10
+      ],
+      "text": "x within ±2^53 - 1",
+      "status": "checked"
+    },
+    {
+      "kind": "representation",
+      "at": [
+        8,
+        18
+      ],
+      "text": "lo within ±2^53 - 1",
+      "status": "checked"
+    },
+    {
+      "kind": "representation",
+      "at": [
+        8,
+        27
+      ],
+      "text": "hi within ±2^53 - 1",
+      "status": "checked"
+    },
+    {
       "kind": "refinement",
       "at": [
         10,
@@ -27,6 +54,15 @@
       ],
       "text": "lo <= it and it <= hi",
       "status": "proved"
+    },
+    {
+      "kind": "representation",
+      "at": [
+        18,
+        8
+      ],
+      "text": "x within ±2^53 - 1",
+      "status": "checked"
     },
     {
       "kind": "ensures",
@@ -65,6 +101,15 @@
       "status": "proved"
     },
     {
+      "kind": "representation",
+      "at": [
+        27,
+        10
+      ],
+      "text": "limit within ±2^53 - 1",
+      "status": "proved"
+    },
+    {
       "kind": "refinement",
       "at": [
         30,
@@ -72,6 +117,15 @@
       ],
       "text": "it >= 0",
       "status": "proved"
+    },
+    {
+      "kind": "representation",
+      "at": [
+        30,
+        3
+      ],
+      "text": "i within ±2^53 - 1",
+      "status": "checked"
     },
     {
       "kind": "invariant-entry",
@@ -155,6 +209,15 @@
       "status": "proved"
     },
     {
+      "kind": "representation",
+      "at": [
+        48,
+        3
+      ],
+      "text": "total within ±2^53 - 1",
+      "status": "checked"
+    },
+    {
       "kind": "refinement",
       "at": [
         50,
@@ -225,6 +288,24 @@
       ],
       "text": "it >= 0",
       "status": "proved"
+    },
+    {
+      "kind": "representation",
+      "at": [
+        65,
+        10
+      ],
+      "text": "lo within ±2^53 - 1",
+      "status": "checked"
+    },
+    {
+      "kind": "representation",
+      "at": [
+        65,
+        19
+      ],
+      "text": "hi within ±2^53 - 1",
+      "status": "checked"
     },
     {
       "kind": "refinement",

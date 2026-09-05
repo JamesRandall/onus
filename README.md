@@ -13,7 +13,7 @@ reviews contracts, and the compiler is the only checker.
 
 ## Status
 
-Milestones 1–11 done: lexer, parser, canonical printer, `onus fmt`; module
+Milestones 1–12 done: lexer, parser, canonical printer, `onus fmt`; module
 loading, name resolution, the type checker, the check-time evaluator, the
 effects pass, obligation objects and the z3-backed verifier (`onus check`,
 `--ledger` shows every obligation's status; `--to <pass>` stops early);
@@ -29,9 +29,12 @@ compares two interface documents; `onus test` runs the generated tests, and
 `onus test --assumptions` runs `verify` blocks against an environment module
 and records the ledger the reports and `policy verified_assumptions_only`
 read (§20). Code generation is one lowering with two emitters: JavaScript,
-and native via LLVM IR and `clang` (`--target native`, §19), for the subset
-in `docs/CHANGES.md` item 95; `onus test --target all` runs the examples on
-both and reports disagreement as E0801. Effects are declared with `may`
+and native via LLVM IR and `clang` (`--target native`, §19; `--target wasm`
+with a WASI SDK), for the subset in `docs/CHANGES.md` item 95; `onus test
+--target all` runs the examples on both and reports disagreement as E0801.
+`std.sql` is real on both targets, over `pg` and `libpq`; the SQL tests use a
+Postgres at `ONUS_TEST_DSN`, by default `docker run -d -e
+POSTGRES_PASSWORD=onus -p 5432:5432 postgres:17`, and skip without one. Effects are declared with `may`
 (`-> Int may alloc`). `z3`
 must be on PATH for verification; without it every obligation is checked at
 runtime.

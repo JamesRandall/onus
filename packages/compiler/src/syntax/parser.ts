@@ -732,7 +732,8 @@ class Parser {
 
   private parseClaim(start: number, vis: A.Visibility): A.ClaimDecl {
     this.expect('claim');
-    const name = this.tname();
+    // A claim is usually a type-cased name; the host claims of §19.2 (`host.js`) are lowercase.
+    const name = this.atName() ? this.ident(this.advance()) : this.tname();
     this.currentDef = name.text;
     let body: A.ClaimBody;
     if (this.accept(':=')) {

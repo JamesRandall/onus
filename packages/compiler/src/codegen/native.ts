@@ -21,12 +21,13 @@
  * `TypeInfo`, `old(...)`, structural equality on aggregates, `Map`, `Bytes`,
  * `sql`, and `Text` operations that need grapheme tables.
  */
+import type { ClaimTables } from '../claims/tables.js';
 import type { Context } from '../context.js';
 import type { Def, DefId, ResolveTables } from '../resolve/defs.js';
 import type { Span } from '../source.js';
 import type { TypeTables } from '../types/tables.js';
 import { stripRefinements, type Type } from '../types/type.js';
-import type { IrBlock, IrExpr, IrFn, IrModule, IrStmt, ObRef } from './ir.js';
+import type { IrBlock, IrDecoder, IrExpr, IrFn, IrModule, IrStmt, ObRef } from './ir.js';
 
 /** A construct the native backend does not compile in v0, at the definition that uses it. */
 export interface Unsupported {
@@ -62,13 +63,21 @@ class UnsupportedError extends Error {
  * runner selected by `--onus-examples`.
  * Effects: none (returns text).
  */
-export function emitNative(ctx: Context, modules: readonly IrModule[], entry: IrModule | null): NativeProgram {
-  return new NativeEmitter(ctx, modules, entry).run();
+export interface NativeOptions {
+  /** `libpq` is available: `std.sql` compiles; otherwise it is E0800. */
+  readonly sql: boolean;
+}
+
+export function emitNative(ctx: Context, modules: readonly IrModule[], entry: IrModule | null, opts: NativeOptions = { sql: true }): NativeProgram {
+  return new NativeEmitter(ctx, modules, entry, opts).run();
 }
 
 class NativeEmitter {
   private readonly t: ResolveTables;
   private readonly ty: TypeTables;
+  private readonly claims: ClaimTables;
+  /** The `std.host.js` claim: functions carrying it run only on the JavaScript host (§19.2). */
+  private readonly hostJs: DefId | null;
   private readonly globals: string[] = [];
   private readonly strings = new Map<string, string>();
   private readonly texts = new Map<string, string>();
@@ -89,19 +98,29 @@ class NativeEmitter {
     ctx: Context,
     private readonly modules: readonly IrModule[],
     private readonly entry: IrModule | null,
+    private readonly opts: NativeOptions,
   ) {
     this.t = ctx.resolve;
     this.ty = ctx.types;
+    this.claims = ctx.claims;
+    const host = ctx.resolve.modules.find((m) => m.name === 'std.host');
+    this.hostJs = host === undefined ? null : (ctx.resolve.membersOf(host.id).claims.get('js') ?? null);
   }
 
   run(): NativeProgram {
+    // Only what the program reaches is compiled, so an unsupported construct in an unreached library function costs nothing (§19.1).
+    const reachable = this.reachable();
     for (const m of this.modules) {
       for (const item of m.items) {
-        if (item.k === 'fn') this.fnItem(m, item);
-        else if (item.k === 'impl') for (const f of item.fns) this.fnItem(m, f);
-        else if (item.k === 'const') this.constItem(m, item.def, item.type, item.value);
+        if (item.k === 'fn') {
+          if (reachable.has(item.def.id)) this.fnItem(m, item);
+        } else if (item.k === 'impl') {
+          for (const f of item.fns) if (reachable.has(f.def.id)) this.fnItem(m, f);
+        } else if (item.k === 'const') {
+          if (reachable.has(item.def.id)) this.constItem(m, item.def, item.type, item.value);
+        }
       }
-      if (m.tests !== null) {
+      if (m.tests !== null && !m.module.isStd) {
         for (const ex of m.tests.examples) this.exampleFn(m, ex.name, ex.body);
       }
     }
@@ -133,6 +152,223 @@ class NativeEmitter {
       '',
     ];
     return { ll: `${head.join('\n')}\n${this.fns.join('\n')}`, unsupported: this.unsupported, hasMain, examples: this.examples.map((e) => e.name) };
+  }
+
+  /** Definitions reachable from the entry's `main` and the non-library examples, over calls, function references and constants. */
+  private reachable(): Set<DefId> {
+    const byDef = new Map<DefId, IrFn>();
+    const consts = new Map<DefId, IrExpr>();
+    for (const m of this.modules) {
+      for (const item of m.items) {
+        if (item.k === 'fn') byDef.set(item.def.id, item);
+        else if (item.k === 'impl') for (const f of item.fns) byDef.set(f.def.id, f);
+        else if (item.k === 'const') consts.set(item.def.id, item.value);
+      }
+    }
+    const seen = new Set<DefId>();
+    const queue: DefId[] = [];
+    const visitBlock = (b: IrBlock): void => {
+      for (const s of b) visitStmt(s);
+    };
+    const visitStmt = (s: IrStmt): void => {
+      switch (s.k) {
+        case 'let':
+        case 'assign':
+        case 'return':
+          visitExpr(s.value);
+          return;
+        case 'expr':
+          visitExpr(s.expr);
+          return;
+        case 'if':
+          visitExpr(s.cond);
+          visitBlock(s.then);
+          if (s.else !== null) visitBlock(s.else);
+          return;
+        case 'match':
+          visitExpr(s.scrutinee);
+          for (const a of s.arms) {
+            if (a.test !== null) visitExpr(a.test);
+            for (const b of a.bindings) visitExpr(b.value);
+            if (a.guard !== null) visitExpr(a.guard);
+            visitBlock(a.body);
+          }
+          return;
+        case 'loop':
+          visitExpr(s.cond);
+          visitBlock(s.body);
+          return;
+        case 'for-range':
+          visitExpr(s.lo);
+          visitExpr(s.hi);
+          visitBlock(s.body);
+          return;
+        case 'for-each':
+          visitExpr(s.list);
+          visitBlock(s.body);
+          return;
+        case 'check':
+        case 'assert':
+          visitExpr(s.cond);
+          return;
+        case 'call-inout':
+          visitExpr(s.call);
+          return;
+        case 'unreachable':
+        case 'comment':
+          return;
+      }
+    };
+    const visitExpr = (e: IrExpr): void => {
+      switch (e.k) {
+        case 'call':
+          if (e.target.k === 'fn') queue.push(e.target.def.id);
+          else visitExpr(e.target.dict);
+          for (const x of [...e.dicts, ...e.consts, ...e.args]) visitExpr(x);
+          return;
+        case 'fnref':
+          queue.push(e.def.id);
+          return;
+        case 'global':
+          queue.push(e.def.id);
+          return;
+        case 'call-value':
+          visitExpr(e.callee);
+          for (const x of e.args) visitExpr(x);
+          return;
+        case 'record':
+        case 'variant':
+        case 'fake':
+          for (const f of e.fields) visitExpr(f.value);
+          return;
+        case 'update':
+          visitExpr(e.base);
+          for (const f of e.fields) visitExpr(f.value);
+          return;
+        case 'field':
+        case 'not':
+        case 'snapshot':
+          visitExpr(e.k === 'field' ? e.object : e.k === 'not' ? e.operand : e.value);
+          return;
+        case 'list':
+        case 'and':
+        case 'or':
+          for (const x of e.k === 'list' ? e.elems : e.operands) visitExpr(x);
+          return;
+        case 'concat':
+        case 'intop':
+        case 'floatop':
+        case 'cmp':
+        case 'eq':
+        case 'implies':
+          visitExpr(e.left);
+          visitExpr(e.right);
+          return;
+        case 'neg':
+          visitExpr(e.operand);
+          return;
+        case 'is-variant':
+          visitExpr(e.subject);
+          return;
+        case 'try':
+          visitExpr(e.operand);
+          if (e.else !== null) visitExpr(e.else.value);
+          return;
+        case 'recover':
+          visitBlock(e.body);
+          visitExpr(e.value);
+          return;
+        case 'quantifier':
+          if (e.domain.k === 'range') {
+            visitExpr(e.domain.lo);
+            visitExpr(e.domain.hi);
+          } else if (e.domain.k !== 'bools') visitExpr(e.domain.expr);
+          if (e.where !== null) visitExpr(e.where);
+          visitExpr(e.body);
+          return;
+        case 'closure':
+          visitBlock(e.entry);
+          visitBlock(e.body);
+          return;
+        case 'checked':
+          visitExpr(e.value);
+          visitBlock(e.checks);
+          return;
+        default:
+          return;
+      }
+    };
+    if (this.entry !== null && this.entry.main !== null) {
+      const main = this.entry.items.find((i): i is IrFn => i.k === 'fn' && i.def.name === 'main');
+      if (main !== undefined) queue.push(main.def.id);
+    }
+    for (const m of this.modules) if (m.tests !== null && !m.module.isStd) for (const ex of m.tests.examples) visitBlock(ex.body);
+    while (queue.length > 0) {
+      const d = queue.pop();
+      if (d === undefined || seen.has(d)) continue;
+      seen.add(d);
+      const fn = byDef.get(d);
+      if (fn !== undefined) {
+        visitBlock(fn.entry);
+        if (fn.body !== null) visitBlock(fn.body);
+      }
+      const c = consts.get(d);
+      if (c !== undefined) visitExpr(c);
+    }
+    return seen;
+  }
+
+  /** A function carrying `host.js` runs only on the JavaScript host (§19.2); `std.sql` needs `libpq`. */
+  private requireNative(def: Def): void {
+    if (this.hostJs !== null && this.claims.carries(def.id, this.hostJs)) {
+      throw new UnsupportedError(`\`${this.t.qualifiedName(def.id)}\`, which claims \`host.js\` and runs only on the JavaScript host`);
+    }
+    if (!this.opts.sql && def.intrinsic && this.t.qualifiedName(def.id).startsWith('std.sql.')) {
+      throw new UnsupportedError(`\`${this.t.qualifiedName(def.id)}\`, which needs libpq, not found on this machine`);
+    }
+  }
+
+  /** Emits a nested function while another is being emitted. */
+  private nested(emit: () => void): void {
+    const saved = { lines: this.lines, allocas: this.allocas, locals: this.locals, block: this.block, terminated: this.terminated, fnRetLl: this.fnRetLl };
+    this.beginFn();
+    try {
+      emit();
+    } finally {
+      this.lines = saved.lines;
+      this.allocas = saved.allocas;
+      this.locals = saved.locals;
+      this.block = saved.block;
+      this.terminated = saved.terminated;
+      this.fnRetLl = saved.fnRetLl;
+    }
+  }
+
+  /** A row decoder as `@decode$N(ptr raw, ptr column) -> ptr`: the record, or null with the rejected column's name stored. */
+  private decoderFn(d: IrDecoder): string {
+    const name = `@"decode$${(this.counter += 1)}"`;
+    this.declare('declare i64 @onus_sql_column(ptr, ptr, i64)');
+    this.nested(() => {
+      this.fnRetLl = 'ptr';
+      const rec = stripRefinements(d.type);
+      if (rec.k !== 'record') throw new UnsupportedError('a row decoder for a non-record');
+      const fields = this.ty.fields.get(rec.def) ?? [];
+      const obj = this.tmp();
+      this.emit(`${obj} = call ptr @onus_alloc(i64 ${8 * Math.max(1, fields.length)})`);
+      for (const f of d.fields) {
+        const idx = fields.findIndex((x) => x.name === f.name);
+        const kind = { Int: 0, Duration: 0, Text: 1, Float: 2, Bool: 3 }[f.kind] ?? 4;
+        const slot = this.tmp();
+        this.emit(`${slot} = call i64 @onus_sql_column(ptr %raw, ptr ${this.textConst(f.name)}, i64 ${kind})`);
+        this.storeSlot(obj, idx < 0 ? 0 : idx, slot);
+      }
+      const ptr = this.alloca(d.it, 'ptr', d.type);
+      this.emit(`store ptr ${obj}, ptr ${ptr}`);
+      this.blockStmts(d.checks);
+      if (!this.terminated) this.emit(`ret ptr ${obj}`);
+      this.finishFn(`define ptr ${name}(ptr %raw, ptr %column) {`, '');
+    });
+    return name;
   }
 
   // -------------------------------------------------------------------------
@@ -168,8 +404,9 @@ class NativeEmitter {
             return 'i1';
           case 'Text':
             return 'ptr';
-          case 'Bytes':
           case 'TypeInfo':
+            return 'ptr';
+          case 'Bytes':
           case 'Spec':
             throw new UnsupportedError(`\`${s.name}\` values`);
         }
@@ -180,7 +417,7 @@ class NativeEmitter {
         return 'ptr';
       case 'opaque': {
         const q = this.t.qualifiedName(s.def);
-        if (q === 'std.list.List' || q === 'std.grid.Grid') return 'ptr';
+        if (q === 'std.list.List' || q === 'std.grid.Grid' || q === 'std.sql.Select' || q === 'std.sql.Param' || q === 'std.sql.Statement') return 'ptr';
         throw new UnsupportedError(`\`${this.t.def(s.def).name}\` values`);
       }
       case 'param':
@@ -188,8 +425,9 @@ class NativeEmitter {
       case 'fn':
         throw new UnsupportedError('function values');
       case 'typeinfo':
+        return 'ptr';
       case 'spec':
-        throw new UnsupportedError(`\`${s.k}\` values`);
+        throw new UnsupportedError('`Spec` values');
       case 'error':
       case 'refined':
         return 'i64';
@@ -337,6 +575,7 @@ class NativeEmitter {
     if (f.intrinsic !== null || f.body === null) return;
     const name = this.fnName(m.module.name, f.name);
     try {
+      this.requireNative(f.def);
       if (f.dictParams.length > 0) throw new UnsupportedError('functions with interface-bounded type parameters');
       this.beginFn();
       const params: string[] = [];
@@ -655,6 +894,18 @@ class NativeEmitter {
       case 'comment':
         this.emit(`; ${s.text}`);
         return;
+      case 'reject': {
+        const c = this.coerce(this.expr(s.cond), 'i1');
+        const okL = this.label('accept');
+        const failL = this.label('reject');
+        this.condBr(c.v, okL, failL);
+        this.startBlock(failL);
+        this.emit(`store ptr ${this.textConst(s.column)}, ptr %column`);
+        this.emit('ret ptr null');
+        this.terminated = true;
+        this.startBlock(okL);
+        return;
+      }
     }
   }
 
@@ -834,6 +1085,14 @@ class NativeEmitter {
         if (c.k === 'bool') return { v: c.v ? '1' : '0', t: 'i1' };
         if (c.k === 'float') return { v: doubleLiteral(c.v), t: 'double' };
         if (c.k === 'text') return { v: this.textConst(c.v), t: 'ptr' };
+        if (c.k === 'variant') {
+          // A constant variant (`ReadOnly` as a `const mode: DbMode`): a value of the union carrying its tag.
+          const union = this.t.def(c.def).parent;
+          const obj = this.tmp();
+          this.emit(`${obj} = call ptr @onus_alloc(i64 8)`);
+          this.storeSlot(obj, 0, String(union === null ? 0 : this.variantIndex(union, c.def)));
+          return { v: obj, t: 'ptr' };
+        }
         throw new UnsupportedError(`${c.k} type arguments`);
       }
       case 'value': {
@@ -854,14 +1113,52 @@ class NativeEmitter {
       case 'quantifier':
         throw new UnsupportedError('quantifiers evaluated at runtime');
       case 'recover':
-        throw new UnsupportedError('`recover`');
+        return this.recover(e);
       case 'fake':
         throw new UnsupportedError('`fake`');
       case 'typeinfo':
-        throw new UnsupportedError('`TypeInfo`');
+        // Inert natively: the decoder the compiler generates replaces what `TypeInfo` describes.
+        return { v: 'null', t: 'ptr' };
       case 'snapshot':
         throw new UnsupportedError('`old(...)` in a checked postcondition');
     }
+  }
+
+  /**
+   * `recover { ... }` (§10.2): the body becomes a function over the enclosing
+   * locals, passed as an array of their addresses; the runtime runs it under
+   * `setjmp`, and a panic inside `longjmp`s back to become `Err(Panicked)`.
+   */
+  private recover(e: Extract<IrExpr, { k: 'recover' }>): Val {
+    const captured = [...this.locals.entries()];
+    const name = `@"recover$${(this.counter += 1)}"`;
+    this.declare('declare ptr @onus_recover(ptr, ptr)');
+    this.nested(() => {
+      this.fnRetLl = 'i64';
+      captured.forEach(([local, info], i) => {
+        const p = this.tmp();
+        this.emit(`${p} = getelementptr ptr, ptr %env, i64 ${i}`);
+        const ptr = this.tmp();
+        this.emit(`${ptr} = load ptr, ptr ${p}`);
+        this.locals.set(local, { ptr, t: info.t, type: info.type });
+      });
+      this.blockStmts(e.body);
+      if (!this.terminated) {
+        const v = this.toSlot(this.expr(e.value));
+        this.emit(`ret i64 ${v}`);
+      }
+      this.finishFn(`define i64 ${name}(ptr %env) {`, '');
+    });
+    const env = this.tmp();
+    this.emit(`${env} = call ptr @onus_alloc(i64 ${8 * Math.max(1, captured.length)})`);
+    captured.forEach(([, info], i) => {
+      const p = this.tmp();
+      this.emit(`${p} = getelementptr ptr, ptr ${env}, i64 ${i}`);
+      this.emit(`store ptr ${info.ptr}, ptr ${p}`);
+    });
+    const out = this.tmp();
+    this.emit(`${out} = call ptr @onus_recover(ptr ${name}, ptr ${env})`);
+    return { v: out, t: 'ptr' };
   }
 
   private loadSlot(obj: string, idx: number): string {
@@ -939,6 +1236,7 @@ class NativeEmitter {
   private call(e: Extract<IrExpr, { k: 'call' }>): Val {
     if (e.target.k !== 'fn') throw new UnsupportedError('interface dispatch through a dictionary');
     const def = e.target.def;
+    this.requireNative(def);
     const sig = e.sig;
     const retLl = this.ll(e.type);
     const args: string[] = [];
@@ -962,6 +1260,13 @@ class NativeEmitter {
           paramTypes.push('i64');
         }
       });
+      if (e.decoder !== undefined) {
+        const fn = this.decoderFn(e.decoder);
+        const slot = this.tmp();
+        this.emit(`${slot} = ptrtoint ptr ${fn} to i64`);
+        args.push(`i64 ${slot}`);
+        paramTypes.push('i64');
+      }
       this.declare(`declare i64 ${cname}(${paramTypes.join(', ')})`);
       const out = this.tmp();
       this.emit(`${out} = call i64 ${cname}(${args.join(', ')})`);

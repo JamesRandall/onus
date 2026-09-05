@@ -643,7 +643,7 @@ fn main(args: List[Text]) -> Result[Unit, AppError] may io.env, sql.read, sql.wr
 }
 ```
 
-`sql.connect` with `mode: ReadOnly` opens the connection with a read-only session (`SET default_transaction_read_only = on` for Postgres; equivalent per driver) and additionally verifies the role's privileges at connect time. The remaining assumption — that the role named in `cfg.reporting_dsn` was not granted write privileges after the check — is recorded in the ledger as an assumed leaf attached to the capability's construction site, so the reviewer's view of any path using `reporting` says where the guarantee bottoms out.
+`sql.connect` with `mode: ReadOnly` opens the connection with a read-only session (`SET default_transaction_read_only = on` for Postgres; equivalent per driver) and additionally verifies the role's privileges at connect time. <!-- changed: 2026-09-05, docs/CHANGES.md item 100 — the v0 check verifies the setting took and refuses a superuser role --> The remaining assumption — that the role named in `cfg.reporting_dsn` was not granted write privileges after the check — is recorded in the ledger as an assumed leaf attached to the capability's construction site, so the reviewer's view of any path using `reporting` says where the guarantee bottoms out.
 
 ### 8.2 Attenuation
 
@@ -1204,11 +1204,11 @@ The primitive surface is versioned with the specification. A backend that lacks 
 
 ### 19.2 Host claims
 
-Code that can only run on one host declares it with a claim: `host.js`, `host.native`, `host.wasm`. These are asserted claims (§7.1) introduced only at `assume` leaves that call host-specific facilities, and they propagate like any claim. A `path` may `forbid { host.js, host.native, host.wasm }` to require portability, and the compiler then rejects anything reachable that depends on a host.
+Code that can only run on one host declares it with a claim: `host.js`, `host.native`, `host.wasm`. These are asserted claims (§7.1) introduced only at `assume` leaves that call host-specific facilities, and they propagate like any claim. A `path` may `forbid { host.js, host.native, host.wasm }` to require portability, and the compiler then rejects anything reachable that depends on a host. <!-- changed: 2026-09-05, docs/CHANGES.md item 98 — the claims live in `std.host` and the JavaScript-only intrinsics carry `claims host.js`; a `forbid` clause may name claims; the native target refuses a reached function carrying `host.js` with `E0800` -->
 
 ### 19.3 Integer representation
 
-`Int` is 64-bit signed on every target. On targets without native 64-bit integers (JavaScript), the backend chooses a representation per value: a double-precision number where the verifier has proved `|x| <= 2^53 - 1` for every value the binding can hold, and an arbitrary-precision integer otherwise. The choice appears in the ledger as an obligation of kind `representation`, so a reviewer can see which values are running on the slow path and tighten refinements to move them.
+`Int` is 64-bit signed on every target. On targets without native 64-bit integers (JavaScript), the backend chooses a representation per value: a double-precision number where the verifier has proved `|x| <= 2^53 - 1` for every value the binding can hold, and an arbitrary-precision integer otherwise. The choice appears in the ledger as an obligation of kind `representation`, so a reviewer can see which values are running on the slow path and tighten refinements to move them. <!-- changed: 2026-09-05, docs/CHANGES.md item 99 — the obligations are generated, verified and reported; the arbitrary-precision path is not implemented, and a checked binding's overflow checks panic instead -->
 
 ### 19.4 Fully specified behaviour
 
@@ -1216,7 +1216,7 @@ The following are specified so that all targets agree: `Map` iteration is in key
 
 ### 19.5 Differential testing
 
-Every `example` and `property` runs on every built target. Any disagreement between targets on a program the compiler accepted is a backend defect, reported as `E0801 target disagreement` with the example, the two results and the targets.
+Every `example` and `property` runs on every built target. Any disagreement between targets on a program the compiler accepted is a backend defect, reported as `E0801 target disagreement` with the example, the two results and the targets. <!-- changed: 2026-09-05, docs/CHANGES.md item 104 — v0 runs examples on both targets (`onus test --target all`); properties run on JavaScript only -->
 
 ---
 

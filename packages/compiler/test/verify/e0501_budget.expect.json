@@ -16,6 +16,33 @@
   ],
   "obligations": [
     {
+      "kind": "representation",
+      "at": [
+        3,
+        11
+      ],
+      "text": "a within ±2^53 - 1",
+      "status": "checked"
+    },
+    {
+      "kind": "representation",
+      "at": [
+        3,
+        32
+      ],
+      "text": "b within ±2^53 - 1",
+      "status": "checked"
+    },
+    {
+      "kind": "representation",
+      "at": [
+        3,
+        53
+      ],
+      "text": "c within ±2^53 - 1",
+      "status": "checked"
+    },
+    {
       "kind": "overflow",
       "at": [
         6,
@@ -31,6 +58,33 @@
         10
       ],
       "text": "a + b within Int",
+      "status": "checked"
+    },
+    {
+      "kind": "representation",
+      "at": [
+        9,
+        11
+      ],
+      "text": "a within ±2^53 - 1",
+      "status": "checked"
+    },
+    {
+      "kind": "representation",
+      "at": [
+        9,
+        32
+      ],
+      "text": "b within ±2^53 - 1",
+      "status": "checked"
+    },
+    {
+      "kind": "representation",
+      "at": [
+        9,
+        53
+      ],
+      "text": "c within ±2^53 - 1",
       "status": "checked"
     },
     {

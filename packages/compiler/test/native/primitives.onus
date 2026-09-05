@@ -78,6 +78,17 @@ example results {
   total(xs: [1, 2, 3]) == 6
 }
 
+fn risky(b: Int) -> Result[Int, Panicked] may panic {
+  return recover {
+    10 / b
+  }
+}
+
+example recovers_a_panic {
+  risky(b: 0) is Err
+  risky(b: 2) is Ok
+}
+
 example inout_and_update {
   var p: Point = Point { x: 2, y: 3 }
   let done: Unit = scale(p: inout p, k: 2)

@@ -158,6 +158,7 @@ class Verifier {
         if (o.status !== 'checked' || o.kind === 'law' || o.kind === 'property') continue;
         const site = t.node(o.at).span;
         const info: ObligationInfo = { kind: o.kind, text: o.text, status: 'checked', counterexample: null };
+        if (o.kind === 'representation') continue; // §19.3: reported in the ledger; the JavaScript number range is the runtime's assumption
         if (sig.constFn && o.kind !== 'overflow') {
           this.report('E0703', site, `\`${def.name}\` is a \`const fn\`, so \`${o.kind} ${o.text}\` must be proved; ${o.by ?? 'it was not'}`, info);
         } else if (!hasPanic && o.kind !== 'overflow') {

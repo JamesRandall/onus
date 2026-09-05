@@ -64,7 +64,7 @@ interface Args {
 }
 
 const VALUE_FLAGS: ReadonlySet<string> = new Set(['root', 'stdlib', 'to', 'out', 'emit', 'budget', 'offset', 'diff', 'against', 'env', 'target']);
-const TARGETS: ReadonlySet<string> = new Set(['js', 'native', 'all']);
+const TARGETS: ReadonlySet<string> = new Set(['js', 'native', 'wasm', 'all']);
 
 function parseArgs(argv: readonly string[]): Args {
   const files: string[] = [];
@@ -204,7 +204,7 @@ function buildCommand(args: Args, run: boolean): number {
   }
   const target = args.values.get('target') ?? 'js';
   if (!TARGETS.has(target) || target === 'all') {
-    process.stderr.write(`onus: --target takes js or native\n`);
+    process.stderr.write(`onus: --target takes js, native or wasm\n`);
     return 2;
   }
   const ctx = newContext(args);
@@ -217,10 +217,10 @@ function buildCommand(args: Args, run: boolean): number {
     for (const m of ctx.resolve.modules) if (!m.isStd) process.stdout.write(printIr(lowerModule(ctx, m, { verify: false }), ctx.resolve));
     return 0;
   }
-  if (target === 'native') {
+  if (target === 'native' || target === 'wasm') {
     runPipeline(ctx, 'paths');
     if (!ctx.sink.hasErrors()) {
-      const native = buildNative(ctx, { outDir });
+      const native = buildNative(ctx, { outDir, target });
       emitDiagnostics(ctx, args.flags.has('json'));
       if (ctx.sink.hasErrors() || native.exe === null) return 1;
       process.stderr.write(`onus build: wrote ${native.exe}\n`);
@@ -229,7 +229,7 @@ function buildCommand(args: Args, run: boolean): number {
         process.stderr.write(`onus run: ${entry} declares no \`pub fn main\`\n`);
         return 2;
       }
-      const r = spawnSync(native.exe, args.files.slice(1), { stdio: 'inherit' });
+      const r = target === 'wasm' ? spawnSync(process.execPath, [join(dirname(native.exe), 'run_wasm.mjs'), ...args.files.slice(1)], { stdio: 'inherit' }) : spawnSync(native.exe, args.files.slice(1), { stdio: 'inherit' });
       return r.status ?? 1;
     }
     emitDiagnostics(ctx, args.flags.has('json'));

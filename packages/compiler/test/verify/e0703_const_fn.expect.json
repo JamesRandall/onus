@@ -16,6 +16,15 @@
   ],
   "obligations": [
     {
+      "kind": "representation",
+      "at": [
+        3,
+        30
+      ],
+      "text": "i within ±2^53 - 1",
+      "status": "checked"
+    },
+    {
       "kind": "refinement",
       "at": [
         4,

@@ -13,6 +13,7 @@
 
 #include <errno.h>
 #include <math.h>
+#include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -30,7 +31,24 @@ void *onus_alloc(int64_t bytes) {
   return p;
 }
 
+/* `recover` frames (§10.2): a panic inside the innermost frame unwinds to it. */
+typedef struct recover_frame {
+  jmp_buf jb;
+  struct recover_frame *prev;
+  const char *kind;
+  const char *text;
+  const char *at;
+} recover_frame;
+
+static recover_frame *recover_top = NULL;
+
 void onus_panic(const char *kind, const char *text, const char *at, const char *def) {
+  if (recover_top != NULL) {
+    recover_top->kind = kind;
+    recover_top->text = text;
+    recover_top->at = at;
+    longjmp(recover_top->jb, 1);
+  }
   fprintf(stderr, "panic: %s `%s` failed at %s in %s\n", kind, text, at, def);
   exit(2);
 }
@@ -74,6 +92,34 @@ static void *ok(onus_slot value) {
 
 static void *err(onus_slot error) {
   return onus_union(1, 1, &error);
+}
+
+typedef onus_slot (*onus_recover_fn)(void *env);
+static void *ok(onus_slot value);
+static void *err(onus_slot error);
+static onus_slot ptr_slot(const void *p);
+onus_text *onus_text_from(const char *bytes, int64_t len);
+
+/* Runs `fn` over `env`; `Ok(value)`, or `Err(Panicked { obligation, location })` when it panicked. */
+void *onus_recover(onus_slot (*fn)(void *), void *env) {
+  recover_frame frame;
+  frame.prev = recover_top;
+  frame.kind = "";
+  frame.text = "";
+  frame.at = "";
+  recover_top = &frame;
+  if (setjmp(frame.jb) == 0) {
+    onus_slot v = fn(env);
+    recover_top = frame.prev;
+    return ok(v);
+  }
+  recover_top = frame.prev;
+  char obligation[512];
+  snprintf(obligation, sizeof obligation, "%s %s", frame.kind, frame.text);
+  onus_slot *panicked = onus_alloc(16);
+  panicked[0] = ptr_slot(onus_text_from(obligation, (int64_t)strlen(obligation)));
+  panicked[1] = ptr_slot(onus_text_from(frame.at, (int64_t)strlen(frame.at)));
+  return err(ptr_slot(panicked));
 }
 
 /* ------------------------------------------------------------------------ */
@@ -396,9 +442,16 @@ void *onus_root(const char *kind) {
   return t;
 }
 
+#ifndef ONUS_NO_SQL
+void onus_sql_close_all(void);
+#endif
+
 int onus_finish(void *result) {
   onus_slot *r = result;
   close_all();
+#ifndef ONUS_NO_SQL
+  onus_sql_close_all();
+#endif
   if (r != NULL && r[0] != 0) {
     fprintf(stderr, "main returned Err\n");
     return 1;

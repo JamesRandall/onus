@@ -6,7 +6,7 @@ import type { Context } from '../context.js';
 import type { DefId } from '../resolve/defs.js';
 import { lineColOf, type Span } from '../source.js';
 import type { PathAnalysis } from '../paths/tables.js';
-import { effectName } from '../paths/pass.js';
+import { claimDisplay, effectName } from '../paths/pass.js';
 import { printVerify } from '../syntax/printer.js';
 import type * as A from '../syntax/ast.js';
 import { effectsOfFn } from '../claims/calls.js';
@@ -131,12 +131,12 @@ export function pathReport(ctx: Context, analysis: PathAnalysis): PathReport {
     path: t.def(analysis.def).name,
     entry: t.qualifiedName(analysis.entry),
     reachable: analysis.reachable.map((d) => t.qualifiedName(d)),
-    effects: { bound: analysis.bound === null ? null : names(analysis.bound), forbid: names(analysis.forbid), actual: names(analysis.actual) },
+    effects: { bound: analysis.bound === null ? null : names(analysis.bound), forbid: [...names(analysis.forbid), ...analysis.forbidClaims.map((c) => claimDisplay(ctx, c))], actual: names(analysis.actual) },
     claims: { required: analysis.required.map((c) => t.qualifiedName(c)), satisfied: analysis.satisfied },
     assumes: analysis.assumes.map((a) => ({ claim: t.qualifiedName(a.claim), at: t.qualifiedName(a.fn), justification: a.justification, permitted_by: a.permittedBy, verifiable: a.verify !== null, verify: verifyText(ctx, a.verify), last_verified: verifiedOf(ctx, a.key) })),
     obligations: { ...counts, checked_at: checkedAt },
     unresolvable_calls: analysis.unresolvable.map((u) => ({ at: `${t.qualifiedName(u.fn)}:${lineCol(ctx, t.node(u.at).span)}`, reason: u.reason })),
-    capabilities: analysis.capabilities.map((c) => ({ type: c.typeText, constructed_at: `${t.qualifiedName(c.fn)}:${lineCol(ctx, t.node(c.at).span)}`, assumes: [] })),
+    capabilities: analysis.capabilities.map((c) => ({ type: c.typeText, constructed_at: `${t.qualifiedName(c.fn)}:${lineCol(ctx, t.node(c.at).span)}`, assumes: constructionAssumes(t.qualifiedName(c.callee)) })),
     graph: { nodes, edges },
     gates: analysis.gates.map((g) => ({ evidence: t.qualifiedName(g.evidence), producers: g.producers.map((p) => t.qualifiedName(p)), guarded: g.guarded.map((p) => t.qualifiedName(p)) })),
     recovers: analysis.recovers.map((r) => ({ def: t.qualifiedName(r.fn), at: `${t.qualifiedName(r.fn)}:${lineCol(ctx, t.node(r.at).span)}` })),
@@ -171,6 +171,11 @@ export function pathText(r: PathReport): string {
   for (const g of r.gates) lines.push(`  gate: ${g.evidence} from ${g.producers.join(', ')} guards ${g.guarded.join(', ')}`);
   lines.push(`  graph: ${r.graph.nodes.length} nodes, ${r.graph.edges.length} edges`);
   return `${lines.join('\n')}\n`;
+}
+
+/** What a capability's construction site leaves to trust (§8.1): for `sql.connect`, the role's privileges after the connect-time check. */
+function constructionAssumes(callee: string): string[] {
+  return callee === 'std.sql.connect' ? ['the role named in the DSN keeps the privileges verified at connect time (§8.1)'] : [];
 }
 
 /** The canonical text of a `verify` block, or null. Effects: none. */

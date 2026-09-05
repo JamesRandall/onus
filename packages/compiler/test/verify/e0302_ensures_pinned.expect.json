@@ -16,6 +16,15 @@
   ],
   "obligations": [
     {
+      "kind": "representation",
+      "at": [
+        3,
+        10
+      ],
+      "text": "x within ±2^53 - 1",
+      "status": "checked"
+    },
+    {
       "kind": "ensures",
       "at": [
         6,

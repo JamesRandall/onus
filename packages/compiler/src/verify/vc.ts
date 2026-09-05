@@ -122,6 +122,7 @@ class BodyWalker {
       if (pd === undefined) return;
       const term = this.bind(pd, p.name, p.type, null);
       this.lowerer.olds.set(pd, term);
+      this.representationGoals(this.t.def(pd).node, p.type);
     });
     for (const c of f.contracts) {
       if (c.clause !== 'requires') continue;
@@ -232,6 +233,7 @@ class BodyWalker {
         if (def !== undefined && type !== undefined) {
           this.flowGoal(s.value, value, type);
           this.bind(def, s.name.text, type, value);
+          this.representationGoals(s.id, type);
         }
         return;
       }
@@ -615,6 +617,18 @@ class BodyWalker {
 
   private obligationsAt(node: A.NodeId, kind: Obligation['kind']): Obligation[] {
     return this.ctx.contracts.at(node).filter((o) => o.kind === kind && this.pending.has(o.id));
+  }
+
+  /** §19.3: from the binding's declared type alone, every value it can hold is within ±2^53 - 1. */
+  private representationGoals(at: A.NodeId, type: Type): void {
+    for (const o of this.obligationsAt(at, 'representation')) {
+      this.tryGoal(o, () => {
+        const x = this.lowerer.freshConst('rep', INT);
+        this.lowerer.typeFacts(x, type, this.env);
+        const max = 9007199254740991n;
+        return and(app('>=', [x, int(-max)], BOOL), app('<=', [x, int(max)], BOOL));
+      });
+    }
   }
 
   private tryGoal(o: Obligation, goal: () => Formula): void {

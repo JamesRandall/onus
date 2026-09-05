@@ -4,12 +4,12 @@ record Order { customer: Text, amount_pence: Int where … }
 record Basket { items: List[Order], total: Int where … }
 fn recent_orders(db: Db[ReadOnly, schema: "orders"], who: AuthedCustomer) -> Result[List[Order], Error]
   body:
-    let stmt: Select[Order] = select(const const text, [text(who.id)], typeinfo Order)
+    let stmt: Select[Order] = select(const const text, [text(who.id)], typeinfo Order) decode(customer: Text, amount_pence: Int; reject amount_pence unless ($row1.amount_pence >= 0))
     return query(db, stmt)
 fn load_basket(db: Db[ReadOnly], who: AuthedCustomer) -> Result[Basket, Error] early-return
   body:
     -- assume Idempotent "A select reads only; it has no observable effect."
-    let stmt: Select[Order] = select(const const text, [text(who.id)], typeinfo Order)
+    let stmt: Select[Order] = select(const const text, [text(who.id)], typeinfo Order) decode(customer: Text, amount_pence: Int; reject amount_pence unless ($row2.amount_pence >= 0))
     let items: List[Order] = try query(db, stmt)
     return Ok(value: Basket { items: items, total: 0 })
 fn record_order(db: Db[ReadWrite, schema: "orders"], who: AuthedCustomer, basket: Basket, receipt: Receipt) -> Result[Unit, Error]

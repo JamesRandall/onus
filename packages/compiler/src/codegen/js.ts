@@ -22,7 +22,7 @@ import type { Def, DefId, ModuleId, ResolveTables } from '../resolve/defs.js';
 import type { Signature, TypeTables } from '../types/tables.js';
 import { stripRefinements, type ConstValue, type Type } from '../types/type.js';
 import type { EmitOptions, EmittedModule } from './emit.js';
-import type { IrBlock, IrExpr, IrFn, IrGen, IrImpl, IrModule, IrStmt, IrTests, IrVerify, ObRef } from './ir.js';
+import type { IrBlock, IrDecoder, IrExpr, IrFn, IrGen, IrImpl, IrModule, IrStmt, IrTests, IrVerify, ObRef } from './ir.js';
 
 const RESERVED = new Set([
   'await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do', 'else', 'enum', 'export', 'extends',
@@ -376,20 +376,26 @@ class JsEmitter {
 
   private fnDecl(f: IrFn): void {
     const sig = f.sig;
-    const paramNames = [...f.dictParams.map((d) => d.name), ...f.constParams.map((c) => this.local(c.name)), ...f.params.map((p) => this.local(p.name))];
+    // `std.sql.select` also receives the compiler-generated row decoder (§18.2).
+    const isSelect = f.intrinsic !== null && this.t.qualifiedName(f.def.id) === 'std.sql.select';
+    const paramNames = [...f.dictParams.map((d) => d.name), ...f.constParams.map((c) => this.local(c.name)), ...f.params.map((p) => this.local(p.name)), ...(isSelect ? ['$decode'] : [])];
     const destructure = paramNames.length === 0 ? '$args' : `{ ${paramNames.join(', ')} }`;
     let tsSig: string;
     if (this.opts.ts) {
+      const rowType = sig.tparams.find((p) => p.k === 'type');
       const extra = [
         ...f.dictParams.map((d) => `${d.name}: ${this.tsIfaceDict(this.t.def(d.iface), { k: 'param', def: d.def })}`),
         ...f.constParams.map((c) => `${this.local(c.name)}: ${this.tsType(c.type)}`),
       ];
-      tsSig = `${this.tsTypeParams(sig)}(${destructure}: ${this.tsParams(f.params, extra)}): ${this.tsReturn(f.ret, f.params.filter((p) => p.inout).map((p) => p.type))}`;
+      const decodeParam = isSelect && rowType !== undefined ? `; $decode?: $rt.sql.Decoder<${this.t.def(rowType.def).name}>` : '';
+      const params = this.tsParams(f.params, extra);
+      tsSig = `${this.tsTypeParams(sig)}(${destructure}: ${decodeParam === '' ? params : params.replace(/ }$/, `${decodeParam} }`)}): ${this.tsReturn(f.ret, f.params.filter((p) => p.inout).map((p) => p.type))}`;
     } else {
       tsSig = `(${destructure})`;
     }
     if (f.intrinsic !== null) {
       const args = [...f.constParams.map((c) => c.name), ...f.params.map((p) => p.name)].map((n) => this.local(n));
+      if (isSelect) args.push('$decode ?? null');
       this.w.block(`export function ${f.name}${tsSig} {`, () => this.w.line(`return $rt.${f.intrinsic?.ns ?? ''}.${f.intrinsic?.name ?? ''}(${args.join(', ')});`));
       this.w.line('');
       return;
@@ -516,7 +522,19 @@ class JsEmitter {
       case 'comment':
         this.w.line(`// ${s.text}`);
         return;
+      case 'reject':
+        this.w.line(`if (!(${this.expr(s.cond).code})) throw new $rt.sql.Rejected($row, ${JSON.stringify(s.column)});`);
+        return;
     }
+  }
+
+  /** A row decoder (§18.2): the record from the raw row's columns, then its refinements as `reject`s. */
+  private decoder(d: IrDecoder): string {
+    const it = this.local(d.it);
+    const fields = d.fields.map((f) => `${this.local(f.name)}: $rt.sql.column(raw, ${JSON.stringify(f.name)}, ${JSON.stringify(f.kind)}, $row)`).join(', ');
+    const sig = this.opts.ts ? `(raw: Readonly<Record<string, unknown>>, $row: number): ${this.tsType(d.type)}` : '(raw, $row)';
+    const itType = this.opts.ts ? `: ${this.tsType(d.type)}` : '';
+    return `${sig} => { const ${it}${itType} = { ${fields} }; ${this.inline(d.checks)} return ${it}; }`;
   }
 
   /** Renders statements into a single line, for check lists inside expressions. */
@@ -575,6 +593,7 @@ class JsEmitter {
           else if (p.k === 'const') parts.push(`${this.local(this.t.def(p.def).name)}: ${this.expr(e.consts[ci] ?? { k: 'unit' }).code}`), (ci += 1);
         }
         e.sig.params.forEach((p, i) => parts.push(`${this.local(p.name)}: ${this.expr(e.args[i] ?? { k: 'unit' }).code}`));
+        if (e.decoder !== undefined) parts.push(`$decode: ${this.decoder(e.decoder)}`);
         return piece(`${callee}({ ${parts.join(', ')} })`, CALL);
       }
       case 'call-value':

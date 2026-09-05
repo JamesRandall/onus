@@ -546,6 +546,63 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     The C runtime's `-DONUS_BROKEN_INT_TO_TEXT` exists for the acceptance
     test that E0801 fires on a broken primitive.
 
+97. **M12 names the JavaScript `sql` implementation.** M12's text listed
+    only the C runtime's `libpq` primitives, but its acceptance (all three
+    examples agree on both targets; reporting runs against Postgres) needs
+    `sql` real on the JavaScript side too, which impl spec §5 has always
+    described over `pg` and which v0 shipped as a stub (item 62). The
+    milestone now says so, and takes `recover` from M11.
+
+## M12 — targets complete
+
+98. **Host claims (§19.2).** `std.host` declares the asserted claims `js`,
+    `native` and `wasm`; a claim's name may be lowercase (grammar §2.3) so
+    they read as `host.js`. The JavaScript-only intrinsics (`Text.len`,
+    `graphemes`, `bytes`, `lower`, `trim`, `Map.*`, `Bytes.len`,
+    `TypeInfo.*`) carry `claims host.js`; the native emitter refuses any
+    reached function carrying it (`E0800`). A `forbid` clause may name
+    claims as well as effects: a reachable function carrying one is `E0413`.
+    Derived-claim predicates may name a claim by a lowercase qualified name.
+99. **Representation obligations (§19.3).** Every `Int` or `Duration`
+    parameter and `let`/`var` gets an obligation of kind `representation`,
+    proved when the binding's declared type keeps every value within
+    ±2^53 - 1 and otherwise `checked`. They are reported in the ledger and
+    exempt from the `panic` rule like overflow. The slow path is not
+    implemented: a checked binding keeps the number representation, and the
+    existing overflow checks panic rather than switch to arbitrary
+    precision. The ledger says which values that concerns.
+100. **`std.sql` on both targets (§8.1, §18.2; impl spec §5).** JavaScript:
+    `sql.ts` over `pg`, driven synchronously by a worker thread with
+    `Atomics.wait` (Onus calls are synchronous; `pg` is not). Native:
+    `onus_sql.c` over `libpq`, found through `pg_config`, Homebrew's keg or
+    `ONUS_LIBPQ`; without it `std.sql` is `E0800`. `connect(mode: ReadOnly)`
+    sets `default_transaction_read_only = on`, verifies it, and refuses a
+    superuser role, which could not be held to it; the remaining assumption
+    is named at the construction site in the path report. `restrict` sets
+    the search path, `deadline` the statement timeout (`Err(Timeout)`).
+101. **Row decoders (§18.2).** For each `sql.select` whose row type is a
+    record the compiler generates a decoder in the target-neutral form
+    (`decoder` on the call, `reject` statements): one column per primitive
+    field, then the record's refinements; a failure is `Err(Refinement)`
+    with the row and column, a missing or ill-typed column `Err(Malformed)`.
+    JavaScript passes it as `$decode`; natively it is a generated function
+    the C runtime calls per row.
+102. **`recover` natively (§10.2).** The body becomes a function over the
+    enclosing locals' addresses, run under `setjmp`; a panic inside
+    `longjmp`s back and becomes `Err(Panicked { obligation, location })`
+    with the same texts as the JavaScript runtime.
+103. **WebAssembly (§19).** `--target wasm` compiles the same LLVM IR with a
+    WASI SDK (`WASI_SDK_PATH` or `/opt/wasi-sdk`) to `program.wasm` and
+    writes `run_wasm.mjs` for Node's built-in WASI; `std.sql` is `E0800`
+    there. No SDK was available where this was written, so the path is
+    untested end to end; `onus build --target wasm` reports the missing SDK.
+104. **Differential harness (§19.5).** Every fixture and example with
+    `example` blocks is built for both targets: those in the native subset
+    must agree on every example, the rest must be refused with `E0800`.
+    The SQL tests run against a Postgres at `ONUS_TEST_DSN` (default: the
+    `postgres:17` Docker container with password `onus`) and skip with a
+    notice otherwise.
+
 ### Deferred, not changed
 
 - `Stream[T] ! e` as a type (§3.11) is not parsed: `-> Stream[T] ! e` is

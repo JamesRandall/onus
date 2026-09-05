@@ -74,7 +74,19 @@ class ContractsPass {
 
   private fn(f: A.FnDecl, def: Def): void {
     if (f.body === null) return;
+    const sig = this.ctx.types.signatures.get(def.id);
+    sig?.params.forEach((p, i) => {
+      const pd = sig.paramDefs[i];
+      if (pd !== undefined) this.representation(this.ctx.resolve.def(pd).node, p.name, p.type, def);
+    });
     this.body(f.body, def, f);
+  }
+
+  /** §19.3: an `Int` binding's values must fit ±2^53 - 1 for the JavaScript backend's number representation. */
+  private representation(at: A.NodeId, name: string, type: Type, def: Def): void {
+    const s = stripRefinements(type);
+    if (s.k !== 'prim' || (s.name !== 'Int' && s.name !== 'Duration')) return;
+    this.ctx.contracts.add({ kind: 'representation', at, def: def.id, text: `${name} within ±2^53 - 1`, source: null, site: 'binding', pinned: null, callee: null, param: null, status: 'checked', by: null });
   }
 
   /** Walks a body: statements and their expressions, closures included (their returns check their own contracts). */
@@ -101,9 +113,13 @@ class ContractsPass {
           }
           break;
         case 'Let':
-        case 'Var':
+        case 'Var': {
           this.flow(n.value, def, 'binding');
+          const d = this.ctx.resolve.defOf.get(n.id);
+          const type = d === undefined ? undefined : this.ctx.types.declTypes.get(d);
+          if (type !== undefined) this.representation(n.id, n.name.text, type, def);
           break;
+        }
         case 'Assign':
           this.flow(n.value, def, 'assignment');
           break;

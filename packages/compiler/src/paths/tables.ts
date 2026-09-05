@@ -29,6 +29,8 @@ export interface CapabilitySite {
   readonly fn: DefId;
   readonly at: A.NodeId;
   readonly typeText: string;
+  /** The constructing function. */
+  readonly callee: DefId;
 }
 
 /** A call from one reachable function to another, with the callee's effects at that site. */
@@ -59,6 +61,8 @@ export interface PathAnalysis {
   readonly reachable: readonly DefId[];
   readonly bound: EffectSet | null;
   readonly forbid: EffectSet;
+  /** Claims a `forbid` clause names (§19.2): no reachable function may carry them. */
+  readonly forbidClaims: readonly DefId[];
   readonly actual: EffectSet;
   readonly required: readonly DefId[];
   readonly satisfied: boolean;

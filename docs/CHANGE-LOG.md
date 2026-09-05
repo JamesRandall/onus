@@ -29,7 +29,7 @@ Grammar (§2.3): every `[ "!" effects ]` is now `[ "may" effects ]` — in `fn_d
 
 ---
 
-## 2026-09-03 — Targets: dual backends as a design goal **(applied to docs; code from M11)**
+## 2026-09-03 — Targets: dual backends as a design goal **(applied; M11 and M12 done 2026-09-05, docs/CHANGES.md items 93–104)**
 
 **Change.** Onus programs compile to JavaScript and to native code from the same source, and later to WebAssembly. This is a stated goal, not an accident of architecture, and it adds a section to the language spec and two milestones to the implementation spec.
 

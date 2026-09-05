@@ -621,7 +621,13 @@ class ModuleResolver {
     else this.t.refs.set(p.id, { k: 'def', def: entry });
     for (const c of p.clauses) {
       if (c.kind === 'PathEffects') this.effects(c.effects, this.moduleScope);
-      if (c.kind === 'PathForbid') this.effects(c.effects, this.moduleScope, true);
+      if (c.kind === 'PathForbid') {
+        // `forbid` names effects, and claims such as `host.js` (§19.2): a reachable function carrying one fails the path.
+        for (const ref of c.effects) {
+          if (this.claimExists(ref.name)) this.claimRef(ref.name, ref.id);
+          else this.effects([ref], this.moduleScope, true);
+        }
+      }
       if (c.kind === 'PathRequire') {
         const claims: DefId[] = [];
         for (const cl of c.claims) {
@@ -642,7 +648,7 @@ class ModuleResolver {
   private claimPred(p: A.ClaimPred): void {
     switch (p.kind) {
       case 'ClaimAtom':
-        if (p.name.segments[p.name.segments.length - 1]?.text.match(/^[A-Z]/)) this.claimRef(p.name, p.id);
+        if (p.name.segments[p.name.segments.length - 1]?.text.match(/^[A-Z]/) || this.claimExists(p.name)) this.claimRef(p.name, p.id);
         else {
           const effect = this.effectOf({ id: p.id, kind: 'EffectRef', span: p.span, name: p.name }, this.moduleScope, false);
           if (effect !== null) this.t.refs.set(p.id, { k: 'effect', effect });
@@ -682,6 +688,25 @@ class ModuleResolver {
     const out: string[] = [];
     for (const s of chain.reverse()) for (const name of s.values.keys()) if (!out.includes(name)) out.push(name);
     return out;
+  }
+
+  /** True iff `q` names a visible claim, without reporting. */
+  private claimExists(q: A.QName): boolean {
+    const last = q.segments[q.segments.length - 1];
+    if (last === undefined) return false;
+    if (q.segments.length === 1) {
+      if (this.t.membersOf(this.m.id).claims.has(last.text)) return true;
+      return this.m.imports.some((imp) => {
+        const c = this.t.membersOf(imp.module).claims.get(last.text);
+        return c !== undefined && this.t.def(c).pub;
+      });
+    }
+    if (q.segments.length !== 2) return false;
+    const head = q.segments[0];
+    const imp = head === undefined ? undefined : this.m.imports.find((i) => i.alias === head.text);
+    if (imp === undefined) return false;
+    const c = this.t.membersOf(imp.module).claims.get(last.text);
+    return c !== undefined && this.t.def(c).pub;
   }
 
   /** Resolves a claim name (`Idempotent` or `payments.Idempotent`) to its definition, recording it at `at` when given. */

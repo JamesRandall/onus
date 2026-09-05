@@ -1,14 +1,20 @@
 module std.text
+import std.host
 
 pub const intrinsic fn len(t: Text) -> Int where it >= 0
+  claims host.js
 
 pub const intrinsic fn graphemes(t: Text) -> List[Text] may alloc
+  claims host.js
   ensures List.len(xs: result) == len(t: t)
 
 pub const intrinsic fn bytes(t: Text) -> Bytes may alloc
+  claims host.js
 
 pub const intrinsic fn starts_with(t: Text, prefix: Text) -> Bool
 
 pub const intrinsic fn lower(t: Text) -> Text may alloc
+  claims host.js
 
 pub const intrinsic fn trim(t: Text) -> Text may alloc
+  claims host.js

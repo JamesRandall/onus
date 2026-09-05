@@ -19,6 +19,8 @@ export interface NativeBuildOptions {
   /** Extra `clang` flags, e.g. `-DONUS_BROKEN_INT_TO_TEXT` for the differential test. */
   readonly cflags?: readonly string[];
   readonly clang?: string;
+  /** `native` (the host, default) or `wasm` (wasm32-wasi through a WASI SDK, run by `run_wasm.mjs` on Node's WASI). */
+  readonly target?: 'native' | 'wasm';
 }
 
 export interface NativeBuildResult {
@@ -32,6 +34,27 @@ export interface NativeBuildResult {
 /** The directory holding `onus.c` and `onus.h`. Effects: none. */
 export function nativeRuntimeDir(): string {
   return join(dirname(runtimeEntry()), '..', 'native');
+}
+
+/** `libpq`'s include and library directories, from `pg_config` on PATH, Homebrew's keg, or `ONUS_LIBPQ`; null when absent. Effects: may spawn `pg_config`. */
+export function findLibpq(): { include: string; lib: string } | null {
+  const fromEnv = process.env['ONUS_LIBPQ'];
+  const candidates = [fromEnv === undefined ? null : join(fromEnv, 'bin', 'pg_config'), 'pg_config', '/opt/homebrew/opt/libpq/bin/pg_config', '/usr/local/opt/libpq/bin/pg_config'];
+  for (const c of candidates) {
+    if (c === null) continue;
+    const r = spawnSync(c, ['--includedir', '--libdir'], { encoding: 'utf8' });
+    if (r.error !== undefined || r.status !== 0) continue;
+    const [include, lib] = r.stdout.trim().split('\n');
+    if (include !== undefined && lib !== undefined && existsSync(join(include, 'libpq-fe.h'))) return { include, lib };
+  }
+  return null;
+}
+
+/** A WASI SDK root (`WASI_SDK_PATH`, else `/opt/wasi-sdk`), or null. Effects: reads the file system. */
+export function findWasiSdk(): string | null {
+  const candidates = [process.env['WASI_SDK_PATH'] ?? null, '/opt/wasi-sdk'];
+  for (const c of candidates) if (c !== null && existsSync(join(c, 'bin', 'clang')) && existsSync(join(c, 'share', 'wasi-sysroot'))) return c;
+  return null;
 }
 
 /** The `clang` executable, or null when none is on PATH. Effects: spawns `clang --version`. */
@@ -51,7 +74,9 @@ export function buildNative(ctx: Context, opts: NativeBuildOptions): NativeBuild
   const modules = ctx.resolve.modules.map((m) => lowerModule(ctx, m, { verify: false }));
   const entryFile = ctx.files[0];
   const entry = modules.find((m) => entryFile !== undefined && m.module.file === entryFile.id) ?? null;
-  const program = emitNative(ctx, modules, entry);
+  const wasm = opts.target === 'wasm';
+  const libpq = wasm ? null : findLibpq();
+  const program = emitNative(ctx, modules, entry, { sql: libpq !== null });
   const dir = join(opts.outDir, 'native');
   mkdirSync(dir, { recursive: true });
   const ll = join(dir, 'program.ll');
@@ -60,14 +85,33 @@ export function buildNative(ctx: Context, opts: NativeBuildOptions): NativeBuild
     ctx.sink.report(diagnostic({ code: 'E0800', span: u.span, def: u.def.split('.').pop() ?? null, context: [`\`${u.def}\` uses ${u.what}, which the native target does not provide in v0 (§19.1)`] }));
   }
   if (program.unsupported.length > 0) return { exe: null, ll, examples: program.examples, hasMain: program.hasMain };
-  const exe = join(dir, entry === null ? 'program' : entry.module.name.replace(/\./g, '_'));
-  const clang = findClang(opts.clang ?? null);
+  const baseName = entry === null ? 'program' : entry.module.name.replace(/\./g, '_');
+  const exe = join(dir, wasm ? 'program.wasm' : baseName);
+  const sdk = wasm ? findWasiSdk() : null;
+  const clang = wasm ? (sdk === null ? null : join(sdk, 'bin', 'clang')) : findClang(opts.clang ?? null);
   if (clang === null) {
-    ctx.sink.report(diagnostic({ code: 'E0999', span: mkSpan(ctx.files[0]?.id ?? fileId(0), 0, 0), context: ['`clang` is not on PATH; the native target needs it (impl spec M11)'] }));
+    ctx.sink.report(diagnostic({ code: 'E0999', span: mkSpan(ctx.files[0]?.id ?? fileId(0), 0, 0), context: [wasm ? 'no WASI SDK found: set WASI_SDK_PATH or install it at /opt/wasi-sdk (impl spec M12)' : '`clang` is not on PATH; the native target needs it (impl spec M11)'] }));
     return { exe: null, ll, examples: program.examples, hasMain: program.hasMain };
   }
   const runtime = nativeRuntimeDir();
-  const r = spawnSync(clang, ['-O1', '-Wno-override-module', '-o', exe, ll, join(runtime, 'onus.c'), '-I', runtime, '-lm', ...(opts.cflags ?? [])], { encoding: 'utf8' });
+  const sqlFlags = libpq === null ? ['-DONUS_NO_SQL'] : [join(runtime, 'onus_sql.c'), '-I', libpq.include, '-L', libpq.lib, '-lpq', `-Wl,-rpath,${libpq.lib}`];
+  const targetFlags = wasm && sdk !== null ? ['--target=wasm32-wasi', `--sysroot=${join(sdk, 'share', 'wasi-sysroot')}`, '-D_WASI_EMULATED_SIGNAL', '-lwasi-emulated-signal', '-D_WASI_EMULATED_PROCESS_CLOCKS'] : [];
+  const r = spawnSync(clang, ['-O1', '-Wno-override-module', ...targetFlags, '-o', exe, ll, join(runtime, 'onus.c'), ...sqlFlags, '-I', runtime, '-lm', ...(opts.cflags ?? [])], { encoding: 'utf8' });
+  if (wasm && r.status === 0) {
+    writeFileSync(
+      join(dir, 'run_wasm.mjs'),
+      [
+        '// Generated by onus: runs program.wasm on Node\'s WASI (§19; impl spec M12).',
+        "import { WASI } from 'node:wasi';",
+        "import { readFile } from 'node:fs/promises';",
+        "const wasi = new WASI({ version: 'preview1', args: ['program', ...process.argv.slice(2)], env: process.env, preopens: { '.': process.cwd() }, returnOnExit: true });",
+        "const wasm = await WebAssembly.compile(await readFile(new URL('./program.wasm', import.meta.url)));",
+        'const instance = await WebAssembly.instantiate(wasm, wasi.getImportObject());',
+        'process.exitCode = wasi.start(instance);',
+        '',
+      ].join('\n'),
+    );
+  }
   if (r.status !== 0) {
     ctx.sink.report(diagnostic({ code: 'E0999', span: mkSpan(ctx.files[0]?.id ?? fileId(0), 0, 0), context: ['clang rejected the generated IR; this is a compiler bug, please report it', ...(r.stderr ?? '').split('\n').slice(0, 20)] }));
     return { exe: null, ll, examples: program.examples, hasMain: program.hasMain };

@@ -16,6 +16,15 @@
   ],
   "obligations": [
     {
+      "kind": "representation",
+      "at": [
+        3,
+        10
+      ],
+      "text": "x within ±2^53 - 1",
+      "status": "checked"
+    },
+    {
       "kind": "overflow",
       "at": [
         6,
@@ -23,6 +32,15 @@
       ],
       "text": "x != 0",
       "status": "proved"
+    },
+    {
+      "kind": "representation",
+      "at": [
+        9,
+        11
+      ],
+      "text": "y within ±2^53 - 1",
+      "status": "checked"
     },
     {
       "kind": "requires",

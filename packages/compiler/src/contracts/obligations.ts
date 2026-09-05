@@ -21,6 +21,8 @@ export type ObligationKind =
   | 'law'
   | 'property'
   | 'overflow'
+  /** An `Int` binding's values fit the JavaScript number range (§19.3); reported, never a runtime check. */
+  | 'representation'
   | 'const-check';
 
 export type ObligationStatus = 'pending' | 'proved' | 'checked' | 'assumed' | 'failed';
