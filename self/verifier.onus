@@ -1,0 +1,612 @@
+module verifier
+import std.io
+import ast
+import defs
+import context
+import types
+import obligations
+import effectset
+import formula
+import lower
+import vc
+import constant
+import z3
+import report
+
+-- The verification pass (impl spec §4, pass 11; spec §12; `verify/pass.ts`).
+--
+-- For every `checked` obligation with a condition, asks z3 whether the
+-- facts entail the goal:
+--   - `unsat` -> `proved`;
+--   - `sat` -> `checked`, or `failed` with a counterexample when the clause
+--     was pinned `proved` (E0302 for `ensures`, E0342 for `requires`);
+--   - `unknown`/timeout -> `checked` for an unpinned nonlinear obligation,
+--     otherwise E0501.
+-- Then the panic rule (§6.1): a function without `panic` may not carry a
+-- `checked` obligation (E0343), overflow excepted in v0 (impl spec §12.1);
+-- and a `const fn` must have every obligation proved (E0703).
+--
+-- Without z3 on PATH every obligation stays `checked` and one line goes to
+-- stderr; the program is still valid.
+pub record Options {
+  z3_path: Option[Text]
+  budget_ms: Int where it >= 0
+  cache_dir: Option[Text]
+  -- A directory to write every SMT-LIB problem to, for debugging (`ONUS_DUMP_SMT`).
+  dump_dir: Option[Text]
+}
+
+pub const default_budget_ms: Int = 500
+
+fn skip() -> Unit {
+  return Unit
+}
+
+fn or_neg(o: Option[Int]) -> Int {
+  match o with
+  | Some(value) -> return value
+  | None -> return -1
+}
+
+fn text_or(o: Option[Text], dflt: Text) -> Text {
+  match o with
+  | Some(value) -> return value
+  | None -> return dflt
+}
+
+fn is_test_kind(k: obligations.Kind) -> Bool {
+  return k is obligations.Law or k is obligations.Property
+}
+
+fn info(
+  o: obligations.Obligation,
+  status: Text,
+  counterexample: List[report.CounterEntry]
+) -> report.ObligationInfo may alloc {
+  return report.ObligationInfo {
+    kind: obligations.kind_text(k: o.kind),
+    text: o.text,
+    status: status,
+    has_counterexample: List.len(xs: counterexample) > 0,
+    counterexample: counterexample
+  }
+}
+
+fn set_status(
+  ctx: inout context.Context,
+  o: obligations.Obligation,
+  status: obligations.Status,
+  by: Text
+) -> Unit may mutate, alloc {
+  context.set_obligation(ctx: inout ctx, o: { o with status: status, by: Some(value: by) })
+  return Unit
+}
+
+fn set_by(
+  ctx: inout context.Context,
+  o: obligations.Obligation,
+  by: Text
+) -> Unit may mutate, alloc {
+  context.set_obligation(ctx: inout ctx, o: { o with by: Some(value: by) })
+  return Unit
+}
+
+-- Pass 11: verify obligations.
+-- Preconditions: the contracts pass ran without diagnostics.
+-- Effects: updates obligation statuses; reports E0302, E0342, E0343, E0344, E0501, E0703, E0999; may run z3 and write the cache.
+pub fn verify_pass(
+  ctx: inout context.Context,
+  process: io.Process,
+  files: io.Files,
+  console: io.Console,
+  opts: Options
+) -> Unit may io.file, nondet, alloc, mutate {
+  let solver: Option[z3.Solver] = z3.find_z3(process: process, explicit: opts.z3_path)
+  let vcs: vc.VCs = vc.build_vcs(ctx: inout ctx)
+  equal_measure_calls(ctx: inout ctx)
+  match solver with
+  | None -> {
+    io.eprint(
+      console: console,
+      text: "onus: z3 not found on PATH; every obligation is checked at runtime\n"
+    )
+    for i: Int in 0 ..< ctx.obligation_count {
+      let o: obligations.Obligation = context.get_obligation(ctx: ctx, id: i)
+      if o.status is obligations.Checked {
+        set_by(ctx: inout ctx, o: o, by: "z3 not available")
+      }
+    }
+  }
+  | Some(value) -> run_all(
+    ctx: inout ctx,
+    process: process,
+    files: files,
+    vcs: vcs,
+    solver: value,
+    opts: opts
+  )
+  rules(ctx: inout ctx)
+  return Unit
+}
+
+fn run_all(
+  ctx: inout context.Context,
+  process: io.Process,
+  files: io.Files,
+  vcs: vc.VCs,
+  solver: z3.Solver,
+  opts: Options
+) -> Unit may io.file, nondet, alloc, mutate {
+  for i: Int in 0 ..< ctx.obligation_count {
+    let o: obligations.Obligation = context.get_obligation(ctx: ctx, id: i)
+    if o.status is obligations.Checked and not is_test_kind(k: o.kind) {
+      match Map.find(d: vcs.built, key: i) with
+      | None -> {
+        -- No solver condition (floats, closures): a closed predicate over constants can still be evaluated.
+        if is_true(o: constant.const_discharge(ctx: inout ctx, o: o)) {
+          set_status(ctx: inout ctx, o: o, status: obligations.Proved, by: "constant evaluation")
+        } else {
+          set_by(
+            ctx: inout ctx,
+            o: o,
+            by: text_or(o: Map.find(d: vcs.skipped, key: i), dflt: "no condition")
+          )
+        }
+      }
+      | Some(value) -> {
+        discharge(
+          ctx: inout ctx,
+          process: process,
+          files: files,
+          o: o,
+          v: value,
+          solver: solver,
+          opts: opts
+        )
+        -- A closed predicate over constants the solver could not settle (floats are opaque to it) may still evaluate.
+        let after: obligations.Obligation = context.get_obligation(ctx: ctx, id: i)
+        if after.status is obligations.Checked and not after.pinned and is_true(
+          o: constant.const_discharge(ctx: inout ctx, o: after)
+        ) {
+          set_status(
+            ctx: inout ctx,
+            o: after,
+            status: obligations.Proved,
+            by: "constant evaluation"
+          )
+        }
+      }
+    }
+  }
+  return Unit
+}
+
+fn is_true(o: Option[Bool]) -> Bool {
+  match o with
+  | Some(value) -> return value
+  | None -> return false
+}
+
+-- Settles the `decreases` obligations of calls that pass a structural measure on unchanged (§5.1).
+-- Sound when every cycle of the call graph takes a proper part somewhere, i.e. the calls passing the
+-- measure unchanged form no cycle of their own; a call on such a cycle is E0344.
+-- Preconditions: `build_vcs` has classified every structural `decreases` obligation.
+-- Effects: updates obligation statuses; reports E0344.
+fn equal_measure_calls(ctx: inout context.Context) -> Unit may mutate, alloc {
+  var pending: Builder[obligations.Obligation] = List.builder()
+  var edges: Dict[Int, List[Int]] = Map.dict()
+  for i: Int in 0 ..< ctx.obligation_count {
+    let o: obligations.Obligation = context.get_obligation(ctx: ctx, id: i)
+    if o.kind is obligations.Decreases and o.status is obligations.Checked and text_or(
+      o: o.by,
+      dflt: ""
+    ) == "equal argument" and o.callee is Some {
+      List.push(b: inout pending, x: o)
+      let callee: Int = or_neg(o: o.callee)
+      match Map.find(d: edges, key: o.def) with
+      | Some(value) -> {
+        if not List.contains(xs: value, x: callee) {
+          Map.set(d: inout edges, key: o.def, value: List.append(xs: value, x: callee))
+        }
+      }
+      | None -> Map.set(d: inout edges, key: o.def, value: [callee])
+    }
+  }
+  let all: List[obligations.Obligation] = List.finish(b: pending)
+  for o: obligations.Obligation in all {
+    let callee: Int = or_neg(o: o.callee)
+    if reaches(edges: edges, from: callee, to: o.def, bound: List.len(xs: all) + 2) {
+      context.set_obligation(
+        ctx: inout ctx,
+        o: { o with
+          status: obligations.Failed,
+          by: Some(value: "the calls passing the measure unchanged form a cycle")
+        }
+      )
+      context.report(
+        ctx: inout ctx,
+        d: report.diagnostic_for(
+          code: "E0344",
+          file: o.at_file,
+          span: o.at_span,
+          def_name: Some(value: context.get_def(ctx: ctx, id: o.def).name),
+          detail: "this call passes the measure `" ++ vc.measure_text(
+            t: o.text
+          ) ++ "` on unchanged, and the calls that do so form a cycle; one of them must pass a proper part (§5.1)",
+          obligation: info(o: o, status: "unprovable", counterexample: [])
+        )
+      )
+    } else {
+      set_status(
+        ctx: inout ctx,
+        o: o,
+        status: obligations.Proved,
+        by: "structural order (passed on unchanged here; every cycle takes a proper part)"
+      )
+    }
+  }
+  return Unit
+}
+
+-- Whether `to` is reachable from `from` along `edges`; `bound` exceeds the number of edges.
+fn reaches(
+  edges: Dict[Int, List[Int]],
+  from: Int,
+  to: Int,
+  bound: Int where it >= 0
+) -> Bool may alloc, mutate {
+  var seen: Dict[Int, Bool] = Map.dict()
+  var stack: Builder[Int] = List.builder()
+  List.push(b: inout stack, x: from)
+  var guard: Int where it >= 0 = bound
+  loop while List.built(b: stack) > 0 and guard > 0
+    invariant guard >= 0
+    decreases guard
+  {
+    guard = guard - 1
+    match List.pop(b: inout stack) with
+    | None -> guard = 0
+    | Some(value) -> {
+      if value == to {
+        return true
+      }
+      if not Map.contains(d: seen, key: value) {
+        Map.set(d: inout seen, key: value, value: true)
+        for w: Int in next_of(edges: edges, v: value) {
+          List.push(b: inout stack, x: w)
+        }
+      }
+    }
+  }
+  return false
+}
+
+fn next_of(edges: Dict[Int, List[Int]], v: Int) -> List[Int] may alloc {
+  match Map.find(d: edges, key: v) with
+  | Some(value) -> return value
+  | None -> return []
+}
+
+fn discharge(
+  ctx: inout context.Context,
+  process: io.Process,
+  files: io.Files,
+  o: obligations.Obligation,
+  v: vc.VC,
+  solver: z3.Solver,
+  opts: Options
+) -> Unit may io.file, nondet, alloc, mutate {
+  let problem: Text = problem_text(v: v, budget_ms: opts.budget_ms)
+  match opts.dump_dir with
+  | Some(value) -> dump(
+    files: files,
+    dir: value,
+    o: o,
+    def_name: context.get_def(ctx: ctx, id: o.def).name,
+    problem: problem
+  )
+  | None -> skip()
+  let key: Text = z3.cache_key(problem: problem, version: solver.version, budget_ms: opts.budget_ms)
+  var outcome_r: z3.SolverResult = z3.SolverResult { outcome: z3.Failure, model: [], detail: "" }
+  match z3.cache_get(files: files, dir: opts.cache_dir, key: key) with
+  | Some(value) -> outcome_r = value
+  | None -> {
+    outcome_r = z3.run_z3(
+      process: process,
+      solver: solver,
+      problem: problem,
+      budget_ms: opts.budget_ms
+    )
+    z3.cache_set(files: files, dir: opts.cache_dir, key: key, r: outcome_r)
+  }
+  let def_name: Text = context.get_def(ctx: ctx, id: o.def).name
+  match outcome_r.outcome with
+  | z3.Unsat -> set_status(ctx: inout ctx, o: o, status: obligations.Proved, by: "z3")
+  | z3.Sat -> {
+    if o.pinned {
+      var code: Text = "E0342"
+      if o.kind is obligations.Ensures {
+        code = "E0302"
+      }
+      context.set_obligation(
+        ctx: inout ctx,
+        o: { o with status: obligations.Failed, by: Some(value: "z3: counterexample") }
+      )
+      context.report(
+        ctx: inout ctx,
+        d: report.diagnostic_for(
+          code: code,
+          file: o.at_file,
+          span: o.at_span,
+          def_name: Some(value: def_name),
+          detail: "`" ++ obligations.kind_text(
+            k: o.kind
+          ) ++ " proved " ++ o.text ++ "` does not hold on every path",
+          obligation: report.ObligationInfo {
+            kind: obligations.kind_text(k: o.kind),
+            text: o.text,
+            status: "unprovable",
+            has_counterexample: true,
+            counterexample: counterexample(r: outcome_r, v: v)
+          }
+        )
+      )
+    } else {
+      if o.kind is obligations.Assertion {
+        set_by(ctx: inout ctx, o: o, by: "run as a test")
+      } else {
+        set_by(ctx: inout ctx, o: o, by: "z3: not provable")
+      }
+    }
+  }
+  | z3.Failure -> {
+    context.report(
+      ctx: inout ctx,
+      d: report.diagnostic(
+        code: "E0999",
+        file: o.at_file,
+        span: o.at_span,
+        def_name: Some(value: def_name),
+        detail: "z3 rejected the problem for `" ++ obligations.kind_text(
+          k: o.kind
+        ) ++ " " ++ o.text ++ "`: " ++ outcome_r.detail
+      )
+    )
+    set_by(ctx: inout ctx, o: o, by: "z3: error")
+  }
+  | _ -> {
+    -- `unknown` or a timeout.
+    var nonlinear: Bool = formula.is_nonlinear(f: v.goal)
+    for f: formula.Formula in v.facts {
+      if formula.is_nonlinear(f: f) {
+        nonlinear = true
+      }
+    }
+    if nonlinear and not o.pinned {
+      set_by(ctx: inout ctx, o: o, by: "z3: nonlinear, budget exceeded")
+    } else {
+      var why: Text = ""
+      if nonlinear {
+        why = " (nonlinear arithmetic)"
+      }
+      context.report(
+        ctx: inout ctx,
+        d: report.diagnostic_for(
+          code: "E0501",
+          file: o.at_file,
+          span: o.at_span,
+          def_name: Some(value: def_name),
+          detail: "z3 gave up on `" ++ obligations.kind_text(
+            k: o.kind
+          ) ++ " " ++ o.text ++ "` within " ++ Int.to_text(
+            x: opts.budget_ms
+          ) ++ " ms" ++ why ++ "; raise the budget or simplify the contract",
+          obligation: info(o: o, status: "unprovable", counterexample: [])
+        )
+      )
+      var status: obligations.Status = o.status
+      if o.pinned {
+        status = obligations.Failed
+      }
+      context.set_obligation(
+        ctx: inout ctx,
+        o: { o with status: status, by: Some(value: "z3: budget exceeded") }
+      )
+    }
+  }
+  return Unit
+}
+
+fn dump(
+  files: io.Files,
+  dir: Text,
+  o: obligations.Obligation,
+  def_name: Text,
+  problem: Text
+) -> Unit may io.file, alloc, mutate {
+  let made: Result[Unit, io.Error] = io.mkdir(files: files, path: dir)
+  let path: Text = dir ++ "/" ++ Int.to_text(
+    x: o.id
+  ) ++ "_" ++ def_name ++ "_" ++ obligations.kind_text(k: o.kind) ++ ".smt2"
+  match io.create(files: files, path: path) with
+  | Ok(value) -> {
+    let written: Result[Unit, io.Error] = io.write(file: value, text: problem)
+  }
+  | Err(_) -> skip()
+  return Unit
+}
+
+-- The SMT-LIB problem for a condition: declarations, axioms, facts, and the negated goal. Effects: none.
+pub fn problem_text(v: vc.VC, budget_ms: Int) -> Text may alloc, mutate {
+  var lines: Builder[Text] = List.builder()
+  List.push(b: inout lines, x: "(set-logic ALL)")
+  List.push(b: inout lines, x: "(set-option :timeout " ++ Int.to_text(x: budget_ms) ++ ")")
+  List.push(b: inout lines, x: "(set-option :produce-models true)")
+  for s: Text in Map.keys(d: v.lw.sorts) {
+    List.push(b: inout lines, x: "(declare-sort " ++ s ++ " 0)")
+  }
+  for name: Text in Map.keys(d: v.lw.fns) {
+    match Map.find(d: v.lw.fns, key: name) with
+    | Some(value) -> {
+      var args: Builder[Text] = List.builder()
+      for a: formula.Sort in value.args {
+        List.push(b: inout args, x: formula.sort_text(s: a))
+      }
+      List.push(
+        b: inout lines,
+        x: "(declare-fun " ++ name ++ " (" ++ Text.join(
+          parts: List.finish(b: args),
+          sep: " "
+        ) ++ ") " ++ formula.sort_text(s: value.ret) ++ ")"
+      )
+    }
+    | None -> skip()
+  }
+  match lower.text_distinctness(lw: v.lw) with
+  | Some(value) -> List.push(b: inout lines, x: "(assert " ++ formula.smt(f: value) ++ ")")
+  | None -> skip()
+  for a: formula.Formula in List.finish(b: v.lw.axioms) {
+    List.push(b: inout lines, x: "(assert " ++ formula.smt(f: a) ++ ")")
+  }
+  for f: formula.Formula in v.facts {
+    List.push(b: inout lines, x: "(assert " ++ formula.smt(f: f) ++ ")")
+  }
+  List.push(
+    b: inout lines,
+    x: "(assert " ++ formula.smt(
+      f: formula.app(fn_name: "not", args: [v.goal], sort: formula.BoolS)
+    ) ++ ")"
+  )
+  List.push(b: inout lines, x: "(check-sat)")
+  List.push(b: inout lines, x: "(get-model)")
+  return Text.join(parts: List.finish(b: lines), sep: "\n") ++ "\n"
+}
+
+-- The model restricted to source-named constants, with source names. Effects: none.
+fn counterexample(r: z3.SolverResult, v: vc.VC) -> List[report.CounterEntry] may alloc, mutate {
+  var out: Builder[report.CounterEntry] = List.builder()
+  for e: z3.ModelEntry in r.model {
+    match Map.find(d: v.names, key: e.name) with
+    | Some(value) -> List.push(
+      b: inout out,
+      x: report.CounterEntry {
+        name: value,
+        value: e.value,
+        is_number: Int.parse(t: e.value) is Some or Float.parse(t: e.value) is Some
+      }
+    )
+    | None -> skip()
+  }
+  return List.finish(b: out)
+}
+
+-- The panic rule (§6.1) and the const fn rule (§3.8.1).
+fn rules(ctx: inout context.Context) -> Unit may mutate, alloc {
+  var by_def: Dict[Int, List[Int]] = Map.dict()
+  var order: Builder[Int] = List.builder()
+  for i: Int in 0 ..< ctx.obligation_count {
+    let o: obligations.Obligation = context.get_obligation(ctx: ctx, id: i)
+    match Map.find(d: by_def, key: o.def) with
+    | Some(value) -> Map.set(d: inout by_def, key: o.def, value: List.append(xs: value, x: i))
+    | None -> {
+      List.push(b: inout order, x: o.def)
+      Map.set(d: inout by_def, key: o.def, value: [i])
+    }
+  }
+  for def: Int in List.finish(b: order) {
+    let d: defs.Def = context.get_def(ctx: ctx, id: def)
+    if d.kind == defs.Fn or d.kind == defs.Verify {
+      var effects: Option[effectset.EffectSet] = None
+      var const_fn: Bool = false
+      var has_body: Bool = true
+      match d.node with
+      | defs.VerifyNode(_) -> {
+        match Map.find(d: ctx.verifies, key: d.key) with
+        | Some(value) -> effects = Some(value: value.effects)
+        | None -> skip()
+      }
+      | defs.FnNode(decl) -> {
+        match Map.find(d: ctx.signatures, key: def) with
+        | Some(value) -> effects = Some(value: value.effects)
+        | None -> skip()
+        const_fn = decl.is_const
+        has_body = decl.body is Some
+      }
+      | _ -> skip()
+      if effects is Some and has_body {
+        let has_panic: Bool = effectset.has(
+          s: set_or_empty(o: effects),
+          e: defs.PrimEffect(name: "panic")
+        )
+        for id: Int in ids_or(o: Map.find(d: by_def, key: def)) {
+          rule_for(ctx: inout ctx, id: id, d: d, const_fn: const_fn, has_panic: has_panic)
+        }
+      }
+    }
+  }
+  return Unit
+}
+
+fn set_or_empty(o: Option[effectset.EffectSet]) -> effectset.EffectSet may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return effectset.empty()
+}
+
+fn ids_or(o: Option[List[Int]]) -> List[Int] may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return []
+}
+
+fn rule_for(
+  ctx: inout context.Context,
+  id: Int,
+  d: defs.Def,
+  const_fn: Bool,
+  has_panic: Bool
+) -> Unit may mutate, alloc {
+  let o: obligations.Obligation = context.get_obligation(ctx: ctx, id: id)
+  if not o.status is obligations.Checked or is_test_kind(k: o.kind) {
+    return Unit
+  }
+  -- §19.3: reported in the ledger; the JavaScript number range is the runtime's assumption.
+  if o.kind is obligations.Representation or o.kind is obligations.Overflow {
+    return Unit
+  }
+  let head: Text = "`" ++ obligations.kind_text(k: o.kind) ++ " " ++ o.text ++ "`"
+  if const_fn {
+    context.report(
+      ctx: inout ctx,
+      d: report.diagnostic_for(
+        code: "E0703",
+        file: o.at_file,
+        span: o.at_span,
+        def_name: Some(value: d.name),
+        detail: "`" ++ d.name ++ "` is a `const fn`, so " ++ head ++ " must be proved; " ++ text_or(
+          o: o.by,
+          dflt: "it was not"
+        ),
+        obligation: info(o: o, status: "checked", counterexample: [])
+      )
+    )
+    return Unit
+  }
+  if not has_panic {
+    context.report(
+      ctx: inout ctx,
+      d: report.diagnostic_for(
+        code: "E0343",
+        file: o.at_file,
+        span: o.at_span,
+        def_name: Some(value: d.name),
+        detail: head ++ " is checked at runtime (" ++ text_or(
+          o: o.by,
+          dflt: "not proved"
+        ) ++ "), so `" ++ d.name ++ "` must declare `panic` or the obligation must be proved",
+        obligation: info(o: o, status: "checked", counterexample: [])
+      )
+    )
+  }
+  return Unit
+}

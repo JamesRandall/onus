@@ -1952,9 +1952,9 @@ fn call_impl(
     if i < 0 or i >= List.len(xs: xs) {
       return Err(
         error: precondition(
-          what: "refinement `0 <= it and it < len(xs: xs)` of std.list.get: " ++ Int.to_text(
+          what: "requires `0 <= i and i < len(xs: xs)` of get: index " ++ Int.to_text(
             x: i
-          ) ++ " is outside the list",
+          ) ++ " is outside 0 ..< " ++ Int.to_text(x: List.len(xs: xs)),
           span: span
         )
       )
@@ -1966,7 +1966,7 @@ fn call_impl(
     if n < 0 {
       return Err(
         error: precondition(
-          what: "refinement `it >= 0` of std.list.replicate: " ++ Int.to_text(x: n),
+          what: "requires `count >= 0` of replicate: count " ++ Int.to_text(x: n) ++ " is negative",
           span: span
         )
       )
@@ -1994,9 +1994,11 @@ fn call_impl(
     if from < 0 or to < from or to > List.len(xs: xs) {
       return Err(
         error: precondition(
-          what: "refinement of std.list.slice: " ++ Int.to_text(x: from) ++ " ..< " ++ Int.to_text(
-            x: to
-          ) ++ " is outside the list",
+          what: "requires `0 <= from and from <= to and to <= len(xs: xs)` of slice: " ++ Int.to_text(
+            x: from
+          ) ++ " ..< " ++ Int.to_text(x: to) ++ " is outside 0 ..< " ++ Int.to_text(
+            x: List.len(xs: xs)
+          ),
           span: span
         )
       )
@@ -2012,9 +2014,9 @@ fn call_impl(
     if i < 0 or i >= List.len(xs: bs) {
       return Err(
         error: precondition(
-          what: "refinement `0 <= it and it < len(b: b)` of std.bytes.get: " ++ Int.to_text(
+          what: "requires `0 <= i and i < len(b: b)` of get: index " ++ Int.to_text(
             x: i
-          ) ++ " is outside the bytes",
+          ) ++ " is outside 0 ..< " ++ Int.to_text(x: List.len(xs: bs)),
           span: span
         )
       )

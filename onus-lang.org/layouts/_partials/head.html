@@ -1,0 +1,33 @@
+{{- $title := .Title -}}
+{{- if .IsHome }}{{ $title = printf "%s — %s" site.Title site.Params.description }}{{ else }}{{ $title = printf "%s — %s" .Title site.Title }}{{ end -}}
+{{- $desc := or .Description .Summary site.Params.description | plainify | truncate 200 -}}
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ $title }}</title>
+<meta name="description" content="{{ $desc }}">
+<link rel="canonical" href="{{ .Permalink }}">
+<link rel="icon" href="{{ "/favicon.svg" | relURL }}" type="image/svg+xml">
+<link rel="icon" href="{{ "/favicon.ico" | relURL }}" sizes="32x32">
+<link rel="apple-touch-icon" href="{{ "/apple-touch-icon.png" | relURL }}">
+<meta name="theme-color" content="#FBF7EC">
+{{- $css := resources.Get "css/main.css" | minify | fingerprint }}
+<link rel="stylesheet" href="{{ $css.RelPermalink }}" integrity="{{ $css.Data.Integrity }}">
+{{- $og := "og.png" | absURL }}
+<meta property="og:site_name" content="{{ site.Title }}">
+<meta property="og:type" content="website">
+<meta property="og:locale" content="en_GB">
+<meta property="og:url" content="{{ .Permalink }}">
+<meta property="og:title" content="{{ $title }}">
+<meta property="og:description" content="{{ $desc }}">
+<meta property="og:image" content="{{ $og }}">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Onus: a language for code that a model writes and a person has to trust, with a function signature showing read-only database access, an authenticated caller, declared effects and a proved postcondition.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{{ $title }}">
+<meta name="twitter:description" content="{{ $desc }}">
+<meta name="twitter:image" content="{{ $og }}">
+<meta name="twitter:image:alt" content="Onus: a language for code that a model writes and a person has to trust.">
+<meta name="author" content="James Randall">
+<link rel="sitemap" type="application/xml" href="{{ "sitemap.xml" | absURL }}">

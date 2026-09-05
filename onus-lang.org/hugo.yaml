@@ -1,0 +1,122 @@
+# onus-lang.org — Hugo configuration.
+#
+# The site has no theme; layouts/ is the whole design. Long-form pages
+# (specification, grammar, implementation plan, loop spec, comparison) are
+# mounted straight from ../docs so the site never carries a stale copy, and
+# the worked examples and their review output are mounted from ../examples
+# so ledgers on the site are the compiler's own numbers.
+
+baseURL: https://onus-lang.org/
+title: Onus
+locale: en-GB
+enableGitInfo: true
+disableKinds: [taxonomy, term]
+timeZone: Europe/London
+
+params:
+  description: A programming language for code that a model writes and a person has to trust.
+  repo: https://github.com/JamesRandall/onus
+  specVersion: v0
+  # Fallback only; the footer reads the specification's last commit date from git when available.
+  specLastChanged: 2026-09-05
+  statusDate: 2026-09-05
+
+markup:
+  goldmark:
+    renderer:
+      unsafe: true   # the docs carry <!-- changed: … --> notes that the spec layout renders as margin notes
+    parser:
+      attribute:
+        block: true
+  highlight:
+    noClasses: false
+    lineNos: false
+  tableOfContents:
+    startLevel: 2
+    endLevel: 3
+
+menus:
+  main:
+    - name: Learn
+      pageRef: /concepts
+      weight: 10
+    - name: In practice
+      pageRef: /practice
+      weight: 20
+    - name: Specification
+      pageRef: /spec
+      weight: 30
+    - name: Environment
+      pageRef: /environment
+      weight: 40
+    - name: Status
+      pageRef: /status
+      weight: 50
+
+# Titles, ordering and layouts for the mounted documents, which carry no front matter.
+cascade:
+  - target:
+      path: /spec
+    title: Language specification
+    params:
+      mounted: true
+      source: docs/onus-spec-v0.md
+  - target:
+      path: /spec/grammar
+    title: Grammar as implemented
+    weight: 20
+    params:
+      mounted: true
+      source: docs/grammar-v0.md
+  - target:
+      path: /spec/implementation
+    title: Implementation plan
+    weight: 30
+    params:
+      mounted: true
+      source: docs/onus-impl-spec-v0.md
+  - target:
+      path: /spec/loop
+    title: Regeneration loop
+    weight: 40
+    params:
+      mounted: true
+      source: docs/onus-loop-v0.md
+  - target:
+      path: /compared
+    title: Compared
+    params:
+      mounted: true
+      source: docs/onus-lang.org/comparison.md
+
+module:
+  mounts:
+    - source: content
+      target: content
+    - source: layouts
+      target: layouts
+    - source: assets
+      target: assets
+    - source: static
+      target: static
+    # Documents published as pages.
+    - source: ../docs/onus-spec-v0.md
+      target: content/spec/_index.md
+    - source: ../docs/grammar-v0.md
+      target: content/spec/grammar.md
+    - source: ../docs/onus-impl-spec-v0.md
+      target: content/spec/implementation.md
+    - source: ../docs/onus-loop-v0.md
+      target: content/spec/loop.md
+    - source: ../docs/onus-lang.org/comparison.md
+      target: content/compared.md
+    # Documents and examples read by templates and shortcodes.
+    - source: ../docs
+      target: assets/docs
+    - source: ../examples
+      target: assets/examples
+    # The review pages `onus review` wrote, served as they are.
+    - source: ../examples/checkout/review
+      target: static/review/checkout
+    - source: ../examples/mandelbrot/review
+      target: static/review/mandelbrot

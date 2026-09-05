@@ -1,0 +1,313 @@
+module formula
+
+-- Formulas for the verifier (impl spec §7.1; `verify/formula.ts`) and their
+-- SMT-LIB 2 rendering. Sorts are `Int` (Onus Int and Duration), `Bool`, and
+-- uninterpreted sorts for everything else. Records and unions are not
+-- lowered to datatypes: field access is an uninterpreted projection and a
+-- variant test compares an uninterpreted tag.
+pub union Sort =
+  | IntS
+  | BoolS
+  | NamedS of name: Text
+
+pub record Bound {
+  name: Text
+  sort: Sort
+}
+
+pub union Formula =
+  | IntF of v: Int
+  -- An integer literal beyond the `Int` range, as SMT text (the ±2^53 bounds).
+  | LitF of text: Text
+  | BoolF of v: Bool
+  | VarF of name: Text, sort: Sort
+  -- An operator or uninterpreted function application.
+  | AppF of fn_name: Text, args: List[Formula], sort: Sort
+  | QuantF of quant: Text, vars: List[Bound], body: Formula
+  | IteF of cond: Formula, then_: Formula, else_: Formula, sort: Sort
+
+pub const true_f: Formula = BoolF(v: true)
+
+pub const false_f: Formula = BoolF(v: false)
+
+pub fn sort_equals(a: Sort, b: Sort) -> Bool {
+  return a == b
+}
+
+pub fn sort_of(f: Formula) -> Sort {
+  match f with
+  | IntF(_) -> return IntS
+  | LitF(_) -> return IntS
+  | BoolF(_) -> return BoolS
+  | VarF(_, sort) -> return sort
+  | AppF(_, _, sort) -> return sort
+  | QuantF(_, _, _) -> return BoolS
+  | IteF(_, _, _, sort) -> return sort
+}
+
+pub fn int_f(v: Int) -> Formula {
+  return IntF(v: v)
+}
+
+pub fn var_f(name: Text, sort: Sort) -> Formula {
+  return VarF(name: name, sort: sort)
+}
+
+pub fn app(fn_name: Text, args: List[Formula], sort: Sort) -> Formula {
+  return AppF(fn_name: fn_name, args: args, sort: sort)
+}
+
+pub fn is_true(f: Formula) -> Bool {
+  return f == BoolF(v: true)
+}
+
+pub fn is_false(f: Formula) -> Bool {
+  return f == BoolF(v: false)
+}
+
+pub fn and_f(xs: List[Formula]) -> Formula may alloc, mutate {
+  var flat: Builder[Formula] = List.builder()
+  for x: Formula in xs {
+    if is_false(f: x) {
+      return false_f
+    }
+    if not is_true(f: x) {
+      List.push(b: inout flat, x: x)
+    }
+  }
+  if List.built(b: flat) == 0 {
+    return true_f
+  }
+  if List.built(b: flat) == 1 {
+    return List.at(b: flat, i: 0)
+  }
+  return AppF(fn_name: "and", args: List.finish(b: flat), sort: BoolS)
+}
+
+pub fn or_f(xs: List[Formula]) -> Formula may alloc, mutate {
+  var flat: Builder[Formula] = List.builder()
+  for x: Formula in xs {
+    if is_true(f: x) {
+      return true_f
+    }
+    if not is_false(f: x) {
+      List.push(b: inout flat, x: x)
+    }
+  }
+  if List.built(b: flat) == 0 {
+    return false_f
+  }
+  if List.built(b: flat) == 1 {
+    return List.at(b: flat, i: 0)
+  }
+  return AppF(fn_name: "or", args: List.finish(b: flat), sort: BoolS)
+}
+
+pub fn not_f(x: Formula) -> Formula may alloc {
+  match x with
+  | BoolF(v) -> return BoolF(v: not v)
+  | _ -> return AppF(fn_name: "not", args: [x], sort: BoolS)
+}
+
+pub fn implies_f(a: Formula, b: Formula) -> Formula may alloc {
+  return AppF(fn_name: "=>", args: [a, b], sort: BoolS)
+}
+
+pub fn eq(a: Formula, b: Formula) -> Formula may alloc {
+  return AppF(fn_name: "=", args: [a, b], sort: BoolS)
+}
+
+-- Whether the formula contains multiplication of two non-constant terms, division or remainder.
+pub fn is_nonlinear(f: Formula) -> Bool
+  decreases f
+{
+  match f with
+  | AppF(fn_name, args, _) -> {
+    if fn_name == "div" or fn_name == "mod" {
+      return true
+    }
+    if fn_name == "*" {
+      var non_const: Int = 0
+      for a: Formula in args {
+        if not a is IntF and not a is LitF {
+          non_const = non_const + 1
+        }
+      }
+      if non_const > 1 {
+        return true
+      }
+    }
+    return any_nonlinear(fs: args)
+  }
+  | QuantF(_, _, body) -> return is_nonlinear(f: body)
+  | IteF(cond, then_, else_, _) -> return is_nonlinear(f: cond) or is_nonlinear(
+    f: then_
+  ) or is_nonlinear(f: else_)
+  | _ -> return false
+}
+
+fn any_nonlinear(fs: List[Formula]) -> Bool
+  decreases fs
+{
+  for f: Formula in fs {
+    if is_nonlinear(f: f) {
+      return true
+    }
+  }
+  return false
+}
+
+pub fn sort_text(s: Sort) -> Text {
+  match s with
+  | IntS -> return "Int"
+  | BoolS -> return "Bool"
+  | NamedS(name) -> return name
+}
+
+-- SMT-LIB 2 text of a formula.
+pub fn smt(f: Formula) -> Text may alloc, mutate
+  decreases f
+{
+  match f with
+  | IntF(v) -> {
+    if v < 0 {
+      return "(- " ++ Int.to_text(x: 0 - v) ++ ")"
+    }
+    return Int.to_text(x: v)
+  }
+  | LitF(text) -> return text
+  | BoolF(v) -> return Bool.to_text(b: v)
+  | VarF(name, _) -> return name
+  | AppF(fn_name, args, _) -> {
+    if List.len(xs: args) == 0 {
+      return fn_name
+    }
+    return "(" ++ fn_name ++ " " ++ smt_list(fs: args) ++ ")"
+  }
+  | QuantF(quant, vars, body) -> {
+    var parts: Builder[Text] = List.builder()
+    for v: Bound in vars {
+      List.push(b: inout parts, x: "(" ++ v.name ++ " " ++ sort_text(s: v.sort) ++ ")")
+    }
+    return "(" ++ quant ++ " (" ++ Text.join(parts: List.finish(b: parts), sep: " ") ++ ") " ++ smt(
+      f: body
+    ) ++ ")"
+  }
+  | IteF(cond, then_, else_, _) -> return "(ite " ++ smt(f: cond) ++ " " ++ smt(
+    f: then_
+  ) ++ " " ++ smt(f: else_) ++ ")"
+}
+
+fn smt_list(fs: List[Formula]) -> Text may alloc, mutate
+  decreases fs
+{
+  var parts: Builder[Text] = List.builder()
+  for x: Formula in fs {
+    List.push(b: inout parts, x: smt(f: x))
+  }
+  return Text.join(parts: List.finish(b: parts), sep: " ")
+}
+
+pub fn fn_name_of(f: Formula) -> Text {
+  match f with
+  | AppF(fn_name, _, _) -> return fn_name
+  | _ -> return ""
+}
+
+pub fn args_of(f: Formula) -> List[Formula] may alloc {
+  match f with
+  | AppF(_, args, _) -> return args
+  | _ -> return []
+}
+
+pub fn var_name(f: Formula) -> Text {
+  match f with
+  | VarF(name, _) -> return name
+  | _ -> return ""
+}
+
+pub fn ite_cond(f: Formula) -> Formula {
+  match f with
+  | IteF(cond, _, _, _) -> return cond
+  | _ -> return false_f
+}
+
+pub fn ite_then(f: Formula) -> Formula {
+  match f with
+  | IteF(_, then_, _, _) -> return then_
+  | _ -> return false_f
+}
+
+pub fn ite_else(f: Formula) -> Formula {
+  match f with
+  | IteF(_, _, else_, _) -> return else_
+  | _ -> return false_f
+}
+
+pub fn first_arg(f: Formula) -> Option[Formula] may alloc {
+  let args: List[Formula] = args_of(f: f)
+  if List.len(xs: args) == 0 {
+    return None
+  }
+  return Some(value: List.get(xs: args, i: 0))
+}
+
+-- Structural equality of formulas; quantified formulas are never equal.
+pub fn formula_equals(a: Formula, b: Formula) -> Bool may alloc
+  decreases a
+{
+  match a with
+  | IntF(v) -> return b == IntF(v: v)
+  | LitF(text) -> return b == LitF(text: text)
+  | BoolF(v) -> return b == BoolF(v: v)
+  | VarF(name, _) -> return b is VarF and var_name(f: b) == name
+  | AppF(fn_name, args, _) -> {
+    if not b is AppF or fn_name_of(f: b) != fn_name {
+      return false
+    }
+    return args_equal(xs: args, ys: args_of(f: b))
+  }
+  | IteF(cond, then_, else_, _) -> return b is IteF and formula_equals(
+    a: cond,
+    b: ite_cond(f: b)
+  ) and formula_equals(a: then_, b: ite_then(f: b)) and formula_equals(a: else_, b: ite_else(f: b))
+  | QuantF(_, _, _) -> return false
+}
+
+fn args_equal(xs: List[Formula], ys: List[Formula]) -> Bool may alloc
+  decreases xs
+{
+  if List.len(xs: xs) != List.len(xs: ys) {
+    return false
+  }
+  for i: Int in 0 ..< List.len(xs: xs) {
+    if not formula_equals(a: List.get(xs: xs, i: i), b: List.get(xs: ys, i: i)) {
+      return false
+    }
+  }
+  return true
+}
+
+example rendering {
+  smt(f: and_f(xs: [IntF(v: 1), true_f])) == "1"
+  smt(
+    f: app(fn_name: "<=", args: [IntF(v: -3), VarF(name: "x", sort: IntS)], sort: BoolS)
+  ) == "(<= (- 3) x)"
+  smt(
+    f: QuantF(quant: "forall", vars: [Bound { name: "i", sort: IntS }], body: true_f)
+  ) == "(forall ((i Int)) true)"
+  is_nonlinear(
+    f: app(
+      fn_name: "*",
+      args: [VarF(name: "x", sort: IntS), VarF(name: "y", sort: IntS)],
+      sort: IntS
+    )
+  )
+  not is_nonlinear(
+    f: app(fn_name: "*", args: [IntF(v: 2), VarF(name: "y", sort: IntS)], sort: IntS)
+  )
+  formula_equals(
+    a: app(fn_name: "f", args: [IntF(v: 1)], sort: IntS),
+    b: app(fn_name: "f", args: [IntF(v: 1)], sort: IntS)
+  )
+}

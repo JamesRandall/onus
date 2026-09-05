@@ -52,6 +52,7 @@ fn digits_end(src: List[Int], start: Int where it >= 0) -> Int where it >= start
   xs: src
 ) may alloc
   requires List.len(xs: src) <= max_source
+  ensures tokens.is_digit(c: at(src: src, i: start)) implies result > start
 {
   var p: Int where it >= start and it <= List.len(xs: src) = start
   loop while tokens.is_digit(c: at(src: src, i: p)) or at(src: src, i: p) == 95
@@ -199,7 +200,8 @@ fn scan_number(
             code: "E0010",
             start: start,
             end: pos,
-            detail: "`" ++ text_of(src: src, from: start, to: pos) ++ "` is not a valid literal"
+            detail: "`" ++ text_of(src: src, from: start, to: pos) ++ "` is not a valid literal",
+            def_name: None
           }
         )
         List.push(
@@ -224,7 +226,8 @@ fn scan_number(
           code: "E0010",
           start: start,
           end: pos,
-          detail: "`" ++ text_of(src: src, from: start, to: pos) ++ "` is not a valid literal"
+          detail: "`" ++ text_of(src: src, from: start, to: pos) ++ "` is not a valid literal",
+          def_name: None
         }
       )
       List.push(
@@ -262,7 +265,8 @@ fn scan_number(
         code: "E0008",
         start: start,
         end: pos,
-        detail: number ++ " exceeds the 64-bit signed range"
+        detail: number ++ " exceeds the 64-bit signed range",
+        def_name: None
       }
     )
     List.push(
@@ -318,7 +322,8 @@ fn push_duration(
           code: "E0008",
           start: start,
           end: end,
-          detail: number ++ " exceeds the 64-bit signed range"
+          detail: number ++ " exceeds the 64-bit signed range",
+          def_name: None
         }
       )
       List.push(
@@ -339,7 +344,8 @@ fn push_duration(
         code: "E0008",
         start: start,
         end: end,
-        detail: number ++ " exceeds the 64-bit signed range"
+        detail: number ++ " exceeds the 64-bit signed range",
+        def_name: None
       }
     )
     List.push(
@@ -380,7 +386,8 @@ fn scan_text(
             code: "E0004",
             start: start,
             end: pos,
-            detail: "a text literal must close on the same line; use \\n for a newline"
+            detail: "a text literal must close on the same line; use \\n for a newline",
+            def_name: None
           }
         )
         List.push(
@@ -410,7 +417,8 @@ fn scan_text(
                 end: stop,
                 detail: "`\\" ++ text_of_code(
                   c: e
-                ) ++ "` is not a valid escape; use \\n \\t \\r \\0 \\\\ or \\\""
+                ) ++ "` is not a valid escape; use \\n \\t \\r \\0 \\\\ or \\\"",
+                def_name: None
               }
             )
           }
@@ -433,7 +441,8 @@ fn scan_text(
         code: "E0004",
         start: start,
         end: pos,
-        detail: "a text literal must close on the same line; use \\n for a newline"
+        detail: "a text literal must close on the same line; use \\n for a newline",
+        def_name: None
       }
     )
   }
@@ -551,7 +560,8 @@ pub fn lex(source: Text) -> LexResult may alloc
                       code: "E0005",
                       start: pos,
                       end: stop,
-                      detail: "`" ++ word ++ "` is neither a name ([a-z][a-z0-9_]*) nor a type name ([A-Z][A-Za-z0-9]*)"
+                      detail: "`" ++ word ++ "` is neither a name ([a-z][a-z0-9_]*) nor a type name ([A-Z][A-Za-z0-9]*)",
+                      def_name: None
                     }
                   )
                 }
@@ -603,7 +613,8 @@ pub fn lex(source: Text) -> LexResult may alloc
                       code: "E0005",
                       start: pos,
                       end: pos + 1,
-                      detail: "`" ++ text_of_code(c: c) ++ "` cannot appear here"
+                      detail: "`" ++ text_of_code(c: c) ++ "` cannot appear here",
+                      def_name: None
                     }
                   )
                   pos = pos + 1

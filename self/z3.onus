@@ -1,0 +1,407 @@
+module z3
+import std.io
+import std.hash
+
+-- The z3 driver and the proof cache (impl spec §7.2–§7.4; `verify/z3.ts`).
+-- One `z3 -in -smt2` process per condition, with the budget as z3's own
+-- timeout and a larger process timeout. `unsat` proves the obligation;
+-- `sat` yields a model; `unknown` and timeouts are reported as such and
+-- never cached. The cache is keyed by the BLAKE3 hash of the problem text,
+-- the solver version and the budget.
+pub union Outcome =
+  | Unsat
+  | Sat
+  | Unknown
+  | Timeout
+  | Failure
+
+pub record ModelEntry {
+  name: Text
+  value: Text
+}
+
+pub record SolverResult {
+  outcome: Outcome
+  -- Values of the problem's constants when `sat`, by SMT name.
+  model: List[ModelEntry]
+  detail: Text
+}
+
+pub record Solver {
+  path: Text
+  version: Text
+}
+
+pub fn outcome_text(o: Outcome) -> Text {
+  match o with
+  | Unsat -> return "unsat"
+  | Sat -> return "sat"
+  | Unknown -> return "unknown"
+  | Timeout -> return "timeout"
+  | Failure -> return "error"
+}
+
+fn outcome_of_text(t: Text) -> Outcome {
+  if t == "unsat" {
+    return Unsat
+  }
+  if t == "sat" {
+    return Sat
+  }
+  if t == "unknown" {
+    return Unknown
+  }
+  if t == "timeout" {
+    return Timeout
+  }
+  return Failure
+}
+
+-- The z3 executable, or None when none runs.
+pub fn find_z3(
+  process: io.Process,
+  explicit: Option[Text]
+) -> Option[Solver] may io.file, nondet, alloc {
+  var path: Text = "z3"
+  match explicit with
+  | Some(value) -> path = value
+  | None -> path = "z3"
+  match io.run(
+    process: process,
+    program: path,
+    args: ["--version"],
+    stdin: "",
+    timeout_ms: 10000
+  ) with
+  | Err(error) -> return None
+  | Ok(value) -> {
+    if value.status != 0 {
+      return None
+    }
+    return Some(value: Solver { path: path, version: Text.trim(t: value.stdout) })
+  }
+}
+
+fn is_verdict(line: Text) -> Bool may alloc {
+  return line == "sat" or line == "unsat" or line == "unknown" or line == "timeout" or Text.starts_with(
+    t: line,
+    prefix: "(error"
+  )
+}
+
+-- Runs z3 on `problem` with `budget_ms`.
+pub fn run_z3(
+  process: io.Process,
+  solver: Solver,
+  problem: Text,
+  budget_ms: Int where it >= 0
+) -> SolverResult may io.file, nondet, alloc, mutate {
+  match io.run(
+    process: process,
+    program: solver.path,
+    args: ["-in", "-smt2", "-t:" ++ Int.to_text(x: budget_ms)],
+    stdin: problem,
+    timeout_ms: budget_ms * 4 + 2000
+  ) with
+  | Err(error) -> {
+    match error with
+    | io.Other(detail) -> {
+      if Text.contains(t: detail, needle: "did not finish") {
+        return SolverResult { outcome: Timeout, model: [], detail: "process timeout" }
+      }
+      return SolverResult { outcome: Failure, model: [], detail: detail }
+    }
+    | io.NotFound(path) -> return SolverResult {
+      outcome: Failure,
+      model: [],
+      detail: "`" ++ path ++ "` not found"
+    }
+    | io.Denied(path) -> return SolverResult {
+      outcome: Failure,
+      model: [],
+      detail: "`" ++ path ++ "` denied"
+    }
+  }
+  | Ok(value) -> {
+    let out: Text = value.stdout ++ value.stderr
+    var first: Text = ""
+    var found: Bool = false
+    for raw: Text in Text.split(t: out, sep: "\n") {
+      let line: Text = Text.trim(t: raw)
+      if not found and line != "" and is_verdict(line: line) {
+        first = line
+        found = true
+      }
+    }
+    if first == "unsat" {
+      return SolverResult { outcome: Unsat, model: [], detail: "" }
+    }
+    if first == "sat" {
+      return SolverResult { outcome: Sat, model: parse_model(text: out), detail: "" }
+    }
+    if first == "unknown" or first == "timeout" {
+      var detail: Text = "unknown"
+      if first == "timeout" or Text.contains(t: out, needle: "timeout") {
+        detail = "solver timeout"
+      }
+      return SolverResult { outcome: Timeout, model: [], detail: detail }
+    }
+    var detail: Text = out
+    if Text.count(t: out) > 500 {
+      detail = Text.slice(t: out, from: 0, to: 500)
+    }
+    return SolverResult { outcome: Failure, model: [], detail: detail }
+  }
+}
+
+fn is_space(c: Int) -> Bool {
+  return c == 32 or c == 10 or c == 13 or c == 9
+}
+
+fn is_token_char(c: Int) -> Bool {
+  return not is_space(c: c) and c != 40 and c != 41
+}
+
+-- The next token of `cps` from `i` (after spaces): its end.
+fn token_end(cps: List[Int], i: Int where it >= 0) -> Int where it >= i {
+  var j: Int where it >= i = i
+  loop while j < List.len(xs: cps) and is_token_char(c: List.get(xs: cps, i: j))
+    invariant j >= i
+    decreases List.len(xs: cps) - j
+  {
+    j = j + 1
+  }
+  return j
+}
+
+fn skip_spaces(cps: List[Int], i: Int where it >= 0) -> Int where it >= i {
+  var j: Int where it >= i = i
+  loop while j < List.len(xs: cps) and is_space(c: List.get(xs: cps, i: j))
+    invariant j >= i
+    decreases List.len(xs: cps) - j
+  {
+    j = j + 1
+  }
+  return j
+}
+
+fn slice_text(cps: List[Int], from: Int, to: Int) -> Text may alloc, mutate {
+  var out: Builder[Int where 0 <= it and it <= 1114111] = List.builder()
+  if from < 0 or to > List.len(xs: cps) or to < from {
+    return ""
+  }
+  for i: Int in from ..< to {
+    let c: Int = List.get(xs: cps, i: i)
+    if c >= 0 and c <= 1114111 {
+      List.push(b: inout out, x: c)
+    }
+  }
+  return Text.of_code_points(cps: List.finish(b: out))
+}
+
+-- Extracts `(define-fun name () Sort value)` entries of a z3 model.
+pub fn parse_model(text: Text) -> List[ModelEntry] may alloc, mutate {
+  let cps: List[Int] = Text.code_points(t: text)
+  let n: Int = List.len(xs: cps)
+  let marker: List[Int] = Text.code_points(t: "(define-fun ")
+  let m: Int = List.len(xs: marker)
+  var out: Builder[ModelEntry] = List.builder()
+  var i: Int where it >= 0 = 0
+  loop while i + m <= n
+    invariant i >= 0
+    decreases n - i
+  {
+    var matches: Bool = true
+    for k: Int in 0 ..< m {
+      if matches and List.get(xs: cps, i: i + k) != List.get(xs: marker, i: k) {
+        matches = false
+      }
+    }
+    if matches {
+      let name_start: Int = skip_spaces(cps: cps, i: i + m)
+      let name_end: Int = token_end(cps: cps, i: name_start)
+      var p: Int = skip_spaces(cps: cps, i: name_end)
+      var ok: Bool = name_end > name_start
+      -- `()`
+      if ok and p + 1 < n and List.get(xs: cps, i: p) == 40 and List.get(xs: cps, i: p + 1) == 41 {
+        p = skip_spaces(cps: cps, i: p + 2)
+      } else {
+        ok = false
+      }
+      if ok {
+        let sort_end: Int = token_end(cps: cps, i: p)
+        ok = sort_end > p
+        p = skip_spaces(cps: cps, i: sort_end)
+      }
+      if ok and p < n {
+        var value: Text = ""
+        if List.get(xs: cps, i: p) == 40 {
+          -- `(- 3)`
+          let close: Int = find_close(cps: cps, i: p)
+          if close > p + 3 {
+            value = "-" ++ Text.trim(t: slice_text(cps: cps, from: p + 3, to: close))
+            p = close + 1
+          } else {
+            ok = false
+          }
+        } else {
+          let value_end: Int = token_end(cps: cps, i: p)
+          value = slice_text(cps: cps, from: p, to: value_end)
+          p = value_end
+        }
+        if ok and p < n and List.get(xs: cps, i: p) == 41 {
+          List.push(
+            b: inout out,
+            x: ModelEntry {
+              name: slice_text(cps: cps, from: name_start, to: name_end),
+              value: value
+            }
+          )
+        }
+      }
+      i = i + m
+    } else {
+      i = i + 1
+    }
+  }
+  return List.finish(b: out)
+}
+
+fn find_close(cps: List[Int], i: Int where it >= 0) -> Int where it >= i {
+  var j: Int where it >= i = i
+  loop while j < List.len(xs: cps) and List.get(xs: cps, i: j) != 41
+    invariant j >= i
+    decreases List.len(xs: cps) - j
+  {
+    j = j + 1
+  }
+  return j
+}
+
+pub fn model_value(model: List[ModelEntry], name: Text) -> Option[Text] {
+  for e: ModelEntry in model {
+    if e.name == name {
+      return Some(value: e.value)
+    }
+  }
+  return None
+}
+
+-- The proof cache -------------------------------------------------------------------------
+pub fn cache_key(problem: Text, version: Text, budget_ms: Int) -> Text may alloc {
+  return hash.blake3_hex(t: version ++ "\n" ++ Int.to_text(x: budget_ms) ++ "\n" ++ problem)
+}
+
+fn cache_path(dir: Text, key: Text) -> Text may alloc {
+  return dir ++ "/" ++ key ++ ".onus-proof"
+}
+
+fn text_or_empty(o: Option[Text]) -> Text {
+  match o with
+  | Some(value) -> return value
+  | None -> return ""
+}
+
+fn read_or_none(files: io.Files, path: Text) -> Option[Text] may io.file, alloc {
+  match io.read(files: files, path: path) with
+  | Ok(value) -> return Some(value: value)
+  | Err(error) -> return None
+}
+
+-- A cached result: the outcome, the detail, then one `name value` line per model entry.
+pub fn cache_get(
+  files: io.Files,
+  dir: Option[Text],
+  key: Text
+) -> Option[SolverResult] may io.file, alloc, mutate {
+  if dir is None {
+    return None
+  }
+  let text: Option[Text] = read_or_none(
+    files: files,
+    path: cache_path(dir: text_or_empty(o: dir), key: key)
+  )
+  if text is None {
+    return None
+  }
+  return parse_cached(text: text_or_empty(o: text))
+}
+
+fn parse_cached(text: Text) -> Option[SolverResult] may alloc, mutate {
+  let lines: List[Text] = Text.split(t: text, sep: "\n")
+  if List.len(xs: lines) < 2 {
+    return None
+  }
+  let outcome: Outcome = outcome_of_text(t: List.get(xs: lines, i: 0))
+  if outcome != Unsat and outcome != Sat {
+    return None
+  }
+  var model: Builder[ModelEntry] = List.builder()
+  for i: Int in 2 ..< List.len(xs: lines) {
+    let line: Text = List.get(xs: lines, i: i)
+    match Text.index_of(t: line, needle: " ", from: 0) with
+    | Some(value) -> {
+      if value < Text.count(t: line) {
+        List.push(
+          b: inout model,
+          x: ModelEntry {
+            name: Text.slice(t: line, from: 0, to: value),
+            value: Text.slice(t: line, from: value + 1, to: Text.count(t: line))
+          }
+        )
+      }
+    }
+    | None -> skip()
+  }
+  return Some(
+    value: SolverResult {
+      outcome: outcome,
+      model: List.finish(b: model),
+      detail: List.get(xs: lines, i: 1)
+    }
+  )
+}
+
+fn skip() -> Unit {
+  return Unit
+}
+
+-- Stores a result. `unknown`, `timeout` and `error` are never cached.
+pub fn cache_set(
+  files: io.Files,
+  dir: Option[Text],
+  key: Text,
+  r: SolverResult
+) -> Unit may io.file, alloc, mutate {
+  if dir is None or (r.outcome != Unsat and r.outcome != Sat) {
+    return Unit
+  }
+  let d: Text = text_or_empty(o: dir)
+  let made: Result[Unit, io.Error] = io.mkdir(files: files, path: d)
+  var lines: Builder[Text] = List.builder()
+  List.push(b: inout lines, x: outcome_text(o: r.outcome))
+  List.push(b: inout lines, x: Text.replace(t: r.detail, from: "\n", to: " "))
+  for e: ModelEntry in r.model {
+    List.push(b: inout lines, x: e.name ++ " " ++ e.value)
+  }
+  match io.create(files: files, path: cache_path(dir: d, key: key)) with
+  | Err(error) -> return Unit
+  | Ok(value) -> {
+    let written: Result[Unit, io.Error] = io.write(
+      file: value,
+      text: Text.join(parts: List.finish(b: lines), sep: "\n")
+    )
+    return Unit
+  }
+}
+
+example model_parsing {
+  parse_model(
+    text: "sat\n(model\n  (define-fun x () Int 3)\n  (define-fun y () Int (- 2))\n  (define-fun b () Bool true)\n)"
+  ) == [
+    ModelEntry { name: "x", value: "3" },
+    ModelEntry { name: "y", value: "-2" },
+    ModelEntry { name: "b", value: "true" }
+  ]
+  model_value(model: parse_model(text: "(define-fun n () Int 7)"), name: "n") == Some(value: "7")
+}

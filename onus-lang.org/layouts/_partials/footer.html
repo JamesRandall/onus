@@ -1,0 +1,6 @@
+{{- $date := site.Params.specLastChanged | time.Format "2 January 2006" -}}
+{{- with site.GetPage "/spec" }}{{ with .GitInfo }}{{ $date = .CommitDate.Format "2 January 2006" }}{{ end }}{{ end -}}
+<footer>
+  <span>Onus is being built in the open. The compiler is being written in Onus. Specification {{ site.Params.specVersion }}, last changed {{ $date }}.</span>
+  <span><a href="{{ "/compared/" | relURL }}">Compared</a> · <a href="{{ "/spec/changes/" | relURL }}">Changes</a> · <a href="{{ site.Params.repo }}">Source</a></span>
+</footer>

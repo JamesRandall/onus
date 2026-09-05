@@ -1,0 +1,11 @@
+{{ define "main" }}
+<div class="wrap">
+  <article class="prose wide">
+    {{- if not .Params.mounted }}
+    <h1 class="page-title">{{ .Title }}</h1>
+    {{- with .Params.lede }}<p class="lede">{{ . | markdownify }}</p>{{ end }}
+    {{- end }}
+    {{ partial "doc-content.html" . }}
+  </article>
+</div>
+{{ end }}

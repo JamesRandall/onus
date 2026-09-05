@@ -1,0 +1,645 @@
+module constant
+import ast
+import parser
+import defs
+import context
+import types
+import obligations
+import values
+import evaluator
+import walk
+import lower
+
+-- Constant discharge (`verify/constant.ts`): an obligation whose predicate
+-- and inputs are all constants (a record built from literals, a call with
+-- literal arguments) is decided by evaluating it, which also covers floats
+-- (§18.1: "the Viewport refinements at construction in main: proved
+-- (constants)").
+pub const budget: Int = 100000
+
+fn skip() -> Unit {
+  return Unit
+}
+
+fn or_neg(o: Option[Int]) -> Int {
+  match o with
+  | Some(value) -> return value
+  | None -> return -1
+}
+
+fn bool_of(o: Option[values.Value]) -> Option[Bool] {
+  match o with
+  | None -> return None
+  | Some(value) -> {
+    match value with
+    | values.BoolV(v) -> return Some(value: v)
+    | _ -> return None
+  }
+}
+
+fn fields_or(o: Option[List[types.FieldInfo]]) -> List[types.FieldInfo] may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return []
+}
+
+fn find_field(fs: List[types.FieldInfo], name: Text) -> Option[types.FieldInfo] {
+  for f: types.FieldInfo in fs {
+    if f.name == name {
+      return Some(value: f)
+    }
+  }
+  return None
+}
+
+-- The def a constructor or callee name resolves to, or -1.
+fn ctor_def(ctx: context.Context, k: Int) -> Int {
+  match Map.find(d: ctx.refs, key: k) with
+  | None -> return -1
+  | Some(value) -> {
+    match value with
+    | defs.DefRes(def) -> return def
+    | _ -> return -1
+  }
+}
+
+fn callee_def(ctx: context.Context, k: Int) -> Int {
+  match Map.find(d: ctx.refs, key: k) with
+  | None -> return -1
+  | Some(value) -> {
+    match value with
+    | defs.DefRes(def) -> return def
+    | defs.CompanionRes(owner, fn_def) -> return fn_def
+    | _ -> return -1
+  }
+}
+
+-- Evaluates `e` as a constant in `file`, or nothing when it is not one.
+fn eval_const(
+  ev: inout evaluator.Ev,
+  ctx: inout context.Context,
+  e: ast.Expr,
+  env: Dict[Int, values.Value],
+  file: Int
+) -> Option[values.Value] may mutate, alloc {
+  ev = { ev with file: file }
+  match evaluator.eval_expr(
+    fuel: evaluator.max_depth,
+    ev: inout ev,
+    ctx: inout ctx,
+    e: e,
+    env: env
+  ) with
+  | Ok(value) -> return Some(value: value)
+  | Err(_) -> return None
+}
+
+-- True when the obligation's predicate evaluates to true under constant
+-- inputs, false when it evaluates to false, nothing when it is not constant.
+-- Effects: none beyond evaluation.
+pub fn const_discharge(
+  ctx: inout context.Context,
+  o: obligations.Obligation
+) -> Option[Bool] may mutate, alloc {
+  let src: Int = or_neg(o: o.source)
+  if src < 0 {
+    return None
+  }
+  var ev: evaluator.Ev = evaluator.new_ev(file: o.at_file)
+  ev = { ev with budget: budget }
+  match o.kind with
+  | obligations.Refinement -> return refinement_verdict(
+    ev: inout ev,
+    ctx: inout ctx,
+    o: o,
+    src: src
+  )
+  | obligations.Requires -> return requires_verdict(ev: inout ev, ctx: inout ctx, o: o, src: src)
+  | _ -> return None
+}
+
+fn refinement_verdict(
+  ev: inout evaluator.Ev,
+  ctx: inout context.Context,
+  o: obligations.Obligation,
+  src: Int
+) -> Option[Bool] may mutate, alloc {
+  let value_e: Option[ast.Expr] = Map.find(d: ctx.expr_nodes, key: o.at)
+  let pred_e: Option[ast.Expr] = Map.find(d: ctx.where_exprs, key: src)
+  if value_e is None or pred_e is None {
+    return None
+  }
+  var env: Dict[Int, values.Value] = Map.dict()
+  -- A field refinement may mention sibling fields: bind them to the constructor's other values.
+  match Map.find(d: ctx.ctor_of, key: o.at) with
+  | Some(value) -> {
+    if not sibling_env(ev: inout ev, ctx: inout ctx, ctor: value, file: o.at_file, env: inout env) {
+      return None
+    }
+  }
+  | None -> skip()
+  let it_v: Option[values.Value] = eval_const(
+    ev: inout ev,
+    ctx: inout ctx,
+    e: expr_or(o: value_e),
+    env: Map.dict(),
+    file: o.at_file
+  )
+  if it_v is None {
+    return None
+  }
+  return eval_pred(
+    fuel: evaluator.max_depth,
+    ev: inout ev,
+    ctx: inout ctx,
+    e: expr_or(o: pred_e),
+    env: env,
+    it_v: value_or_unit(o: it_v),
+    file: lower.pred_file(k: src)
+  )
+}
+
+fn expr_or(o: Option[ast.Expr]) -> ast.Expr may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return ast.Hole(span: ast.Span { start: 0, end: 0 })
+}
+
+fn value_or_unit(o: Option[values.Value]) -> values.Value {
+  match o with
+  | Some(value) -> return value
+  | None -> return values.UnitV
+}
+
+-- Binds the constructor's fields to their (constant) initialisers; false when one is not constant.
+fn sibling_env(
+  ev: inout evaluator.Ev,
+  ctx: inout context.Context,
+  ctor: ast.Expr,
+  file: Int,
+  env: inout Dict[Int, values.Value]
+) -> Bool may mutate, alloc {
+  match ctor with
+  | ast.Ctor(_, args, fields, span) -> {
+    let owner: Int = ctor_def(
+      ctx: ctx,
+      k: defs.node_key(file: file, tag: defs.tag_expr, span: span)
+    )
+    var fs: List[types.FieldInfo] = []
+    if owner >= 0 {
+      fs = fields_or(o: Map.find(d: ctx.fields, key: owner))
+    }
+    match args with
+    | Some(value) -> {
+      for a: ast.Arg in value {
+        if not bind_sibling(
+          ev: inout ev,
+          ctx: inout ctx,
+          fs: fs,
+          name: a.name.text,
+          e: a.value,
+          file: file,
+          env: inout env
+        ) {
+          return false
+        }
+      }
+    }
+    | None -> skip()
+    match fields with
+    | Some(value) -> {
+      for f: ast.FieldInit in value {
+        if not bind_sibling(
+          ev: inout ev,
+          ctx: inout ctx,
+          fs: fs,
+          name: f.name.text,
+          e: f.value,
+          file: file,
+          env: inout env
+        ) {
+          return false
+        }
+      }
+    }
+    | None -> skip()
+    return true
+  }
+  | _ -> return true
+}
+
+fn bind_sibling(
+  ev: inout evaluator.Ev,
+  ctx: inout context.Context,
+  fs: List[types.FieldInfo],
+  name: Text,
+  e: ast.Expr,
+  file: Int,
+  env: inout Dict[Int, values.Value]
+) -> Bool may mutate, alloc {
+  match find_field(fs: fs, name: name) with
+  | None -> return true
+  | Some(value) -> {
+    let fv: Option[values.Value] = eval_const(
+      ev: inout ev,
+      ctx: inout ctx,
+      e: e,
+      env: Map.dict(),
+      file: file
+    )
+    if fv is None {
+      return false
+    }
+    Map.set(d: inout env, key: value.def, value: value_or_unit(o: fv))
+    return true
+  }
+}
+
+-- Evaluates a refinement predicate with `it` bound: the evaluator has no
+-- `it`, so comparisons and boolean structure are evaluated here and the
+-- rest handed to it.
+fn eval_pred(
+  fuel: Int where it >= 0,
+  ev: inout evaluator.Ev,
+  ctx: inout context.Context,
+  e: ast.Expr,
+  env: Dict[Int, values.Value],
+  it_v: values.Value,
+  file: Int
+) -> Option[Bool] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return None
+  }
+  match e with
+  | ast.And(operands, _) -> {
+    for x: ast.Expr in operands {
+      match bool_of(
+        o: eval_value(
+          fuel: fuel - 1,
+          ev: inout ev,
+          ctx: inout ctx,
+          e: x,
+          env: env,
+          it_v: it_v,
+          file: file
+        )
+      ) with
+      | None -> return None
+      | Some(value) -> {
+        if not value {
+          return Some(value: false)
+        }
+      }
+    }
+    return Some(value: true)
+  }
+  | ast.Or(operands, _) -> {
+    for x: ast.Expr in operands {
+      match bool_of(
+        o: eval_value(
+          fuel: fuel - 1,
+          ev: inout ev,
+          ctx: inout ctx,
+          e: x,
+          env: env,
+          it_v: it_v,
+          file: file
+        )
+      ) with
+      | None -> return None
+      | Some(value) -> {
+        if value {
+          return Some(value: true)
+        }
+      }
+    }
+    return Some(value: false)
+  }
+  | _ -> return bool_of(
+    o: eval_value(
+      fuel: fuel - 1,
+      ev: inout ev,
+      ctx: inout ctx,
+      e: e,
+      env: env,
+      it_v: it_v,
+      file: file
+    )
+  )
+}
+
+fn mentions_it(root: ast.Expr) -> Bool may alloc, mutate {
+  for n: walk.Node in walk.nodes_in_expr(e: root, into_verify: true) {
+    match n with
+    | walk.NExpr(e) -> {
+      if e is ast.It {
+        return true
+      }
+    }
+    | _ -> skip()
+  }
+  return false
+}
+
+-- Evaluates `e` where `It` denotes `it_v`: comparisons and boolean structure here, the rest by the evaluator.
+fn eval_value(
+  fuel: Int where it >= 0,
+  ev: inout evaluator.Ev,
+  ctx: inout context.Context,
+  e: ast.Expr,
+  env: Dict[Int, values.Value],
+  it_v: values.Value,
+  file: Int
+) -> Option[values.Value] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return None
+  }
+  match e with
+  | ast.It(_) -> return Some(value: it_v)
+  | ast.Binary(op, left, right, _) -> {
+    let l: Option[values.Value] = eval_value(
+      fuel: fuel - 1,
+      ev: inout ev,
+      ctx: inout ctx,
+      e: left,
+      env: env,
+      it_v: it_v,
+      file: file
+    )
+    let r: Option[values.Value] = eval_value(
+      fuel: fuel - 1,
+      ev: inout ev,
+      ctx: inout ctx,
+      e: right,
+      env: env,
+      it_v: it_v,
+      file: file
+    )
+    if l is None or r is None {
+      return None
+    }
+    return compare(op: op, l: value_or_unit(o: l), r: value_or_unit(o: r))
+  }
+  | ast.Unary(op, operand, _) -> {
+    if op == "not" {
+      match bool_of(
+        o: eval_value(
+          fuel: fuel - 1,
+          ev: inout ev,
+          ctx: inout ctx,
+          e: operand,
+          env: env,
+          it_v: it_v,
+          file: file
+        )
+      ) with
+      | Some(value) -> return Some(value: values.BoolV(v: not value))
+      | None -> return None
+    }
+    return eval_rest(ev: inout ev, ctx: inout ctx, e: e, env: env, file: file)
+  }
+  | ast.And(_, _) -> return bool_value(
+    o: eval_pred(
+      fuel: fuel - 1,
+      ev: inout ev,
+      ctx: inout ctx,
+      e: e,
+      env: env,
+      it_v: it_v,
+      file: file
+    )
+  )
+  | ast.Or(_, _) -> return bool_value(
+    o: eval_pred(
+      fuel: fuel - 1,
+      ev: inout ev,
+      ctx: inout ctx,
+      e: e,
+      env: env,
+      it_v: it_v,
+      file: file
+    )
+  )
+  | _ -> return eval_rest(ev: inout ev, ctx: inout ctx, e: e, env: env, file: file)
+}
+
+fn bool_value(o: Option[Bool]) -> Option[values.Value] {
+  match o with
+  | Some(value) -> return Some(value: values.BoolV(v: value))
+  | None -> return None
+}
+
+fn eval_rest(
+  ev: inout evaluator.Ev,
+  ctx: inout context.Context,
+  e: ast.Expr,
+  env: Dict[Int, values.Value],
+  file: Int
+) -> Option[values.Value] may mutate, alloc {
+  if mentions_it(root: e) {
+    return None
+  }
+  return eval_const(ev: inout ev, ctx: inout ctx, e: e, env: env, file: file)
+}
+
+-- Whether a value is a number the comparisons read: an Int, a Float or a Duration.
+fn is_int_like(v: values.Value) -> Bool {
+  match v with
+  | values.IntV(_) -> return true
+  | values.DurationV(_) -> return true
+  | _ -> return false
+}
+
+fn int_of(x: values.Value) -> Int {
+  match x with
+  | values.IntV(v) -> return v
+  | values.DurationV(v) -> return v
+  | _ -> return 0
+}
+
+fn float_of(x: values.Value) -> Float {
+  match x with
+  | values.FloatV(v) -> return v
+  | values.IntV(v) -> return Float.of(x: v)
+  | values.DurationV(v) -> return Float.of(x: v)
+  | _ -> return 0.0
+}
+
+fn is_number(v: values.Value) -> Bool {
+  match v with
+  | values.FloatV(_) -> return true
+  | _ -> return is_int_like(v: v)
+}
+
+fn compare(op: Text, l: values.Value, r: values.Value) -> Option[values.Value] may alloc {
+  if op == "==" {
+    return Some(value: values.BoolV(v: values.equals(a: l, b: r)))
+  }
+  if op == "!=" {
+    return Some(value: values.BoolV(v: not values.equals(a: l, b: r)))
+  }
+  if not is_number(v: l) or not is_number(v: r) {
+    return None
+  }
+  if is_int_like(v: l) and is_int_like(v: r) {
+    let a: Int = int_of(x: l)
+    let b: Int = int_of(x: r)
+    if op == "<" {
+      return Some(value: values.BoolV(v: a < b))
+    }
+    if op == "<=" {
+      return Some(value: values.BoolV(v: a <= b))
+    }
+    if op == ">" {
+      return Some(value: values.BoolV(v: a > b))
+    }
+    if op == ">=" {
+      return Some(value: values.BoolV(v: a >= b))
+    }
+    if op == "+" {
+      match recover {
+        a + b
+      } with
+      | Ok(value) -> return Some(value: values.IntV(v: value))
+      | Err(_) -> return None
+    }
+    if op == "-" {
+      match recover {
+        a - b
+      } with
+      | Ok(value) -> return Some(value: values.IntV(v: value))
+      | Err(_) -> return None
+    }
+    if op == "*" {
+      match recover {
+        a * b
+      } with
+      | Ok(value) -> return Some(value: values.IntV(v: value))
+      | Err(_) -> return None
+    }
+    return None
+  }
+  let a: Float = float_of(x: l)
+  let b: Float = float_of(x: r)
+  if op == "<" {
+    return Some(value: values.BoolV(v: a < b))
+  }
+  if op == "<=" {
+    return Some(value: values.BoolV(v: a <= b))
+  }
+  if op == ">" {
+    return Some(value: values.BoolV(v: a > b))
+  }
+  if op == ">=" {
+    return Some(value: values.BoolV(v: a >= b))
+  }
+  if l is values.FloatV {
+    if op == "+" {
+      return Some(value: values.FloatV(v: a + b))
+    }
+    if op == "-" {
+      return Some(value: values.FloatV(v: a - b))
+    }
+    if op == "*" {
+      return Some(value: values.FloatV(v: a * b))
+    }
+  }
+  return None
+}
+
+fn requires_verdict(
+  ev: inout evaluator.Ev,
+  ctx: inout context.Context,
+  o: obligations.Obligation,
+  src: Int
+) -> Option[Bool] may mutate, alloc {
+  let call_e: Option[ast.Expr] = Map.find(d: ctx.expr_nodes, key: o.at)
+  let clause: Option[ast.Contract] = Map.find(d: ctx.contract_nodes, key: src)
+  if call_e is None or clause is None {
+    return None
+  }
+  match expr_or(o: call_e) with
+  | ast.Call(callee, _, args, _) -> {
+    let fn_id: Int = callee_def(
+      ctx: ctx,
+      k: defs.node_key(file: o.at_file, tag: defs.tag_expr, span: parser.span_of_expr(e: callee))
+    )
+    if fn_id < 0 {
+      return None
+    }
+    match Map.find(d: ctx.signatures, key: fn_id) with
+    | None -> return None
+    | Some(value) -> {
+      var env: Dict[Int, values.Value] = Map.dict()
+      var i: Int where it >= 0 = 0
+      for p: types.FnParam in value.params {
+        if i >= List.len(xs: value.param_defs) {
+          return None
+        }
+        let pd: Int = List.get(xs: value.param_defs, i: i)
+        let a: Option[ast.Arg] = find_arg(args: args, name: p.name)
+        if a is None {
+          return None
+        }
+        let av: Option[values.Value] = eval_const(
+          ev: inout ev,
+          ctx: inout ctx,
+          e: arg_or(o: a).value,
+          env: Map.dict(),
+          file: o.at_file
+        )
+        if av is None {
+          return None
+        }
+        Map.set(d: inout env, key: pd, value: value_or_unit(o: av))
+        i = i + 1
+      }
+      let c: ast.Contract = contract_or(o: clause)
+      return bool_of(
+        o: eval_const(
+          ev: inout ev,
+          ctx: inout ctx,
+          e: c.expr,
+          env: env,
+          file: lower.pred_file(k: src)
+        )
+      )
+    }
+  }
+  | _ -> return None
+}
+
+fn contract_or(o: Option[ast.Contract]) -> ast.Contract may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return ast.Contract {
+    clause: "",
+    is_proved: false,
+    expr: ast.Hole(span: ast.Span { start: 0, end: 0 }),
+    span: ast.Span { start: 0, end: 0 }
+  }
+}
+
+fn arg_or(o: Option[ast.Arg]) -> ast.Arg may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return ast.Arg {
+    name: ast.Ident { text: "", span: ast.Span { start: 0, end: 0 } },
+    is_inout: false,
+    value: ast.Hole(span: ast.Span { start: 0, end: 0 }),
+    span: ast.Span { start: 0, end: 0 }
+  }
+}
+
+fn find_arg(args: List[ast.Arg], name: Text) -> Option[ast.Arg] {
+  for a: ast.Arg in args {
+    if a.name.text == name {
+      return Some(value: a)
+    }
+  }
+  return None
+}

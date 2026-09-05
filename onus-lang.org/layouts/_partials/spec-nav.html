@@ -1,0 +1,9 @@
+{{- /* spec-nav.html — the documents in the specification section, in weight order, with the current one marked. */ -}}
+{{- $spec := site.GetPage "/spec" -}}
+{{- $here := .RelPermalink -}}
+<div class="subnav">
+  <a href="{{ $spec.RelPermalink }}"{{ if eq $here $spec.RelPermalink }} class="active"{{ end }}>Specification</a>
+  {{- range $spec.RegularPages.ByWeight }}
+  <a href="{{ .RelPermalink }}"{{ if eq $here .RelPermalink }} class="active"{{ end }}>{{ .Title }}</a>
+  {{- end }}
+</div>

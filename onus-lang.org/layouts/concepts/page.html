@@ -1,0 +1,16 @@
+{{ define "main" }}
+{{- $pages := .CurrentSection.RegularPages.ByWeight -}}
+{{- $i := -1 }}{{ range $k, $p := $pages }}{{ if eq $p.RelPermalink $.RelPermalink }}{{ $i = $k }}{{ end }}{{ end -}}
+<div class="wrap">
+  <article class="prose wide">
+    <p class="subnav"><a href="{{ .CurrentSection.RelPermalink }}">{{ .CurrentSection.Title }}</a> · {{ .Params.spec }}</p>
+    <h1 class="page-title">{{ .Title }}</h1>
+    {{ .Content }}
+    {{- with .Params.specurl }}<p><b>In the specification:</b> <a href="{{ . | relURL }}">{{ $.Params.spec }}</a>.</p>{{ end }}
+    <nav class="pager">
+      <span>{{ if gt $i 0 }}{{ with index $pages (sub $i 1) }}<a href="{{ .RelPermalink }}"><small>Previous</small>← {{ .Title }}</a>{{ end }}{{ end }}</span>
+      <span>{{ if lt (add $i 1) (len $pages) }}{{ with index $pages (add $i 1) }}<a href="{{ .RelPermalink }}" style="text-align:right;display:block"><small>Next</small>{{ .Title }} →</a>{{ end }}{{ end }}</span>
+    </nav>
+  </article>
+</div>
+{{ end }}

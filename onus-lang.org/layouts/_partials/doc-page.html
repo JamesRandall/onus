@@ -1,0 +1,20 @@
+{{- /* doc-page.html — a long document with a sticky table of contents. Used by every page in /spec. */ -}}
+<div class="wrap">
+  {{ partial "spec-nav.html" . }}
+  <div class="doc">
+    <aside class="toc" aria-label="Contents"><h4>{{ .Title }}</h4>{{ partial "doc-toc.html" . }}</aside>
+    <article class="prose">
+      {{- if .Params.mounted }}
+      <p class="meta">
+        {{- if eq .Path "/spec" }}{{ site.Params.specVersion }} — sections marked <em>provisional</em> are proposals; everything else records a design decision. {{ end -}}
+        Rendered from <code>{{ .Params.source }}</code>{{ with .GitInfo }}, last changed {{ .CommitDate.Format "2 January 2006" }}{{ end }}. Notes marked <span class="chg"><b>changed</b></span> record where implementation forced a change; each is listed on the <a href="{{ "/spec/changes/" | relURL }}">Changes</a> page.
+      </p>
+      {{- else }}
+      <h1 class="page-title">{{ .Title }}</h1>
+      {{- with .Params.lede }}<p class="lede">{{ . | markdownify }}</p>{{ end }}
+      {{- end }}
+      <details class="toc-mobile"><summary>Contents</summary>{{ partial "doc-toc.html" . }}</details>
+      {{ partial "doc-content.html" . }}
+    </article>
+  </div>
+</div>

@@ -1,0 +1,176 @@
+{
+  "diagnostics": [],
+  "obligations": [
+    {
+      "kind": "representation",
+      "at": [
+        6,
+        3
+      ],
+      "text": "n within ±2^53 - 1",
+      "status": "checked"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        14,
+        10
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        27,
+        23
+      ],
+      "text": "it >= 0 and it <= List.len(xs: toks)",
+      "status": "proved"
+    },
+    {
+      "kind": "overflow",
+      "at": [
+        27,
+        23
+      ],
+      "text": "p.pos + 1 within Int",
+      "status": "checked"
+    },
+    {
+      "kind": "ensures",
+      "at": [
+        28,
+        5
+      ],
+      "text": "p.toks == old(p).toks and p.pos >= old(p).pos",
+      "status": "proved"
+    },
+    {
+      "kind": "ensures",
+      "at": [
+        28,
+        5
+      ],
+      "text": "result is Ok implies p.pos > old(p).pos",
+      "status": "proved"
+    },
+    {
+      "kind": "ensures",
+      "at": [
+        30,
+        3
+      ],
+      "text": "p.toks == old(p).toks and p.pos >= old(p).pos",
+      "status": "proved"
+    },
+    {
+      "kind": "ensures",
+      "at": [
+        30,
+        3
+      ],
+      "text": "result is Ok implies p.pos > old(p).pos",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        37,
+        34
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "representation",
+      "at": [
+        37,
+        3
+      ],
+      "text": "count within ±2^53 - 1",
+      "status": "checked"
+    },
+    {
+      "kind": "representation",
+      "at": [
+        39,
+        3
+      ],
+      "text": "start within ±2^53 - 1",
+      "status": "checked"
+    },
+    {
+      "kind": "invariant-entry",
+      "at": [
+        40,
+        3
+      ],
+      "text": "p.pos >= start and p.toks == toks0",
+      "status": "proved"
+    },
+    {
+      "kind": "invariant-step",
+      "at": [
+        40,
+        3
+      ],
+      "text": "p.pos >= start and p.toks == toks0",
+      "status": "proved"
+    },
+    {
+      "kind": "decreases",
+      "at": [
+        40,
+        3
+      ],
+      "text": "List.len(xs: p.toks) - p.pos",
+      "status": "proved"
+    },
+    {
+      "kind": "overflow",
+      "at": [
+        42,
+        15
+      ],
+      "text": "List.len(xs: p.toks) - p.pos within Int",
+      "status": "checked"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        45,
+        28
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "overflow",
+      "at": [
+        45,
+        28
+      ],
+      "text": "count + 1 within Int",
+      "status": "checked"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        46,
+        39
+      ],
+      "text": "it >= 0 and it <= List.len(xs: toks)",
+      "status": "proved"
+    },
+    {
+      "kind": "ensures",
+      "at": [
+        48,
+        3
+      ],
+      "text": "p.toks == old(p).toks and p.pos >= old(p).pos",
+      "status": "proved"
+    }
+  ]
+}

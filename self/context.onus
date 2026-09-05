@@ -2,10 +2,13 @@ module context
 import ast
 import tokens
 import report
+import comments
 import defs
 import effectset
 import types
 import values
+import obligations
+import tables
 
 -- The compilation context (impl spec §4; `context.ts`). Passes read the
 -- tables of earlier passes and write their own. Dicts and builders share
@@ -22,10 +25,12 @@ pub record Context {
   parsed: Dict[Int, Parsed]
   syntax_error_files: Dict[Int, Bool]
   canonical: Dict[Int, Text]
+  -- The comment table of each canonical file, for printing items with their comments (§11.1).
+  comment_tables: Dict[Int, comments.Table]
   diagnostics: Builder[report.Diagnostic]
   -- Pass 3 (load and resolve)
   modules: Dict[Int, defs.ModuleRecord]
-  module_count: Int
+  module_count: Int where it >= 0
   by_name: Dict[Text, Int]
   defs: Builder[defs.Def]
   def_of: Dict[Int, Int]
@@ -60,6 +65,26 @@ pub record Context {
   proved_at_check_time: Dict[Int, List[Int]]
   -- Outcome of each `example` at check time: passed, failed or deferred.
   examples: Dict[Int, Text]
+  -- Pass 8 (contracts)
+  obligations: Dict[Int, obligations.Obligation]
+  obligation_count: Int where it >= 0
+  -- Obligation ids located at each node key, in creation order.
+  obligations_at: Dict[Int, List[Int]]
+  -- Nodes obligations refer to, by key: contract clauses, loop clauses and refinement predicates.
+  contract_nodes: Dict[Int, ast.Contract]
+  clause_nodes: Dict[Int, ast.LoopClause]
+  where_exprs: Dict[Int, ast.Expr]
+  -- The expression at each refinement or `requires` obligation site, by key (constant discharge).
+  expr_nodes: Dict[Int, ast.Expr]
+  -- The constructor a field initialiser belongs to, by the initialiser's key.
+  ctor_of: Dict[Int, ast.Expr]
+  -- Pass 9 (claims)
+  claim_tiers: Dict[Int, Text]
+  -- Claims each function carries: declared ones, plus derived claims whose predicate holds over its effects.
+  carried: Dict[Int, List[Int]]
+  assume_sites: Builder[tables.AssumeSite]
+  -- Pass 12 (paths)
+  analyses: Dict[Int, tables.PathAnalysis]
 }
 
 pub fn new_context(root: Option[Text], stdlib: Option[Text]) -> Context may alloc {
@@ -70,6 +95,7 @@ pub fn new_context(root: Option[Text], stdlib: Option[Text]) -> Context may allo
     parsed: Map.dict(),
     syntax_error_files: Map.dict(),
     canonical: Map.dict(),
+    comment_tables: Map.dict(),
     diagnostics: List.builder(),
     modules: Map.dict(),
     module_count: 0,
@@ -101,7 +127,19 @@ pub fn new_context(root: Option[Text], stdlib: Option[Text]) -> Context may allo
     cycles: Map.dict(),
     const_values: Map.dict(),
     proved_at_check_time: Map.dict(),
-    examples: Map.dict()
+    examples: Map.dict(),
+    obligations: Map.dict(),
+    obligation_count: 0,
+    obligations_at: Map.dict(),
+    contract_nodes: Map.dict(),
+    clause_nodes: Map.dict(),
+    where_exprs: Map.dict(),
+    expr_nodes: Map.dict(),
+    ctor_of: Map.dict(),
+    claim_tiers: Map.dict(),
+    carried: Map.dict(),
+    assume_sites: List.builder(),
+    analyses: Map.dict()
   }
 }
 
@@ -202,6 +240,34 @@ pub fn add_def(ctx: inout Context, d: defs.Def) -> Unit may mutate, alloc {
   List.push(b: inout ds, x: d)
   var table: Dict[Int, Int] = ctx.def_of
   Map.set(d: inout table, key: d.key, value: d.id)
+}
+
+-- An obligation by id; a placeholder for an id that is not one.
+pub fn get_obligation(ctx: Context, id: Int) -> obligations.Obligation may alloc {
+  match Map.find(d: ctx.obligations, key: id) with
+  | Some(value) -> return value
+  | None -> return obligations.Obligation {
+    id: -1,
+    kind: obligations.Assertion,
+    at: -1,
+    at_file: 0,
+    at_span: ast.Span { start: 0, end: 0 },
+    def: -1,
+    text: "",
+    source: None,
+    site: obligations.OtherSite,
+    pinned: false,
+    callee: None,
+    param: None,
+    status: obligations.Pending,
+    by: None
+  }
+}
+
+pub fn set_obligation(ctx: inout Context, o: obligations.Obligation) -> Unit may mutate, alloc {
+  var table: Dict[Int, obligations.Obligation] = ctx.obligations
+  Map.set(d: inout table, key: o.id, value: o)
+  return Unit
 }
 
 pub fn set_ref(ctx: inout Context, key: Int, res: defs.Resolution) -> Unit may mutate, alloc {

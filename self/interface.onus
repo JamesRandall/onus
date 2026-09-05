@@ -1,0 +1,828 @@
+module interface
+import std.hash
+import ast
+import parser
+import printer
+import comments
+import defs
+import context
+import types
+import obligations
+import effectset
+import walk
+import tables
+import json
+import loc
+
+-- Interface documents (spec §11, §11.1; impl spec §3.6; `report/interface.ts`).
+--
+-- The interface of a module is what a reviewer reads instead of bodies: for
+-- every item its signature, effects, claims, contracts with their obligation
+-- status, examples and properties with their results, every `assume` and
+-- `recover`, and the obligation ledger. `interface_of` is the normative JSON;
+-- `interface_text` renders the module in canonical syntax with every function
+-- body elided to `{ ... }` (the one printer, with an option).
+--
+-- Obligations that are tests themselves, or that no runtime check carries.
+fn is_check(k: obligations.Kind) -> Bool {
+  if k is obligations.Property or k is obligations.Law {
+    return false
+  }
+  if k is obligations.Assertion or k is obligations.Representation {
+    return false
+  }
+  return true
+}
+
+record Counts {
+  n_proved: Int where it >= 0
+  n_checked: Int where it >= 0
+  n_assumed: Int where it >= 0
+  n_failed: Int where it >= 0
+}
+
+-- An `assume` entry, with what the coverage line needs from it.
+pub record AssumeEntry {
+  j: json.Json
+  verifiable: Bool
+}
+
+record Ctx {
+  tables: Dict[Int, loc.LineTable]
+  file: Int
+  mod: Int
+  tab: comments.Table
+  -- The module's obligations, in creation order.
+  own: List[obligations.Obligation]
+}
+
+fn skip() -> Unit {
+  return Unit
+}
+
+fn or_neg(o: Option[Int]) -> Int {
+  match o with
+  | Some(value) -> return value
+  | None -> return -1
+}
+
+fn qname_text(q: ast.QName) -> Text may alloc, mutate {
+  var parts: Builder[Text] = List.builder()
+  for s: ast.Ident in q.segments {
+    List.push(b: inout parts, x: s.text)
+  }
+  return Text.join(parts: List.finish(b: parts), sep: ".")
+}
+
+pub fn counts_json(obs: List[obligations.Obligation]) -> json.Json may alloc, mutate {
+  let c: Counts = counts(obs: obs)
+  return json.JObject(
+    fields: [
+      json.field(key: "proved", value: json.int(v: c.n_proved)),
+      json.field(key: "checked", value: json.int(v: c.n_checked)),
+      json.field(key: "assumed", value: json.int(v: c.n_assumed)),
+      json.field(key: "failed", value: json.int(v: c.n_failed))
+    ]
+  )
+}
+
+fn counts(obs: List[obligations.Obligation]) -> Counts {
+  var n_proved: Int where it >= 0 = 0
+  var n_checked: Int where it >= 0 = 0
+  var n_assumed: Int where it >= 0 = 0
+  var n_failed: Int where it >= 0 = 0
+  for o: obligations.Obligation in obs {
+    match o.status with
+    | obligations.Proved -> n_proved = n_proved + 1
+    | obligations.Assumed -> n_assumed = n_assumed + 1
+    | obligations.Failed -> n_failed = n_failed + 1
+    | _ -> n_checked = n_checked + 1
+  }
+  return Counts {
+    n_proved: n_proved,
+    n_checked: n_checked,
+    n_assumed: n_assumed,
+    n_failed: n_failed
+  }
+}
+
+-- The aggregate state: any failure fails it, any runtime check makes it checked, else assumed, else proved.
+pub fn status_of(obs: List[obligations.Obligation]) -> Text {
+  var any_checked: Bool = false
+  var any_assumed: Bool = false
+  for o: obligations.Obligation in obs {
+    match o.status with
+    | obligations.Failed -> return "failed"
+    | obligations.Checked -> any_checked = true
+    | obligations.Pending -> any_checked = true
+    | obligations.Assumed -> any_assumed = true
+    | obligations.Proved -> skip()
+  }
+  if any_checked {
+    return "checked"
+  }
+  if any_assumed {
+    return "assumed"
+  }
+  return "proved"
+}
+
+-- Obligation coverage (§20.5; `report/coverage.ts`): the driver in Onus reads no test coverage table and no
+-- mutation records, so exercised checks, verified assumptions and mutations are zero.
+pub fn coverage_json(
+  obs: List[obligations.Obligation],
+  assumes: List[AssumeEntry]
+) -> json.Json may alloc, mutate {
+  var n_proved: Int where it >= 0 = 0
+  var n_checked: Int where it >= 0 = 0
+  for o: obligations.Obligation in obs {
+    if is_check(k: o.kind) {
+      if o.status is obligations.Proved {
+        n_proved = n_proved + 1
+      }
+      if o.status is obligations.Checked {
+        n_checked = n_checked + 1
+      }
+    }
+  }
+  var verifiable: Int where it >= 0 = 0
+  for a: AssumeEntry in assumes {
+    if a.verifiable {
+      verifiable = verifiable + 1
+    }
+  }
+  return json.JObject(
+    fields: [
+      json.field(key: "proved", value: json.int(v: n_proved)),
+      json.field(key: "checked", value: json.int(v: n_checked)),
+      json.field(key: "checked_exercised", value: json.int(v: 0)),
+      json.field(key: "assumptions", value: json.int(v: List.len(xs: assumes))),
+      json.field(key: "assumptions_verifiable", value: json.int(v: verifiable)),
+      json.field(key: "assumptions_verified", value: json.int(v: 0)),
+      json.field(key: "mutations_detected", value: json.int(v: 0)),
+      json.field(key: "mutations_surviving", value: json.int(v: 0))
+    ]
+  )
+}
+
+pub fn effect_name(ctx: context.Context, e: defs.Effect) -> Text {
+  match e with
+  | defs.PrimEffect(name) -> return name
+  | defs.ResourceEffect(_, name) -> return name
+  | defs.ParamEffect(def) -> return context.get_def(ctx: ctx, id: def).name
+}
+
+fn module_of_file(ctx: context.Context, file: Int) -> Int {
+  for mid: Int in 0 ..< ctx.module_count {
+    match Map.find(d: ctx.modules, key: mid) with
+    | Some(value) -> {
+      if value.file == file {
+        return mid
+      }
+    }
+    | None -> skip()
+  }
+  return -1
+}
+
+-- The module in canonical syntax with every function body elided to `{ ... }` (§11.1).
+pub fn interface_text(ctx: context.Context, mod: Int) -> Text may alloc, mutate {
+  match Map.find(d: ctx.modules, key: mod) with
+  | None -> return ""
+  | Some(value) -> return printer.print_module_elided(
+    m: value.tree,
+    tab: table_of(ctx: ctx, file: value.file)
+  )
+}
+
+fn table_of(ctx: context.Context, file: Int) -> comments.Table may alloc {
+  match Map.find(d: ctx.comment_tables, key: file) with
+  | Some(value) -> return value
+  | None -> return Map.empty()
+}
+
+-- The interface document of a loaded module.
+-- Preconditions: the pipeline ran to `verify` (statuses are final) without diagnostics.
+-- Effects: none.
+pub fn interface_of(ctx: context.Context, mod: Int) -> json.Json may alloc, mutate {
+  match Map.find(d: ctx.modules, key: mod) with
+  | None -> return json.JNull
+  | Some(value) -> return build(ctx: ctx, rec: value)
+}
+
+fn build(ctx: context.Context, rec: defs.ModuleRecord) -> json.Json may alloc, mutate {
+  let file: Int = rec.file
+  var own: Builder[obligations.Obligation] = List.builder()
+  for i: Int in 0 ..< ctx.obligation_count {
+    let o: obligations.Obligation = context.get_obligation(ctx: ctx, id: i)
+    if o.at_file == file {
+      List.push(b: inout own, x: o)
+    }
+  }
+  let c: Ctx = Ctx {
+    tables: loc.line_tables(ctx: ctx),
+    file: file,
+    mod: rec.id,
+    tab: table_of(ctx: ctx, file: file),
+    own: List.finish(b: own)
+  }
+  let m: ast.Module = rec.tree
+  var examples: Builder[ast.ExampleDecl] = List.builder()
+  var properties: Builder[ast.PropertyDecl] = List.builder()
+  var fn_names: Dict[Text, Bool] = Map.dict()
+  for item: ast.Item in m.items {
+    match item with
+    | ast.ExampleItem(decl) -> List.push(b: inout examples, x: decl)
+    | ast.PropertyItem(decl) -> List.push(b: inout properties, x: decl)
+    | ast.FnItem(decl) -> Map.set(d: inout fn_names, key: decl.name.text, value: true)
+    | _ -> skip()
+  }
+  let example_list: List[ast.ExampleDecl] = List.finish(b: examples)
+  let property_list: List[ast.PropertyDecl] = List.finish(b: properties)
+  var items: Builder[json.Json] = List.builder()
+  var assumes: Builder[AssumeEntry] = List.builder()
+  var recovers: Builder[json.Json] = List.builder()
+  var sealed_types: Builder[Text] = List.builder()
+  for item: ast.Item in m.items {
+    var reported: Bool = true
+    match item with
+    | ast.ExampleItem(decl) -> reported = not Map.contains(d: fn_names, key: decl.name.text)
+    | ast.PropertyItem(decl) -> reported = not Map.contains(d: fn_names, key: decl.name.text)
+    | _ -> skip()
+    -- Examples and properties named after a function are reported under it (§18.1).
+    if reported {
+      let item_assumes: List[AssumeEntry] = assumes_in(ctx: ctx, c: c, item: item)
+      let item_recovers: List[json.Json] = recovers_in(ctx: ctx, c: c, item: item)
+      for a: AssumeEntry in item_assumes {
+        List.push(b: inout assumes, x: a)
+      }
+      for r: json.Json in item_recovers {
+        List.push(b: inout recovers, x: r)
+      }
+      List.push(
+        b: inout items,
+        x: item_json(
+          ctx: ctx,
+          c: c,
+          item: item,
+          examples: example_list,
+          properties: property_list,
+          assumes: item_assumes,
+          recovers: item_recovers
+        )
+      )
+    }
+    if is_sealed(item: item) {
+      List.push(b: inout sealed_types, x: item_name(item: item))
+    }
+  }
+  let assume_list: List[AssumeEntry] = List.finish(b: assumes)
+  var assume_json: Builder[json.Json] = List.builder()
+  for a: AssumeEntry in assume_list {
+    List.push(b: inout assume_json, x: a.j)
+  }
+  var imports: Builder[Text] = List.builder()
+  for imp: defs.ImportRecord in rec.imports {
+    match Map.find(d: ctx.modules, key: imp.mod) with
+    | Some(value) -> List.push(b: inout imports, x: value.name)
+    | None -> skip()
+  }
+  var ledger: Builder[json.Json] = List.builder()
+  for o: obligations.Obligation in c.own {
+    List.push(b: inout ledger, x: ledger_entry(ctx: ctx, c: c, o: o))
+  }
+  var canonical_text: Text = ""
+  if file >= 0 and file < List.built(b: ctx.files) {
+    canonical_text = context.file_at(ctx: ctx, id: file).text
+  }
+  match Map.find(d: ctx.canonical, key: file) with
+  | Some(value) -> canonical_text = value
+  | None -> skip()
+  return json.JObject(
+    fields: [
+      json.field(key: "module", value: json.text(t: rec.name)),
+      json.field(key: "hash", value: json.text(t: "b3:" ++ hash.blake3_hex(t: canonical_text))),
+      json.field(key: "imports", value: json.texts(ts: List.finish(b: imports))),
+      json.field(key: "items", value: json.JArray(items: List.finish(b: items))),
+      json.field(key: "assumes", value: json.JArray(items: List.finish(b: assume_json))),
+      json.field(key: "recovers", value: json.JArray(items: List.finish(b: recovers))),
+      json.field(key: "sealed_types", value: json.texts(ts: List.finish(b: sealed_types))),
+      json.field(key: "test_module", value: json.bool(b: m.is_test)),
+      json.field(key: "obligations", value: counts_json(obs: c.own)),
+      json.field(key: "ledger", value: json.JArray(items: List.finish(b: ledger))),
+      json.field(key: "obligation_coverage", value: coverage_json(obs: c.own, assumes: assume_list))
+    ]
+  )
+}
+
+fn is_sealed(item: ast.Item) -> Bool {
+  match item with
+  | ast.FnItem(decl) -> return decl.vis.is_sealed
+  | ast.TypeAliasItem(decl) -> return decl.vis.is_sealed
+  | ast.IntrinsicTypeItem(decl) -> return decl.vis.is_sealed
+  | ast.ConstItem(decl) -> return decl.vis.is_sealed
+  | ast.RecordItem(decl) -> return decl.vis.is_sealed
+  | ast.UnionItem(decl) -> return decl.vis.is_sealed
+  | ast.InterfaceItem(decl) -> return decl.vis.is_sealed
+  | ast.ClaimItem(decl) -> return decl.vis.is_sealed
+  | ast.CapabilityItem(decl) -> return decl.vis.is_sealed
+  | _ -> return false
+}
+
+fn item_name(item: ast.Item) -> Text {
+  match item with
+  | ast.FnItem(decl) -> return decl.name.text
+  | ast.TypeAliasItem(decl) -> return decl.name.text
+  | ast.IntrinsicTypeItem(decl) -> return decl.name.text
+  | ast.ConstItem(decl) -> return decl.name.text
+  | ast.RecordItem(decl) -> return decl.name.text
+  | ast.UnionItem(decl) -> return decl.name.text
+  | ast.InterfaceItem(decl) -> return decl.name.text
+  | ast.ImplItem(_) -> return ""
+  | ast.ClaimItem(decl) -> return decl.name.text
+  | ast.CapabilityItem(decl) -> return decl.name.text
+  | ast.PathItem(decl) -> return decl.name.text
+  | ast.PolicyItem(decl) -> return decl.name.text
+  | ast.ExampleItem(decl) -> return decl.name.text
+  | ast.PropertyItem(decl) -> return decl.name.text
+}
+
+fn vis_text(v: ast.Visibility) -> Text {
+  if v.is_pub {
+    return "pub"
+  }
+  return "private"
+}
+
+fn within(inner: ast.Span, outer: ast.Span) -> Bool {
+  return inner.start >= outer.start and inner.end <= outer.end
+}
+
+fn item_json(
+  ctx: context.Context,
+  c: Ctx,
+  item: ast.Item,
+  examples: List[ast.ExampleDecl],
+  properties: List[ast.PropertyDecl],
+  assumes: List[AssumeEntry],
+  recovers: List[json.Json]
+) -> json.Json may alloc, mutate {
+  let span: ast.Span = comments.item_span(item: item)
+  var own: Builder[obligations.Obligation] = List.builder()
+  for o: obligations.Obligation in c.own {
+    let d: defs.Def = context.get_def(ctx: ctx, id: o.def)
+    if d.file == c.file and within(inner: d.span, outer: span) {
+      List.push(b: inout own, x: o)
+    }
+  }
+  var effects: List[Text] = []
+  var claims_list: List[Text] = []
+  var contracts: List[json.Json] = []
+  var example_json: Builder[json.Json] = List.builder()
+  var property_json: Builder[json.Json] = List.builder()
+  var kind: Text = ""
+  var name: Text = item_name(item: item)
+  var visibility: Text = "private"
+  var signature: Text = ""
+  match item with
+  | ast.FnItem(decl) -> {
+    kind = "fn"
+    visibility = vis_text(v: decl.vis)
+    signature = printer.print_signature(f: decl)
+    effects = effects_of(ctx: ctx, c: c, f: decl)
+    var cl: Builder[Text] = List.builder()
+    for q: ast.QName in decl.claim_list {
+      List.push(b: inout cl, x: qname_text(q: q))
+    }
+    claims_list = List.finish(b: cl)
+    contracts = contracts_of(ctx: ctx, cx: c, f: decl)
+    for e: ast.ExampleDecl in examples {
+      if e.name.text == decl.name.text {
+        List.push(b: inout example_json, x: example_json_of(ctx: ctx, c: c, e: e))
+      }
+    }
+    for p: ast.PropertyDecl in properties {
+      if p.name.text == decl.name.text {
+        List.push(b: inout property_json, x: property_json_of(ctx: ctx, c: c, p: p))
+      }
+    }
+  }
+  | ast.TypeAliasItem(decl) -> {
+    kind = "type"
+    visibility = vis_text(v: decl.vis)
+    signature = printer.print_item(item: item, tab: c.tab, elide: true)
+  }
+  | ast.IntrinsicTypeItem(decl) -> {
+    kind = "type"
+    visibility = vis_text(v: decl.vis)
+    signature = printer.print_item(item: item, tab: c.tab, elide: true)
+  }
+  | ast.ConstItem(decl) -> {
+    kind = "const"
+    visibility = vis_text(v: decl.vis)
+    signature = printer.print_item(item: item, tab: c.tab, elide: true)
+  }
+  | ast.RecordItem(decl) -> {
+    kind = "record"
+    visibility = vis_text(v: decl.vis)
+    signature = printer.print_item(item: item, tab: c.tab, elide: true)
+  }
+  | ast.UnionItem(decl) -> {
+    kind = "union"
+    visibility = vis_text(v: decl.vis)
+    signature = printer.print_item(item: item, tab: c.tab, elide: true)
+  }
+  | ast.InterfaceItem(decl) -> {
+    kind = "interface"
+    visibility = vis_text(v: decl.vis)
+    signature = printer.print_item(item: item, tab: c.tab, elide: true)
+  }
+  | ast.ImplItem(decl) -> {
+    kind = "impl"
+    name = decl.iface.text ++ "[" ++ printer.print_type(t: decl.target) ++ "]"
+    visibility = "pub"
+    signature = printer.print_item(item: item, tab: c.tab, elide: true)
+    var all_contracts: Builder[json.Json] = List.builder()
+    var all_effects: Builder[Text] = List.builder()
+    var seen: Dict[Text, Bool] = Map.dict()
+    for f: ast.FnDecl in decl.fns {
+      for entry_json: json.Json in contracts_of(ctx: ctx, cx: c, f: f) {
+        List.push(b: inout all_contracts, x: entry_json)
+      }
+      for e: Text in effects_of(ctx: ctx, c: c, f: f) {
+        if not Map.contains(d: seen, key: e) {
+          Map.set(d: inout seen, key: e, value: true)
+          List.push(b: inout all_effects, x: e)
+        }
+      }
+    }
+    contracts = List.finish(b: all_contracts)
+    effects = List.finish(b: all_effects)
+  }
+  | ast.ClaimItem(decl) -> {
+    kind = "claim"
+    visibility = vis_text(v: decl.vis)
+    signature = printer.print_item(item: item, tab: c.tab, elide: true)
+  }
+  | ast.CapabilityItem(decl) -> {
+    kind = "capability"
+    visibility = vis_text(v: decl.vis)
+    signature = printer.print_item(item: item, tab: c.tab, elide: true)
+  }
+  | ast.PathItem(_) -> {
+    kind = "path"
+    signature = printer.print_item(item: item, tab: c.tab, elide: true)
+  }
+  | ast.PolicyItem(_) -> {
+    kind = "policy"
+    signature = printer.print_item(item: item, tab: c.tab, elide: true)
+  }
+  | ast.ExampleItem(decl) -> {
+    kind = "example"
+    signature = printer.print_item(item: item, tab: c.tab, elide: true)
+    List.push(b: inout example_json, x: example_json_of(ctx: ctx, c: c, e: decl))
+  }
+  | ast.PropertyItem(decl) -> {
+    kind = "property"
+    signature = printer.print_item(item: item, tab: c.tab, elide: true)
+    List.push(b: inout property_json, x: property_json_of(ctx: ctx, c: c, p: decl))
+  }
+  var assume_json: Builder[json.Json] = List.builder()
+  for a: AssumeEntry in assumes {
+    List.push(b: inout assume_json, x: a.j)
+  }
+  return json.JObject(
+    fields: [
+      json.field(key: "effects", value: json.texts(ts: effects)),
+      json.field(key: "claims", value: json.texts(ts: claims_list)),
+      json.field(key: "contracts", value: json.JArray(items: contracts)),
+      json.field(key: "examples", value: json.JArray(items: List.finish(b: example_json))),
+      json.field(key: "properties", value: json.JArray(items: List.finish(b: property_json))),
+      json.field(key: "assumes", value: json.JArray(items: List.finish(b: assume_json))),
+      json.field(key: "recovers", value: json.JArray(items: recovers)),
+      json.field(key: "obligations", value: counts_json(obs: List.finish(b: own))),
+      json.field(
+        key: "at",
+        value: loc.location_json(ctx: ctx, tables: c.tables, file: c.file, span: span)
+      ),
+      json.field(key: "kind", value: json.text(t: kind)),
+      json.field(key: "name", value: json.text(t: name)),
+      json.field(key: "visibility", value: json.text(t: visibility)),
+      json.field(key: "signature", value: json.text(t: signature))
+    ]
+  )
+}
+
+fn effects_of(ctx: context.Context, c: Ctx, f: ast.FnDecl) -> List[Text] may alloc, mutate {
+  let def: Int = or_neg(
+    o: Map.find(d: ctx.def_of, key: defs.node_key(file: c.file, tag: defs.tag_item, span: f.span))
+  )
+  var out: Builder[Text] = List.builder()
+  var sig: Option[types.Signature] = None
+  if def >= 0 {
+    sig = Map.find(d: ctx.signatures, key: def)
+  }
+  match sig with
+  | None -> {
+    for e: ast.EffectRef in f.effects {
+      List.push(b: inout out, x: qname_text(q: e.name))
+    }
+  }
+  | Some(value) -> {
+    for e: defs.Effect in effectset.values(s: value.effects) {
+      List.push(b: inout out, x: effect_name(ctx: ctx, e: e))
+    }
+  }
+  return List.finish(b: out)
+}
+
+-- Header contracts and loop clauses, each with the status of the obligations it generated.
+fn contracts_of(ctx: context.Context, cx: Ctx, f: ast.FnDecl) -> List[json.Json] may alloc, mutate {
+  var out: Builder[json.Json] = List.builder()
+  for con: ast.Contract in f.contracts {
+    List.push(
+      b: inout out,
+      x: contract_entry(
+        ctx: ctx,
+        c: cx,
+        kind: con.clause,
+        e: con.expr,
+        pinned: con.is_proved,
+        source: defs.node_key(file: cx.file, tag: defs.tag_sig, span: con.span)
+      )
+    )
+  }
+  match f.body with
+  | None -> skip()
+  | Some(value) -> {
+    for n: walk.Node in walk.nodes_in_block(b: value, into_verify: false) {
+      match n with
+      | walk.NClause(c) -> List.push(
+        b: inout out,
+        x: contract_entry(
+          ctx: ctx,
+          c: cx,
+          kind: c.clause,
+          e: c.expr,
+          pinned: false,
+          source: defs.node_key(file: cx.file, tag: defs.tag_sig, span: c.span)
+        )
+      )
+      | _ -> skip()
+    }
+  }
+  return List.finish(b: out)
+}
+
+fn contract_entry(
+  ctx: context.Context,
+  c: Ctx,
+  kind: Text,
+  e: ast.Expr,
+  pinned: Bool,
+  source: Int
+) -> json.Json may alloc, mutate {
+  -- `requires` obligations live at call sites in other definitions, so search every obligation.
+  var obs: Builder[obligations.Obligation] = List.builder()
+  var checked_at: Option[Text] = None
+  for i: Int in 0 ..< ctx.obligation_count {
+    let o: obligations.Obligation = context.get_obligation(ctx: ctx, id: i)
+    if or_neg(o: o.source) == source {
+      List.push(b: inout obs, x: o)
+      if checked_at is None and o.status is obligations.Checked {
+        checked_at = Some(
+          value: loc.location_text(ctx: ctx, tables: c.tables, file: o.at_file, span: o.at_span)
+        )
+      }
+    }
+  }
+  let all: List[obligations.Obligation] = List.finish(b: obs)
+  var fields: List[json.Field] = [
+    json.field(key: "kind", value: json.text(t: kind)),
+    json.field(key: "text", value: json.text(t: printer.print_expr(e: e))),
+    json.field(key: "pinned", value: json.bool(b: pinned)),
+    json.field(key: "status", value: json.text(t: status_of(obs: all))),
+    json.field(key: "sites", value: json.int(v: List.len(xs: all)))
+  ]
+  match checked_at with
+  | Some(value) -> fields = List.append(
+    xs: fields,
+    x: json.field(key: "checked_at", value: json.text(t: value))
+  )
+  | None -> skip()
+  return json.JObject(fields: fields)
+}
+
+fn example_json_of(
+  ctx: context.Context,
+  c: Ctx,
+  e: ast.ExampleDecl
+) -> json.Json may alloc, mutate {
+  let def: Int = or_neg(
+    o: Map.find(d: ctx.def_of, key: defs.node_key(file: c.file, tag: defs.tag_item, span: e.span))
+  )
+  var status: Text = "not run"
+  if def >= 0 {
+    match Map.find(d: ctx.examples, key: def) with
+    | Some(value) -> status = value
+    | None -> skip()
+  }
+  return json.JObject(
+    fields: [
+      json.field(key: "name", value: json.text(t: e.name.text)),
+      json.field(key: "status", value: json.text(t: status)),
+      json.field(
+        key: "at",
+        value: loc.location_json(ctx: ctx, tables: c.tables, file: c.file, span: e.span)
+      )
+    ]
+  )
+}
+
+fn property_json_of(
+  ctx: context.Context,
+  c: Ctx,
+  p: ast.PropertyDecl
+) -> json.Json may alloc, mutate {
+  var status: Text = "checked"
+  let k: Int = defs.node_key(file: c.file, tag: defs.tag_item, span: p.span)
+  var found: Bool = false
+  match Map.find(d: ctx.obligations_at, key: k) with
+  | Some(value) -> {
+    for id: Int in value {
+      let o: obligations.Obligation = context.get_obligation(ctx: ctx, id: id)
+      if not found and o.kind is obligations.Property {
+        found = true
+        status = status_of(obs: [o])
+      }
+    }
+  }
+  | None -> skip()
+  return json.JObject(
+    fields: [
+      json.field(key: "name", value: json.text(t: p.name.text)),
+      json.field(key: "status", value: json.text(t: status)),
+      json.field(
+        key: "at",
+        value: loc.location_json(ctx: ctx, tables: c.tables, file: c.file, span: p.span)
+      )
+    ]
+  )
+}
+
+-- The blocks an item's body consists of, in source order.
+fn item_blocks(item: ast.Item) -> List[ast.Block] may alloc, mutate {
+  var out: Builder[ast.Block] = List.builder()
+  match item with
+  | ast.FnItem(decl) -> {
+    match decl.body with
+    | Some(value) -> List.push(b: inout out, x: value)
+    | None -> skip()
+  }
+  | ast.ImplItem(decl) -> {
+    for f: ast.FnDecl in decl.fns {
+      match f.body with
+      | Some(value) -> List.push(b: inout out, x: value)
+      | None -> skip()
+    }
+  }
+  | ast.InterfaceItem(decl) -> {
+    for b: ast.Block in law_blocks(members: decl.items) {
+      List.push(b: inout out, x: b)
+    }
+  }
+  | ast.ExampleItem(decl) -> List.push(b: inout out, x: decl.body)
+  | ast.PropertyItem(decl) -> List.push(b: inout out, x: decl.body)
+  | _ -> skip()
+  return List.finish(b: out)
+}
+
+fn law_blocks(members: List[ast.IfaceItem]) -> List[ast.Block] may alloc, mutate {
+  var out: Builder[ast.Block] = List.builder()
+  for member: ast.IfaceItem in members {
+    match member with
+    | ast.LawItem(decl) -> List.push(b: inout out, x: decl.body)
+    | _ -> skip()
+  }
+  return List.finish(b: out)
+}
+
+fn assumes_in(ctx: context.Context, c: Ctx, item: ast.Item) -> List[AssumeEntry] may alloc, mutate {
+  var out: Builder[AssumeEntry] = List.builder()
+  for b: ast.Block in item_blocks(item: item) {
+    for n: walk.Node in walk.nodes_in_block(b: b, into_verify: false) {
+      match n with
+      | walk.NStmt(s) -> {
+        match s with
+        | ast.Assume(claim, justification, verify_block, span) -> {
+          var verify_json: json.Json = json.JNull
+          match verify_block with
+          | Some(value) -> verify_json = json.text(t: printer.print_verify(v: value))
+          | None -> skip()
+          List.push(
+            b: inout out,
+            x: AssumeEntry {
+              j: json.JObject(
+                fields: [
+                  json.field(
+                    key: "def",
+                    value: json.text(t: def_name_at(ctx: ctx, c: c, span: span))
+                  ),
+                  json.field(key: "claim", value: json.text(t: qname_text(q: claim))),
+                  json.field(key: "justification", value: json.text(t: justification)),
+                  json.field(
+                    key: "at",
+                    value: loc.location_json(ctx: ctx, tables: c.tables, file: c.file, span: span)
+                  ),
+                  json.field(key: "verifiable", value: json.bool(b: verify_block is Some)),
+                  json.field(key: "verify", value: verify_json),
+                  json.field(key: "last_verified", value: json.JNull)
+                ]
+              ),
+              verifiable: verify_block is Some
+            }
+          )
+        }
+        | _ -> skip()
+      }
+      | _ -> skip()
+    }
+  }
+  return List.finish(b: out)
+}
+
+fn recovers_in(ctx: context.Context, c: Ctx, item: ast.Item) -> List[json.Json] may alloc, mutate {
+  var out: Builder[json.Json] = List.builder()
+  for b: ast.Block in item_blocks(item: item) {
+    for n: walk.Node in walk.nodes_in_block(b: b, into_verify: false) {
+      match n with
+      | walk.NExpr(e) -> {
+        match e with
+        | ast.Recover(_, span) -> List.push(
+          b: inout out,
+          x: json.JObject(
+            fields: [
+              json.field(key: "def", value: json.text(t: def_name_at(ctx: ctx, c: c, span: span))),
+              json.field(
+                key: "at",
+                value: loc.location_json(ctx: ctx, tables: c.tables, file: c.file, span: span)
+              )
+            ]
+          )
+        )
+        | _ -> skip()
+      }
+      | _ -> skip()
+    }
+  }
+  return List.finish(b: out)
+}
+
+-- The innermost function, example or property containing `span`.
+fn def_name_at(ctx: context.Context, c: Ctx, span: ast.Span) -> Text may alloc {
+  var best: Text = ""
+  var best_size: Int = -1
+  for d: defs.Def in List.finish(b: ctx.defs) {
+    if d.file == c.file and (d.kind == defs.Fn or d.kind == defs.Example or d.kind == defs.Property) {
+      var extent: Option[ast.Span] = None
+      match d.node with
+      | defs.FnNode(decl) -> extent = Some(value: decl.span)
+      | defs.ExampleNode(decl) -> extent = Some(value: decl.span)
+      | defs.PropertyNode(decl) -> extent = Some(value: decl.span)
+      | _ -> skip()
+      match extent with
+      | Some(value) -> {
+        if within(inner: span, outer: value) {
+          let size: Int = value.end - value.start
+          if best_size < 0 or size < best_size {
+            best = d.name
+            best_size = size
+          }
+        }
+      }
+      | None -> skip()
+    }
+  }
+  return best
+}
+
+fn ledger_entry(
+  ctx: context.Context,
+  c: Ctx,
+  o: obligations.Obligation
+) -> json.Json may alloc, mutate {
+  return json.JObject(
+    fields: [
+      json.field(key: "kind", value: json.text(t: obligations.kind_text(k: o.kind))),
+      json.field(key: "text", value: json.text(t: o.text)),
+      json.field(key: "def", value: json.text(t: context.get_def(ctx: ctx, id: o.def).name)),
+      json.field(key: "status", value: json.text(t: obligations.status_text(s: o.status))),
+      json.field(key: "by", value: json.text_or_null(o: o.by)),
+      json.field(key: "pinned", value: json.bool(b: o.pinned)),
+      json.field(
+        key: "at",
+        value: loc.location_json(ctx: ctx, tables: c.tables, file: o.at_file, span: o.at_span)
+      )
+    ]
+  )
+}

@@ -1,0 +1,795 @@
+module claimcheck
+import std.hash
+import ast
+import parser
+import printer
+import defs
+import context
+import types
+import effectset
+import walk
+import report
+import tables
+
+-- The claims pass (impl spec §4, pass 9; spec §6.3, §7; `claims/pass.ts`).
+--
+-- Tiers: a derived claim is a predicate over effects and other claims and
+-- holds wherever the predicate holds; an asserted claim is carried by a
+-- function that declares it, and is sound relative to its `assume` leaves.
+--
+-- Propagation (§7.1): a function declaring an asserted claim either assumes
+-- it in its body or every callee that participates carries it. A callee
+-- participates when it has an observable effect: `io.file`, `io.net` or a
+-- resource effect. The quiet effects — `alloc`, `mutate`, `panic`, `diverge`,
+-- `nondet`, `io.env`, `io.clock`, `io.rand` — change nothing an observer
+-- could see twice, so they never participate (docs/CHANGES.md item 76).
+--
+-- Rules: E0203 (declared derived claim does not hold), E0204 (asserted claim
+-- not propagated), E0205 (`assume` of a derived claim), E0206 (`assume` of a
+-- claim the function does not declare).
+pub const quiet_effects: List[Text] = [
+  "alloc",
+  "mutate",
+  "panic",
+  "diverge",
+  "nondet",
+  "io.env",
+  "io.clock",
+  "io.rand"
+]
+
+fn skip() -> Unit {
+  return Unit
+}
+
+fn or_neg(o: Option[Int]) -> Int {
+  match o with
+  | Some(value) -> return value
+  | None -> return -1
+}
+
+fn ids_or(o: Option[List[Int]]) -> List[Int] may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return []
+}
+
+-- True iff `effects` contains an observable effect: `io.file`, `io.net` or a resource effect.
+pub fn observable(effects: effectset.EffectSet) -> Bool may alloc {
+  for e: defs.Effect in effectset.values(s: effects) {
+    match e with
+    | defs.ResourceEffect(_, _) -> return true
+    | defs.PrimEffect(name) -> {
+      if not List.contains(xs: quiet_effects, x: name) {
+        return true
+      }
+    }
+    | _ -> skip()
+  }
+  return false
+}
+
+-- Call-site resolution shared with the paths pass (§7.1, §9; `claims/calls.ts`): what a call reaches.
+pub union Callee =
+  | FnCallee of def: Int
+  -- An interface function on a concrete receiver, resolved to the implementation's function.
+  | ImplCallee of def: Int
+  -- An interface function whose receiver is a type parameter: resolvable only per instantiation.
+  | DispatchCallee of fn_def: Int, iface: Int
+  -- A call through a function value: its provenance is not tracked in v0 (impl spec §9, M8).
+  | ValueCallee of ty: Option[types.Type]
+  | CtorCallee
+
+-- What the call `e` (in `file`) calls.
+pub fn callee_of(ctx: context.Context, file: Int, e: ast.Expr) -> Callee may alloc, mutate {
+  match e with
+  | ast.Call(callee, _, _, span) -> {
+    let ck: Int = defs.node_key(
+      file: file,
+      tag: defs.tag_expr,
+      span: parser.span_of_expr(e: callee)
+    )
+    let call_key: Int = defs.node_key(file: file, tag: defs.tag_expr, span: span)
+    match Map.find(d: ctx.refs, key: ck) with
+    | None -> return ValueCallee(ty: Map.find(d: ctx.expr_types, key: ck))
+    | Some(value) -> {
+      match value with
+      | defs.DefRes(def) -> {
+        let d: defs.Def = context.get_def(ctx: ctx, id: def)
+        if d.kind == defs.Fn {
+          return FnCallee(def: def)
+        }
+        if d.kind == defs.Variant or d.kind == defs.Record {
+          return CtorCallee
+        }
+        return ValueCallee(ty: decl_or_expr_type(ctx: ctx, def: def, ck: ck))
+      }
+      | defs.CompanionRes(owner, fn_def) -> return FnCallee(def: fn_def)
+      | defs.IfaceFnRes(iface, fn_def) -> return iface_callee(
+        ctx: ctx,
+        iface: iface,
+        fn_def: fn_def,
+        call_key: call_key
+      )
+      | _ -> return ValueCallee(ty: Map.find(d: ctx.expr_types, key: ck))
+    }
+  }
+  | _ -> return CtorCallee
+}
+
+fn decl_or_expr_type(ctx: context.Context, def: Int, ck: Int) -> Option[types.Type] {
+  match Map.find(d: ctx.decl_types, key: def) with
+  | Some(value) -> return Some(value: value)
+  | None -> return Map.find(d: ctx.expr_types, key: ck)
+}
+
+fn iface_callee(
+  ctx: context.Context,
+  iface: Int,
+  fn_def: Int,
+  call_key: Int
+) -> Callee may alloc, mutate {
+  match Map.find(d: ctx.signatures, key: fn_def) with
+  | None -> return DispatchCallee(fn_def: fn_def, iface: iface)
+  | Some(value) -> {
+    let n: Int = List.len(xs: value.tparams)
+    let inst: List[types.TypeArg] = args_or(o: Map.find(d: ctx.instantiations, key: call_key))
+    if n < List.len(xs: inst) and n >= 0 {
+      match List.get(xs: inst, i: n) with
+      | types.TypeA(ty) -> {
+        let s: types.Type = types.strip(t: ty)
+        if not s is types.ParamT and not s is types.ErrorT {
+          let fn_name: Text = context.get_def(ctx: ctx, id: fn_def).name
+          for im: types.ImplInfo in impls_or(o: Map.find(d: ctx.impls, key: iface)) {
+            if types.same_base(a: im.target, b: s) {
+              let found: Int = child_named(ctx: ctx, parent: im.def, name: fn_name)
+              if found >= 0 {
+                return ImplCallee(def: found)
+              }
+              return DispatchCallee(fn_def: fn_def, iface: iface)
+            }
+          }
+        }
+      }
+      | _ -> skip()
+    }
+    return DispatchCallee(fn_def: fn_def, iface: iface)
+  }
+}
+
+fn args_or(o: Option[List[types.TypeArg]]) -> List[types.TypeArg] may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return []
+}
+
+fn impls_or(o: Option[List[types.ImplInfo]]) -> List[types.ImplInfo] may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return []
+}
+
+-- The first def whose parent is `parent` and whose name is `name`, or -1.
+fn child_named(ctx: context.Context, parent: Int, name: Text) -> Int may alloc {
+  for d: defs.Def in List.finish(b: ctx.defs) {
+    if or_neg(o: d.parent) == parent and d.name == name {
+      return d.id
+    }
+  }
+  return -1
+}
+
+-- A function's effects: declared plus inferred (`alloc`, §6.1).
+pub fn effects_of_fn(ctx: context.Context, def: Int) -> effectset.EffectSet may alloc, mutate {
+  match Map.find(d: ctx.signatures, key: def) with
+  | None -> return effectset.empty()
+  | Some(value) -> {
+    return with_inferred(ctx: ctx, def: def, declared: value.effects)
+  }
+}
+
+fn with_inferred(
+  ctx: context.Context,
+  def: Int,
+  declared: effectset.EffectSet
+) -> effectset.EffectSet may alloc, mutate {
+  match Map.find(d: ctx.inferred, key: def) with
+  | Some(value) -> return effectset.join_sets(a: declared, b: value)
+  | None -> return declared
+}
+
+-- The callee's effects at the call with key `call_key`, with its effect parameters bound as the checker recorded.
+pub fn callee_effects(
+  ctx: context.Context,
+  call_key: Int,
+  callee: Int
+) -> effectset.EffectSet may alloc, mutate {
+  let effects: effectset.EffectSet = effects_of_fn(ctx: ctx, def: callee)
+  match Map.find(d: ctx.effect_bindings, key: call_key) with
+  | None -> return effects
+  | Some(value) -> {
+    var out: Builder[defs.Effect] = List.builder()
+    for e: defs.Effect in effectset.values(s: effects) {
+      match e with
+      | defs.ParamEffect(def) -> {
+        push_bound(bound: Map.find(d: value, key: def), original: e, out: inout out)
+      }
+      | _ -> List.push(b: inout out, x: e)
+    }
+    return effectset.of_list(effects: List.finish(b: out))
+  }
+}
+
+fn push_bound(
+  bound: Option[effectset.EffectSet],
+  original: defs.Effect,
+  out: inout Builder[defs.Effect]
+) -> Unit may mutate, alloc {
+  match bound with
+  | Some(value) -> {
+    for x: defs.Effect in effectset.values(s: value) {
+      List.push(b: inout out, x: x)
+    }
+  }
+  | None -> List.push(b: inout out, x: original)
+  return Unit
+}
+
+-- The effects of a call through a function value.
+pub fn value_effects(ty: Option[types.Type]) -> effectset.EffectSet may alloc {
+  match ty with
+  | None -> return effectset.empty()
+  | Some(value) -> {
+    match types.strip(t: value) with
+    | types.FnT(_, _, effects) -> return effects
+    | _ -> return effectset.empty()
+  }
+}
+
+pub fn assumes_of(ctx: context.Context, fn_def: Int) -> List[tables.AssumeSite] may alloc, mutate {
+  var out: Builder[tables.AssumeSite] = List.builder()
+  for a: tables.AssumeSite in List.finish(b: ctx.assume_sites) {
+    if a.fn_def == fn_def {
+      List.push(b: inout out, x: a)
+    }
+  }
+  return List.finish(b: out)
+}
+
+pub fn carries(ctx: context.Context, fn_def: Int, claim_def: Int) -> Bool may alloc {
+  return List.contains(xs: ids_or(o: Map.find(d: ctx.carried, key: fn_def)), x: claim_def)
+}
+
+pub fn tier_of(ctx: context.Context, claim_def: Int) -> Text {
+  match Map.find(d: ctx.claim_tiers, key: claim_def) with
+  | Some(value) -> return value
+  | None -> return ""
+}
+
+fn module_name(ctx: context.Context, mod: Int) -> Text {
+  match Map.find(d: ctx.modules, key: mod) with
+  | Some(value) -> return value.name
+  | None -> return ""
+}
+
+fn rep(
+  ctx: inout context.Context,
+  code: Text,
+  file: Int,
+  at: ast.Span,
+  def_name: Option[Text],
+  detail: Text
+) -> Unit may mutate, alloc {
+  context.report(
+    ctx: inout ctx,
+    d: report.diagnostic(code: code, file: file, span: at, def_name: def_name, detail: detail)
+  )
+  return Unit
+}
+
+fn dedupe(xs: List[Int]) -> List[Int] may alloc, mutate {
+  var out: Builder[Int] = List.builder()
+  var seen: Dict[Int, Bool] = Map.dict()
+  for x: Int in xs {
+    if not Map.contains(d: seen, key: x) {
+      Map.set(d: inout seen, key: x, value: true)
+      List.push(b: inout out, x: x)
+    }
+  }
+  return List.finish(b: out)
+}
+
+-- Pass 9: claims.
+-- Preconditions: the contracts pass ran without diagnostics.
+-- Effects: fills the claim tables of `ctx`; reports E0203–E0206.
+pub fn claims_pass(ctx: inout context.Context) -> Unit may mutate, alloc {
+  var tiers: Dict[Int, Text] = ctx.claim_tiers
+  for mid: Int in 0 ..< ctx.module_count {
+    match Map.find(d: ctx.modules, key: mid) with
+    | None -> skip()
+    | Some(value) -> {
+      for item: ast.Item in value.tree.items {
+        match item with
+        | ast.ClaimItem(decl) -> {
+          let d: Int = or_neg(
+            o: Map.find(
+              d: ctx.def_of,
+              key: defs.node_key(file: value.file, tag: defs.tag_item, span: decl.span)
+            )
+          )
+          if d >= 0 {
+            var tier: Text = "asserted"
+            if decl.body is ast.Derived {
+              tier = "derived"
+            }
+            Map.set(d: inout tiers, key: d, value: tier)
+          }
+        }
+        | _ -> skip()
+      }
+    }
+  }
+  let all_defs: List[defs.Def] = List.finish(b: ctx.defs)
+  var carried: Dict[Int, List[Int]] = ctx.carried
+  for d: defs.Def in all_defs {
+    if d.kind == defs.Fn {
+      match d.node with
+      | defs.FnNode(decl) -> {
+        Map.set(
+          d: inout carried,
+          key: d.id,
+          value: dedupe(xs: declared_claims(ctx: ctx, d: d, decl: decl))
+        )
+        match decl.body with
+        | Some(value) -> collect_assumes(ctx: inout ctx, d: d, body: value)
+        | None -> skip()
+      }
+      | _ -> skip()
+    }
+  }
+  -- Derived claims hold wherever their predicate holds (§7), for every function with a signature.
+  var derived: Builder[Int] = List.builder()
+  for c: Int in Map.keys(d: tiers) {
+    if tier_of(ctx: ctx, claim_def: c) == "derived" {
+      List.push(b: inout derived, x: c)
+    }
+  }
+  let derived_list: List[Int] = List.finish(b: derived)
+  for d: defs.Def in all_defs {
+    if d.kind == defs.Fn and Map.contains(d: ctx.signatures, key: d.id) {
+      var set: List[Int] = ids_or(o: Map.find(d: carried, key: d.id))
+      let effects: effectset.EffectSet = effects_of_fn(ctx: ctx, def: d.id)
+      for c: Int in derived_list {
+        var visiting: Dict[Int, Bool] = Map.dict()
+        if holds(
+          fuel: 1000,
+          ctx: ctx,
+          claim_def: c,
+          effects: effects,
+          carried: set,
+          visiting: inout visiting
+        ) and not List.contains(xs: set, x: c) {
+          set = List.append(xs: set, x: c)
+        }
+      }
+      Map.set(d: inout carried, key: d.id, value: set)
+    }
+  }
+  for d: defs.Def in all_defs {
+    if d.kind == defs.Fn {
+      match d.node with
+      | defs.FnNode(decl) -> check_fn(ctx: inout ctx, d: d, decl: decl)
+      | _ -> skip()
+    }
+  }
+  return Unit
+}
+
+fn declared_claims(ctx: context.Context, d: defs.Def, decl: ast.FnDecl) -> List[Int] may alloc {
+  return ids_or(
+    o: Map.find(
+      d: ctx.claim_lists,
+      key: defs.node_key(file: d.file, tag: defs.tag_item, span: decl.span)
+    )
+  )
+}
+
+fn collect_assumes(
+  ctx: inout context.Context,
+  d: defs.Def,
+  body: ast.Block
+) -> Unit may mutate, alloc {
+  var sites: Builder[tables.AssumeSite] = ctx.assume_sites
+  for n: walk.Node in walk.nodes_in_block(b: body, into_verify: false) {
+    match n with
+    | walk.NStmt(s) -> {
+      match s with
+      | ast.Assume(_, justification, verify_block, span) -> {
+        let k: Int = defs.node_key(file: d.file, tag: defs.tag_stmt, span: span)
+        let claim_def: Int = ref_def(ctx: ctx, k: k)
+        if claim_def >= 0 {
+          var verify_key: Option[Int] = None
+          match verify_block with
+          | Some(value) -> verify_key = Some(
+            value: defs.node_key(file: d.file, tag: defs.tag_misc, span: value.span)
+          )
+          | None -> skip()
+          List.push(
+            b: inout sites,
+            x: tables.AssumeSite {
+              fn_def: d.id,
+              claim_def: claim_def,
+              justification: justification,
+              node: k,
+              at_file: d.file,
+              at_span: span,
+              verify_key: verify_key,
+              verify_block: verify_block,
+              key: module_name(ctx: ctx, mod: d.mod) ++ "#b3:" ++ hash.blake3_hex(
+                t: printer.print_stmt(st: s)
+              )
+            }
+          )
+        }
+      }
+      | _ -> skip()
+    }
+    | _ -> skip()
+  }
+  return Unit
+}
+
+fn ref_def(ctx: context.Context, k: Int) -> Int {
+  match Map.find(d: ctx.refs, key: k) with
+  | None -> return -1
+  | Some(value) -> {
+    match value with
+    | defs.DefRes(def) -> return def
+    | _ -> return -1
+  }
+}
+
+fn ref_effect(ctx: context.Context, k: Int) -> Option[defs.Effect] {
+  match Map.find(d: ctx.refs, key: k) with
+  | None -> return None
+  | Some(value) -> {
+    match value with
+    | defs.EffectRes(effect) -> return Some(value: effect)
+    | _ -> return None
+  }
+}
+
+fn check_fn(ctx: inout context.Context, d: defs.Def, decl: ast.FnDecl) -> Unit may mutate, alloc {
+  let declared: List[Int] = declared_claims(ctx: ctx, d: d, decl: decl)
+  let sites: List[tables.AssumeSite] = assumes_of(ctx: ctx, fn_def: d.id)
+  for a: tables.AssumeSite in sites {
+    let name: Text = context.qualified_name(ctx: ctx, id: a.claim_def)
+    if tier_of(ctx: ctx, claim_def: a.claim_def) == "derived" {
+      rep(
+        ctx: inout ctx,
+        code: "E0205",
+        file: a.at_file,
+        at: a.at_span,
+        def_name: Some(value: d.name),
+        detail: "`" ++ name ++ "` is a derived claim; it holds or fails by its predicate and cannot be assumed"
+      )
+    } else {
+      if not List.contains(xs: declared, x: a.claim_def) {
+        rep(
+          ctx: inout ctx,
+          code: "E0206",
+          file: a.at_file,
+          at: a.at_span,
+          def_name: Some(value: d.name),
+          detail: "`" ++ d.name ++ "` assumes `" ++ name ++ "` but does not declare `claims " ++ context.get_def(
+            ctx: ctx,
+            id: a.claim_def
+          ).name ++ "`"
+        )
+      }
+    }
+  }
+  let effects: effectset.EffectSet = effects_of_fn(ctx: ctx, def: d.id)
+  var i: Int where it >= 0 = 0
+  for c: Int in declared {
+    var at: ast.Span = decl.name.span
+    if i < List.len(xs: decl.claim_list) {
+      at = List.get(xs: decl.claim_list, i: i).span
+    }
+    if tier_of(ctx: ctx, claim_def: c) == "derived" {
+      var visiting: Dict[Int, Bool] = Map.dict()
+      if not holds(
+        fuel: 1000,
+        ctx: ctx,
+        claim_def: c,
+        effects: effects,
+        carried: ids_or(o: Map.find(d: ctx.carried, key: d.id)),
+        visiting: inout visiting
+      ) {
+        rep(
+          ctx: inout ctx,
+          code: "E0203",
+          file: d.file,
+          at: at,
+          def_name: Some(value: d.name),
+          detail: "`" ++ d.name ++ "` claims `" ++ context.get_def(
+            ctx: ctx,
+            id: c
+          ).name ++ "` but its effects { " ++ effect_text(
+            ctx: ctx,
+            effects: effects
+          ) ++ " } do not satisfy the predicate"
+        )
+      }
+    } else {
+      var assumed: Bool = false
+      for a: tables.AssumeSite in sites {
+        if a.claim_def == c {
+          assumed = true
+        }
+      }
+      if not assumed {
+        propagation(ctx: inout ctx, d: d, decl: decl, claim_def: c)
+      }
+    }
+    i = i + 1
+  }
+  return Unit
+}
+
+pub fn effect_name(ctx: context.Context, e: defs.Effect) -> Text {
+  match e with
+  | defs.ParamEffect(def) -> return context.get_def(ctx: ctx, id: def).name
+  | defs.PrimEffect(name) -> return name
+  | defs.ResourceEffect(_, name) -> return name
+}
+
+fn effect_text(ctx: context.Context, effects: effectset.EffectSet) -> Text may alloc, mutate {
+  var parts: Builder[Text] = List.builder()
+  for e: defs.Effect in effectset.values(s: effects) {
+    List.push(b: inout parts, x: effect_name(ctx: ctx, e: e))
+  }
+  return Text.join(parts: List.finish(b: parts), sep: ", ")
+}
+
+-- Whether `claim_def` holds for a function with `effects` that carries `carried`.
+fn holds(
+  fuel: Int where it >= 0,
+  ctx: context.Context,
+  claim_def: Int,
+  effects: effectset.EffectSet,
+  carried: List[Int],
+  visiting: inout Dict[Int, Bool]
+) -> Bool may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return false
+  }
+  let d: defs.Def = context.get_def(ctx: ctx, id: claim_def)
+  match d.node with
+  | defs.ClaimNode(decl) -> {
+    match decl.body with
+    | ast.Asserted(_) -> return List.contains(xs: carried, x: claim_def)
+    | ast.Derived(pred) -> {
+      if Map.contains(d: visiting, key: claim_def) {
+        return false
+      }
+      Map.set(d: inout visiting, key: claim_def, value: true)
+      let r: Bool = pred_holds(
+        fuel: fuel - 1,
+        ctx: ctx,
+        file: d.file,
+        p: pred,
+        fx: effects,
+        carried: carried,
+        visiting: inout visiting
+      )
+      Map.remove(d: inout visiting, key: claim_def)
+      return r
+    }
+  }
+  | _ -> return false
+}
+
+fn pred_holds(
+  fuel: Int where it >= 0,
+  ctx: context.Context,
+  file: Int,
+  p: ast.ClaimPred,
+  fx: effectset.EffectSet,
+  carried: List[Int],
+  visiting: inout Dict[Int, Bool]
+) -> Bool may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return false
+  }
+  match p with
+  | ast.ClaimAtom(_, span) -> {
+    let k: Int = defs.node_key(file: file, tag: defs.tag_misc, span: span)
+    match Map.find(d: ctx.refs, key: k) with
+    | None -> return false
+    | Some(value) -> {
+      match value with
+      | defs.EffectRes(effect) -> return effectset.has(s: fx, e: effect)
+      | defs.DefRes(def) -> return holds(
+        fuel: fuel - 1,
+        ctx: ctx,
+        claim_def: def,
+        effects: fx,
+        carried: carried,
+        visiting: inout visiting
+      )
+      | _ -> return false
+    }
+  }
+  | ast.ClaimEffectsEq(effects, _) -> {
+    var listed: Builder[defs.Effect] = List.builder()
+    for r: ast.EffectRef in effects {
+      match ref_effect(ctx: ctx, k: defs.node_key(file: file, tag: defs.tag_sig, span: r.span)) with
+      | Some(value) -> List.push(b: inout listed, x: value)
+      | None -> skip()
+    }
+    return effectset.equals(a: fx, b: effectset.of_list(effects: List.finish(b: listed)))
+  }
+  | ast.ClaimNot(operand, _) -> return not pred_holds(
+    fuel: fuel - 1,
+    ctx: ctx,
+    file: file,
+    p: operand,
+    fx: fx,
+    carried: carried,
+    visiting: inout visiting
+  )
+  | ast.ClaimAnd(operands, _) -> {
+    for x: ast.ClaimPred in operands {
+      if not pred_holds(
+        fuel: fuel - 1,
+        ctx: ctx,
+        file: file,
+        p: x,
+        fx: fx,
+        carried: carried,
+        visiting: inout visiting
+      ) {
+        return false
+      }
+    }
+    return true
+  }
+  | ast.ClaimOr(operands, _) -> {
+    for x: ast.ClaimPred in operands {
+      if pred_holds(
+        fuel: fuel - 1,
+        ctx: ctx,
+        file: file,
+        p: x,
+        fx: fx,
+        carried: carried,
+        visiting: inout visiting
+      ) {
+        return true
+      }
+    }
+    return false
+  }
+}
+
+-- §7.1: every participating callee of a function declaring asserted `claim_def` must carry it.
+fn propagation(
+  ctx: inout context.Context,
+  d: defs.Def,
+  decl: ast.FnDecl,
+  claim_def: Int
+) -> Unit may mutate, alloc {
+  match decl.body with
+  | None -> return Unit
+  | Some(value) -> {
+    -- An intrinsic's claims are trusted, like its contracts (§3.12).
+    let name: Text = context.get_def(ctx: ctx, id: claim_def).name
+    for n: walk.Node in walk.nodes_in_block(b: value, into_verify: false) {
+      match n with
+      | walk.NExpr(e) -> {
+        if e is ast.Call {
+          call_propagation(ctx: inout ctx, d: d, decl: decl, claim_def: claim_def, name: name, e: e)
+        }
+      }
+      | _ -> skip()
+    }
+  }
+  return Unit
+}
+
+fn call_propagation(
+  ctx: inout context.Context,
+  d: defs.Def,
+  decl: ast.FnDecl,
+  claim_def: Int,
+  name: Text,
+  e: ast.Expr
+) -> Unit may mutate, alloc {
+  let at: ast.Span = parser.span_of_expr(e: e)
+  let call_key: Int = defs.node_key(file: d.file, tag: defs.tag_expr, span: at)
+  match callee_of(ctx: ctx, file: d.file, e: e) with
+  | CtorCallee -> skip()
+  | FnCallee(def) -> callee_propagation(
+    ctx: inout ctx,
+    d: d,
+    decl: decl,
+    claim_def: claim_def,
+    name: name,
+    call_key: call_key,
+    at: at,
+    def: def
+  )
+  | ImplCallee(def) -> callee_propagation(
+    ctx: inout ctx,
+    d: d,
+    decl: decl,
+    claim_def: claim_def,
+    name: name,
+    call_key: call_key,
+    at: at,
+    def: def
+  )
+  | DispatchCallee(fn_def, _) -> {
+    if observable(effects: callee_effects(ctx: ctx, call_key: call_key, callee: fn_def)) {
+      rep(
+        ctx: inout ctx,
+        code: "E0204",
+        file: d.file,
+        at: at,
+        def_name: Some(value: d.name),
+        detail: "`" ++ context.get_def(
+          ctx: ctx,
+          id: fn_def
+        ).name ++ "` is dispatched on a type parameter, so it cannot be shown to claim `" ++ name ++ "`"
+      )
+    }
+  }
+  | ValueCallee(ty) -> {
+    if observable(effects: value_effects(ty: ty)) {
+      rep(
+        ctx: inout ctx,
+        code: "E0204",
+        file: d.file,
+        at: at,
+        def_name: Some(value: d.name),
+        detail: "a call through a function value cannot be shown to claim `" ++ name ++ "`"
+      )
+    }
+  }
+  return Unit
+}
+
+fn callee_propagation(
+  ctx: inout context.Context,
+  d: defs.Def,
+  decl: ast.FnDecl,
+  claim_def: Int,
+  name: Text,
+  call_key: Int,
+  at: ast.Span,
+  def: Int
+) -> Unit may mutate, alloc {
+  if observable(effects: callee_effects(ctx: ctx, call_key: call_key, callee: def)) and not carries(
+    ctx: ctx,
+    fn_def: def,
+    claim_def: claim_def
+  ) {
+    rep(
+      ctx: inout ctx,
+      code: "E0204",
+      file: d.file,
+      at: at,
+      def_name: Some(value: d.name),
+      detail: "`" ++ context.qualified_name(
+        ctx: ctx,
+        id: def
+      ) ++ "` has observable effects but does not claim `" ++ name ++ "`; `" ++ decl.name.text ++ "` must not claim it without an `assume`"
+    )
+  }
+  return Unit
+}

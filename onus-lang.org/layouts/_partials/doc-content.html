@@ -1,0 +1,2 @@
+{{- /* doc-content.html — a page's rendered content with the documents' `<!-- changed: … -->` notes made visible. */ -}}
+{{- .Content | replaceRE `(?s)<!--\s*changed:\s*(.*?)\s*-->` `<span class="chg"><b>changed:</b> $1</span>` | safeHTML -}}

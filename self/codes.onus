@@ -1,0 +1,248 @@
+module codes
+
+-- The diagnostic code catalogue (spec §13; `report/codes.ts`): the title of
+-- every code, for the JSON rendering of diagnostics. Generated from the
+-- TypeScript catalogue; codes are never reused or renumbered.
+pub fn title(code: Text) -> Text {
+  if code == "E0001" {
+    return "source is not canonical"
+  }
+  if code == "E0002" {
+    return "expression statement has no effect"
+  }
+  if code == "E0003" {
+    return "unexpected token"
+  }
+  if code == "E0004" {
+    return "unterminated text literal"
+  }
+  if code == "E0005" {
+    return "unexpected character"
+  }
+  if code == "E0006" {
+    return "comparison operators are non-associative"
+  }
+  if code == "E0007" {
+    return "and/or mixed without parentheses"
+  }
+  if code == "E0008" {
+    return "integer literal out of range"
+  }
+  if code == "E0009" {
+    return "invalid escape sequence in text literal"
+  }
+  if code == "E0010" {
+    return "malformed numeric literal"
+  }
+  if code == "E0011" {
+    return "implies is non-associative"
+  }
+  if code == "E0012" {
+    return "fake outside a test module"
+  }
+  if code == "E0101" {
+    return "module cycle"
+  }
+  if code == "E0102" {
+    return "intrinsic outside the standard library"
+  }
+  if code == "E0103" {
+    return "module not found"
+  }
+  if code == "E0104" {
+    return "module name does not match its file"
+  }
+  if code == "E0105" {
+    return "unknown name"
+  }
+  if code == "E0106" {
+    return "unknown type"
+  }
+  if code == "E0107" {
+    return "duplicate definition"
+  }
+  if code == "E0108" {
+    return "ambiguous name"
+  }
+  if code == "E0109" {
+    return "unknown member"
+  }
+  if code == "E0110" {
+    return "private item used outside its module"
+  }
+  if code == "E0111" {
+    return "sealed type constructed outside its module"
+  }
+  if code == "E0112" {
+    return "module name reserved for the standard library"
+  }
+  if code == "E0113" {
+    return "binding shadows a visible name"
+  }
+  if code == "E0114" {
+    return "contract keyword outside its context"
+  }
+  if code == "E0115" {
+    return "elided body outside an interface document"
+  }
+  if code == "E0201" {
+    return "undeclared effect"
+  }
+  if code == "E0202" {
+    return "unknown effect"
+  }
+  if code == "E0203" {
+    return "derived claim not satisfied"
+  }
+  if code == "E0204" {
+    return "asserted claim not propagated"
+  }
+  if code == "E0205" {
+    return "assume of a derived claim"
+  }
+  if code == "E0206" {
+    return "assume of an undeclared claim"
+  }
+  if code == "E0207" {
+    return "verify block exceeds its function's effects"
+  }
+  if code == "E0208" {
+    return "verify parameter is not a capability"
+  }
+  if code == "E0302" {
+    return "postcondition not established"
+  }
+  if code == "E0310" {
+    return "pattern field mismatch"
+  }
+  if code == "E0320" {
+    return "recursive cycle without shared measure"
+  }
+  if code == "E0321" {
+    return "type mismatch"
+  }
+  if code == "E0322" {
+    return "wrong arguments"
+  }
+  if code == "E0323" {
+    return "not callable"
+  }
+  if code == "E0324" {
+    return "wrong type arguments"
+  }
+  if code == "E0325" {
+    return "no such field"
+  }
+  if code == "E0326" {
+    return "match is not exhaustive"
+  }
+  if code == "E0327" {
+    return "unreachable match arm"
+  }
+  if code == "E0328" {
+    return "assignment to an immutable binding"
+  }
+  if code == "E0329" {
+    return "inout misuse"
+  }
+  if code == "E0330" {
+    return "closure captures a var, inout parameter or capability"
+  }
+  if code == "E0331" {
+    return "missing return"
+  }
+  if code == "E0332" {
+    return "unreachable statement"
+  }
+  if code == "E0333" {
+    return "bound not satisfied"
+  }
+  if code == "E0334" {
+    return "impl does not match its interface"
+  }
+  if code == "E0335" {
+    return "invalid modifier"
+  }
+  if code == "E0337" {
+    return "argument is not a compile-time constant"
+  }
+  if code == "E0338" {
+    return "quantifier domain is unbounded"
+  }
+  if code == "E0339" {
+    return "value discarded"
+  }
+  if code == "E0340" {
+    return "operator not defined for type"
+  }
+  if code == "E0341" {
+    return "pattern does not match the scrutinee type"
+  }
+  if code == "E0342" {
+    return "precondition not established"
+  }
+  if code == "E0343" {
+    return "checked obligation in a function without panic"
+  }
+  if code == "E0344" {
+    return "structural measure not shown to decrease"
+  }
+  if code == "E0410" {
+    return "unresolvable call on path"
+  }
+  if code == "E0411" {
+    return "path effect bound and forbid clause are inconsistent"
+  }
+  if code == "E0412" {
+    return "path effect bound exceeded"
+  }
+  if code == "E0413" {
+    return "forbidden effect reachable on path"
+  }
+  if code == "E0414" {
+    return "required claim missing on path"
+  }
+  if code == "E0415" {
+    return "assumption forbidden by path policy"
+  }
+  if code == "E0416" {
+    return "assumption not verified on path"
+  }
+  if code == "E0501" {
+    return "verification budget exceeded"
+  }
+  if code == "E0600" {
+    return "test module linked into a non-test build"
+  }
+  if code == "E0601" {
+    return "capability stored in a record"
+  }
+  if code == "E0602" {
+    return "main receives a non-root capability"
+  }
+  if code == "E0603" {
+    return "no environment source for a verify parameter"
+  }
+  if code == "E0700" {
+    return "library check failed"
+  }
+  if code == "E0701" {
+    return "const evaluation failed"
+  }
+  if code == "E0702" {
+    return "example failed"
+  }
+  if code == "E0703" {
+    return "const fn obligation not proved"
+  }
+  if code == "E0800" {
+    return "primitive unavailable on target"
+  }
+  if code == "E0801" {
+    return "target disagreement"
+  }
+  if code == "E0999" {
+    return "internal error"
+  }
+  return ""
+}

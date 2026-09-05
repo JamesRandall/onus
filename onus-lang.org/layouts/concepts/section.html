@@ -1,0 +1,22 @@
+{{ define "main" }}
+<div class="wrap">
+  <article class="prose wide">
+    <h1 class="page-title">{{ .Title }}</h1>
+    {{- with .Params.lede }}<p class="lede">{{ . | markdownify }}</p>{{ end }}
+    {{ .Content }}
+  </article>
+  <div class="cards">
+    {{- range .RegularPages.ByWeight }}
+    <a class="card" href="{{ .RelPermalink }}"><h3>{{ .Title }}</h3><p>{{ .Params.summary }}</p><span class="ref">{{ .Params.spec }}</span></a>
+    {{- end }}
+  </div>
+  <article class="prose wide">
+    <h2>Further on</h2>
+    <ul>
+      <li><a href="{{ "/practice/" | relURL }}">In practice</a> — what a real project looks like: zones, an HTTP API, testing, the loop, the workbench.</li>
+      <li><a href="{{ "/compared/" | relURL }}">Compared</a> — where each idea came from, and where Onus differs.</li>
+      <li><a href="{{ "/spec/" | relURL }}">The specification</a> — the normative document.</li>
+    </ul>
+  </article>
+</div>
+{{ end }}

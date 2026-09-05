@@ -563,7 +563,7 @@ fn check_call(
           record_proved(
             ctx: inout ctx,
             call_key: call_key,
-            clause_key: key(cp: cp, tag: defs.tag_sig, span: clause.span)
+            clause_key: defs.node_key(file: fn_def.file, tag: defs.tag_sig, span: clause.span)
           )
         } else {
           library_check_failed(
@@ -657,7 +657,17 @@ fn library_check_failed(
           ctx: ctx,
           id: fn_def.id
         ) ++ "`"
-      ]
+      ],
+      obligation: Some(
+        value: report.ObligationInfo {
+          kind: "requires",
+          text: printer.print_expr(e: clause.expr),
+          status: "failed",
+          has_counterexample: false,
+          counterexample: []
+        }
+      ),
+      repairs: []
     }
   )
   return Unit
@@ -787,6 +797,9 @@ fn grapheme_span(
   if from_i < 0 {
     from_i = 0
   }
+  if from_i > n {
+    from_i = n
+  }
   if to_i > n {
     to_i = n
   }
@@ -795,7 +808,7 @@ fn grapheme_span(
   }
   let src: List[Int] = List.slice(xs: cps, from: from_i, to: to_i)
   let m: Int = List.len(xs: src)
-  var starts: Builder[Int] = List.builder()
+  var starts: Builder[Int where it >= 0] = List.builder()
   var value_cps: Builder[Int where 0 <= it and it <= 1114111] = List.builder()
   var i: Int where it >= 0 = 0
   loop while i < m
@@ -815,7 +828,7 @@ fn grapheme_span(
     }
     i = i + width
   }
-  let start_list: List[Int] = List.finish(b: starts)
+  let start_list: List[Int where it >= 0] = List.finish(b: starts)
   let value_text: Text = Text.of_code_points(cps: List.finish(b: value_cps))
   var unit: Int = 0
   var g: Int = 0
@@ -834,11 +847,15 @@ fn grapheme_span(
   }
   let base: Int = literal.start + 1
   if not found or unit < 0 or unit >= List.len(xs: start_list) {
-    return ast.Span { start: literal.end - 1, end: literal.end }
+    var close: Int where it >= 0 = literal.start
+    if literal.end > 0 {
+      close = literal.end - 1
+    }
+    return ast.Span { start: close, end: literal.end }
   }
-  let from: Int = List.get(xs: start_list, i: unit)
+  let from: Int where it >= 0 = List.get(xs: start_list, i: unit)
   let to_index: Int = unit + width
-  var to: Int = m
+  var to: Int where it >= 0 = m
   if to_index >= 0 and to_index < List.len(xs: start_list) {
     to = List.get(xs: start_list, i: to_index)
   }

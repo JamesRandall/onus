@@ -1,0 +1,35 @@
+# Netlify: build and deploy the website in onus-lang.org/.
+#
+# The site mounts ../docs and ../examples, so the whole repository is needed
+# at build time and a change to either of those directories must trigger a
+# build even though it is outside the base directory.
+
+[build]
+  base    = "onus-lang.org"
+  publish = "public"
+  command = "hugo --gc --minify"
+  ignore  = "git diff --quiet $CACHED_COMMIT_REF $COMMIT_REF -- . ../docs ../examples"
+
+[build.environment]
+  HUGO_VERSION = "0.165.0"
+  HUGO_ENV     = "production"
+  TZ           = "Europe/London"
+
+[context.deploy-preview]
+  command = "hugo --gc --minify -b $DEPLOY_PRIME_URL"
+
+[context.branch-deploy]
+  command = "hugo --gc --minify -b $DEPLOY_PRIME_URL"
+
+# Fingerprinted stylesheets never change at a given URL; everything else is revalidated.
+[[headers]]
+  for = "/css/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options        = "SAMEORIGIN"
+    Referrer-Policy        = "strict-origin-when-cross-origin"

@@ -1,0 +1,227 @@
+module capabilities
+import ast
+import defs
+import context
+import types
+import report
+
+-- The capabilities pass (impl spec §4, pass 10; spec §8, §8.3, §8.4;
+-- `capabilities/pass.ts`).
+--
+-- Typing of capabilities and attenuation lives in the types pass; this pass
+-- checks the structural rules:
+--   - E0600: a module that is not a `test module` imports one;
+--   - E0601: a record field of capability type (capabilities are threaded, never stored);
+--   - E0602: `main` receives a capability that is not a root (`std.io.*`), for
+--     which no source exists (§8.3).
+-- `fake` outside a `test module` is a syntax error (E0012, §8.4); closure
+-- capture of a capability is E0330 in the types pass.
+fn skip() -> Unit {
+  return Unit
+}
+
+fn or_neg(o: Option[Int]) -> Int {
+  match o with
+  | Some(value) -> return value
+  | None -> return -1
+}
+
+fn fields_or(o: Option[List[types.FieldInfo]]) -> List[types.FieldInfo] may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return []
+}
+
+fn rep(
+  ctx: inout context.Context,
+  code: Text,
+  file: Int,
+  at: ast.Span,
+  def_name: Option[Text],
+  detail: Text
+) -> Unit may mutate, alloc {
+  context.report(
+    ctx: inout ctx,
+    d: report.diagnostic(code: code, file: file, span: at, def_name: def_name, detail: detail)
+  )
+  return Unit
+}
+
+-- The name an item declares, when it has one (an `impl` has none).
+fn item_name(item: ast.Item) -> Option[Text] {
+  match item with
+  | ast.FnItem(decl) -> return Some(value: decl.name.text)
+  | ast.TypeAliasItem(decl) -> return Some(value: decl.name.text)
+  | ast.IntrinsicTypeItem(decl) -> return Some(value: decl.name.text)
+  | ast.ConstItem(decl) -> return Some(value: decl.name.text)
+  | ast.RecordItem(decl) -> return Some(value: decl.name.text)
+  | ast.UnionItem(decl) -> return Some(value: decl.name.text)
+  | ast.InterfaceItem(decl) -> return Some(value: decl.name.text)
+  | ast.ImplItem(_) -> return None
+  | ast.ClaimItem(decl) -> return Some(value: decl.name.text)
+  | ast.CapabilityItem(decl) -> return Some(value: decl.name.text)
+  | ast.PathItem(decl) -> return Some(value: decl.name.text)
+  | ast.PolicyItem(decl) -> return Some(value: decl.name.text)
+  | ast.ExampleItem(decl) -> return Some(value: decl.name.text)
+  | ast.PropertyItem(decl) -> return Some(value: decl.name.text)
+}
+
+-- Pass 10: capabilities.
+-- Preconditions: the claims pass ran without diagnostics.
+-- Effects: reports E0600–E0602.
+pub fn capabilities_pass(ctx: inout context.Context) -> Unit may mutate, alloc {
+  for mid: Int in 0 ..< ctx.module_count {
+    match Map.find(d: ctx.modules, key: mid) with
+    | None -> skip()
+    | Some(value) -> check_module(ctx: inout ctx, m: value)
+  }
+  return Unit
+}
+
+fn check_module(ctx: inout context.Context, m: defs.ModuleRecord) -> Unit may mutate, alloc {
+  if not m.tree.is_test {
+    for imp: defs.ImportRecord in m.imports {
+      match Map.find(d: ctx.modules, key: imp.mod) with
+      | None -> skip()
+      | Some(value) -> {
+        if value.tree.is_test {
+          rep(
+            ctx: inout ctx,
+            code: "E0600",
+            file: m.file,
+            at: imp.span,
+            def_name: None,
+            detail: "`" ++ m.name ++ "` is not a test module but imports test module `" ++ value.name ++ "` (§8.4)"
+          )
+        }
+      }
+    }
+  }
+  for item: ast.Item in m.tree.items {
+    match item with
+    | ast.RecordItem(decl) -> check_record(ctx: inout ctx, m: m, decl: decl)
+    | ast.FnItem(decl) -> {
+      if decl.name.text == "main" and decl.vis.is_pub {
+        check_main(ctx: inout ctx, m: m, decl: decl)
+      }
+    }
+    | _ -> skip()
+  }
+  return Unit
+}
+
+fn check_record(
+  ctx: inout context.Context,
+  m: defs.ModuleRecord,
+  decl: ast.RecordDecl
+) -> Unit may mutate, alloc {
+  let def: Int = or_neg(
+    o: Map.find(
+      d: ctx.def_of,
+      key: defs.node_key(file: m.file, tag: defs.tag_item, span: decl.span)
+    )
+  )
+  if def < 0 {
+    return Unit
+  }
+  for f: types.FieldInfo in fields_or(o: Map.find(d: ctx.fields, key: def)) {
+    if mentions_capability(fuel: 1000, t: f.ty) {
+      let fd: defs.Def = context.get_def(ctx: ctx, id: f.def)
+      rep(
+        ctx: inout ctx,
+        code: "E0601",
+        file: fd.file,
+        at: fd.span,
+        def_name: Some(value: decl.name.text),
+        detail: "field `" ++ f.name ++ "` of `" ++ decl.name.text ++ "` holds a capability; capabilities are threaded through signatures, never stored (§8)"
+      )
+    }
+  }
+  return Unit
+}
+
+fn check_main(
+  ctx: inout context.Context,
+  m: defs.ModuleRecord,
+  decl: ast.FnDecl
+) -> Unit may mutate, alloc {
+  let fn_id: Int = or_neg(
+    o: Map.find(
+      d: ctx.def_of,
+      key: defs.node_key(file: m.file, tag: defs.tag_item, span: decl.span)
+    )
+  )
+  if fn_id < 0 {
+    return Unit
+  }
+  match Map.find(d: ctx.signatures, key: fn_id) with
+  | None -> skip()
+  | Some(value) -> {
+    var i: Int where it >= 0 = 0
+    for p: types.FnParam in value.params {
+      match types.strip(t: p.ty) with
+      | types.Capability(def, _, _) -> {
+        let qualified: Text = context.qualified_name(ctx: ctx, id: def)
+        if not Text.starts_with(t: qualified, prefix: "std.io.") {
+          var at: ast.Span = decl.name.span
+          if i < List.len(xs: decl.params) {
+            at = List.get(xs: decl.params, i: i).span
+          }
+          rep(
+            ctx: inout ctx,
+            code: "E0602",
+            file: m.file,
+            at: at,
+            def_name: Some(value: decl.name.text),
+            detail: "`main` receives `" ++ p.name ++ "` of capability type `" ++ qualified ++ "`, but the runtime supplies only root capabilities (`io.Files`, `io.Env`, `io.Net`, `io.Clock`; §8.3)"
+          )
+        }
+      }
+      | _ -> skip()
+      i = i + 1
+    }
+  }
+  return Unit
+}
+
+-- True iff a value of `t` contains a capability.
+pub fn mentions_capability(fuel: Int where it >= 0, t: types.Type) -> Bool may alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return false
+  }
+  match t with
+  | types.Capability(_, _, _) -> return true
+  | types.Refined(base, _, _) -> return mentions_capability(fuel: fuel - 1, t: base)
+  | types.RecordT(_, args) -> return args_mention(fuel: fuel - 1, args: args)
+  | types.UnionT(_, args) -> return args_mention(fuel: fuel - 1, args: args)
+  | types.Opaque(_, args) -> return args_mention(fuel: fuel - 1, args: args)
+  | types.FnT(params, ret, _) -> {
+    for p: types.FnParam in params {
+      if mentions_capability(fuel: fuel - 1, t: p.ty) {
+        return true
+      }
+    }
+    return mentions_capability(fuel: fuel - 1, t: ret)
+  }
+  | _ -> return false
+}
+
+fn args_mention(fuel: Int where it >= 0, args: List[types.TypeArg]) -> Bool may alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return false
+  }
+  for a: types.TypeArg in args {
+    match a with
+    | types.TypeA(ty) -> {
+      if mentions_capability(fuel: fuel - 1, t: ty) {
+        return true
+      }
+    }
+    | _ -> skip()
+  }
+  return false
+}

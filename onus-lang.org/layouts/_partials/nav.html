@@ -1,0 +1,8 @@
+<nav class="top" aria-label="Site">
+  <a class="brand" href="{{ "/" | relURL }}">{{ partial "logo.html" . }}Onus</a>
+  {{- $cur := . -}}
+  {{- range site.Menus.main }}
+  <a href="{{ .URL }}"{{ if or ($cur.IsMenuCurrent "main" .) ($cur.HasMenuCurrent "main" .) }} class="active" aria-current="page"{{ end }}>{{ .Name }}</a>
+  {{- end }}
+  <a href="{{ site.Params.repo }}" rel="external">Source ↗</a>
+</nav>

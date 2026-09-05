@@ -1,0 +1,59 @@
+{
+  "diagnostics": [
+    {
+      "code": "E0343",
+      "span": [
+        [
+          8,
+          10
+        ],
+        [
+          8,
+          26
+        ]
+      ]
+    },
+    {
+      "code": "E0343",
+      "span": [
+        [
+          16,
+          10
+        ],
+        [
+          16,
+          11
+        ]
+      ]
+    }
+  ],
+  "obligations": [
+    {
+      "kind": "refinement",
+      "at": [
+        8,
+        10
+      ],
+      "text": "it == 0",
+      "status": "checked"
+    },
+    {
+      "kind": "representation",
+      "at": [
+        13,
+        10
+      ],
+      "text": "x within ±2^53 - 1",
+      "status": "checked"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        16,
+        10
+      ],
+      "text": "it >= 0",
+      "status": "checked"
+    }
+  ]
+}

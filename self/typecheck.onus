@@ -614,6 +614,12 @@ fn compute_type(
     | None -> return base
     | Some(value) -> {
       var q: Builder[PendingWhere] = ck.pending
+      var wheres: Dict[Int, ast.Expr] = ctx.where_exprs
+      Map.set(
+        d: inout wheres,
+        key: key(ck: ck, tag: defs.tag_expr, span: parser.span_of_expr(e: value)),
+        value: value
+      )
       List.push(
         b: inout q,
         x: PendingWhere {
@@ -1017,11 +1023,11 @@ fn instantiate(
   let n: Int = List.len(xs: tparams)
   var out: Dict[Int, types.TypeArg] = Map.dict()
   var restrictions: Builder[types.Restriction] = List.builder()
-  var positional: Int = 0
+  var positional: Int where it >= 0 = 0
   for a: ast.TypeArg in args {
     match type_arg_label(a: a) with
     | Some(value) -> {
-      var idx: Int = -1
+      var idx: Int where it >= -1 and it < List.len(xs: tparams) = -1
       for i: Int in 0 ..< n {
         if idx < 0 and def_name(
           ctx: ctx,
@@ -4591,7 +4597,7 @@ fn call_signature(
     let tvars: Dict[Int, Bool] = tvars_of(tparams: tparams)
     match targs with
     | Some(value) -> {
-      var positional: Int = 0
+      var positional: Int where it >= 0 = 0
       for a: ast.TypeArg in value {
         var p: Option[types.TParamInfo] = None
         let label: Option[ast.Ident] = type_arg_label(a: a)

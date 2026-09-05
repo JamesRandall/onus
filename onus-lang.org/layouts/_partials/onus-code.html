@@ -1,0 +1,22 @@
+{{- /*
+  onus-code.html — Onus source text → HTML with token spans.
+  Input: a string. Output: safe HTML for a <pre class="code"><code> element.
+  There is no Chroma lexer for Onus; this colours keywords (.k), capitalised
+  names, which are types and variants (.t), strings (.s), numbers (.n) and
+  `--` comments (.c). The token regex covers every byte, so concatenating the
+  matches reproduces the input exactly.
+*/ -}}
+{{- $kw := slice "fn" "pub" "sealed" "hardened" "const" "let" "var" "return" "if" "else" "match" "with" "when" "loop" "while" "for" "in" "invariant" "decreases" "requires" "ensures" "claims" "assume" "verify" "may" "try" "recover" "and" "or" "not" "is" "implies" "old" "forall" "exists" "true" "false" "break" "inout" "proved" "proves" "budget" "module" "import" "test" "type" "record" "union" "interface" "impl" "law" "claim" "capability" "grants" "path" "entry" "effects" "forbid" "require" "policy" "outside" "except" "example" "property" "of" "self" "intrinsic" "where" "panic" "spec" -}}
+{{- $out := slice -}}
+{{- range findRE `(?s)--[^\n]*|"(?:[^"\\\n]|\\.)*"|[A-Za-z_][A-Za-z0-9_]*|[0-9][0-9_]*(?:\.[0-9]+)?(?:e[+-]?[0-9]+)?|[^A-Za-z_"0-9-]+|-` . -}}
+  {{- $t := . -}}
+  {{- $e := htmlEscape $t -}}
+  {{- if hasPrefix $t "--" -}}{{ $out = $out | append (printf `<span class="c">%s</span>` $e) -}}
+  {{- else if hasPrefix $t `"` -}}{{ $out = $out | append (printf `<span class="s">%s</span>` $e) -}}
+  {{- else if in $kw $t -}}{{ $out = $out | append (printf `<span class="k">%s</span>` $e) -}}
+  {{- else if findRE `^[A-Z]` $t -}}{{ $out = $out | append (printf `<span class="t">%s</span>` $e) -}}
+  {{- else if findRE `^[0-9]` $t -}}{{ $out = $out | append (printf `<span class="n">%s</span>` $e) -}}
+  {{- else -}}{{ $out = $out | append $e -}}
+  {{- end -}}
+{{- end -}}
+{{- return (delimit $out "" | safeHTML) -}}

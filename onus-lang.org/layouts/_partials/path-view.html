@@ -1,0 +1,93 @@
+{{- /*
+  path-view.html — one path report from review.json, drawn as the review tool draws it:
+  the reachable graph top-down from the entry, `assume` leaves in colour, the sealed-type
+  gate as a dashed region, and the ledger rows beneath. Computes only layout.
+  Input: dict "path" <paths[i]> "cream" <bool: render on the cream background>.
+*/ -}}
+{{- $p := .path -}}
+{{- $cream := .cream | default false -}}
+{{- $W := 960.0 }}{{ $nw := 132.0 }}{{ $nh := 40.0 }}{{ $rowh := 100.0 }}{{ $top := 12.0 -}}
+{{- /* depth of every node from the entry, by relaxation over the edges; a path's call graph is acyclic */ -}}
+{{- $depth := dict $p.entry 0 -}}
+{{- range seq 8 -}}
+  {{- range $p.graph.edges -}}
+    {{- if isset $depth .from -}}
+      {{- $cand := add (index $depth .from) 1 -}}
+      {{- if or (not (isset $depth .to)) (lt (index $depth .to) $cand) }}{{ $depth = merge $depth (dict .to $cand) }}{{ end -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- $maxd := 0 -}}
+{{- range $k, $v := $depth }}{{ if gt $v $maxd }}{{ $maxd = $v }}{{ end }}{{ end -}}
+{{- $guarded := slice }}{{ range $p.gates }}{{ range .guarded }}{{ $guarded = $guarded | append . }}{{ end }}{{ end -}}
+{{- $external := slice }}{{ range $p.assumes }}{{ if eq .permitted_by "except" }}{{ $external = $external | append .at }}{{ end }}{{ end -}}
+{{- /* positions: one row per depth, guarded nodes last so the gate region is contiguous */ -}}
+{{- $pos := dict -}}
+{{- range $d := seq 0 $maxd -}}
+  {{- $row := slice -}}
+  {{- range $p.graph.nodes }}{{ if and (isset $depth .id) (eq (index $depth .id) $d) (not (in $guarded .id)) }}{{ $row = $row | append . }}{{ end }}{{ end -}}
+  {{- range $p.graph.nodes }}{{ if and (isset $depth .id) (eq (index $depth .id) $d) (in $guarded .id) }}{{ $row = $row | append . }}{{ end }}{{ end -}}
+  {{- if gt (len $row) 0 -}}
+    {{- $sp := div $W (float (len $row)) -}}
+    {{- range $i, $n := $row -}}
+      {{- $cx := mul $sp (add (float $i) 0.5) -}}
+      {{- $cy := add $top (add (mul (float $d) $rowh) (div $nh 2)) -}}
+      {{- $pos = merge $pos (dict $n.id (dict "x" $cx "y" $cy)) -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- $H := add $top (mul (float (add $maxd 1)) $rowh) -}}
+{{- $o := $p.obligations -}}
+<div class="ledger{{ if $cream }} cream{{ end }}">
+<p class="sum"><b>path {{ $p.path }}</b> · entry <code>{{ $p.entry }}</code> · {{ len $p.reachable }} functions reachable · effects within <code>{{ delimit $p.effects.bound ", " }}</code>{{ with $p.claims.required }} · requires <code>{{ delimit . ", " }}</code>{{ end }} · {{ if $p.ok }}<span class="st-proved">passes</span>{{ else }}<span class="st-failed">fails</span>{{ end }}</p>
+<svg class="graph" viewBox="0 0 {{ $W }} {{ printf "%.0f" $H }}" role="img" aria-label="Call graph of path {{ $p.path }}: every function reachable from {{ $p.entry }}">
+  {{- range $p.graph.edges -}}
+    {{- $a := index $pos .from }}{{ $b := index $pos .to -}}
+    {{- if and $a $b -}}
+      {{- $y1 := add $a.y (div $nh 2) }}{{ $y2 := sub $b.y (div $nh 2) }}{{ $my := div (add $y1 $y2) 2 -}}
+  <path class="edge" d="M{{ printf "%.1f" $a.x }} {{ printf "%.1f" $y1 }} C{{ printf "%.1f" $a.x }} {{ printf "%.1f" $my }}, {{ printf "%.1f" $b.x }} {{ printf "%.1f" $my }}, {{ printf "%.1f" $b.x }} {{ printf "%.1f" $y2 }}"><title>{{ .from }} → {{ .to }}{{ with .effects }} ({{ delimit . ", " }}){{ end }}</title></path>
+    {{- end -}}
+  {{- end -}}
+  {{- range $p.gates -}}
+    {{- $minx := 1e9 }}{{ $maxx := -1.0 }}{{ $miny := 1e9 }}{{ $maxy := -1.0 -}}
+    {{- range .guarded }}{{ with index $pos . }}{{ if lt .x $minx }}{{ $minx = .x }}{{ end }}{{ if gt .x $maxx }}{{ $maxx = .x }}{{ end }}{{ if lt .y $miny }}{{ $miny = .y }}{{ end }}{{ if gt .y $maxy }}{{ $maxy = .y }}{{ end }}{{ end }}{{ end -}}
+    {{- if ge $maxx 0.0 -}}
+  <rect class="gate" x="{{ printf "%.1f" (sub $minx (add (div $nw 2) 8)) }}" y="{{ printf "%.1f" (sub $miny (add (div $nh 2) 8)) }}" width="{{ printf "%.1f" (add (sub $maxx $minx) (add $nw 16)) }}" height="{{ printf "%.1f" (add (sub $maxy $miny) (add $nh 16)) }}" rx="8"/>
+  <text class="gate-label" x="{{ printf "%.1f" (sub $minx (div $nw 2)) }}" y="{{ printf "%.1f" (add $maxy (add (div $nh 2) 20)) }}">callable only with {{ .evidence }}, which only {{ delimit .producers ", " }} produces</text>
+    {{- end -}}
+  {{- end -}}
+  {{- range $n := $p.graph.nodes -}}
+    {{- with index $pos $n.id -}}
+      {{- $cls := "node" -}}
+      {{- if eq $n.kind "entry" }}{{ $cls = printf "%s entry" $cls }}{{ end -}}
+      {{- if eq $n.kind "intrinsic" }}{{ $cls = printf "%s intrinsic" $cls }}{{ end -}}
+      {{- if gt $n.assumes 0 }}{{ $cls = printf "%s assume" $cls }}{{ end -}}
+      {{- if in $external $n.id }}{{ $cls = printf "%s external" $cls }}{{ end -}}
+  <g class="{{ $cls }}">
+    <title>{{ $n.id }}{{ with $n.effects }} · may {{ delimit . ", " }}{{ end }} · {{ $n.obligations.proved }} proved, {{ $n.obligations.checked }} checked{{ if gt $n.assumes 0 }} · {{ $n.assumes }} assume{{ end }}</title>
+    <rect x="{{ printf "%.1f" (sub .x (div $nw 2)) }}" y="{{ printf "%.1f" (sub .y (div $nh 2)) }}" width="{{ $nw }}" height="{{ $nh }}" rx="6"/>
+    <text x="{{ printf "%.1f" .x }}" y="{{ printf "%.1f" (sub .y 3) }}" text-anchor="middle">{{ replaceRE `^.*\.` "" $n.id }}</text>
+    <text class="mod" x="{{ printf "%.1f" .x }}" y="{{ printf "%.1f" (add .y 12) }}" text-anchor="middle">{{ $n.module }}</text>
+  </g>
+    {{- end -}}
+  {{- end -}}
+</svg>
+<p class="legend"><span><i class="entry"></i>entry</span><span><i></i>function</span><span><i class="intrinsic"></i>intrinsic</span><span><i class="assume"></i>carries an <code>assume</code></span><span><i class="external"></i>assumption outside the project, permitted by <code>except</code></span></p>
+<p class="sum">Obligations on the path: <b class="st-proved">{{ $o.proved }} proved</b> · <span class="st-checked">{{ $o.checked }} checked</span> · <span class="st-assumed">{{ $o.assumed }} assumed</span> · {{ $o.failed }} failed{{ with $p.capabilities }} · capabilities constructed on the path: {{ range $i, $c := . }}{{ if $i }}, {{ end }}<code>{{ $c.type }}</code> at <code>{{ $c.constructed_at }}</code>{{ end }}{{ end }}</p>
+<div class="tbl"><table>
+  <thead><tr><th>Obligation</th><th>In</th><th>Status</th><th>Discharged by</th></tr></thead>
+  <tbody>
+  {{- range $p.ledger }}
+  <tr><td><code>{{ .kind }}</code> {{ .text }}</td><td class="mono">{{ replaceRE `^.*\.` "" .def }}</td><td class="st-{{ .status }}">{{ .status }}{{ if .pinned }}<span class="tag">pinned</span>{{ end }}</td><td>{{ .by }}</td></tr>
+  {{- end }}
+  </tbody>
+</table></div>
+{{- with $p.assumes }}
+<h4>Assumptions on the path ({{ len . }})</h4>
+<ul class="assume-list">
+  {{- range . }}
+  <li><span class="where">{{ .claim }}</span> at <span class="where">{{ .at }}</span><span class="tag">{{ if eq .permitted_by "except" }}outside the project · permitted by except{{ else }}in scope{{ end }}</span><br><span class="why">“{{ .justification }}”</span></li>
+  {{- end }}
+</ul>
+{{- end }}
+</div>

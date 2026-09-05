@@ -16,7 +16,7 @@ import type { Span } from '../source.js';
 import type * as A from '../syntax/ast.js';
 import { printExpr } from '../syntax/printer.js';
 import type { Signature, TypeTables } from '../types/tables.js';
-import { stripRefinements, substitute, typeToString, type Type, type TypeArg } from '../types/type.js';
+import { stripRefinements, substitute, substituteArg, typeToString, type Type, type TypeArg } from '../types/type.js';
 import { callImpl, ConversionError, hasImpl, stdType, type Conversion } from './intrinsics.js';
 import { bool, int, ofConst, text, UNIT, valueEquals, type Value } from './values.js';
 
@@ -57,6 +57,8 @@ export interface EvalHost {
 }
 
 interface Frame {
+  /** The instantiation the frame runs under, so that a nested generic call resolves the caller's type parameters (a `T` result of `List.get` inside `head[T]` called at `Int`). */
+  readonly subst: ReadonlyMap<DefId, TypeArg>;
   readonly name: string;
   readonly ret: Type | null;
 }
@@ -404,9 +406,10 @@ export class Evaluator {
     }
     const subst = new Map<DefId, TypeArg>();
     const targs = this.ty.instantiations.get(e.id) ?? [];
+    const outer = this.frames[this.frames.length - 1]?.subst;
     sig.tparams.forEach((p, i) => {
       const a = targs[i];
-      if (a !== undefined) subst.set(p.def, a);
+      if (a !== undefined) subst.set(p.def, outer === undefined ? a : substituteArg(a, outer));
     });
     const result = this.callFn(fnDef, sig, args, subst, e.span);
     for (const [name, def] of inoutVars) {
@@ -440,7 +443,7 @@ export class Evaluator {
       if (pd === undefined || v === undefined) throw new NotConst(`missing argument \`${p.name}\``, span);
       env.set(pd, v);
     });
-    this.frames.push({ name: def.name, ret: sig.ret });
+    this.frames.push({ name: def.name, ret: sig.ret, subst });
     try {
       for (const c of sig.contracts) {
         if (c.clause !== 'requires') continue;

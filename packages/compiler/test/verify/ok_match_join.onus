@@ -1,0 +1,49 @@
+module ok_match_join
+
+-- After a `match` whose arms assign a variable, what each arm established
+-- holds under that arm's condition, as after an `if`.
+fn clamp(o: Option[Int]) -> Int where it >= 0 {
+  var n: Int = 0
+  match o with
+  | Some(value) -> {
+    if value >= 0 {
+      n = value
+    }
+  }
+  | None -> n = 1
+  return n
+}
+
+record Parser {
+  toks: List[Int]
+  pos: Int where it >= 0 and it <= List.len(xs: toks)
+}
+
+fn step(p: inout Parser) -> Result[Int, Text] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  ensures result is Ok implies p.pos > old(p).pos
+{
+  if p.pos < List.len(xs: p.toks) {
+    p = { p with pos: p.pos + 1 }
+    return Ok(value: p.pos)
+  }
+  return Err(error: "end")
+}
+
+-- The loop's invariant survives the `match` on the call in its body.
+fn drain(p: inout Parser) -> Int may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos
+{
+  var count: Int where it >= 0 = 0
+  let toks0: List[Int] = p.toks
+  let start: Int = p.pos
+  loop while p.pos < List.len(xs: p.toks)
+    invariant p.pos >= start and p.toks == toks0
+    decreases List.len(xs: p.toks) - p.pos
+  {
+    match step(p: inout p) with
+    | Ok(value) -> count = count + 1
+    | Err(error) -> p = { p with pos: List.len(xs: p.toks) }
+  }
+  return count
+}

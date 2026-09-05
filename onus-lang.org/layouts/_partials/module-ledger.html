@@ -1,0 +1,17 @@
+{{- /* module-ledger.html — obligation counts per item of the entry module of a review.json document. Input: dict "review" <document> "cream" <bool>. */ -}}
+{{- $r := .review -}}
+<div class="ledger{{ if .cream }} cream{{ end }}">
+{{- range $r.modules }}{{ if eq .module $r.entry }}
+{{- $pr := 0 }}{{ $ch := 0 }}{{ $as := 0 }}{{ $fa := 0 -}}
+{{- range .items }}{{ $pr = add $pr .obligations.proved }}{{ $ch = add $ch .obligations.checked }}{{ $as = add $as .obligations.assumed }}{{ $fa = add $fa .obligations.failed }}{{ end -}}
+<p class="sum">Module <code>{{ .module }}</code>: <b class="st-proved">{{ $pr }} proved</b> · <span class="st-checked">{{ $ch }} checked</span> · <span class="st-assumed">{{ $as }} assumed</span> · {{ $fa }} failed. Written by <code>{{ $r.generated.tool }}</code> on {{ $r.generated.at | time.Format "2 January 2006" }}.</p>
+<div class="tbl"><table>
+  <thead><tr><th>Item</th><th>Kind</th><th>Effects</th><th>Proved</th><th>Checked</th><th>Assumed</th><th>Failed</th></tr></thead>
+  <tbody>
+  {{- range .items }}{{ if or (eq .kind "fn") (eq .kind "property") (gt .obligations.proved 0) (gt .obligations.checked 0) }}
+  <tr><td class="mono">{{ if eq .visibility "pub" }}pub {{ end }}{{ .name }}</td><td>{{ .kind }}</td><td class="mono">{{ delimit .effects ", " }}</td><td class="st-proved">{{ .obligations.proved }}</td><td{{ if gt .obligations.checked 0 }} class="st-checked"{{ end }}>{{ .obligations.checked }}</td><td{{ if gt .obligations.assumed 0 }} class="st-assumed"{{ end }}>{{ .obligations.assumed }}</td><td{{ if gt .obligations.failed 0 }} class="st-failed"{{ end }}>{{ .obligations.failed }}</td></tr>
+  {{- end }}{{ end }}
+  </tbody>
+</table></div>
+{{- end }}{{ end }}
+</div>

@@ -1,0 +1,2436 @@
+module vc
+import ast
+import parser
+import defs
+import context
+import types
+import obligations
+import walk
+import formula
+import lower
+import report
+
+-- Verification conditions (impl spec §7; spec §3.2.1, §5.1, §12.1; `verify/vc.ts`).
+--
+-- Each function body is walked once in program order with a static
+-- single-assignment discipline: every `var` assignment introduces a fresh
+-- SMT constant, so facts about earlier values never go stale. Path
+-- knowledge follows §3.2.1: `if` conditions and their negations, `match`
+-- arms (tag, bindings, guard, and the failure of earlier arms), loop
+-- conditions and invariants inside the body, their negation and the
+-- invariants after exit, `for` ranges, `try` success, and the declared
+-- refinements of every binding. Loops and branch joins forget (`havoc`)
+-- the variables they assign.
+--
+-- For every obligation created by the contracts pass, the walk records a
+-- goal and the facts in scope at its site. Obligations whose expressions
+-- cannot be lowered (floats, closures) get no condition and stay `checked`.
+pub record VC {
+  id: Int
+  -- The lowerer of the definition: its declarations and axioms are shared by every condition of the body.
+  lw: lower.Lw
+  facts: List[formula.Formula]
+  goal: formula.Formula
+  -- SMT constant name to source name, for counterexamples.
+  names: Dict[Text, Text]
+}
+
+pub record VCs {
+  built: Dict[Int, VC]
+  -- Why an obligation has no condition.
+  skipped: Dict[Int, Text]
+}
+
+-- The walker's state over one definition.
+record W {
+  def: defs.Def
+  file: Int
+  env: Dict[Int, lower.Binding]
+  facts: List[formula.Formula]
+  names: Dict[Text, Text]
+  pending: Dict[Int, Bool]
+  ret: Option[types.Type]
+  post: List[ast.Contract]
+  -- The recursive function's measure at entry (§5.1), when it has one and it lowered.
+  measure0: Option[formula.Formula]
+  built: Dict[Int, VC]
+  skipped: Dict[Int, Text]
+}
+
+record Init {
+  name: Text
+  value: ast.Expr
+}
+
+-- The largest integer the runtime represents exactly (§19.3).
+pub const safe_max: Int = 9007199254740991
+
+fn skip() -> Unit {
+  return Unit
+}
+
+fn or_neg(o: Option[Int]) -> Int {
+  match o with
+  | Some(value) -> return value
+  | None -> return -1
+}
+
+fn type_or(o: Option[types.Type]) -> types.Type {
+  match o with
+  | Some(value) -> return value
+  | None -> return types.ErrorT
+}
+
+fn formula_or(o: Option[formula.Formula]) -> formula.Formula {
+  match o with
+  | Some(value) -> return value
+  | None -> return formula.true_f
+}
+
+fn ids_or(o: Option[List[Int]]) -> List[Int] may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return []
+}
+
+fn fields_or(o: Option[List[types.FieldInfo]]) -> List[types.FieldInfo] may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return []
+}
+
+fn binding_or(o: Option[lower.Binding]) -> lower.Binding {
+  match o with
+  | Some(value) -> return value
+  | None -> return lower.Binding { term: formula.true_f, ty: types.ErrorT }
+}
+
+fn info_or(o: Option[lower.CallInfo]) -> lower.CallInfo may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return lower.CallInfo { args: Map.dict(), param_types: Map.dict(), subst: Map.dict() }
+}
+
+fn zero_span() -> ast.Span {
+  return ast.Span { start: 0, end: 0 }
+}
+
+fn contract_or(o: Option[ast.Contract]) -> ast.Contract may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return ast.Contract {
+    clause: "",
+    is_proved: false,
+    expr: ast.Hole(span: zero_span()),
+    span: zero_span()
+  }
+}
+
+fn clause_expr(o: Option[ast.LoopClause]) -> ast.Expr may alloc {
+  match o with
+  | Some(value) -> return value.expr
+  | None -> return ast.Hole(span: zero_span())
+}
+
+fn same_kind(a: obligations.Kind, b: obligations.Kind) -> Bool {
+  return obligations.kind_text(k: a) == obligations.kind_text(k: b)
+}
+
+fn key(w: W, tag: Int, span: ast.Span) -> Int {
+  return defs.node_key(file: w.file, tag: tag, span: span)
+}
+
+fn expr_key(w: W, e: ast.Expr) -> Int {
+  return key(w: w, tag: defs.tag_expr, span: parser.span_of_expr(e: e))
+}
+
+fn app_true() -> formula.Formula may alloc {
+  return formula.app(fn_name: "true", args: [], sort: formula.BoolS)
+}
+
+fn app_false() -> formula.Formula may alloc {
+  return formula.app(fn_name: "false", args: [], sort: formula.BoolS)
+}
+
+fn cmp(op: Text, a: formula.Formula, b: formula.Formula) -> formula.Formula may alloc {
+  return formula.app(fn_name: op, args: [a, b], sort: formula.BoolS)
+}
+
+-- The def a resolution names directly, or -1.
+fn ref_def(o: Option[defs.Resolution]) -> Int {
+  match o with
+  | None -> return -1
+  | Some(value) -> {
+    match value with
+    | defs.DefRes(def) -> return def
+    | _ -> return -1
+  }
+}
+
+-- The conjunction of `fs`, `true` when empty.
+fn conj(fs: List[formula.Formula]) -> formula.Formula may alloc, mutate {
+  if List.len(xs: fs) == 0 {
+    return formula.true_f
+  }
+  if List.len(xs: fs) == 1 {
+    for f: formula.Formula in fs {
+      return f
+    }
+  }
+  return formula.and_f(xs: fs)
+}
+
+-- `xs` without its first `n` elements.
+fn drop(xs: List[formula.Formula], n: Int) -> List[formula.Formula] may alloc, mutate {
+  var out: Builder[formula.Formula] = List.builder()
+  var i: Int where it >= 0 = 0
+  for x: formula.Formula in xs {
+    if i >= n {
+      List.push(b: inout out, x: x)
+    }
+    i = i + 1
+  }
+  return List.finish(b: out)
+}
+
+fn negations(fs: List[formula.Formula]) -> List[formula.Formula] may alloc, mutate {
+  var out: Builder[formula.Formula] = List.builder()
+  for f: formula.Formula in fs {
+    List.push(b: inout out, x: formula.not_f(x: f))
+  }
+  return List.finish(b: out)
+}
+
+-- The measure of a `decreases` obligation's text, without the call it names.
+pub fn measure_text(t: Text) -> Text may alloc {
+  for p: Text in Text.split(t: t, sep: " at the call to ") {
+    return p
+  }
+  return t
+}
+
+-- Builds a condition for every lowerable obligation of `ctx`.
+-- Preconditions: the contracts pass ran.
+-- Effects: settles structural `decreases` obligations and reports E0344; otherwise none beyond the returned structure.
+pub fn build_vcs(ctx: inout context.Context) -> VCs may mutate, alloc {
+  let out: VCs = VCs { built: Map.dict(), skipped: Map.dict() }
+  var by_def: Dict[Int, List[Int]] = Map.dict()
+  var order: Builder[Int] = List.builder()
+  for i: Int in 0 ..< ctx.obligation_count {
+    let o: obligations.Obligation = context.get_obligation(ctx: ctx, id: i)
+    if not o.kind is obligations.Law and not o.kind is obligations.Property {
+      match Map.find(d: by_def, key: o.def) with
+      | Some(value) -> Map.set(d: inout by_def, key: o.def, value: List.append(xs: value, x: i))
+      | None -> {
+        List.push(b: inout order, x: o.def)
+        Map.set(d: inout by_def, key: o.def, value: [i])
+      }
+    }
+  }
+  for def: Int in List.finish(b: order) {
+    let d: defs.Def = context.get_def(ctx: ctx, id: def)
+    var pending: Dict[Int, Bool] = Map.dict()
+    for id: Int in ids_or(o: Map.find(d: by_def, key: def)) {
+      Map.set(d: inout pending, key: id, value: true)
+    }
+    var lw: lower.Lw = lower.new_lw(file: d.file)
+    var w: W = W {
+      def: d,
+      file: d.file,
+      env: Map.dict(),
+      facts: [],
+      names: Map.dict(),
+      pending: pending,
+      ret: None,
+      post: [],
+      measure0: None,
+      built: out.built,
+      skipped: out.skipped
+    }
+    match walk_def(w: inout w, lw: inout lw, ctx: inout ctx, d: d) with
+    | Ok(_) -> skip()
+    | Err(error) -> skip_all(w: w, reason: error)
+  }
+  return out
+}
+
+fn walk_def(
+  w: inout W,
+  lw: inout lower.Lw,
+  ctx: inout context.Context,
+  d: defs.Def
+) -> Result[Unit, Text] may mutate, alloc {
+  match d.node with
+  | defs.FnNode(decl) -> {
+    match decl.body with
+    | Some(value) -> return fn_body(
+      w: inout w,
+      lw: inout lw,
+      ctx: inout ctx,
+      decl: decl,
+      body: value
+    )
+    | None -> skip_all(w: w, reason: "no body")
+  }
+  | defs.ExampleNode(decl) -> return assertion_body(
+    w: inout w,
+    lw: inout lw,
+    ctx: inout ctx,
+    params: [],
+    body: decl.body
+  )
+  | defs.PropertyNode(decl) -> return assertion_body(
+    w: inout w,
+    lw: inout lw,
+    ctx: inout ctx,
+    params: decl.params,
+    body: decl.body
+  )
+  | defs.LawNode(decl) -> return assertion_body(
+    w: inout w,
+    lw: inout lw,
+    ctx: inout ctx,
+    params: decl.params,
+    body: decl.body
+  )
+  | defs.VerifyNode(decl) -> return assertion_body(
+    w: inout w,
+    lw: inout lw,
+    ctx: inout ctx,
+    params: decl.params,
+    body: decl.body
+  )
+  | defs.ConstNode(decl) -> return const_body(w: inout w, lw: inout lw, ctx: inout ctx, decl: decl)
+  | defs.ImplNode(_) -> skip_all(w: w, reason: "laws are run under generated inputs")
+  | _ -> skip_all(w: w, reason: "no body")
+  return Ok(value: Unit)
+}
+
+-- Bodies ---------------------------------------------------------------------------------
+fn fn_body(
+  w: inout W,
+  lw: inout lower.Lw,
+  ctx: inout context.Context,
+  decl: ast.FnDecl,
+  body: ast.Block
+) -> Result[Unit, Text] may mutate, alloc {
+  match Map.find(d: ctx.signatures, key: w.def.id) with
+  | None -> return Ok(value: Unit)
+  | Some(value) -> return fn_body_sig(
+    w: inout w,
+    lw: inout lw,
+    ctx: inout ctx,
+    decl: decl,
+    body: body,
+    sig: value
+  )
+}
+
+fn fn_body_sig(
+  w: inout W,
+  lw: inout lower.Lw,
+  ctx: inout context.Context,
+  decl: ast.FnDecl,
+  body: ast.Block,
+  sig: types.Signature
+) -> Result[Unit, Text] may mutate, alloc {
+  var post: Builder[ast.Contract] = List.builder()
+  for c: ast.Contract in decl.contracts {
+    if c.clause == "ensures" {
+      List.push(b: inout post, x: c)
+    }
+  }
+  w = { w with ret: Some(value: sig.ret), post: List.finish(b: post) }
+  for p: types.TParamInfo in sig.tparams {
+    match p with
+    | types.ConstP(def, ty) -> {
+      let t: formula.Formula = try bind(
+        w: inout w,
+        lw: inout lw,
+        ctx: ctx,
+        def: def,
+        name: context.get_def(ctx: ctx, id: def).name,
+        ty: ty,
+        init: None
+      )
+    }
+    | _ -> skip()
+  }
+  var i: Int where it >= 0 = 0
+  for p: types.FnParam in sig.params {
+    if i < List.len(xs: sig.param_defs) {
+      let pd: Int = List.get(xs: sig.param_defs, i: i)
+      let term: formula.Formula = try bind(
+        w: inout w,
+        lw: inout lw,
+        ctx: ctx,
+        def: pd,
+        name: p.name,
+        ty: p.ty,
+        init: None
+      )
+      var olds: Dict[Int, formula.Formula] = lw.olds
+      Map.set(d: inout olds, key: pd, value: term)
+      representation_goals(
+        w: inout w,
+        lw: inout lw,
+        ctx: ctx,
+        at: context.get_def(ctx: ctx, id: pd).key,
+        ty: p.ty
+      )
+    }
+    i = i + 1
+  }
+  for c: ast.Contract in decl.contracts {
+    if c.clause == "requires" {
+      match lower.lower(fuel: lower.max_depth, lw: inout lw, ctx: ctx, e: c.expr, env: w.env) with
+      | Ok(value) -> push_fact(w: inout w, f: value)
+      | Err(_) -> skip()
+    }
+  }
+  -- The measure of a recursive function, taken at entry (§5.1): non-negative here, and every call in the cycle must go strictly below it.
+  for c: ast.Contract in decl.contracts {
+    if c.clause == "decreases" {
+      match lower.lower(fuel: lower.max_depth, lw: inout lw, ctx: ctx, e: c.expr, env: w.env) with
+      | Ok(value) -> w = { w with measure0: Some(value: value) }
+      | Err(_) -> skip()
+      for o: Int in obligations_at(
+        w: w,
+        ctx: ctx,
+        at: key(w: w, tag: defs.tag_sig, span: c.span),
+        kind: obligations.Decreases
+      ) {
+        match w.measure0 with
+        | None -> skip_one(w: w, o: o, reason: "measure not lowered")
+        | Some(value) -> emit(
+          w: w,
+          lw: lw,
+          o: o,
+          goal: cmp(op: ">=", a: value, b: formula.int_f(v: 0))
+        )
+      }
+    }
+  }
+  try w_block(fuel: lower.max_depth, w: inout w, lw: inout lw, ctx: inout ctx, b: body)
+  skip_all(w: w, reason: "not reached by the walk")
+  return Ok(value: Unit)
+}
+
+-- An `example`, `property`, `law` or `verify` body: its parameters bound, then its statements.
+fn assertion_body(
+  w: inout W,
+  lw: inout lower.Lw,
+  ctx: inout context.Context,
+  params: List[ast.Param],
+  body: ast.Block
+) -> Result[Unit, Text] may mutate, alloc {
+  for p: ast.Param in params {
+    let pd: Int = or_neg(
+      o: Map.find(d: ctx.def_of, key: key(w: w, tag: defs.tag_sig, span: p.span))
+    )
+    if pd >= 0 {
+      match Map.find(d: ctx.decl_types, key: pd) with
+      | Some(value) -> {
+        let t: formula.Formula = try bind(
+          w: inout w,
+          lw: inout lw,
+          ctx: ctx,
+          def: pd,
+          name: p.name.text,
+          ty: value,
+          init: None
+        )
+      }
+      | None -> skip()
+    }
+  }
+  try w_block(fuel: lower.max_depth, w: inout w, lw: inout lw, ctx: inout ctx, b: body)
+  skip_all(w: w, reason: "not reached by the walk")
+  return Ok(value: Unit)
+}
+
+fn const_body(
+  w: inout W,
+  lw: inout lower.Lw,
+  ctx: inout context.Context,
+  decl: ast.ConstDecl
+) -> Result[Unit, Text] may mutate, alloc {
+  let v: formula.Formula = try expr_obligations(
+    fuel: lower.max_depth,
+    w: inout w,
+    lw: inout lw,
+    ctx: inout ctx,
+    e: decl.value
+  )
+  skip_all(w: w, reason: "not reached by the walk")
+  return Ok(value: Unit)
+}
+
+-- Environment ----------------------------------------------------------------------------
+fn push_fact(w: inout W, f: formula.Formula) -> Unit may alloc, mutate {
+  w = { w with facts: List.append(xs: w.facts, x: f) }
+  return Unit
+}
+
+-- Binds `def` to a fresh constant, equal to `init` when given, and assumes its declared refinements.
+fn bind(
+  w: inout W,
+  lw: inout lower.Lw,
+  ctx: context.Context,
+  def: Int,
+  name: Text,
+  ty: types.Type,
+  init: Option[formula.Formula]
+) -> Result[formula.Formula, Text] may mutate, alloc {
+  let sort: formula.Sort = try lower.sort_of(lw: lw, ctx: ctx, t: ty)
+  let term: formula.Formula = lower.fresh_const(lw: inout lw, prefix: name, sort: sort)
+  if term is formula.VarF {
+    var names: Dict[Text, Text] = w.names
+    Map.set(d: inout names, key: formula.var_name(f: term), value: name)
+  }
+  match init with
+  | Some(value) -> {
+    push_fact(w: inout w, f: formula.eq(a: term, b: value))
+    if term is formula.VarF {
+      var aliases: Dict[Text, formula.Formula] = lw.aliases
+      Map.set(d: inout aliases, key: formula.var_name(f: term), value: value)
+    }
+  }
+  | None -> skip()
+  var env: Dict[Int, lower.Binding] = w.env
+  Map.set(d: inout env, key: def, value: lower.Binding { term: term, ty: ty })
+  lower.type_facts(fuel: lower.max_depth, lw: inout lw, ctx: ctx, term: term, ty: ty, env: w.env)
+  return Ok(value: term)
+}
+
+-- Forgets the current values of `ds`: fresh constants with only their declared refinements.
+fn havoc(
+  w: inout W,
+  lw: inout lower.Lw,
+  ctx: context.Context,
+  ds: List[Int]
+) -> Result[Unit, Text] may mutate, alloc {
+  for d: Int in ds {
+    match Map.find(d: w.env, key: d) with
+    | None -> skip()
+    | Some(value) -> {
+      let t: formula.Formula = try bind(
+        w: inout w,
+        lw: inout lw,
+        ctx: ctx,
+        def: d,
+        name: context.get_def(ctx: ctx, id: d).name,
+        ty: value.ty,
+        init: None
+      )
+    }
+  }
+  return Ok(value: Unit)
+}
+
+fn stmt_nodes(s: ast.Stmt) -> List[walk.Node] may alloc, mutate {
+  return walk.nodes_in_block(
+    b: ast.Block { stmts: [s], elided: false, span: parser.span_of_stmt(st: s) },
+    into_verify: false
+  )
+}
+
+-- `var`s (and inout parameters) assigned anywhere among `nodes`, each once, in order of first assignment.
+fn assigned(ctx: context.Context, w: W, nodes: List[walk.Node]) -> List[Int] may alloc, mutate {
+  var seen: Dict[Int, Bool] = Map.dict()
+  var out: Builder[Int] = List.builder()
+  for n: walk.Node in nodes {
+    var k: Int = -1
+    match n with
+    | walk.NStmt(s) -> {
+      match s with
+      | ast.Assign(_, _, span) -> k = key(w: w, tag: defs.tag_stmt, span: span)
+      | _ -> skip()
+    }
+    | walk.NExpr(e) -> {
+      match e with
+      | ast.Call(_, _, args, _) -> {
+        for a: ast.Arg in args {
+          if a.is_inout {
+            match a.value with
+            | ast.Name(_, span) -> {
+              let d: Int = ref_def(
+                o: Map.find(d: ctx.refs, key: key(w: w, tag: defs.tag_expr, span: span))
+              )
+              if d >= 0 and not Map.contains(d: seen, key: d) {
+                Map.set(d: inout seen, key: d, value: true)
+                List.push(b: inout out, x: d)
+              }
+            }
+            | _ -> skip()
+          }
+        }
+      }
+      | _ -> skip()
+    }
+    | _ -> skip()
+    if k >= 0 {
+      let d: Int = ref_def(o: Map.find(d: ctx.refs, key: k))
+      if d >= 0 and not Map.contains(d: seen, key: d) {
+        Map.set(d: inout seen, key: d, value: true)
+        List.push(b: inout out, x: d)
+      }
+    }
+  }
+  return List.finish(b: out)
+}
+
+-- Lowers `e` in the current environment and takes what was learned on the way (`try` success).
+fn lower_e(
+  w: inout W,
+  lw: inout lower.Lw,
+  ctx: context.Context,
+  e: ast.Expr
+) -> Result[formula.Formula, Text] may mutate, alloc {
+  let f: formula.Formula = try lower.lower(
+    fuel: lower.max_depth,
+    lw: inout lw,
+    ctx: ctx,
+    e: e,
+    env: w.env
+  )
+  w = { w with facts: w.facts ++ lower.take_learned(lw: lw) }
+  -- A variable passed `inout` holds the callee's exit value from here on (§3.2.1: an assignment).
+  for r: lower.Rebound in lower.take_rebound(lw: lw) {
+    match Map.find(d: w.env, key: r.def) with
+    | Some(value) -> {
+      let t: formula.Formula = try bind(
+        w: inout w,
+        lw: inout lw,
+        ctx: ctx,
+        def: r.def,
+        name: context.get_def(ctx: ctx, id: r.def).name,
+        ty: value.ty,
+        init: Some(value: r.term)
+      )
+    }
+    | None -> skip()
+  }
+  return Ok(value: f)
+}
+
+fn push_maybe(
+  w: inout W,
+  lw: inout lower.Lw,
+  ctx: context.Context,
+  e: ast.Expr
+) -> Unit may mutate, alloc {
+  match lower_e(w: inout w, lw: inout lw, ctx: ctx, e: e) with
+  | Ok(value) -> push_fact(w: inout w, f: value)
+  | Err(_) -> skip()
+  return Unit
+}
+
+-- Statements -----------------------------------------------------------------------------
+fn w_block(
+  fuel: Int where it >= 0,
+  w: inout W,
+  lw: inout lower.Lw,
+  ctx: inout context.Context,
+  b: ast.Block
+) -> Result[Unit, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "walk too deep")
+  }
+  for s: ast.Stmt in b.stmts {
+    try w_stmt(fuel: fuel - 1, w: inout w, lw: inout lw, ctx: inout ctx, s: s)
+  }
+  return Ok(value: Unit)
+}
+
+fn w_stmt(
+  fuel: Int where it >= 0,
+  w: inout W,
+  lw: inout lower.Lw,
+  ctx: inout context.Context,
+  s: ast.Stmt
+) -> Result[Unit, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "walk too deep")
+  }
+  match s with
+  | ast.Let(name, _, value, span) -> return let_stmt(
+    fuel: fuel - 1,
+    w: inout w,
+    lw: inout lw,
+    ctx: inout ctx,
+    name: name.text,
+    e: value,
+    at: span
+  )
+  | ast.Var(name, _, value, span) -> return let_stmt(
+    fuel: fuel - 1,
+    w: inout w,
+    lw: inout lw,
+    ctx: inout ctx,
+    name: name.text,
+    e: value,
+    at: span
+  )
+  | ast.Assign(name, value, span) -> return assign_stmt(
+    fuel: fuel - 1,
+    w: inout w,
+    lw: inout lw,
+    ctx: inout ctx,
+    name: name.text,
+    e: value,
+    at: span
+  )
+  | ast.Return(value, span) -> return return_stmt(
+    fuel: fuel - 1,
+    w: inout w,
+    lw: inout lw,
+    ctx: inout ctx,
+    e: value,
+    at: span
+  )
+  | ast.If(cond, then_block, else_block, _) -> return if_stmt(
+    fuel: fuel - 1,
+    w: inout w,
+    lw: inout lw,
+    ctx: inout ctx,
+    cond: cond,
+    then_block: then_block,
+    else_block: else_block
+  )
+  | ast.Match(scrutinee, arms, _) -> return match_stmt(
+    fuel: fuel - 1,
+    w: inout w,
+    lw: inout lw,
+    ctx: inout ctx,
+    s: s,
+    scrutinee: scrutinee,
+    arms: arms
+  )
+  | ast.Loop(cond, clauses, body, span) -> return loop_stmt(
+    fuel: fuel - 1,
+    w: inout w,
+    lw: inout lw,
+    ctx: inout ctx,
+    s: s,
+    cond: cond,
+    clauses: clauses,
+    body: body,
+    at: span
+  )
+  | ast.For(name, _, domain, body, span) -> return for_stmt(
+    fuel: fuel - 1,
+    w: inout w,
+    lw: inout lw,
+    ctx: inout ctx,
+    name: name.text,
+    domain: domain,
+    body: body,
+    at: span
+  )
+  | ast.Assume(_, _, _, _) -> return Ok(value: Unit)
+  | ast.ExprStmt(expr, _) -> return expr_stmt(
+    fuel: fuel - 1,
+    w: inout w,
+    lw: inout lw,
+    ctx: inout ctx,
+    e: expr
+  )
+}
+
+fn let_stmt(
+  fuel: Int where it >= 0,
+  w: inout W,
+  lw: inout lower.Lw,
+  ctx: inout context.Context,
+  name: Text,
+  e: ast.Expr,
+  at: ast.Span
+) -> Result[Unit, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "walk too deep")
+  }
+  let at_key: Int = key(w: w, tag: defs.tag_stmt, span: at)
+  let def: Int = or_neg(o: Map.find(d: ctx.def_of, key: at_key))
+  var ty: Option[types.Type] = None
+  if def >= 0 {
+    ty = Map.find(d: ctx.decl_types, key: def)
+  }
+  let v: formula.Formula = try expr_obligations(
+    fuel: fuel - 1,
+    w: inout w,
+    lw: inout lw,
+    ctx: inout ctx,
+    e: e
+  )
+  if def >= 0 and ty is Some {
+    let t: types.Type = type_or(o: ty)
+    flow_goal(w: inout w, lw: inout lw, ctx: ctx, e: e, term: v, ty: t)
+    let b: formula.Formula = try bind(
+      w: inout w,
+      lw: inout lw,
+      ctx: ctx,
+      def: def,
+      name: name,
+      ty: t,
+      init: Some(value: v)
+    )
+    representation_goals(w: inout w, lw: inout lw, ctx: ctx, at: at_key, ty: t)
+  }
+  return Ok(value: Unit)
+}
+
+fn assign_stmt(
+  fuel: Int where it >= 0,
+  w: inout W,
+  lw: inout lower.Lw,
+  ctx: inout context.Context,
+  name: Text,
+  e: ast.Expr,
+  at: ast.Span
+) -> Result[Unit, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "walk too deep")
+  }
+  let def: Int = ref_def(o: Map.find(d: ctx.refs, key: key(w: w, tag: defs.tag_stmt, span: at)))
+  let v: formula.Formula = try expr_obligations(
+    fuel: fuel - 1,
+    w: inout w,
+    lw: inout lw,
+    ctx: inout ctx,
+    e: e
+  )
+  if def < 0 {
+    return Ok(value: Unit)
+  }
+  match Map.find(d: ctx.decl_types, key: def) with
+  | None -> return Ok(value: Unit)
+  | Some(value) -> {
+    flow_goal(w: inout w, lw: inout lw, ctx: ctx, e: e, term: v, ty: value)
+    let b: formula.Formula = try bind(
+      w: inout w,
+      lw: inout lw,
+      ctx: ctx,
+      def: def,
+      name: name,
+      ty: value,
+      init: Some(value: v)
+    )
+  }
+  return Ok(value: Unit)
+}
+
+fn return_stmt(
+  fuel: Int where it >= 0,
+  w: inout W,
+  lw: inout lower.Lw,
+  ctx: inout context.Context,
+  e: ast.Expr,
+  at: ast.Span
+) -> Result[Unit, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "walk too deep")
+  }
+  let v: formula.Formula = try expr_obligations(
+    fuel: fuel - 1,
+    w: inout w,
+    lw: inout lw,
+    ctx: inout ctx,
+    e: e
+  )
+  if w.ret is None {
+    return Ok(value: Unit)
+  }
+  let rt: types.Type = type_or(o: w.ret)
+  flow_goal(w: inout w, lw: inout lw, ctx: ctx, e: e, term: v, ty: rt)
+  for o: Int in obligations_at(
+    w: w,
+    ctx: ctx,
+    at: key(w: w, tag: defs.tag_stmt, span: at),
+    kind: obligations.Ensures
+  ) {
+    let src: Int = or_neg(o: context.get_obligation(ctx: ctx, id: o).source)
+    for c: ast.Contract in w.post {
+      if key(w: w, tag: defs.tag_sig, span: c.span) == src {
+        lw = { lw with result_term: Some(value: v) }
+        let r: Result[formula.Formula, Text] = lower.lower(
+          fuel: lower.max_depth,
+          lw: inout lw,
+          ctx: ctx,
+          e: c.expr,
+          env: w.env
+        )
+        lw = { lw with result_term: None }
+        try_goal(w: w, lw: lw, o: o, goal: r)
+      }
+    }
+  }
+  return Ok(value: Unit)
+}
+
+fn if_stmt(
+  fuel: Int where it >= 0,
+  w: inout W,
+  lw: inout lower.Lw,
+  ctx: inout context.Context,
+  cond: ast.Expr,
+  then_block: ast.Block,
+  else_block: Option[ast.Block]
+) -> Result[Unit, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "walk too deep")
+  }
+  let c: formula.Formula = try expr_obligations(
+    fuel: fuel - 1,
+    w: inout w,
+    lw: inout lw,
+    ctx: inout ctx,
+    e: cond
+  )
+  let before_env: Dict[Int, lower.Binding] = lower.copy_env(env: w.env)
+  let before_facts: List[formula.Formula] = w.facts
+  push_fact(w: inout w, f: c)
+  try w_block(fuel: fuel - 1, w: inout w, lw: inout lw, ctx: inout ctx, b: then_block)
+  let then_returns: Bool = block_returns(b: then_block)
+  let after_then_env: Dict[Int, lower.Binding] = lower.copy_env(env: w.env)
+  let after_then_facts: List[formula.Formula] = w.facts
+  w = { w with
+    env: lower.copy_env(env: before_env),
+    facts: List.append(xs: before_facts, x: formula.not_f(x: c))
+  }
+  var else_returns: Bool = false
+  var else_nodes: List[walk.Node] = []
+  match else_block with
+  | Some(value) -> {
+    try w_block(fuel: fuel - 1, w: inout w, lw: inout lw, ctx: inout ctx, b: value)
+    else_returns = block_returns(b: value)
+    else_nodes = walk.nodes_in_block(b: value, into_verify: false)
+  }
+  | None -> skip()
+  let after_else_env: Dict[Int, lower.Binding] = lower.copy_env(env: w.env)
+  let after_else_facts: List[formula.Formula] = w.facts
+  if then_returns and not else_returns {
+    -- Continue on the else path.
+    return Ok(value: Unit)
+  }
+  if else_returns and not then_returns {
+    w = { w with env: after_then_env, facts: after_then_facts }
+    return Ok(value: Unit)
+  }
+  -- Join: what held before still holds; what a branch learned holds under its condition; a
+  -- variable a branch assigned is fresh, and equal to each branch's value under that condition.
+  let assigned_defs: List[Int] = assigned(
+    ctx: ctx,
+    w: w,
+    nodes: walk.nodes_in_block(b: then_block, into_verify: false) ++ else_nodes
+  )
+  let then_new: List[formula.Formula] = drop(
+    xs: after_then_facts,
+    n: List.len(xs: before_facts) + 1
+  )
+  let else_new: List[formula.Formula] = drop(
+    xs: after_else_facts,
+    n: List.len(xs: before_facts) + 1
+  )
+  w = { w with env: lower.copy_env(env: before_env), facts: before_facts }
+  var then_eqs: Builder[formula.Formula] = List.builder()
+  var else_eqs: Builder[formula.Formula] = List.builder()
+  for d: Int in assigned_defs {
+    match Map.find(d: before_env, key: d) with
+    | None -> skip()
+    | Some(value) -> {
+      let t1: Option[lower.Binding] = Map.find(d: after_then_env, key: d)
+      let t2: Option[lower.Binding] = Map.find(d: after_else_env, key: d)
+      let fresh: formula.Formula = try bind(
+        w: inout w,
+        lw: inout lw,
+        ctx: ctx,
+        def: d,
+        name: context.get_def(ctx: ctx, id: d).name,
+        ty: value.ty,
+        init: None
+      )
+      if t1 is Some {
+        List.push(b: inout then_eqs, x: formula.eq(a: fresh, b: binding_or(o: t1).term))
+      }
+      if t2 is Some {
+        List.push(b: inout else_eqs, x: formula.eq(a: fresh, b: binding_or(o: t2).term))
+      }
+    }
+  }
+  push_fact(
+    w: inout w,
+    f: formula.implies_f(a: c, b: conj(fs: then_new ++ List.finish(b: then_eqs)))
+  )
+  push_fact(
+    w: inout w,
+    f: formula.implies_f(a: formula.not_f(x: c), b: conj(fs: else_new ++ List.finish(b: else_eqs)))
+  )
+  return Ok(value: Unit)
+}
+
+record Taken {
+  cond: formula.Formula
+  env: Dict[Int, lower.Binding]
+  learned: List[formula.Formula]
+}
+
+fn list_or(o: Option[List[formula.Formula]]) -> List[formula.Formula] may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return []
+}
+
+fn match_stmt(
+  fuel: Int where it >= 0,
+  w: inout W,
+  lw: inout lower.Lw,
+  ctx: inout context.Context,
+  s: ast.Stmt,
+  scrutinee: ast.Expr,
+  arms: List[ast.Arm]
+) -> Result[Unit, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "walk too deep")
+  }
+  let subject: formula.Formula = try expr_obligations(
+    fuel: fuel - 1,
+    w: inout w,
+    lw: inout lw,
+    ctx: inout ctx,
+    e: scrutinee
+  )
+  let st: types.Type = type_or(o: Map.find(d: ctx.expr_types, key: expr_key(w: w, e: scrutinee)))
+  let before_env: Dict[Int, lower.Binding] = lower.copy_env(env: w.env)
+  let before_facts: List[formula.Formula] = w.facts
+  var earlier: List[formula.Formula] = []
+  -- The arms control can fall out of: each one's condition, its environment on exit and what it learned.
+  var takens: Builder[Taken] = List.builder()
+  var all_return: Bool = List.len(xs: arms) > 0
+  for arm: ast.Arm in arms {
+    let failed: List[formula.Formula] = negations(fs: earlier)
+    w = { w with env: lower.copy_env(env: before_env), facts: before_facts ++ failed }
+    var test: formula.Formula = app_true()
+    match pattern_facts(
+      w: inout w,
+      lw: inout lw,
+      ctx: ctx,
+      p: arm.pattern,
+      subject: subject,
+      ty: st
+    ) with
+    | Ok(value) -> test = value
+    | Err(_) -> test = app_true()
+    push_fact(w: inout w, f: test)
+    var guard_f: Option[formula.Formula] = None
+    match arm.guard with
+    | Some(value) -> {
+      let g: formula.Formula = try expr_obligations(
+        fuel: fuel - 1,
+        w: inout w,
+        lw: inout lw,
+        ctx: inout ctx,
+        e: value
+      )
+      push_fact(w: inout w, f: g)
+      guard_f = Some(value: g)
+    }
+    | None -> skip()
+    var cond_parts: List[formula.Formula] = failed ++ [test]
+    match guard_f with
+    | None -> earlier = List.append(xs: earlier, x: test)
+    | Some(value) -> {
+      earlier = List.append(xs: earlier, x: formula.and_f(xs: [test, value]))
+      cond_parts = cond_parts ++ [value]
+    }
+    let cond: formula.Formula = conj(fs: cond_parts)
+    var returns: Bool = false
+    match arm.body with
+    | ast.ArmBlock(block) -> {
+      try w_block(fuel: fuel - 1, w: inout w, lw: inout lw, ctx: inout ctx, b: block)
+      returns = block_returns(b: block)
+    }
+    | ast.ArmStmt(stmt) -> {
+      try w_stmt(fuel: fuel - 1, w: inout w, lw: inout lw, ctx: inout ctx, s: stmt)
+      returns = stmt_returns(s: stmt)
+    }
+    if not returns {
+      all_return = false
+      List.push(
+        b: inout takens,
+        x: Taken {
+          cond: cond,
+          env: lower.copy_env(env: w.env),
+          learned: drop(xs: w.facts, n: List.len(xs: before_facts))
+        }
+      )
+    }
+  }
+  w = { w with env: lower.copy_env(env: before_env), facts: before_facts }
+  if all_return {
+    push_fact(w: inout w, f: app_false())
+    return Ok(value: Unit)
+  }
+  -- Join, as for `if`: what an arm learned holds under its condition; a variable an arm assigned is fresh,
+  -- and equal to each arm's value under that arm's condition; one of the arms control falls out of was taken
+  -- (the arms are exhaustive, §4.4).
+  let taken_list: List[Taken] = List.finish(b: takens)
+  var eqs: Dict[Int, List[formula.Formula]] = Map.dict()
+  for d: Int in assigned(ctx: ctx, w: w, nodes: stmt_nodes(s: s)) {
+    match Map.find(d: before_env, key: d) with
+    | None -> skip()
+    | Some(value) -> {
+      let fresh: formula.Formula = try bind(
+        w: inout w,
+        lw: inout lw,
+        ctx: ctx,
+        def: d,
+        name: context.get_def(ctx: ctx, id: d).name,
+        ty: value.ty,
+        init: None
+      )
+      var i: Int where it >= 0 = 0
+      for t: Taken in taken_list {
+        let tb: Option[lower.Binding] = Map.find(d: t.env, key: d)
+        if tb is Some {
+          Map.set(
+            d: inout eqs,
+            key: i,
+            value: List.append(
+              xs: list_or(o: Map.find(d: eqs, key: i)),
+              x: formula.eq(a: fresh, b: binding_or(o: tb).term)
+            )
+          )
+        }
+        i = i + 1
+      }
+    }
+  }
+  var conds: Builder[formula.Formula] = List.builder()
+  var i: Int where it >= 0 = 0
+  for t: Taken in taken_list {
+    push_fact(
+      w: inout w,
+      f: formula.implies_f(
+        a: t.cond,
+        b: conj(fs: t.learned ++ list_or(o: Map.find(d: eqs, key: i)))
+      )
+    )
+    List.push(b: inout conds, x: t.cond)
+    i = i + 1
+  }
+  push_fact(w: inout w, f: formula.or_f(xs: List.finish(b: conds)))
+  return Ok(value: Unit)
+}
+
+-- Facts a matching pattern establishes, binding its variables.
+fn pattern_facts(
+  w: inout W,
+  lw: inout lower.Lw,
+  ctx: context.Context,
+  p: ast.Pattern,
+  subject: formula.Formula,
+  ty: types.Type
+) -> Result[formula.Formula, Text] may mutate, alloc {
+  match p with
+  | ast.WildcardPat(_) -> return Ok(value: app_true())
+  | ast.BindPat(name, span) -> {
+    let def: Int = or_neg(
+      o: Map.find(d: ctx.def_of, key: key(w: w, tag: defs.tag_pattern, span: span))
+    )
+    if def >= 0 {
+      let t: formula.Formula = try bind(
+        w: inout w,
+        lw: inout lw,
+        ctx: ctx,
+        def: def,
+        name: name.text,
+        ty: ty,
+        init: Some(value: subject)
+      )
+    }
+    return Ok(value: app_true())
+  }
+  | ast.LitPat(literal, _) -> return Ok(
+    value: formula.eq(a: subject, b: try lower_e(w: inout w, lw: inout lw, ctx: ctx, e: literal))
+  )
+  | ast.VariantPat(_, fields, span) -> return variant_facts(
+    w: inout w,
+    lw: inout lw,
+    ctx: ctx,
+    fields: fields,
+    at: span,
+    subject: subject,
+    ty: ty
+  )
+}
+
+fn variant_facts(
+  w: inout W,
+  lw: inout lower.Lw,
+  ctx: context.Context,
+  fields: Option[List[ast.PatField]],
+  at: ast.Span,
+  subject: formula.Formula,
+  ty: types.Type
+) -> Result[formula.Formula, Text] may mutate, alloc {
+  let def: Int = ref_def(o: Map.find(d: ctx.refs, key: key(w: w, tag: defs.tag_pattern, span: at)))
+  if def < 0 {
+    return Err(error: "unresolved pattern")
+  }
+  let test: formula.Formula = try lower.is_variant(
+    lw: lw,
+    ctx: ctx,
+    term: subject,
+    ty: ty,
+    variant: def
+  )
+  match fields with
+  | None -> skip()
+  | Some(value) -> {
+    let fs: List[types.FieldInfo] = fields_or(o: Map.find(d: ctx.fields, key: def))
+    var i: Int where it >= 0 = 0
+    var stop: Bool = false
+    for pf: ast.PatField in value {
+      if not stop {
+        match pf with
+        | ast.PatFieldRest(_) -> stop = true
+        | ast.PatFieldName(name, span) -> {
+          if i < List.len(xs: fs) {
+            try bind_field(
+              w: inout w,
+              lw: inout lw,
+              ctx: ctx,
+              name: name.text,
+              at: span,
+              f: List.get(xs: fs, i: i),
+              subject: subject,
+              ty: ty,
+              owner: def
+            )
+          }
+          i = i + 1
+        }
+        | ast.PatFieldSkip(_) -> i = i + 1
+      }
+    }
+  }
+  return Ok(value: test)
+}
+
+fn bind_field(
+  w: inout W,
+  lw: inout lower.Lw,
+  ctx: context.Context,
+  name: Text,
+  at: ast.Span,
+  f: types.FieldInfo,
+  subject: formula.Formula,
+  ty: types.Type,
+  owner: Int
+) -> Result[Unit, Text] may mutate, alloc {
+  let fdef: Int = or_neg(
+    o: Map.find(d: ctx.def_of, key: key(w: w, tag: defs.tag_pattern, span: at))
+  )
+  var lookup: Int = f.def
+  if fdef >= 0 {
+    lookup = fdef
+  }
+  var ft: types.Type = f.ty
+  match Map.find(d: ctx.decl_types, key: lookup) with
+  | Some(value) -> ft = value
+  | None -> skip()
+  if fdef >= 0 {
+    let proj: formula.Formula = try lower.projection_of(
+      lw: lw,
+      ctx: ctx,
+      term: subject,
+      ty: ty,
+      owner: owner,
+      field: f.name,
+      field_type: ft
+    )
+    let b: formula.Formula = try bind(
+      w: inout w,
+      lw: inout lw,
+      ctx: ctx,
+      def: fdef,
+      name: name,
+      ty: ft,
+      init: Some(value: proj)
+    )
+  }
+  return Ok(value: Unit)
+}
+
+-- The pending obligation of `kind` at `at` that comes from the clause `src`, or -1.
+fn find_source(
+  w: W,
+  ctx: context.Context,
+  at: Int,
+  kind: obligations.Kind,
+  src: Int
+) -> Int may alloc, mutate {
+  for o: Int in obligations_at(w: w, ctx: ctx, at: at, kind: kind) {
+    if or_neg(o: context.get_obligation(ctx: ctx, id: o).source) == src {
+      return o
+    }
+  }
+  return -1
+}
+
+fn loop_stmt(
+  fuel: Int where it >= 0,
+  w: inout W,
+  lw: inout lower.Lw,
+  ctx: inout context.Context,
+  s: ast.Stmt,
+  cond: ast.Expr,
+  clauses: List[ast.LoopClause],
+  body: ast.Block,
+  at: ast.Span
+) -> Result[Unit, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "walk too deep")
+  }
+  let at_key: Int = key(w: w, tag: defs.tag_stmt, span: at)
+  var invariants: Builder[ast.LoopClause] = List.builder()
+  var dec_clause: Option[ast.LoopClause] = None
+  for c: ast.LoopClause in clauses {
+    if c.clause == "invariant" {
+      List.push(b: inout invariants, x: c)
+    }
+    if c.clause == "decreases" and dec_clause is None {
+      dec_clause = Some(value: c)
+    }
+  }
+  let invs: List[ast.LoopClause] = List.finish(b: invariants)
+  -- Entry: the invariants hold before the first iteration.
+  for inv: ast.LoopClause in invs {
+    let o: Int = find_source(
+      w: w,
+      ctx: ctx,
+      at: at_key,
+      kind: obligations.InvariantEntry,
+      src: key(w: w, tag: defs.tag_sig, span: inv.span)
+    )
+    if o >= 0 {
+      let g: Result[formula.Formula, Text] = lower_e(
+        w: inout w,
+        lw: inout lw,
+        ctx: ctx,
+        e: inv.expr
+      )
+      try_goal(w: w, lw: lw, o: o, goal: g)
+    }
+  }
+  let assigned_defs: List[Int] = assigned(ctx: ctx, w: w, nodes: stmt_nodes(s: s))
+  let before_env: Dict[Int, lower.Binding] = lower.copy_env(env: w.env)
+  let before_facts: List[formula.Formula] = w.facts
+  -- An arbitrary iteration: the invariants and the condition hold on forgotten state.
+  try havoc(w: inout w, lw: inout lw, ctx: ctx, ds: assigned_defs)
+  for inv: ast.LoopClause in invs {
+    push_maybe(w: inout w, lw: inout lw, ctx: ctx, e: inv.expr)
+  }
+  let c: formula.Formula = try expr_obligations(
+    fuel: fuel - 1,
+    w: inout w,
+    lw: inout lw,
+    ctx: inout ctx,
+    e: cond
+  )
+  push_fact(w: inout w, f: c)
+  var m0: Option[formula.Formula] = None
+  var dec_o: Int = -1
+  match dec_clause with
+  | Some(value) -> dec_o = find_source(
+    w: w,
+    ctx: ctx,
+    at: at_key,
+    kind: obligations.Decreases,
+    src: key(w: w, tag: defs.tag_sig, span: value.span)
+  )
+  | None -> skip()
+  if dec_clause is Some and dec_o >= 0 {
+    let measure: formula.Formula = try expr_obligations(
+      fuel: fuel - 1,
+      w: inout w,
+      lw: inout lw,
+      ctx: inout ctx,
+      e: clause_expr(o: dec_clause)
+    )
+    let m: formula.Formula = lower.fresh_const(lw: inout lw, prefix: "measure", sort: formula.IntS)
+    push_fact(w: inout w, f: formula.eq(a: m, b: measure))
+    m0 = Some(value: m)
+  }
+  try w_block(fuel: fuel - 1, w: inout w, lw: inout lw, ctx: inout ctx, b: body)
+  for inv: ast.LoopClause in invs {
+    let o: Int = find_source(
+      w: w,
+      ctx: ctx,
+      at: at_key,
+      kind: obligations.InvariantStep,
+      src: key(w: w, tag: defs.tag_sig, span: inv.span)
+    )
+    if o >= 0 {
+      let g: Result[formula.Formula, Text] = lower_e(
+        w: inout w,
+        lw: inout lw,
+        ctx: ctx,
+        e: inv.expr
+      )
+      try_goal(w: w, lw: lw, o: o, goal: g)
+    }
+  }
+  if dec_clause is Some and dec_o >= 0 and m0 is Some {
+    let m: formula.Formula = formula_or(o: m0)
+    match lower_e(w: inout w, lw: inout lw, ctx: ctx, e: clause_expr(o: dec_clause)) with
+    | Ok(value) -> emit(
+      w: w,
+      lw: lw,
+      o: dec_o,
+      goal: formula.and_f(
+        xs: [cmp(op: ">=", a: m, b: formula.int_f(v: 0)), cmp(op: "<", a: value, b: m)]
+      )
+    )
+    | Err(error) -> skip_one(w: w, o: dec_o, reason: error)
+  }
+  -- Exit: forgotten state again, the condition false, the invariants true.
+  w = { w with env: lower.copy_env(env: before_env), facts: before_facts }
+  try havoc(w: inout w, lw: inout lw, ctx: ctx, ds: assigned_defs)
+  for inv: ast.LoopClause in invs {
+    push_maybe(w: inout w, lw: inout lw, ctx: ctx, e: inv.expr)
+  }
+  match lower_e(w: inout w, lw: inout lw, ctx: ctx, e: cond) with
+  | Ok(value) -> push_fact(w: inout w, f: formula.not_f(x: value))
+  | Err(_) -> skip()
+  return Ok(value: Unit)
+}
+
+fn for_stmt(
+  fuel: Int where it >= 0,
+  w: inout W,
+  lw: inout lower.Lw,
+  ctx: inout context.Context,
+  name: Text,
+  domain: ast.Domain,
+  body: ast.Block,
+  at: ast.Span
+) -> Result[Unit, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "walk too deep")
+  }
+  let def: Int = or_neg(o: Map.find(d: ctx.def_of, key: key(w: w, tag: defs.tag_stmt, span: at)))
+  if def < 0 {
+    return Ok(value: Unit)
+  }
+  let ty_opt: Option[types.Type] = Map.find(d: ctx.decl_types, key: def)
+  if ty_opt is None {
+    return Ok(value: Unit)
+  }
+  let ty: types.Type = type_or(o: ty_opt)
+  let assigned_defs: List[Int] = assigned(
+    ctx: ctx,
+    w: w,
+    nodes: walk.nodes_in_block(b: body, into_verify: false)
+  )
+  match domain with
+  | ast.RangeDomain(lo, hi, _) -> {
+    let lo_f: formula.Formula = try expr_obligations(
+      fuel: fuel - 1,
+      w: inout w,
+      lw: inout lw,
+      ctx: inout ctx,
+      e: lo
+    )
+    let hi_f: formula.Formula = try expr_obligations(
+      fuel: fuel - 1,
+      w: inout w,
+      lw: inout lw,
+      ctx: inout ctx,
+      e: hi
+    )
+    try havoc(w: inout w, lw: inout lw, ctx: ctx, ds: assigned_defs)
+    let x: formula.Formula = try bind(
+      w: inout w,
+      lw: inout lw,
+      ctx: ctx,
+      def: def,
+      name: name,
+      ty: ty,
+      init: None
+    )
+    push_fact(w: inout w, f: cmp(op: "<=", a: lo_f, b: x))
+    push_fact(w: inout w, f: cmp(op: "<", a: x, b: hi_f))
+  }
+  | ast.InDomain(expr, _) -> {
+    let xs: formula.Formula = try expr_obligations(
+      fuel: fuel - 1,
+      w: inout w,
+      lw: inout lw,
+      ctx: inout ctx,
+      e: expr
+    )
+    let xs_type: types.Type = type_or(o: Map.find(d: ctx.expr_types, key: expr_key(w: w, e: expr)))
+    try havoc(w: inout w, lw: inout lw, ctx: ctx, ds: assigned_defs)
+    match for_in_bind(
+      w: inout w,
+      lw: inout lw,
+      ctx: ctx,
+      def: def,
+      name: name,
+      ty: ty,
+      xs: xs,
+      xs_type: xs_type,
+      e: expr
+    ) with
+    | Ok(_) -> skip()
+    | Err(_) -> {
+      let b: formula.Formula = try bind(
+        w: inout w,
+        lw: inout lw,
+        ctx: ctx,
+        def: def,
+        name: name,
+        ty: ty,
+        init: None
+      )
+    }
+  }
+  try w_block(fuel: fuel - 1, w: inout w, lw: inout lw, ctx: inout ctx, b: body)
+  try havoc(w: inout w, lw: inout lw, ctx: ctx, ds: assigned_defs)
+  var env: Dict[Int, lower.Binding] = w.env
+  Map.remove(d: inout env, key: def)
+  return Ok(value: Unit)
+}
+
+-- The element of a `for x in xs` loop: an arbitrary in-range element, its refinement obligation over every index.
+fn for_in_bind(
+  w: inout W,
+  lw: inout lower.Lw,
+  ctx: context.Context,
+  def: Int,
+  name: Text,
+  ty: types.Type,
+  xs: formula.Formula,
+  xs_type: types.Type,
+  e: ast.Expr
+) -> Result[Unit, Text] may mutate, alloc {
+  let k: formula.Formula = lower.fresh_const(lw: inout lw, prefix: "k", sort: formula.IntS)
+  let elem: formula.Formula = try lower.list_get(lw: lw, ctx: ctx, term: xs, ty: xs_type, index: k)
+  let len: formula.Formula = try lower.list_len(lw: lw, ctx: ctx, term: xs, ty: xs_type)
+  push_fact(w: inout w, f: cmp(op: "<=", a: formula.int_f(v: 0), b: k))
+  push_fact(w: inout w, f: cmp(op: "<", a: k, b: len))
+  for o: Int in obligations_at(
+    w: w,
+    ctx: ctx,
+    at: expr_key(w: w, e: e),
+    kind: obligations.Refinement
+  ) {
+    let g: Result[formula.Formula, Text] = element_goal(
+      w: w,
+      lw: inout lw,
+      ctx: ctx,
+      ty: ty,
+      xs: xs,
+      xs_type: xs_type
+    )
+    try_goal(w: w, lw: lw, o: o, goal: g)
+  }
+  let b: formula.Formula = try bind(
+    w: inout w,
+    lw: inout lw,
+    ctx: ctx,
+    def: def,
+    name: name,
+    ty: ty,
+    init: Some(value: elem)
+  )
+  return Ok(value: Unit)
+}
+
+fn element_goal(
+  w: W,
+  lw: inout lower.Lw,
+  ctx: context.Context,
+  ty: types.Type,
+  xs: formula.Formula,
+  xs_type: types.Type
+) -> Result[formula.Formula, Text] may mutate, alloc {
+  let kk: formula.Formula = lower.fresh_const(lw: inout lw, prefix: "kk", sort: formula.IntS)
+  let len: formula.Formula = try lower.list_len(lw: lw, ctx: ctx, term: xs, ty: xs_type)
+  let in_range: formula.Formula = formula.and_f(
+    xs: [cmp(op: "<=", a: formula.int_f(v: 0), b: kk), cmp(op: "<", a: kk, b: len)]
+  )
+  let got: formula.Formula = try lower.list_get(lw: lw, ctx: ctx, term: xs, ty: xs_type, index: kk)
+  let r: formula.Formula = try lower.refinement_of(
+    fuel: lower.max_depth,
+    lw: inout lw,
+    ctx: ctx,
+    ty: ty,
+    term: got,
+    env: w.env
+  )
+  return Ok(value: formula.implies_f(a: in_range, b: r))
+}
+
+fn expr_stmt(
+  fuel: Int where it >= 0,
+  w: inout W,
+  lw: inout lower.Lw,
+  ctx: inout context.Context,
+  e: ast.Expr
+) -> Result[Unit, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "walk too deep")
+  }
+  let v: formula.Formula = try expr_obligations(
+    fuel: fuel - 1,
+    w: inout w,
+    lw: inout lw,
+    ctx: inout ctx,
+    e: e
+  )
+  -- An assertion of a test body (§5.2): proved when the contracts entail it, and then a fact for the assertions after it.
+  let assertions: List[Int] = obligations_at(
+    w: w,
+    ctx: ctx,
+    at: expr_key(w: w, e: e),
+    kind: obligations.Assertion
+  )
+  for o: Int in assertions {
+    emit(w: w, lw: lw, o: o, goal: v)
+  }
+  if List.len(xs: assertions) > 0 {
+    push_fact(w: inout w, f: v)
+  }
+  return Ok(value: Unit)
+}
+
+-- Expressions and their obligations ------------------------------------------------------
+-- The key an enumerated node's obligations live at, or -1 when it can carry none.
+fn node_key(w: W, n: walk.Node) -> Int {
+  match n with
+  | walk.NExpr(e) -> return expr_key(w: w, e: e)
+  | walk.NStmt(s) -> return key(w: w, tag: defs.tag_stmt, span: parser.span_of_stmt(st: s))
+  | walk.NContract(c) -> return key(w: w, tag: defs.tag_sig, span: c.span)
+  | walk.NParam(p) -> return key(w: w, tag: defs.tag_sig, span: p.span)
+  | _ -> return -1
+}
+
+-- Skips every pending obligation under `e`, the root itself excepted when `inner` is set.
+fn skip_under(
+  w: W,
+  ctx: context.Context,
+  e: ast.Expr,
+  reason: Text,
+  inner: Bool
+) -> Unit may alloc, mutate {
+  var first: Bool = true
+  for n: walk.Node in walk.nodes_in_expr(e: e, into_verify: true) {
+    if not (first and inner) {
+      let k: Int = node_key(w: w, n: n)
+      if k >= 0 {
+        for o: Int in ids_or(o: Map.find(d: ctx.obligations_at, key: k)) {
+          if Map.contains(d: w.pending, key: o) {
+            skip_one(w: w, o: o, reason: reason)
+          }
+        }
+      }
+    }
+    first = false
+  }
+  return Unit
+}
+
+fn safe_sort(
+  lw: lower.Lw,
+  ctx: context.Context,
+  w: W,
+  e: ast.Expr
+) -> formula.Sort may mutate, alloc {
+  match lower.sort_of(
+    lw: lw,
+    ctx: ctx,
+    t: type_or(o: Map.find(d: ctx.expr_types, key: expr_key(w: w, e: e)))
+  ) with
+  | Ok(value) -> return value
+  | Err(_) -> return formula.IntS
+}
+
+fn term_of(lw: lower.Lw, w: W, e: ast.Expr) -> Option[formula.Formula] {
+  return Map.find(d: lw.terms, key: expr_key(w: w, e: e))
+}
+
+-- Lowers `e` and emits the conditions of every obligation inside it:
+-- callee preconditions, argument and field refinements, and overflow.
+fn expr_obligations(
+  fuel: Int where it >= 0,
+  w: inout W,
+  lw: inout lower.Lw,
+  ctx: inout context.Context,
+  e: ast.Expr
+) -> Result[formula.Formula, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "walk too deep")
+  }
+  match lower_e(w: inout w, lw: inout lw, ctx: ctx, e: e) with
+  | Err(error) -> {
+    skip_under(w: w, ctx: ctx, e: e, reason: error, inner: false)
+    return Ok(
+      value: lower.fresh_const(
+        lw: inout lw,
+        prefix: "unlowered",
+        sort: safe_sort(lw: lw, ctx: ctx, w: w, e: e)
+      )
+    )
+  }
+  | Ok(value) -> {
+    try discharge_under(fuel: fuel - 1, w: inout w, lw: inout lw, ctx: inout ctx, e: e)
+    return Ok(value: value)
+  }
+}
+
+-- The direct subexpressions of `e`, in the order the syntax walker visits them.
+fn child_exprs(e: ast.Expr) -> List[ast.Expr] may alloc, mutate {
+  var out: Builder[ast.Expr] = List.builder()
+  match e with
+  | ast.Ctor(_, args, fields, _) -> {
+    match args with
+    | Some(value) -> {
+      for a: ast.Arg in value {
+        List.push(b: inout out, x: a.value)
+      }
+    }
+    | None -> skip()
+    match fields with
+    | Some(value) -> {
+      for f: ast.FieldInit in value {
+        List.push(b: inout out, x: f.value)
+      }
+    }
+    | None -> skip()
+  }
+  | ast.RecordUpdate(base, fields, _) -> {
+    List.push(b: inout out, x: base)
+    for f: ast.FieldInit in fields {
+      List.push(b: inout out, x: f.value)
+    }
+  }
+  | ast.ListLit(elems, _) -> {
+    for x: ast.Expr in elems {
+      List.push(b: inout out, x: x)
+    }
+  }
+  | ast.Try(expr, else_, _) -> {
+    List.push(b: inout out, x: expr)
+    match else_ with
+    | Some(value) -> List.push(b: inout out, x: value.expr)
+    | None -> skip()
+  }
+  | ast.Fake(_, fields, _) -> {
+    for f: ast.FieldInit in fields {
+      List.push(b: inout out, x: f.value)
+    }
+  }
+  | ast.FieldAccess(object, _, _) -> List.push(b: inout out, x: object)
+  | ast.Call(callee, _, args, _) -> {
+    List.push(b: inout out, x: callee)
+    for a: ast.Arg in args {
+      List.push(b: inout out, x: a.value)
+    }
+  }
+  | ast.Unary(_, operand, _) -> List.push(b: inout out, x: operand)
+  | ast.Binary(_, left, right, _) -> {
+    List.push(b: inout out, x: left)
+    List.push(b: inout out, x: right)
+  }
+  | ast.And(operands, _) -> {
+    for x: ast.Expr in operands {
+      List.push(b: inout out, x: x)
+    }
+  }
+  | ast.Or(operands, _) -> {
+    for x: ast.Expr in operands {
+      List.push(b: inout out, x: x)
+    }
+  }
+  | ast.Is(expr, pattern, _) -> {
+    List.push(b: inout out, x: expr)
+    match pattern with
+    | ast.LitPat(literal, _) -> List.push(b: inout out, x: literal)
+    | _ -> skip()
+  }
+  | _ -> skip()
+  return List.finish(b: out)
+}
+
+-- Discharges the obligations under `e` after it was lowered. The right
+-- operand of `and`, `or` and `implies` is evaluated only when the left
+-- decides nothing, so its obligations may assume the left operand (or its
+-- negation), as a call after an `if` may assume the condition.
+fn discharge_under(
+  fuel: Int where it >= 0,
+  w: inout W,
+  lw: inout lower.Lw,
+  ctx: inout context.Context,
+  e: ast.Expr
+) -> Result[Unit, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "walk too deep")
+  }
+  match e with
+  | ast.And(operands, _) -> return junction(
+    fuel: fuel - 1,
+    w: inout w,
+    lw: inout lw,
+    ctx: inout ctx,
+    operands: operands,
+    negate: false
+  )
+  | ast.Or(operands, _) -> return junction(
+    fuel: fuel - 1,
+    w: inout w,
+    lw: inout lw,
+    ctx: inout ctx,
+    operands: operands,
+    negate: true
+  )
+  | ast.Binary(op, left, right, _) -> {
+    if op == "implies" {
+      try discharge_under(fuel: fuel - 1, w: inout w, lw: inout lw, ctx: inout ctx, e: left)
+      let saved: List[formula.Formula] = w.facts
+      match term_of(lw: lw, w: w, e: left) with
+      | Some(value) -> push_fact(w: inout w, f: value)
+      | None -> skip()
+      try discharge_under(fuel: fuel - 1, w: inout w, lw: inout lw, ctx: inout ctx, e: right)
+      w = { w with facts: saved }
+      overflow_obligation(w: w, lw: lw, ctx: ctx, e: e)
+      return Ok(value: Unit)
+    }
+    overflow_obligation(w: w, lw: lw, ctx: ctx, e: e)
+    try discharge_under(fuel: fuel - 1, w: inout w, lw: inout lw, ctx: inout ctx, e: left)
+    try discharge_under(fuel: fuel - 1, w: inout w, lw: inout lw, ctx: inout ctx, e: right)
+    return Ok(value: Unit)
+  }
+  | ast.Closure(_, _, _, _, _) -> {
+    -- Obligations under binders are not discharged in v0.
+    skip_under(w: w, ctx: ctx, e: e, reason: "inside a quantifier or closure", inner: true)
+    return Ok(value: Unit)
+  }
+  | ast.Quantifier(_, _, _, _, _, _, _) -> {
+    skip_under(w: w, ctx: ctx, e: e, reason: "inside a quantifier or closure", inner: true)
+    return Ok(value: Unit)
+  }
+  | ast.Recover(_, _) -> {
+    skip_under(w: w, ctx: ctx, e: e, reason: "inside a quantifier or closure", inner: true)
+    return Ok(value: Unit)
+  }
+  | ast.Call(_, _, _, _) -> try call_obligations(w: inout w, lw: inout lw, ctx: inout ctx, e: e)
+  | ast.Ctor(_, _, _, _) -> try field_obligations(w: inout w, lw: inout lw, ctx: ctx, e: e)
+  | ast.RecordUpdate(_, _, _) -> try field_obligations(w: inout w, lw: inout lw, ctx: ctx, e: e)
+  | _ -> skip()
+  for c: ast.Expr in child_exprs(e: e) {
+    try discharge_under(fuel: fuel - 1, w: inout w, lw: inout lw, ctx: inout ctx, e: c)
+  }
+  return Ok(value: Unit)
+}
+
+fn junction(
+  fuel: Int where it >= 0,
+  w: inout W,
+  lw: inout lower.Lw,
+  ctx: inout context.Context,
+  operands: List[ast.Expr],
+  negate: Bool
+) -> Result[Unit, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "walk too deep")
+  }
+  let saved: List[formula.Formula] = w.facts
+  for operand: ast.Expr in operands {
+    try discharge_under(fuel: fuel - 1, w: inout w, lw: inout lw, ctx: inout ctx, e: operand)
+    match term_of(lw: lw, w: w, e: operand) with
+    | Some(value) -> {
+      if negate {
+        push_fact(w: inout w, f: formula.not_f(x: value))
+      } else {
+        push_fact(w: inout w, f: value)
+      }
+    }
+    | None -> skip()
+  }
+  w = { w with facts: saved }
+  return Ok(value: Unit)
+}
+
+-- Lowers a callee's clause under the call's instantiation, with the callee's file for its keys.
+fn lower_callee(
+  lw: inout lower.Lw,
+  ctx: context.Context,
+  e: ast.Expr,
+  file: Int,
+  subst: Dict[Int, types.TypeArg],
+  env: Dict[Int, lower.Binding]
+) -> Result[formula.Formula, Text] may mutate, alloc {
+  lower.push_subst(lw: inout lw, subst: subst)
+  let saved: Int = lw.file
+  lw = { lw with file: file }
+  let r: Result[formula.Formula, Text] = lower.lower(
+    fuel: lower.max_depth,
+    lw: inout lw,
+    ctx: ctx,
+    e: e,
+    env: env
+  )
+  lw = { lw with file: saved }
+  lower.pop_subst(lw: inout lw)
+  return r
+}
+
+fn call_obligations(
+  w: inout W,
+  lw: inout lower.Lw,
+  ctx: inout context.Context,
+  e: ast.Expr
+) -> Result[Unit, Text] may mutate, alloc {
+  match e with
+  | ast.Call(_, _, args, span) -> {
+    let call_key: Int = key(w: w, tag: defs.tag_expr, span: span)
+    let info: Option[lower.CallInfo] = Map.find(d: lw.calls, key: call_key)
+    for o: Int in obligations_at(w: w, ctx: ctx, at: call_key, kind: obligations.Decreases) {
+      call_decreases(w: w, lw: inout lw, ctx: inout ctx, o: o, info: info, at: span)
+    }
+    for o: Int in obligations_at(w: w, ctx: ctx, at: call_key, kind: obligations.Requires) {
+      call_requires(w: w, lw: inout lw, ctx: ctx, o: o, info: info)
+    }
+    for a: ast.Arg in args {
+      for o: Int in obligations_at(
+        w: w,
+        ctx: ctx,
+        at: expr_key(w: w, e: a.value),
+        kind: obligations.Refinement
+      ) {
+        arg_refinement(w: w, lw: inout lw, ctx: ctx, o: o, info: info, a: a)
+      }
+    }
+  }
+  | _ -> skip()
+  return Ok(value: Unit)
+}
+
+-- The contract a `requires` or `decreases` obligation at a call comes from, with its file.
+fn clause_of(ctx: context.Context, o: Int) -> Option[ast.Contract] may alloc {
+  let src: Int = or_neg(o: context.get_obligation(ctx: ctx, id: o).source)
+  if src < 0 {
+    return None
+  }
+  return Map.find(d: ctx.contract_nodes, key: src)
+}
+
+fn call_decreases(
+  w: W,
+  lw: inout lower.Lw,
+  ctx: inout context.Context,
+  o: Int,
+  info: Option[lower.CallInfo],
+  at: ast.Span
+) -> Unit may mutate, alloc {
+  let ob: obligations.Obligation = context.get_obligation(ctx: ctx, id: o)
+  let clause: Option[ast.Contract] = clause_of(ctx: ctx, o: o)
+  if info is None or clause is None {
+    skip_one(w: w, o: o, reason: "call not lowered")
+    return Unit
+  }
+  if w.measure0 is None {
+    skip_one(w: w, o: o, reason: "measure not lowered")
+    return Unit
+  }
+  let ci: lower.CallInfo = info_or(o: info)
+  let c: ast.Contract = contract_or(o: clause)
+  let m0: formula.Formula = formula_or(o: w.measure0)
+  let src: Int = or_neg(o: ob.source)
+  let callee_file: Int = lower.pred_file(k: src)
+  let mt: Option[types.Type] = Map.find(
+    d: ctx.expr_types,
+    key: defs.node_key(file: callee_file, tag: defs.tag_expr, span: parser.span_of_expr(e: c.expr))
+  )
+  var structural: Bool = false
+  match mt with
+  | Some(value) -> {
+    let ms: types.Type = types.strip(t: value)
+    structural = not (ms is types.Prim and (types.prim_name(t: ms) == "Int" or types.prim_name(
+      t: ms
+    ) == "Duration"))
+  }
+  | None -> skip()
+  let arg_term: Result[formula.Formula, Text] = lower_callee(
+    lw: inout lw,
+    ctx: ctx,
+    e: c.expr,
+    file: callee_file,
+    subst: ci.subst,
+    env: ci.args
+  )
+  if structural {
+    -- A structural measure (§5.1): the argument must be a proper part of the value at entry, which is
+    -- decided from how it was obtained, never checked at runtime; anything else is an error.
+    var verdict: Int = 2
+    match arg_term with
+    | Ok(value) -> {
+      if lower.is_proper_part(lw: lw, term: value, whole: m0) {
+        verdict = 0
+      } else {
+        if lower.is_same_part(lw: lw, term: value, whole: m0) {
+          verdict = 1
+        }
+      }
+    }
+    | Err(_) -> verdict = 2
+    if verdict == 0 {
+      context.set_obligation(
+        ctx: inout ctx,
+        o: { ob with status: obligations.Proved, by: Some(value: "structural order") }
+      )
+    } else {
+      if verdict == 1 {
+        -- The measure passed on unchanged: sound when no cycle consists of such calls alone, which the
+        -- verify pass settles once every function is lowered.
+        context.set_obligation(
+          ctx: inout ctx,
+          o: { ob with status: obligations.Checked, by: Some(value: "equal argument") }
+        )
+      } else {
+        context.set_obligation(
+          ctx: inout ctx,
+          o: { ob with status: obligations.Failed, by: Some(value: "not a part of the measure") }
+        )
+        context.report(
+          ctx: inout ctx,
+          d: report.diagnostic_for(
+            code: "E0344",
+            file: w.file,
+            span: at,
+            def_name: Some(value: w.def.name),
+            detail: "the argument of this recursive call is not a field, or an element of a list field, of the measure `" ++ measure_text(
+              t: ob.text
+            ) ++ "` reached by pattern matching or field access (§5.1)",
+            obligation: report.ObligationInfo {
+              kind: obligations.kind_text(k: ob.kind),
+              text: ob.text,
+              status: "unprovable",
+              has_counterexample: false,
+              counterexample: []
+            }
+          )
+        )
+      }
+    }
+    return Unit
+  }
+  match arg_term with
+  | Ok(value) -> emit(w: w, lw: lw, o: o, goal: cmp(op: "<", a: value, b: m0))
+  | Err(error) -> skip_one(w: w, o: o, reason: error)
+  return Unit
+}
+
+fn call_requires(
+  w: W,
+  lw: inout lower.Lw,
+  ctx: context.Context,
+  o: Int,
+  info: Option[lower.CallInfo]
+) -> Unit may mutate, alloc {
+  let clause: Option[ast.Contract] = clause_of(ctx: ctx, o: o)
+  if info is None or clause is None {
+    skip_one(w: w, o: o, reason: "call not lowered")
+    return Unit
+  }
+  let ci: lower.CallInfo = info_or(o: info)
+  let c: ast.Contract = contract_or(o: clause)
+  let src: Int = or_neg(o: context.get_obligation(ctx: ctx, id: o).source)
+  let g: Result[formula.Formula, Text] = lower_callee(
+    lw: inout lw,
+    ctx: ctx,
+    e: c.expr,
+    file: lower.pred_file(k: src),
+    subst: ci.subst,
+    env: ci.args
+  )
+  try_goal(w: w, lw: lw, o: o, goal: g)
+  return Unit
+}
+
+fn arg_refinement(
+  w: W,
+  lw: inout lower.Lw,
+  ctx: context.Context,
+  o: Int,
+  info: Option[lower.CallInfo],
+  a: ast.Arg
+) -> Unit may mutate, alloc {
+  let term: Option[formula.Formula] = term_of(lw: lw, w: w, e: a.value)
+  var target: Option[types.Type] = None
+  match info with
+  | Some(value) -> target = Map.find(d: value.param_types, key: a.name.text)
+  | None -> skip()
+  if term is None or target is None or info is None {
+    skip_one(w: w, o: o, reason: "argument not lowered")
+    return Unit
+  }
+  let ci: lower.CallInfo = info_or(o: info)
+  -- A parameter's refinement may mention other parameters: they denote the arguments.
+  var callee_env: Dict[Int, lower.Binding] = lower.copy_env(env: w.env)
+  for pd: Int in Map.keys(d: ci.args) {
+    match Map.find(d: ci.args, key: pd) with
+    | Some(value) -> Map.set(d: inout callee_env, key: pd, value: value)
+    | None -> skip()
+  }
+  lower.push_subst(lw: inout lw, subst: ci.subst)
+  let g: Result[formula.Formula, Text] = lower.refinement_of(
+    fuel: lower.max_depth,
+    lw: inout lw,
+    ctx: ctx,
+    ty: type_or(o: target),
+    term: formula_or(o: term),
+    env: callee_env
+  )
+  lower.pop_subst(lw: inout lw)
+  try_goal(w: w, lw: lw, o: o, goal: g)
+  return Unit
+}
+
+fn overflow_obligation(
+  w: W,
+  lw: lower.Lw,
+  ctx: context.Context,
+  e: ast.Expr
+) -> Unit may mutate, alloc {
+  match e with
+  | ast.Binary(op, _, right, span) -> {
+    for o: Int in obligations_at(
+      w: w,
+      ctx: ctx,
+      at: key(w: w, tag: defs.tag_expr, span: span),
+      kind: obligations.Overflow
+    ) {
+      let term: Option[formula.Formula] = term_of(lw: lw, w: w, e: e)
+      let r: Option[formula.Formula] = term_of(lw: lw, w: w, e: right)
+      if term is None or r is None {
+        skip_one(w: w, o: o, reason: "arithmetic not lowered")
+      } else {
+        if op == "/" or op == "%" {
+          emit(
+            w: w,
+            lw: lw,
+            o: o,
+            goal: formula.not_f(x: formula.eq(a: formula_or(o: r), b: formula.int_f(v: 0)))
+          )
+        } else {
+          let t: formula.Formula = formula_or(o: term)
+          emit(
+            w: w,
+            lw: lw,
+            o: o,
+            goal: formula.and_f(
+              xs: [
+                cmp(op: "<=", a: formula.LitF(text: "(- 9007199254740992)"), b: t),
+                cmp(op: "<=", a: t, b: formula.LitF(text: "9007199254740992"))
+              ]
+            )
+          )
+        }
+      }
+    }
+  }
+  | _ -> skip()
+  return Unit
+}
+
+fn find_field(fs: List[types.FieldInfo], name: Text) -> Option[types.FieldInfo] {
+  for f: types.FieldInfo in fs {
+    if f.name == name {
+      return Some(value: f)
+    }
+  }
+  return None
+}
+
+fn field_obligations(
+  w: inout W,
+  lw: inout lower.Lw,
+  ctx: context.Context,
+  e: ast.Expr
+) -> Result[Unit, Text] may mutate, alloc {
+  let ctor_term: Option[formula.Formula] = term_of(lw: lw, w: w, e: e)
+  let ty_opt: Option[types.Type] = Map.find(d: ctx.expr_types, key: expr_key(w: w, e: e))
+  var inits: Builder[Init] = List.builder()
+  var owner: Int = -1
+  match e with
+  | ast.Ctor(_, args, fields, span) -> {
+    match args with
+    | Some(value) -> {
+      for a: ast.Arg in value {
+        List.push(b: inout inits, x: Init { name: a.name.text, value: a.value })
+      }
+    }
+    | None -> skip()
+    match fields with
+    | Some(value) -> {
+      for f: ast.FieldInit in value {
+        List.push(b: inout inits, x: Init { name: f.name.text, value: f.value })
+      }
+    }
+    | None -> skip()
+    owner = ref_def(o: Map.find(d: ctx.refs, key: key(w: w, tag: defs.tag_expr, span: span)))
+  }
+  | ast.RecordUpdate(_, fields, _) -> {
+    for f: ast.FieldInit in fields {
+      List.push(b: inout inits, x: Init { name: f.name.text, value: f.value })
+    }
+    match ty_opt with
+    | Some(value) -> {
+      let s: types.Type = types.strip(t: value)
+      if s is types.RecordT {
+        owner = types.def_of(t: s)
+      }
+    }
+    | None -> skip()
+  }
+  | _ -> return Ok(value: Unit)
+  for init: Init in List.finish(b: inits) {
+    for o: Int in obligations_at(
+      w: w,
+      ctx: ctx,
+      at: expr_key(w: w, e: init.value),
+      kind: obligations.Refinement
+    ) {
+      let value_term: Option[formula.Formula] = term_of(lw: lw, w: w, e: init.value)
+      if ctor_term is None or value_term is None or owner < 0 or ty_opt is None {
+        skip_one(w: w, o: o, reason: "constructor not lowered")
+      } else {
+        let fs: List[types.FieldInfo] = fields_or(o: Map.find(d: ctx.fields, key: owner))
+        match find_field(fs: fs, name: init.name) with
+        | None -> skip_one(w: w, o: o, reason: "unknown field")
+        | Some(value) -> {
+          -- Sibling fields are visible to a field's refinement (§3.3).
+          var field_env: Dict[Int, lower.Binding] = lower.copy_env(env: w.env)
+          for f: types.FieldInfo in fs {
+            let proj: formula.Formula = try lower.projection_of(
+              lw: lw,
+              ctx: ctx,
+              term: formula_or(o: ctor_term),
+              ty: type_or(o: ty_opt),
+              owner: owner,
+              field: f.name,
+              field_type: f.ty
+            )
+            Map.set(d: inout field_env, key: f.def, value: lower.Binding { term: proj, ty: f.ty })
+          }
+          let g: Result[formula.Formula, Text] = lower.refinement_of(
+            fuel: lower.max_depth,
+            lw: inout lw,
+            ctx: ctx,
+            ty: value.ty,
+            term: formula_or(o: value_term),
+            env: field_env
+          )
+          try_goal(w: w, lw: lw, o: o, goal: g)
+        }
+      }
+    }
+  }
+  return Ok(value: Unit)
+}
+
+-- A refinement obligation at `e` flowing into `ty`.
+fn flow_goal(
+  w: inout W,
+  lw: inout lower.Lw,
+  ctx: context.Context,
+  e: ast.Expr,
+  term: formula.Formula,
+  ty: types.Type
+) -> Unit may mutate, alloc {
+  for o: Int in obligations_at(
+    w: w,
+    ctx: ctx,
+    at: expr_key(w: w, e: e),
+    kind: obligations.Refinement
+  ) {
+    let g: Result[formula.Formula, Text] = lower.refinement_of(
+      fuel: lower.max_depth,
+      lw: inout lw,
+      ctx: ctx,
+      ty: ty,
+      term: term,
+      env: w.env
+    )
+    try_goal(w: w, lw: lw, o: o, goal: g)
+  }
+  return Unit
+}
+
+-- §19.3: from the binding's declared type alone, every value it can hold is within ±2^53 - 1.
+fn representation_goals(
+  w: inout W,
+  lw: inout lower.Lw,
+  ctx: context.Context,
+  at: Int,
+  ty: types.Type
+) -> Unit may mutate, alloc {
+  for o: Int in obligations_at(w: w, ctx: ctx, at: at, kind: obligations.Representation) {
+    let x: formula.Formula = lower.fresh_const(lw: inout lw, prefix: "rep", sort: formula.IntS)
+    lower.type_facts(fuel: lower.max_depth, lw: inout lw, ctx: ctx, term: x, ty: ty, env: w.env)
+    emit(
+      w: w,
+      lw: lw,
+      o: o,
+      goal: formula.and_f(
+        xs: [
+          cmp(op: ">=", a: x, b: formula.int_f(v: 0 - safe_max)),
+          cmp(op: "<=", a: x, b: formula.int_f(v: safe_max))
+        ]
+      )
+    )
+  }
+  return Unit
+}
+
+-- Emitting conditions --------------------------------------------------------------------
+-- The pending obligations of `kind` at the node `at`, in creation order.
+fn obligations_at(
+  w: W,
+  ctx: context.Context,
+  at: Int,
+  kind: obligations.Kind
+) -> List[Int] may alloc, mutate {
+  var out: Builder[Int] = List.builder()
+  for id: Int in ids_or(o: Map.find(d: ctx.obligations_at, key: at)) {
+    if Map.contains(d: w.pending, key: id) and same_kind(
+      a: context.get_obligation(ctx: ctx, id: id).kind,
+      b: kind
+    ) {
+      List.push(b: inout out, x: id)
+    }
+  }
+  return List.finish(b: out)
+}
+
+fn try_goal(
+  w: W,
+  lw: lower.Lw,
+  o: Int,
+  goal: Result[formula.Formula, Text]
+) -> Unit may mutate, alloc {
+  match goal with
+  | Ok(value) -> emit(w: w, lw: lw, o: o, goal: value)
+  | Err(error) -> skip_one(w: w, o: o, reason: error)
+  return Unit
+}
+
+fn emit(w: W, lw: lower.Lw, o: Int, goal: formula.Formula) -> Unit may mutate, alloc {
+  if not Map.contains(d: w.pending, key: o) {
+    return Unit
+  }
+  var pending: Dict[Int, Bool] = w.pending
+  Map.remove(d: inout pending, key: o)
+  var built: Dict[Int, VC] = w.built
+  Map.set(
+    d: inout built,
+    key: o,
+    value: VC { id: o, lw: lw, facts: w.facts, goal: goal, names: w.names }
+  )
+  return Unit
+}
+
+fn skip_one(w: W, o: Int, reason: Text) -> Unit may mutate, alloc {
+  if not Map.contains(d: w.pending, key: o) {
+    return Unit
+  }
+  var pending: Dict[Int, Bool] = w.pending
+  Map.remove(d: inout pending, key: o)
+  var skipped: Dict[Int, Text] = w.skipped
+  Map.set(d: inout skipped, key: o, value: reason)
+  return Unit
+}
+
+fn skip_all(w: W, reason: Text) -> Unit may mutate, alloc {
+  var skipped: Dict[Int, Text] = w.skipped
+  for o: Int in Map.keys(d: w.pending) {
+    if not Map.contains(d: w.built, key: o) {
+      Map.set(d: inout skipped, key: o, value: reason)
+    }
+  }
+  return Unit
+}
+
+-- Control flow ---------------------------------------------------------------------------
+fn stmt_returns(s: ast.Stmt) -> Bool may alloc
+  decreases s
+{
+  match s with
+  | ast.Return(_, _) -> return true
+  | ast.If(_, then_block, else_block, _) -> {
+    match else_block with
+    | Some(value) -> return block_returns(b: then_block) and block_returns(b: value)
+    | None -> return false
+  }
+  | ast.Match(_, arms, _) -> {
+    if List.len(xs: arms) == 0 {
+      return false
+    }
+    for a: ast.Arm in arms {
+      match a.body with
+      | ast.ArmBlock(block) -> {
+        if not block_returns(b: block) {
+          return false
+        }
+      }
+      | ast.ArmStmt(stmt) -> {
+        if not stmt_returns(s: stmt) {
+          return false
+        }
+      }
+    }
+    return true
+  }
+  | _ -> return false
+}
+
+fn block_returns(b: ast.Block) -> Bool may alloc
+  decreases b
+{
+  for s: ast.Stmt in b.stmts {
+    if stmt_returns(s: s) {
+      return true
+    }
+  }
+  return false
+}

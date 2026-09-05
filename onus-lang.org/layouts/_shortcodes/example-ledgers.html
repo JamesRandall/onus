@@ -1,0 +1,13 @@
+{{- /* {{< example-ledgers >}} — current ledger numbers of the three worked examples, from the review output checked in under examples/. */ -}}
+{{- range $name := slice "mandelbrot" "reporting" "checkout" -}}
+{{- $rs := resources.Get (printf "examples/%s/review/review.json" $name) -}}
+<h3 id="example-{{ $name }}">{{ $name }}</h3>
+{{- if $rs -}}
+  {{- $r := $rs.Content | transform.Unmarshal -}}
+  {{- $pr := 0 }}{{ $ch := 0 }}{{ $as := 0 }}{{ $fa := 0 }}{{ $leaves := 0 -}}
+  {{- range $r.modules }}{{ range .items }}{{ $pr = add $pr .obligations.proved }}{{ $ch = add $ch .obligations.checked }}{{ $as = add $as .obligations.assumed }}{{ $fa = add $fa .obligations.failed }}{{ $leaves = add $leaves (len .assumes) }}{{ end }}{{ end -}}
+<p>Across {{ len $r.modules }} module{{ if ne (len $r.modules) 1 }}s{{ end }}: <b>{{ $pr }} proved</b>, {{ $ch }} checked, {{ $as }} assumed, {{ $fa }} failed; {{ $leaves }} <code>assume</code> leaves. {{ with $r.paths }}{{ range . }}Path <code>{{ .path }}</code>: {{ len .reachable }} functions reachable, {{ .obligations.proved }} proved, {{ .obligations.checked }} checked, {{ len .assumes }} assumption{{ if ne (len .assumes) 1 }}s{{ end }}, {{ if .ok }}passes{{ else }}fails{{ end }}. {{ end }}{{ else }}No <code>path</code> is declared. {{ end }}Written by <code>{{ $r.generated.tool }}</code> on {{ $r.generated.at | time.Format "2 January 2006" }}; <a href="{{ printf "/spec/%s/" $name | relURL }}">source and ledger</a>, <a href="{{ printf "/review/%s/" $name | relURL }}">review page</a>.</p>
+{{- else -}}
+<p>No review output is checked in for this example yet; the ledger will appear here when <code>onus review</code> has been run on it and its output committed.</p>
+{{- end -}}
+{{- end -}}

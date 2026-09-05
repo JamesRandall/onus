@@ -1,0 +1,17 @@
+module e0343_inout_stale
+
+-- The value known before an `inout` call is stale after it: `b` held no
+-- elements, but `push` changed it, so the refinement is not provable.
+fn stale() -> Int where it == 0 may alloc, mutate {
+  var b: Builder[Int] = List.builder()
+  List.push(b: inout b, x: 3)
+  return List.built(b: b)
+}
+
+-- A contradiction between an `ensures` about the exit value and the value
+-- passed must not prove everything after the call.
+fn after(x: Int) -> Int where it >= 0 may alloc, mutate {
+  var b: Builder[Int] = List.builder()
+  List.push(b: inout b, x: x)
+  return x
+}

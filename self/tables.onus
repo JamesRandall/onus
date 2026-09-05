@@ -1,0 +1,101 @@
+module tables
+import ast
+import effectset
+
+-- Output tables of the claims pass (impl spec §4, pass 9; spec §7) and the
+-- paths pass (pass 12; spec §9), as records the context holds.
+-- An `assume` leaf: where an asserted claim bottoms out (§7.1).
+pub record AssumeSite {
+  fn_def: Int
+  claim_def: Int
+  justification: Text
+  -- The `assume` statement: its key and position.
+  node: Int
+  at_file: Int
+  at_span: ast.Span
+  -- The `verify` block's key, when the assumption is verifiable (§20.2).
+  verify_key: Option[Int]
+  verify_block: Option[ast.VerifyBlock]
+  -- Ledger key: module name and the BLAKE3 of the assumption's canonical text (§20.3).
+  key: Text
+}
+
+pub record PathAssume {
+  claim_def: Int
+  fn_def: Int
+  justification: Text
+  node: Int
+  -- How the path's policy permits it: "scope", "except", or "" when it violates the policy (E0415) or there is none.
+  permitted_by: Text
+  verify_key: Option[Int]
+  verify_block: Option[ast.VerifyBlock]
+  key: Text
+}
+
+pub record UnresolvableCall {
+  fn_def: Int
+  at: Int
+  at_file: Int
+  at_span: ast.Span
+  reason: Text
+}
+
+-- A call in the reachable set that yields a capability: a construction or attenuation site (§8.1).
+pub record CapabilitySite {
+  fn_def: Int
+  at: Int
+  at_file: Int
+  at_span: ast.Span
+  type_text: Text
+  -- The constructing function.
+  callee: Int
+}
+
+-- A call from one reachable function to another, with the callee's effects at that site.
+pub record CallEdge {
+  from: Int
+  to: Int
+  at: Int
+  at_file: Int
+  at_span: ast.Span
+  effects: effectset.EffectSet
+}
+
+-- A typestate gate (§3.10, §18.3): a sealed type only `producers` return, which `guarded` functions demand.
+pub record Gate {
+  evidence: Int
+  producers: List[Int]
+  guarded: List[Int]
+}
+
+pub record RecoverSite {
+  fn_def: Int
+  at: Int
+  at_file: Int
+  at_span: ast.Span
+}
+
+pub record PathAnalysis {
+  def: Int
+  mod: Int
+  entry_fn: Int
+  -- Breadth-first from the entry.
+  reachable: List[Int]
+  has_bound: Bool
+  bound: effectset.EffectSet
+  forbidden: effectset.EffectSet
+  -- Claims a `forbid` clause names (§19.2): no reachable function may carry them.
+  forbid_claims: List[Int]
+  actual: effectset.EffectSet
+  required: List[Int]
+  satisfied: Bool
+  policy_def: Option[Int]
+  assume_sites: List[PathAssume]
+  unresolvable: List[UnresolvableCall]
+  capabilities: List[CapabilitySite]
+  edges: List[CallEdge]
+  gates: List[Gate]
+  recovers: List[RecoverSite]
+  -- No diagnostic was reported for this path.
+  ok: Bool
+}

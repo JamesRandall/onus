@@ -1,0 +1,117 @@
+module loc
+import ast
+import report
+import context
+import comments
+import json
+
+-- Positions for the reports (`source.ts`): a span's line and column, computed
+-- from a table of line starts per file, built once per report.
+pub record LineCol {
+  line: Int
+  col: Int
+}
+
+-- Per file: the offset each line starts at, and the line (from 1) of every offset, the end included.
+pub record LineTable {
+  starts: List[Int]
+  line_of: List[Int]
+}
+
+pub fn line_table(cps: List[Int]) -> LineTable may alloc, mutate {
+  let starts: List[Int] = comments.line_starts_of(src: cps)
+  var line_of: Builder[Int] = List.builder()
+  var line: Int = 1
+  for c: Int in cps {
+    List.push(b: inout line_of, x: line)
+    if c == 10 {
+      line = line + 1
+    }
+  }
+  List.push(b: inout line_of, x: line)
+  return LineTable { starts: starts, line_of: List.finish(b: line_of) }
+}
+
+-- The tables of every file of `ctx`.
+pub fn line_tables(ctx: context.Context) -> Dict[Int, LineTable] may alloc, mutate {
+  var out: Dict[Int, LineTable] = Map.dict()
+  for f: Int in 0 ..< context.file_count(ctx: ctx) {
+    Map.set(d: inout out, key: f, value: line_table(cps: context.file_at(ctx: ctx, id: f).cps))
+  }
+  return out
+}
+
+pub fn line_col(tables: Dict[Int, LineTable], file: Int, offset: Int) -> LineCol {
+  match Map.find(d: tables, key: file) with
+  | None -> return LineCol { line: 1, col: offset + 1 }
+  | Some(value) -> {
+    var line: Int = 1
+    if offset >= 0 and offset < List.len(xs: value.line_of) {
+      line = List.get(xs: value.line_of, i: offset)
+    } else {
+      line = List.len(xs: value.starts)
+    }
+    var start: Int = 0
+    if line >= 1 and line - 1 < List.len(xs: value.starts) {
+      start = List.get(xs: value.starts, i: line - 1)
+    }
+    return LineCol { line: line, col: offset - start + 1 }
+  }
+}
+
+pub fn path_of(ctx: context.Context, file: Int) -> Text {
+  if file >= 0 and file < context.file_count(ctx: ctx) {
+    return context.file_at(ctx: ctx, id: file).path
+  }
+  return "?"
+}
+
+-- `[[line, col], [line, col]]`.
+pub fn span_json(
+  tables: Dict[Int, LineTable],
+  file: Int,
+  span: ast.Span
+) -> json.Json may alloc, mutate {
+  let a: LineCol = line_col(tables: tables, file: file, offset: span.start)
+  let b: LineCol = line_col(tables: tables, file: file, offset: span.end)
+  return json.JArray(
+    items: [
+      json.JArray(items: [json.int(v: a.line), json.int(v: a.col)]),
+      json.JArray(items: [json.int(v: b.line), json.int(v: b.col)])
+    ]
+  )
+}
+
+-- `{ "file": path, "span": [[l, c], [l, c]] }`.
+pub fn location_json(
+  ctx: context.Context,
+  tables: Dict[Int, LineTable],
+  file: Int,
+  span: ast.Span
+) -> json.Json may alloc, mutate {
+  return json.JObject(
+    fields: [
+      json.field(key: "file", value: json.text(t: path_of(ctx: ctx, file: file))),
+      json.field(key: "span", value: span_json(tables: tables, file: file, span: span))
+    ]
+  )
+}
+
+-- `path:line:col` of a span's start.
+pub fn location_text(
+  ctx: context.Context,
+  tables: Dict[Int, LineTable],
+  file: Int,
+  span: ast.Span
+) -> Text may alloc {
+  let p: LineCol = line_col(tables: tables, file: file, offset: span.start)
+  return path_of(ctx: ctx, file: file) ++ ":" ++ Int.to_text(x: p.line) ++ ":" ++ Int.to_text(
+    x: p.col
+  )
+}
+
+-- `line:col` of a span's start.
+pub fn line_col_text(tables: Dict[Int, LineTable], file: Int, span: ast.Span) -> Text may alloc {
+  let p: LineCol = line_col(tables: tables, file: file, offset: span.start)
+  return Int.to_text(x: p.line) ++ ":" ++ Int.to_text(x: p.col)
+}

@@ -1050,6 +1050,130 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     node as a helper and re-matches it is the idiom that lets a large
     `match` be split, now that item 139 admits the call.
 
+### 2026-09-05 — M15.3, first part: the verifier in Onus, and what porting it found
+
+150. **A callee's `ensures` about an `inout` parameter was a contradiction
+    (verifier soundness bug).** The lowering bound both a parameter and
+    `old(param)` to the argument's term, so `List.push`'s
+    `ensures built(b: b) == built(b: old(b)) + 1` became
+    `built(b) == built(b) + 1`; and since a definition's callee axioms are
+    shared by every condition of its body, every obligation in a function
+    that pushed to a builder was proved vacuously. Found when the
+    verification-condition builder in Onus proved `fuel < fuel`. Now an
+    `inout` argument gets a fresh post-call term: the callee's `ensures`
+    sees it for the parameter and the passed term for `old(param)`, and the
+    body walker re-binds the variable to it after the expression (§3.2.1:
+    a call through `inout` is an assignment). `verify/lower.ts` (`rebound`,
+    `calleeFacts` with pre and post bindings), `verify/vc.ts` (`lower`),
+    and the same in `self/lower.onus` and `self/vc.onus`. Pinned by
+    `test/verify/ok_inout_post.onus` (the exit value is known through the
+    `ensures`) and `test/verify/e0343_inout_stale.onus` (the value known
+    before the call is stale, and nothing after the call is vacuous).
+151. **The `match` join keeps what each arm learned (verifier precision).**
+    After a `match` whose arms assigned a variable the walker forgot
+    everything about it, unlike the `if` join; the parser's loops over
+    `match parse_x(p: inout p) with` had only ever "verified" through item
+    150's contradiction. The join now mirrors `if`: a fresh constant per
+    assigned variable, equal to each fall-through arm's value under that
+    arm's condition (the earlier arms' failure, its test and its guard),
+    the arm's facts under the same condition, and the disjunction of the
+    fall-through conditions, which is sound because arms are exhaustive
+    (§4.4). `verify/vc.ts` (`match`) and `self/vc.onus` (`match_stmt`).
+    Pinned by `test/verify/ok_match_join.onus`.
+152. **What the two fixes uncovered in `self/`.** Fifty obligations across
+    the compiler in Onus had been proved vacuously; the match join settled
+    fifteen, and the rest were real gaps, fixed at the source: loop
+    invariants that lost a bound (`j <= n`, `i < List.len(xs: parts)`,
+    `List.built(b: segs) >= 1`, `steps <= 100000000`), counters declared
+    `Int` where `Int where it >= 0` (or `it < List.len(...)`) was meant, a
+    `var end: Int` that lost `>= 0`, `digits_end` gaining
+    `ensures is_digit(at(src, start)) implies result > start`, a slice in
+    the constant evaluator's `grapheme_span` whose lower bound could exceed
+    the text (a bug), and in the parser: `take` (consume or fail at the
+    end of input) in place of `skip` where the next token is known, so
+    `p.pos > old(p).pos` follows; `type_args` and `call_args` promising
+    `result is Ok implies p.pos > old(p).pos`; and the measure
+    `(List.len(xs: p.toks) - p.pos) * 2 + flag(b: more)` for loops that
+    end by clearing `more`, since a `decreases` clause must fall on every
+    iteration, the last included.
+153. **The verifier in Onus.** `self/formula.onus` (formulas and SMT-LIB
+    text), `self/z3.onus` (finding and running z3 through `io.Process`,
+    the proof cache), `self/lower.onus` (lowering expressions, callee
+    contracts, type facts, structural measures), `self/vc.onus` (the body
+    walker of `verify/vc.ts`: bindings, havoc, joins, loops, `for`,
+    obligations at calls, fields and arithmetic), `self/constant.onus`
+    (constant discharge), `self/verifier.onus` (the pass: z3 outcomes,
+    counterexamples, the equal-measure cycle rule, the panic and const-fn
+    rules). Obligation ids and node keys replace object identity; the
+    contracts pass records the expression at each refinement and
+    `requires` site and the constructor of each field initialiser
+    (`expr_nodes`, `ctor_of`) for constant discharge. `report.Diagnostic`
+    carries an optional `ObligationInfo` (kind, text, status,
+    counterexample) as the TypeScript one does. Left out for now: the
+    `ONUS_DUMP_SMT` debugging dump and contract mutation (§20.4, an option
+    of `buildVCs` the Onus builder does not take).
+154. **Claims, capabilities and paths in Onus.** `self/claimcheck.onus`
+    (tiers, carried claims, `assume` sites keyed by module and BLAKE3 of
+    the canonical statement, propagation, E0203–E0206; `claims` is a
+    keyword, hence the module name), `self/capabilities.onus`
+    (E0600–E0602), `self/paths.onus` (reachability, bounds, forbids,
+    required claims, policies, gates and capability sites into
+    `PathAnalysis` records for the path report; E0410–E0416). The driver
+    in Onus reads no assumption ledger yet, so `policy
+    verified_assumptions_only` reports E0416 for every assumption, as the
+    TypeScript compiler does without a ledger. `self/check.onus` runs the
+    passes in the driver's order (contracts, claims, capabilities, verify,
+    paths) with `--z3`, `--budget` and `--cache`; `main` takes
+    `io.Process`.
+155. **`Text.split` for a prefix.** A `decreases` text is trimmed of its
+    ` at the call to …` suffix by taking the first piece of
+    `Text.split`, which needs no index proof; `Text.index_of` plus
+    `Text.slice` would have required one the verifier cannot give.
+156. **The reports in Onus.** `self/json.onus` (JSON values, compact and
+    two-space-indented text as `JSON.stringify` writes them),
+    `self/loc.onus` (line tables per file, locations as the reports print
+    them), `self/codes.onus` (the code titles, generated from
+    `report/codes.ts`), `self/interface.onus` (the §11.1 document and the
+    elided canonical text; the coverage line, with the test coverage table
+    and mutation records the driver in Onus does not read yet at zero),
+    `self/pathreport.onus` (the §9.1 document), `self/diagjson.onus` (the
+    §13 object, with the E0001 repair and the canonical hash). The printer
+    gained `print_item`, `print_signature`, `print_verify`, `print_type`
+    and `print_module_elided`; the loader keeps each file's comment table
+    for them; `report.Diagnostic` carries repairs. `self/check.onus` prints
+    the documents with `--interface-json`, `--path-json` and `--diag-json`,
+    and `packages/compiler/test/self/reports.test.ts` compares them byte
+    for byte with `onus interface --json`, `onus path --json` and `onus
+    check --json` on every source in the repository. The one known
+    difference, not exercised by any source: positions count code points
+    here and UTF-16 units there, so a line with a character outside the
+    basic plane would place a later column differently.
+157. **What the report differential found in the checker in Onus.** The
+    earlier differentials compared codes and spans; the JSON compares
+    everything. Brought into line with the TypeScript compiler: a parser
+    diagnostic names the definition being parsed (`tokens.Diagnostic`
+    carries it; an `impl` is `Iface[Target]` with the target's source
+    text rebuilt from its tokens); a file that already carries a
+    diagnostic gets no canonical text, hence no `canonical_hash`; E0113
+    says at which line the earlier binding is; E0700 carries its
+    obligation (`requires`, failed); the evaluator's precondition
+    messages for `List.get`, `List.replicate`, `List.slice` and
+    `Bytes.get` are the runtime's, word for word. The verifier's body
+    walker looked parameters of examples, properties and laws up under the
+    wrong key tag, so their names were "not in the verifier's scope" and
+    their obligations stayed `checked`; the fixture suite had not caught it
+    because every property and law fixture is exercised through the
+    TypeScript walker.
+158. **A nested generic call evaluates at check time (TypeScript
+    evaluator).** `first_or(xs: [3, 4], fallback: 7)` calling `head[T]`
+    calling `List.get` converted the intrinsic's result with the type `T`
+    of `head`, not the `Int` it was called at, and threw "cannot convert a
+    T", so the example was `deferred`; the evaluator in Onus, whose values
+    need no conversion, ran it. The TypeScript evaluator now keeps the
+    instantiation of each frame and resolves a nested call's type
+    arguments through it, so the two agree and the example passes at
+    check time.
+
 ### Deferred, not changed
 
 - `Stream[T] ! e` as a type (§3.11) is not parsed: `-> Stream[T] ! e` is

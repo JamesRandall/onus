@@ -31,6 +31,8 @@ pub record Diagnostic {
   start: Int where it >= 0
   end: Int where it >= 0
   detail: Text
+  -- The definition being parsed, when one was.
+  def_name: Option[Text]
 }
 
 pub const keywords: List[Text] = [

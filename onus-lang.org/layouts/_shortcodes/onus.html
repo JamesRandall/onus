@@ -1,0 +1,11 @@
+{{- /* {{< onus file="checkout/checkout.onus" from=20 to=30 caption="…" >}} — lines of a file under examples/, highlighted. */ -}}
+{{- $f := .Get "file" -}}
+{{- with resources.Get (printf "examples/%s" $f) -}}
+  {{- $lines := split (strings.TrimSuffix "\n" .Content) "\n" -}}
+  {{- $from := 1 }}{{ with $.Get "from" }}{{ $from = int . }}{{ end -}}
+  {{- $to := len $lines }}{{ with $.Get "to" }}{{ $to = int . }}{{ end -}}
+  {{- $sel := first (add (sub $to $from) 1) (after (sub $from 1) $lines) -}}
+<figure class="src"><pre class="code onus"><code>{{ partial "onus-code.html" (delimit $sel "\n") }}</code></pre><figcaption class="cap">{{ with $.Get "caption" }}{{ . | markdownify }} {{ end }}<code>examples/{{ $f }}</code>{{ if $.Get "from" }}, lines {{ $from }}–{{ $to }}{{ end }}.</figcaption></figure>
+{{- else -}}
+  {{- errorf "onus shortcode: examples/%s not found (%s)" $f $.Position -}}
+{{- end -}}

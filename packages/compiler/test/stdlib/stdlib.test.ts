@@ -45,7 +45,7 @@ describe('the standard library (M15.0)', () => {
     }
   });
 
-  for (const name of ['text_ops', 'list_ops', 'list_generic', 'map_ops']) {
+  for (const name of ['text_ops', 'list_ops', 'list_generic', 'map_ops', 'hash_ops']) {
     it(`${name}: the examples pass as generated tests`, () => {
       const ctx = checked(join(here, `${name}.onus`));
       const out = fresh(name);
@@ -55,6 +55,16 @@ describe('the standard library (M15.0)', () => {
       expect([...results].filter(([, ok]) => !ok).map(([n]) => n)).toEqual([]);
     }, 60000);
   }
+
+  it('a program runs other programs through io.Process', () => {
+    const ctx = checked(join(here, 'process_program.onus'));
+    const out = fresh('process_program');
+    const js = emitAll(ctx, { outDir: out, ts: false });
+    if (js.launcher === null) throw new Error('no launcher');
+    const r = spawnSync(process.execPath, [js.launcher], { encoding: 'utf8' });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toBe('0 hello\npiped\nmissing\n');
+  }, 60000);
 
   it('a program reads a file back and prints on the console, on both targets', () => {
     const ctx = checked(join(here, 'io_program.onus'));

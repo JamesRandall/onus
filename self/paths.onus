@@ -1,0 +1,913 @@
+module paths
+import ast
+import parser
+import defs
+import context
+import types
+import effectset
+import walk
+import report
+import tables
+import claimcheck
+import typecheck
+import resolve
+
+-- The paths pass (impl spec §4, pass 12; spec §9; `paths/pass.ts`).
+--
+-- For every `path`: the set of functions reachable from `entry` (calls in
+-- bodies, closures included; interface calls resolved on concrete receivers;
+-- calls through function values and dispatch on type parameters are
+-- unresolvable and fail closed, E0410); the union of their effects against
+-- `effects <=` (E0412) and `forbid` (E0413), which must be consistent with
+-- each other (E0411); required claims (E0414): an asserted claim must be
+-- carried by every reachable function with observable effects that is not
+-- under an `assume` of it, a derived one by every reachable function; and the
+-- policy (E0415) over every `assume` in the reachable set. The analysis is
+-- recorded for the path report (§9.1) whether or not it passed.
+--
+-- The driver in Onus reads no assumption ledger yet, so under
+-- `policy verified_assumptions_only` every assumption is unverified (E0416),
+-- as the TypeScript compiler behaves without a ledger.
+pub const assumption_max_age_days: Int = 7
+
+record Policy {
+  def: Int
+  except_list: List[Text]
+  span: ast.Span
+}
+
+record Reach {
+  reachable: List[Int]
+  unresolvable: List[tables.UnresolvableCall]
+  capabilities: List[tables.CapabilitySite]
+  edges: List[tables.CallEdge]
+  recovers: List[tables.RecoverSite]
+}
+
+record Checker {
+  m: defs.ModuleRecord
+  decl: ast.PathDecl
+  errors: Int where it >= 0
+}
+
+fn skip() -> Unit {
+  return Unit
+}
+
+fn or_neg(o: Option[Int]) -> Int {
+  match o with
+  | Some(value) -> return value
+  | None -> return -1
+}
+
+fn ids_or(o: Option[List[Int]]) -> List[Int] may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return []
+}
+
+fn rep(
+  pc: inout Checker,
+  ctx: inout context.Context,
+  code: Text,
+  at: ast.Span,
+  detail: Text,
+  def_name: Option[Text]
+) -> Unit may mutate, alloc {
+  pc = { pc with errors: pc.errors + 1 }
+  context.report(
+    ctx: inout ctx,
+    d: report.diagnostic(code: code, file: pc.m.file, span: at, def_name: def_name, detail: detail)
+  )
+  return Unit
+}
+
+fn path_name(pc: Checker) -> Option[Text] {
+  return Some(value: pc.decl.name.text)
+}
+
+fn ref_def(ctx: context.Context, k: Int) -> Int {
+  match Map.find(d: ctx.refs, key: k) with
+  | None -> return -1
+  | Some(value) -> {
+    match value with
+    | defs.DefRes(def) -> return def
+    | _ -> return -1
+  }
+}
+
+fn qname_text(q: ast.QName) -> Text may alloc, mutate {
+  var parts: Builder[Text] = List.builder()
+  for s: ast.Ident in q.segments {
+    List.push(b: inout parts, x: s.text)
+  }
+  return Text.join(parts: List.finish(b: parts), sep: ".")
+}
+
+fn module_name(ctx: context.Context, mod: Int) -> Text {
+  match Map.find(d: ctx.modules, key: mod) with
+  | Some(value) -> return value.name
+  | None -> return ""
+}
+
+-- Pass 12: paths.
+-- Preconditions: the verify pass ran (statuses are final) without diagnostics.
+-- Effects: fills the path analyses of `ctx`; reports E0410–E0416.
+pub fn paths_pass(ctx: inout context.Context) -> Unit may mutate, alloc {
+  for mid: Int in 0 ..< ctx.module_count {
+    match Map.find(d: ctx.modules, key: mid) with
+    | None -> skip()
+    | Some(value) -> {
+      for item: ast.Item in value.tree.items {
+        match item with
+        | ast.PathItem(decl) -> {
+          var pc: Checker = Checker { m: value, decl: decl, errors: 0 }
+          check_path(pc: inout pc, ctx: inout ctx)
+        }
+        | _ -> skip()
+      }
+    }
+  }
+  return Unit
+}
+
+fn effects_of_refs(
+  ctx: context.Context,
+  file: Int,
+  refs: List[ast.EffectRef]
+) -> effectset.EffectSet may alloc, mutate {
+  var out: Builder[defs.Effect] = List.builder()
+  for r: ast.EffectRef in refs {
+    match Map.find(
+      d: ctx.refs,
+      key: defs.node_key(file: file, tag: defs.tag_sig, span: r.span)
+    ) with
+    | None -> skip()
+    | Some(value) -> {
+      match value with
+      | defs.EffectRes(effect) -> List.push(b: inout out, x: effect)
+      | _ -> skip()
+    }
+  }
+  return effectset.of_list(effects: List.finish(b: out))
+}
+
+fn check_path(pc: inout Checker, ctx: inout context.Context) -> Unit may mutate, alloc {
+  let file: Int = pc.m.file
+  let decl: ast.PathDecl = pc.decl
+  let path_key: Int = defs.node_key(file: file, tag: defs.tag_item, span: decl.span)
+  let path_def: Int = or_neg(o: Map.find(d: ctx.def_of, key: path_key))
+  let entry_fn: Int = ref_def(ctx: ctx, k: path_key)
+  if path_def < 0 or entry_fn < 0 {
+    return Unit
+  }
+  var has_bound: Bool = false
+  var bound: effectset.EffectSet = effectset.empty()
+  var forbidden: effectset.EffectSet = effectset.empty()
+  var forbid_claims: Builder[Int] = List.builder()
+  var required: List[Int] = []
+  var pol: Option[Policy] = None
+  var verified_only: Option[ast.Span] = None
+  var bound_span: ast.Span = decl.span
+  var forbid_span: ast.Span = decl.span
+  var require_span: ast.Span = decl.span
+  for c: ast.PathClause in decl.clauses {
+    match c with
+    | ast.PathEffects(effects, span) -> {
+      if not has_bound {
+        bound_span = span
+      }
+      has_bound = true
+      bound = effectset.join_sets(a: bound, b: effects_of_refs(ctx: ctx, file: file, refs: effects))
+    }
+    | ast.PathForbid(effects, span) -> {
+      if effectset.size(s: forbidden) == 0 and List.built(b: forbid_claims) == 0 {
+        forbid_span = span
+      }
+      forbidden = effectset.join_sets(
+        a: forbidden,
+        b: effects_of_refs(ctx: ctx, file: file, refs: effects)
+      )
+      for r: ast.EffectRef in effects {
+        let d: Int = ref_def(
+          ctx: ctx,
+          k: defs.node_key(file: file, tag: defs.tag_sig, span: r.span)
+        )
+        if d >= 0 and context.get_def(ctx: ctx, id: d).kind == defs.Claim {
+          List.push(b: inout forbid_claims, x: d)
+        }
+      }
+    }
+    | ast.PathRequire(_, span) -> {
+      if List.len(xs: required) == 0 {
+        require_span = span
+      }
+      required = required ++ ids_or(
+        o: Map.find(
+          d: ctx.claim_lists,
+          key: defs.node_key(file: file, tag: defs.tag_sig, span: span)
+        )
+      )
+    }
+    | ast.PathPolicy(name, except_list, span) -> {
+      if name.text == resolve.builtin_policy {
+        verified_only = Some(value: span)
+      } else {
+        let d: Int = ref_def(ctx: ctx, k: defs.node_key(file: file, tag: defs.tag_sig, span: span))
+        if d >= 0 {
+          var names: Builder[Text] = List.builder()
+          for q: ast.QName in except_list {
+            List.push(b: inout names, x: qname_text(q: q))
+          }
+          pol = Some(value: Policy { def: d, except_list: List.finish(b: names), span: span })
+        }
+      }
+    }
+  }
+  let forbid_claim_list: List[Int] = List.finish(b: forbid_claims)
+  if has_bound {
+    for e: defs.Effect in effectset.values(s: forbidden) {
+      if effectset.has(s: bound, e: e) {
+        rep(
+          pc: inout pc,
+          ctx: inout ctx,
+          code: "E0411",
+          at: decl.span,
+          detail: "`" ++ claimcheck.effect_name(
+            ctx: ctx,
+            e: e
+          ) ++ "` is allowed by `effects <=` and listed under `forbid`",
+          def_name: path_name(pc: pc)
+        )
+      }
+    }
+  }
+  let r: Reach = reach(ctx: ctx, entry_fn: entry_fn)
+  for u: tables.UnresolvableCall in r.unresolvable {
+    context.report(
+      ctx: inout ctx,
+      d: report.diagnostic(
+        code: "E0410",
+        file: u.at_file,
+        span: u.at_span,
+        def_name: Some(value: context.get_def(ctx: ctx, id: u.fn_def).name),
+        detail: "on path `" ++ decl.name.text ++ "`: " ++ u.reason ++ ", so the reachable set cannot be closed"
+      )
+    )
+    pc = { pc with errors: pc.errors + 1 }
+  }
+  var actual: effectset.EffectSet = effectset.empty()
+  for fn_def: Int in r.reachable {
+    let effects: effectset.EffectSet = concrete_effects(ctx: ctx, fn_def: fn_def)
+    actual = effectset.join_sets(a: actual, b: effects)
+    var outside: Builder[Text] = List.builder()
+    var bad: Builder[Text] = List.builder()
+    for e: defs.Effect in effectset.values(s: effects) {
+      if has_bound and not effectset.has(s: bound, e: e) {
+        List.push(b: inout outside, x: claimcheck.effect_name(ctx: ctx, e: e))
+      }
+      if effectset.has(s: forbidden, e: e) {
+        List.push(b: inout bad, x: claimcheck.effect_name(ctx: ctx, e: e))
+      }
+    }
+    let outside_list: List[Text] = List.finish(b: outside)
+    if List.len(xs: outside_list) > 0 {
+      rep(
+        pc: inout pc,
+        ctx: inout ctx,
+        code: "E0412",
+        at: bound_span,
+        detail: "`" ++ context.qualified_name(
+          ctx: ctx,
+          id: fn_def
+        ) ++ "` is reachable and has effect" ++ plural(
+          n: List.len(xs: outside_list)
+        ) ++ " { " ++ Text.join(parts: outside_list, sep: ", ") ++ " } outside the bound",
+        def_name: path_name(pc: pc)
+      )
+    }
+    let bad_list: List[Text] = List.finish(b: bad)
+    if List.len(xs: bad_list) > 0 {
+      rep(
+        pc: inout pc,
+        ctx: inout ctx,
+        code: "E0413",
+        at: forbid_span,
+        detail: "`" ++ context.qualified_name(
+          ctx: ctx,
+          id: fn_def
+        ) ++ "` is reachable and has forbidden effect" ++ plural(
+          n: List.len(xs: bad_list)
+        ) ++ " { " ++ Text.join(parts: bad_list, sep: ", ") ++ " }",
+        def_name: path_name(pc: pc)
+      )
+    }
+    for cl: Int in forbid_claim_list {
+      if claimcheck.carries(ctx: ctx, fn_def: fn_def, claim_def: cl) {
+        rep(
+          pc: inout pc,
+          ctx: inout ctx,
+          code: "E0413",
+          at: forbid_span,
+          detail: "`" ++ context.qualified_name(
+            ctx: ctx,
+            id: fn_def
+          ) ++ "` is reachable and carries forbidden claim `" ++ claim_display(
+            ctx: ctx,
+            claim_def: cl
+          ) ++ "`",
+          def_name: path_name(pc: pc)
+        )
+      }
+    }
+  }
+  var satisfied: Bool = true
+  for cl: Int in required {
+    let asserted: Bool = claimcheck.tier_of(ctx: ctx, claim_def: cl) == "asserted"
+    var candidates: List[Int] = r.reachable
+    if asserted {
+      candidates = uncovered(ctx: ctx, entry_fn: entry_fn, claim_def: cl)
+    }
+    for fn_def: Int in candidates {
+      var applies: Bool = true
+      if asserted and not claimcheck.observable(
+        effects: claimcheck.effects_of_fn(ctx: ctx, def: fn_def)
+      ) {
+        applies = false
+      }
+      if applies and not claimcheck.carries(ctx: ctx, fn_def: fn_def, claim_def: cl) {
+        satisfied = false
+        var how: Text = ""
+        if asserted {
+          how = " with observable effects"
+        }
+        rep(
+          pc: inout pc,
+          ctx: inout ctx,
+          code: "E0414",
+          at: require_span,
+          detail: "`" ++ context.qualified_name(
+            ctx: ctx,
+            id: fn_def
+          ) ++ "` is reachable" ++ how ++ " and does not carry required claim `" ++ context.get_def(
+            ctx: ctx,
+            id: cl
+          ).name ++ "`",
+          def_name: path_name(pc: pc)
+        )
+      }
+    }
+  }
+  var assume_sites: Builder[tables.PathAssume] = List.builder()
+  for fn_def: Int in r.reachable {
+    for a: tables.AssumeSite in claimcheck.assumes_of(ctx: ctx, fn_def: fn_def) {
+      let owner: defs.Def = context.get_def(ctx: ctx, id: fn_def)
+      var permitted_by: Text = ""
+      match pol with
+      | Some(value) -> {
+        if in_policy_scope(ctx: ctx, pc: pc, policy_def: value.def, mod: owner.mod) {
+          permitted_by = "scope"
+        } else {
+          if List.contains(xs: value.except_list, x: context.qualified_name(ctx: ctx, id: fn_def)) {
+            permitted_by = "except"
+          } else {
+            rep(
+              pc: inout pc,
+              ctx: inout ctx,
+              code: "E0415",
+              at: value.span,
+              detail: "`" ++ context.qualified_name(
+                ctx: ctx,
+                id: fn_def
+              ) ++ "` assumes `" ++ context.get_def(
+                ctx: ctx,
+                id: a.claim_def
+              ).name ++ "` (\"" ++ a.justification ++ "\") outside the policy's scope and is not listed under `except`",
+              def_name: path_name(pc: pc)
+            )
+          }
+        }
+      }
+      | None -> skip()
+      match verified_only with
+      | Some(value) -> {
+        var why: Text = "with no `verify` block"
+        if a.verify_key is Some {
+          why = "without a passing verification in the last " ++ Int.to_text(
+            x: assumption_max_age_days
+          ) ++ " days"
+        }
+        rep(
+          pc: inout pc,
+          ctx: inout ctx,
+          code: "E0416",
+          at: value,
+          detail: "`" ++ context.qualified_name(
+            ctx: ctx,
+            id: fn_def
+          ) ++ "` assumes `" ++ context.get_def(
+            ctx: ctx,
+            id: a.claim_def
+          ).name ++ "` " ++ why ++ "; `policy " ++ resolve.builtin_policy ++ "` requires one (§20.3)",
+          def_name: path_name(pc: pc)
+        )
+      }
+      | None -> skip()
+      List.push(
+        b: inout assume_sites,
+        x: tables.PathAssume {
+          claim_def: a.claim_def,
+          fn_def: fn_def,
+          justification: a.justification,
+          node: a.node,
+          permitted_by: permitted_by,
+          verify_key: a.verify_key,
+          verify_block: a.verify_block,
+          key: a.key
+        }
+      )
+    }
+  }
+  var policy_def: Option[Int] = None
+  match pol with
+  | Some(value) -> policy_def = Some(value: value.def)
+  | None -> skip()
+  var analyses: Dict[Int, tables.PathAnalysis] = ctx.analyses
+  Map.set(
+    d: inout analyses,
+    key: path_def,
+    value: tables.PathAnalysis {
+      def: path_def,
+      mod: pc.m.id,
+      entry_fn: entry_fn,
+      reachable: r.reachable,
+      has_bound: has_bound,
+      bound: bound,
+      forbidden: forbidden,
+      forbid_claims: forbid_claim_list,
+      actual: actual,
+      required: required,
+      satisfied: satisfied,
+      policy_def: policy_def,
+      assume_sites: List.finish(b: assume_sites),
+      unresolvable: r.unresolvable,
+      capabilities: r.capabilities,
+      edges: r.edges,
+      gates: gates(ctx: ctx, reachable: r.reachable),
+      recovers: r.recovers,
+      ok: pc.errors == 0
+    }
+  )
+  return Unit
+}
+
+fn plural(n: Int) -> Text {
+  if n == 1 {
+    return ""
+  }
+  return "s"
+}
+
+-- A function's effects without its effect parameters.
+fn concrete_effects(ctx: context.Context, fn_def: Int) -> effectset.EffectSet may alloc, mutate {
+  var out: Builder[defs.Effect] = List.builder()
+  for e: defs.Effect in effectset.values(s: claimcheck.effects_of_fn(ctx: ctx, def: fn_def)) {
+    match e with
+    | defs.ParamEffect(_) -> skip()
+    | _ -> List.push(b: inout out, x: e)
+  }
+  return effectset.of_list(effects: List.finish(b: out))
+}
+
+-- How a claim reads in a report: `host.js` for the host claims, qualified otherwise.
+pub fn claim_display(ctx: context.Context, claim_def: Int) -> Text may alloc, mutate {
+  let d: defs.Def = context.get_def(ctx: ctx, id: claim_def)
+  if module_name(ctx: ctx, mod: d.mod) == "std.host" {
+    return "host." ++ d.name
+  }
+  return context.qualified_name(ctx: ctx, id: claim_def)
+}
+
+-- `sql.Db[ReadOnly]`: the capability's module alias and its type (§9.1).
+fn capability_text(ctx: context.Context, t: types.Type) -> Text may alloc, mutate {
+  let text: Text = typecheck.show(ctx: ctx, t: t)
+  match t with
+  | types.Capability(def, _, _) -> {
+    let name: Text = module_name(ctx: ctx, mod: context.get_def(ctx: ctx, id: def).mod)
+    var alias: Text = ""
+    for seg: Text in Text.split(t: name, sep: ".") {
+      alias = seg
+    }
+    return alias ++ "." ++ text
+  }
+  | _ -> return text
+}
+
+-- The capability a call result carries: directly, or as the success payload of a union such as `Result`.
+fn capability_in(t: Option[types.Type]) -> Option[types.Type] may alloc {
+  match t with
+  | None -> return None
+  | Some(value) -> {
+    let s: types.Type = types.strip(t: value)
+    if s is types.Capability {
+      return Some(value: s)
+    }
+    match s with
+    | types.UnionT(_, args) -> {
+      for a: types.TypeArg in args {
+        match a with
+        | types.TypeA(ty) -> {
+          let inner: types.Type = types.strip(t: ty)
+          if inner is types.Capability {
+            return Some(value: inner)
+          }
+        }
+        | _ -> skip()
+      }
+      return None
+    }
+    | _ -> return None
+  }
+}
+
+fn fn_body(ctx: context.Context, fn_def: Int) -> Option[ast.Block] {
+  match context.get_def(ctx: ctx, id: fn_def).node with
+  | defs.FnNode(decl) -> return decl.body
+  | _ -> return None
+}
+
+-- Breadth-first reachability from `entry_fn` over resolvable calls.
+fn reach(ctx: context.Context, entry_fn: Int) -> Reach may alloc, mutate {
+  var reachable: Builder[Int] = List.builder()
+  var seen: Dict[Int, Bool] = Map.dict()
+  var unresolvable: Builder[tables.UnresolvableCall] = List.builder()
+  var capabilities: Builder[tables.CapabilitySite] = List.builder()
+  var edges: Builder[tables.CallEdge] = List.builder()
+  var recovers: Builder[tables.RecoverSite] = List.builder()
+  var queue: Builder[Int] = List.builder()
+  List.push(b: inout queue, x: entry_fn)
+  var head: Int where it >= 0 = 0
+  var fuel: Int where it >= 0 = 10000000
+  loop while head < List.built(b: queue) and fuel > 0
+    invariant head >= 0 and fuel >= 0
+    decreases fuel
+  {
+    fuel = fuel - 1
+    let cur: Int = List.at(b: queue, i: head)
+    head = head + 1
+    if not Map.contains(d: seen, key: cur) {
+      Map.set(d: inout seen, key: cur, value: true)
+      List.push(b: inout reachable, x: cur)
+      let file: Int = context.get_def(ctx: ctx, id: cur).file
+      match fn_body(ctx: ctx, fn_def: cur) with
+      | None -> skip()
+      | Some(value) -> {
+        for n: walk.Node in walk.nodes_in_block(b: value, into_verify: false) {
+          match n with
+          | walk.NExpr(e) -> {
+            match e with
+            | ast.Recover(_, span) -> List.push(
+              b: inout recovers,
+              x: tables.RecoverSite {
+                fn_def: cur,
+                at: defs.node_key(file: file, tag: defs.tag_expr, span: span),
+                at_file: file,
+                at_span: span
+              }
+            )
+            | ast.Call(_, _, _, span) -> {
+              let at: Int = defs.node_key(file: file, tag: defs.tag_expr, span: span)
+              match claimcheck.callee_of(ctx: ctx, file: file, e: e) with
+              | claimcheck.FnCallee(def) -> {
+                List.push(b: inout queue, x: def)
+                push_edge(
+                  ctx: ctx,
+                  fn_def: cur,
+                  def: def,
+                  at: at,
+                  file: file,
+                  span: span,
+                  edges: inout edges,
+                  capabilities: inout capabilities
+                )
+              }
+              | claimcheck.ImplCallee(def) -> {
+                List.push(b: inout queue, x: def)
+                push_edge(
+                  ctx: ctx,
+                  fn_def: cur,
+                  def: def,
+                  at: at,
+                  file: file,
+                  span: span,
+                  edges: inout edges,
+                  capabilities: inout capabilities
+                )
+              }
+              | claimcheck.DispatchCallee(fn_def, _) -> List.push(
+                b: inout unresolvable,
+                x: tables.UnresolvableCall {
+                  fn_def: cur,
+                  at: at,
+                  at_file: file,
+                  at_span: span,
+                  reason: "`" ++ context.get_def(
+                    ctx: ctx,
+                    id: fn_def
+                  ).name ++ "` is dispatched on a type parameter"
+                }
+              )
+              | claimcheck.ValueCallee(_) -> List.push(
+                b: inout unresolvable,
+                x: tables.UnresolvableCall {
+                  fn_def: cur,
+                  at: at,
+                  at_file: file,
+                  at_span: span,
+                  reason: "this call goes through a function value whose provenance is not tracked in v0"
+                }
+              )
+              | claimcheck.CtorCallee -> skip()
+            }
+            | _ -> skip()
+          }
+          | _ -> skip()
+        }
+      }
+    }
+  }
+  return Reach {
+    reachable: List.finish(b: reachable),
+    unresolvable: List.finish(b: unresolvable),
+    capabilities: List.finish(b: capabilities),
+    edges: List.finish(b: edges),
+    recovers: List.finish(b: recovers)
+  }
+}
+
+fn push_edge(
+  ctx: context.Context,
+  fn_def: Int,
+  def: Int,
+  at: Int,
+  file: Int,
+  span: ast.Span,
+  edges: inout Builder[tables.CallEdge],
+  capabilities: inout Builder[tables.CapabilitySite]
+) -> Unit may mutate, alloc {
+  List.push(
+    b: inout edges,
+    x: tables.CallEdge {
+      from: fn_def,
+      to: def,
+      at: at,
+      at_file: file,
+      at_span: span,
+      effects: claimcheck.callee_effects(ctx: ctx, call_key: at, callee: def)
+    }
+  )
+  match capability_in(t: Map.find(d: ctx.expr_types, key: at)) with
+  | Some(value) -> List.push(
+    b: inout capabilities,
+    x: tables.CapabilitySite {
+      fn_def: fn_def,
+      at: at,
+      at_file: file,
+      at_span: span,
+      type_text: capability_text(ctx: ctx, t: value),
+      callee: def
+    }
+  )
+  | None -> skip()
+  return Unit
+}
+
+-- Sealed record types that some reachable function returns and others demand as a parameter (§3.10).
+fn gates(ctx: context.Context, reachable: List[Int]) -> List[tables.Gate] may alloc, mutate {
+  var producers: Dict[Int, List[Int]] = Map.dict()
+  var producer_order: Builder[Int] = List.builder()
+  var guarded: Dict[Int, List[Int]] = Map.dict()
+  for fn_def: Int in reachable {
+    match Map.find(d: ctx.signatures, key: fn_def) with
+    | None -> skip()
+    | Some(value) -> {
+      for p: types.FnParam in value.params {
+        for e: Int in sealed_records_in(fuel: 1000, ctx: ctx, t: p.ty) {
+          Map.set(
+            d: inout guarded,
+            key: e,
+            value: List.append(xs: ids_or(o: Map.find(d: guarded, key: e)), x: fn_def)
+          )
+        }
+      }
+      for e: Int in sealed_records_in(fuel: 1000, ctx: ctx, t: value.ret) {
+        if not Map.contains(d: producers, key: e) {
+          List.push(b: inout producer_order, x: e)
+        }
+        Map.set(
+          d: inout producers,
+          key: e,
+          value: List.append(xs: ids_or(o: Map.find(d: producers, key: e)), x: fn_def)
+        )
+      }
+    }
+  }
+  var out: Builder[tables.Gate] = List.builder()
+  for evidence: Int in List.finish(b: producer_order) {
+    let ps: List[Int] = ids_or(o: Map.find(d: producers, key: evidence))
+    var gs: Builder[Int] = List.builder()
+    for g: Int in ids_or(o: Map.find(d: guarded, key: evidence)) {
+      if not List.contains(xs: ps, x: g) {
+        List.push(b: inout gs, x: g)
+      }
+    }
+    if List.built(b: gs) > 0 {
+      List.push(
+        b: inout out,
+        x: tables.Gate { evidence: evidence, producers: ps, guarded: List.finish(b: gs) }
+      )
+    }
+  }
+  return List.finish(b: out)
+}
+
+-- The sealed record types mentioned in `t`, each once, in order of first mention.
+fn sealed_records_in(
+  fuel: Int where it >= 0,
+  ctx: context.Context,
+  t: types.Type
+) -> List[Int] may alloc, mutate
+  decreases fuel
+{
+  var out: Builder[Int] = List.builder()
+  var seen: Dict[Int, Bool] = Map.dict()
+  sealed_walk(fuel: fuel, ctx: ctx, t: t, seen: inout seen, out: inout out)
+  return List.finish(b: out)
+}
+
+fn sealed_walk(
+  fuel: Int where it >= 0,
+  ctx: context.Context,
+  t: types.Type,
+  seen: inout Dict[Int, Bool],
+  out: inout Builder[Int]
+) -> Unit may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return Unit
+  }
+  match t with
+  | types.Refined(base, _, _) -> sealed_walk(
+    fuel: fuel - 1,
+    ctx: ctx,
+    t: base,
+    seen: inout seen,
+    out: inout out
+  )
+  | types.RecordT(def, args) -> {
+    if context.get_def(ctx: ctx, id: def).is_sealed and not Map.contains(d: seen, key: def) {
+      Map.set(d: inout seen, key: def, value: true)
+      List.push(b: inout out, x: def)
+    }
+    sealed_args(fuel: fuel - 1, ctx: ctx, args: args, seen: inout seen, out: inout out)
+  }
+  | types.UnionT(_, args) -> sealed_args(
+    fuel: fuel - 1,
+    ctx: ctx,
+    args: args,
+    seen: inout seen,
+    out: inout out
+  )
+  | types.Opaque(_, args) -> sealed_args(
+    fuel: fuel - 1,
+    ctx: ctx,
+    args: args,
+    seen: inout seen,
+    out: inout out
+  )
+  | types.Capability(_, args, _) -> sealed_args(
+    fuel: fuel - 1,
+    ctx: ctx,
+    args: args,
+    seen: inout seen,
+    out: inout out
+  )
+  | types.FnT(params, ret, _) -> {
+    for p: types.FnParam in params {
+      sealed_walk(fuel: fuel - 1, ctx: ctx, t: p.ty, seen: inout seen, out: inout out)
+    }
+    sealed_walk(fuel: fuel - 1, ctx: ctx, t: ret, seen: inout seen, out: inout out)
+  }
+  | _ -> skip()
+  return Unit
+}
+
+fn sealed_args(
+  fuel: Int where it >= 0,
+  ctx: context.Context,
+  args: List[types.TypeArg],
+  seen: inout Dict[Int, Bool],
+  out: inout Builder[Int]
+) -> Unit may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return Unit
+  }
+  for a: types.TypeArg in args {
+    match a with
+    | types.TypeA(ty) -> sealed_walk(
+      fuel: fuel - 1,
+      ctx: ctx,
+      t: ty,
+      seen: inout seen,
+      out: inout out
+    )
+    | _ -> skip()
+  }
+  return Unit
+}
+
+-- Reachable functions not under an `assume` of `claim_def`: an assumption covers everything beneath it.
+fn uncovered(ctx: context.Context, entry_fn: Int, claim_def: Int) -> List[Int] may alloc, mutate {
+  var out: Builder[Int] = List.builder()
+  var seen: Dict[Int, Bool] = Map.dict()
+  var queue: Builder[Int] = List.builder()
+  List.push(b: inout queue, x: entry_fn)
+  var head: Int where it >= 0 = 0
+  var fuel: Int where it >= 0 = 10000000
+  loop while head < List.built(b: queue) and fuel > 0
+    invariant head >= 0 and fuel >= 0
+    decreases fuel
+  {
+    fuel = fuel - 1
+    let fn_def: Int = List.at(b: queue, i: head)
+    head = head + 1
+    if not Map.contains(d: seen, key: fn_def) {
+      Map.set(d: inout seen, key: fn_def, value: true)
+      List.push(b: inout out, x: fn_def)
+      var assumed: Bool = false
+      for a: tables.AssumeSite in claimcheck.assumes_of(ctx: ctx, fn_def: fn_def) {
+        if a.claim_def == claim_def {
+          assumed = true
+        }
+      }
+      if not assumed {
+        let file: Int = context.get_def(ctx: ctx, id: fn_def).file
+        match fn_body(ctx: ctx, fn_def: fn_def) with
+        | None -> skip()
+        | Some(value) -> {
+          for n: walk.Node in walk.nodes_in_block(b: value, into_verify: false) {
+            match n with
+            | walk.NExpr(e) -> {
+              if e is ast.Call {
+                match claimcheck.callee_of(ctx: ctx, file: file, e: e) with
+                | claimcheck.FnCallee(def) -> List.push(b: inout queue, x: def)
+                | claimcheck.ImplCallee(def) -> List.push(b: inout queue, x: def)
+                | _ -> skip()
+              }
+            }
+            | _ -> skip()
+          }
+        }
+      }
+    }
+  }
+  return List.finish(b: out)
+}
+
+-- `forbid assume outside { self, std.* }`: whether `mod` is inside the policy's scope.
+fn in_policy_scope(
+  ctx: context.Context,
+  pc: Checker,
+  policy_def: Int,
+  mod: Int
+) -> Bool may alloc, mutate {
+  match context.get_def(ctx: ctx, id: policy_def).node with
+  | defs.PolicyNode(decl) -> {
+    let name: Text = module_name(ctx: ctx, mod: mod)
+    for scope: ast.PolicyScope in decl.outside_list {
+      match scope.name with
+      | None -> {
+        if mod == pc.m.id {
+          return true
+        }
+      }
+      | Some(value) -> {
+        let prefix: Text = qname_text(q: value)
+        if scope.glob {
+          if name == prefix or Text.starts_with(t: name, prefix: prefix ++ ".") {
+            return true
+          }
+        } else {
+          if name == prefix {
+            return true
+          }
+        }
+      }
+    }
+    return false
+  }
+  | _ -> return false
+}

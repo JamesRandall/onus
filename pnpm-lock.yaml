@@ -53,6 +53,9 @@ importers:
 
   packages/runtime:
     dependencies:
+      '@noble/hashes':
+        specifier: ^2.0.0
+        version: 2.4.0
       pg:
         specifier: ^8.23.0
         version: 8.23.0

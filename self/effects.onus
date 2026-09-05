@@ -1217,7 +1217,7 @@ pub fn measure_key(text: Text, params: List[types.FnParam]) -> Text may alloc, m
     if is_word_cp(c: c) {
       var j: Int where it >= 0 = i
       loop while j < n and is_word_cp(c: List.get(xs: cps, i: j))
-        invariant j >= i
+        invariant j >= i and j <= n
         decreases n - j
       {
         j = j + 1

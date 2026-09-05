@@ -1,0 +1,309 @@
+module walk
+import ast
+
+-- Generic pre-order traversal (`syntax/walk.ts`): every node under a block
+-- or expression, each before its children, children in source order. A
+-- `verify` block is listed but not entered unless `into_verify` is set,
+-- since it is a definition of its own.
+pub union Node =
+  | NStmt of s: ast.Stmt
+  | NExpr of e: ast.Expr
+  | NType of t: ast.Type
+  | NBlock of b: ast.Block
+  | NPattern of p: ast.Pattern
+  | NParam of p: ast.Param
+  | NContract of c: ast.Contract
+  | NClause of c: ast.LoopClause
+  | NArm of a: ast.Arm
+  | NVerify of v: ast.VerifyBlock
+  -- Marks the end of a verify block's nodes when they are entered.
+  | NVerifyEnd
+  | NDomain of d: ast.Domain
+  | NArg of a: ast.Arg
+  | NFieldInit of f: ast.FieldInit
+  | NTryElse of t: ast.TryElse
+  | NEffect of e: ast.EffectRef
+  | NTypeArg of a: ast.TypeArg
+  | NTParam of p: ast.TParam
+
+pub fn nodes_in_block(b: ast.Block, into_verify: Bool) -> List[Node] may alloc, mutate {
+  var out: Builder[Node] = List.builder()
+  w_block(b: b, into_verify: into_verify, out: inout out)
+  return List.finish(b: out)
+}
+
+pub fn nodes_in_expr(e: ast.Expr, into_verify: Bool) -> List[Node] may alloc, mutate {
+  var out: Builder[Node] = List.builder()
+  w_expr(e: e, into_verify: into_verify, out: inout out)
+  return List.finish(b: out)
+}
+
+pub fn nodes_in_type(t: ast.Type, into_verify: Bool) -> List[Node] may alloc, mutate {
+  var out: Builder[Node] = List.builder()
+  w_type(t: t, into_verify: into_verify, out: inout out)
+  return List.finish(b: out)
+}
+
+fn skip() -> Unit {
+  return Unit
+}
+
+fn w_block(b: ast.Block, into_verify: Bool, out: inout Builder[Node]) -> Unit may mutate, alloc
+  decreases b
+{
+  List.push(b: inout out, x: NBlock(b: b))
+  for s: ast.Stmt in b.stmts {
+    w_stmt(s: s, into_verify: into_verify, out: inout out)
+  }
+  return Unit
+}
+
+fn w_params(
+  ps: List[ast.Param],
+  into_verify: Bool,
+  out: inout Builder[Node]
+) -> Unit may mutate, alloc
+  decreases ps
+{
+  for p: ast.Param in ps {
+    List.push(b: inout out, x: NParam(p: p))
+    w_type(t: p.ty, into_verify: into_verify, out: inout out)
+  }
+  return Unit
+}
+
+fn w_effects(es: List[ast.EffectRef], out: inout Builder[Node]) -> Unit may mutate, alloc {
+  for e: ast.EffectRef in es {
+    List.push(b: inout out, x: NEffect(e: e))
+  }
+  return Unit
+}
+
+pub fn w_verify(
+  v: ast.VerifyBlock,
+  into_verify: Bool,
+  out: inout Builder[Node]
+) -> Unit may mutate, alloc
+  decreases v
+{
+  List.push(b: inout out, x: NVerify(v: v))
+  if into_verify {
+    w_params(ps: v.params, into_verify: into_verify, out: inout out)
+    w_effects(es: v.effects, out: inout out)
+    w_block(b: v.body, into_verify: into_verify, out: inout out)
+    List.push(b: inout out, x: NVerifyEnd)
+  }
+  return Unit
+}
+
+fn w_stmt(s: ast.Stmt, into_verify: Bool, out: inout Builder[Node]) -> Unit may mutate, alloc
+  decreases s
+{
+  List.push(b: inout out, x: NStmt(s: s))
+  match s with
+  | ast.Let(_, ty, value, _) -> {
+    w_type(t: ty, into_verify: into_verify, out: inout out)
+    w_expr(e: value, into_verify: into_verify, out: inout out)
+  }
+  | ast.Var(_, ty, value, _) -> {
+    w_type(t: ty, into_verify: into_verify, out: inout out)
+    w_expr(e: value, into_verify: into_verify, out: inout out)
+  }
+  | ast.Assign(_, value, _) -> w_expr(e: value, into_verify: into_verify, out: inout out)
+  | ast.Return(value, _) -> w_expr(e: value, into_verify: into_verify, out: inout out)
+  | ast.If(cond, then_block, else_block, _) -> {
+    w_expr(e: cond, into_verify: into_verify, out: inout out)
+    w_block(b: then_block, into_verify: into_verify, out: inout out)
+    match else_block with
+    | Some(value) -> w_block(b: value, into_verify: into_verify, out: inout out)
+    | None -> skip()
+  }
+  | ast.Match(scrutinee, arms, _) -> {
+    w_expr(e: scrutinee, into_verify: into_verify, out: inout out)
+    for a: ast.Arm in arms {
+      List.push(b: inout out, x: NArm(a: a))
+      w_pattern(p: a.pattern, into_verify: into_verify, out: inout out)
+      match a.guard with
+      | Some(value) -> w_expr(e: value, into_verify: into_verify, out: inout out)
+      | None -> skip()
+      match a.body with
+      | ast.ArmBlock(block) -> w_block(b: block, into_verify: into_verify, out: inout out)
+      | ast.ArmStmt(stmt) -> w_stmt(s: stmt, into_verify: into_verify, out: inout out)
+    }
+  }
+  | ast.Loop(cond, clauses, body, _) -> {
+    w_expr(e: cond, into_verify: into_verify, out: inout out)
+    for c: ast.LoopClause in clauses {
+      List.push(b: inout out, x: NClause(c: c))
+      w_expr(e: c.expr, into_verify: into_verify, out: inout out)
+    }
+    w_block(b: body, into_verify: into_verify, out: inout out)
+  }
+  | ast.For(_, ty, domain, body, _) -> {
+    w_type(t: ty, into_verify: into_verify, out: inout out)
+    w_domain(d: domain, into_verify: into_verify, out: inout out)
+    w_block(b: body, into_verify: into_verify, out: inout out)
+  }
+  | ast.Assume(_, _, verify_block, _) -> {
+    match verify_block with
+    | Some(value) -> w_verify(v: value, into_verify: into_verify, out: inout out)
+    | None -> skip()
+  }
+  | ast.ExprStmt(expr, _) -> w_expr(e: expr, into_verify: into_verify, out: inout out)
+  return Unit
+}
+
+fn w_domain(d: ast.Domain, into_verify: Bool, out: inout Builder[Node]) -> Unit may mutate, alloc
+  decreases d
+{
+  List.push(b: inout out, x: NDomain(d: d))
+  match d with
+  | ast.RangeDomain(lo, hi, _) -> {
+    w_expr(e: lo, into_verify: into_verify, out: inout out)
+    w_expr(e: hi, into_verify: into_verify, out: inout out)
+  }
+  | ast.InDomain(expr, _) -> w_expr(e: expr, into_verify: into_verify, out: inout out)
+  return Unit
+}
+
+fn w_pattern(p: ast.Pattern, into_verify: Bool, out: inout Builder[Node]) -> Unit may mutate, alloc
+  decreases p
+{
+  List.push(b: inout out, x: NPattern(p: p))
+  match p with
+  | ast.LitPat(literal, _) -> w_expr(e: literal, into_verify: into_verify, out: inout out)
+  | _ -> skip()
+  return Unit
+}
+
+fn w_type(t: ast.Type, into_verify: Bool, out: inout Builder[Node]) -> Unit may mutate, alloc
+  decreases t
+{
+  List.push(b: inout out, x: NType(t: t))
+  match t with
+  | ast.NamedType(_, args, where_, _) -> {
+    for a: ast.TypeArg in args {
+      List.push(b: inout out, x: NTypeArg(a: a))
+      match a with
+      | ast.TypeArgType(_, ty, _) -> w_type(t: ty, into_verify: into_verify, out: inout out)
+      | ast.TypeArgConst(_, expr, _) -> w_expr(e: expr, into_verify: into_verify, out: inout out)
+    }
+    match where_ with
+    | Some(value) -> w_expr(e: value, into_verify: into_verify, out: inout out)
+    | None -> skip()
+  }
+  | ast.FnType(params, ret, effects, _) -> {
+    w_params(ps: params, into_verify: into_verify, out: inout out)
+    w_type(t: ret, into_verify: into_verify, out: inout out)
+    w_effects(es: effects, out: inout out)
+  }
+  return Unit
+}
+
+fn w_expr(e: ast.Expr, into_verify: Bool, out: inout Builder[Node]) -> Unit may mutate, alloc
+  decreases e
+{
+  List.push(b: inout out, x: NExpr(e: e))
+  match e with
+  | ast.Ctor(_, args, fields, _) -> {
+    match args with
+    | Some(value) -> {
+      for a: ast.Arg in value {
+        List.push(b: inout out, x: NArg(a: a))
+        w_expr(e: a.value, into_verify: into_verify, out: inout out)
+      }
+    }
+    | None -> skip()
+    match fields with
+    | Some(value) -> {
+      for f: ast.FieldInit in value {
+        List.push(b: inout out, x: NFieldInit(f: f))
+        w_expr(e: f.value, into_verify: into_verify, out: inout out)
+      }
+    }
+    | None -> skip()
+  }
+  | ast.RecordUpdate(base, fields, _) -> {
+    w_expr(e: base, into_verify: into_verify, out: inout out)
+    for f: ast.FieldInit in fields {
+      List.push(b: inout out, x: NFieldInit(f: f))
+      w_expr(e: f.value, into_verify: into_verify, out: inout out)
+    }
+  }
+  | ast.ListLit(elems, _) -> {
+    for x: ast.Expr in elems {
+      w_expr(e: x, into_verify: into_verify, out: inout out)
+    }
+  }
+  | ast.Try(expr, else_, _) -> {
+    w_expr(e: expr, into_verify: into_verify, out: inout out)
+    match else_ with
+    | Some(value) -> {
+      List.push(b: inout out, x: NTryElse(t: value))
+      w_expr(e: value.expr, into_verify: into_verify, out: inout out)
+    }
+    | None -> skip()
+  }
+  | ast.Recover(body, _) -> w_block(b: body, into_verify: into_verify, out: inout out)
+  | ast.Quantifier(_, _, ty, domain, where_, body, _) -> {
+    w_type(t: ty, into_verify: into_verify, out: inout out)
+    match domain with
+    | Some(value) -> w_domain(d: value, into_verify: into_verify, out: inout out)
+    | None -> skip()
+    match where_ with
+    | Some(value) -> w_expr(e: value, into_verify: into_verify, out: inout out)
+    | None -> skip()
+    w_expr(e: body, into_verify: into_verify, out: inout out)
+  }
+  | ast.Closure(params, ret, effects, body, _) -> {
+    w_params(ps: params, into_verify: into_verify, out: inout out)
+    w_type(t: ret, into_verify: into_verify, out: inout out)
+    w_effects(es: effects, out: inout out)
+    w_block(b: body, into_verify: into_verify, out: inout out)
+  }
+  | ast.Fake(_, fields, _) -> {
+    for f: ast.FieldInit in fields {
+      List.push(b: inout out, x: NFieldInit(f: f))
+      w_expr(e: f.value, into_verify: into_verify, out: inout out)
+    }
+  }
+  | ast.FieldAccess(object, _, _) -> w_expr(e: object, into_verify: into_verify, out: inout out)
+  | ast.Call(callee, targs, args, _) -> {
+    w_expr(e: callee, into_verify: into_verify, out: inout out)
+    match targs with
+    | Some(value) -> {
+      for a: ast.TypeArg in value {
+        List.push(b: inout out, x: NTypeArg(a: a))
+        match a with
+        | ast.TypeArgType(_, ty, _) -> w_type(t: ty, into_verify: into_verify, out: inout out)
+        | ast.TypeArgConst(_, expr, _) -> w_expr(e: expr, into_verify: into_verify, out: inout out)
+      }
+    }
+    | None -> skip()
+    for a: ast.Arg in args {
+      List.push(b: inout out, x: NArg(a: a))
+      w_expr(e: a.value, into_verify: into_verify, out: inout out)
+    }
+  }
+  | ast.Unary(_, operand, _) -> w_expr(e: operand, into_verify: into_verify, out: inout out)
+  | ast.Binary(_, left, right, _) -> {
+    w_expr(e: left, into_verify: into_verify, out: inout out)
+    w_expr(e: right, into_verify: into_verify, out: inout out)
+  }
+  | ast.And(operands, _) -> {
+    for o: ast.Expr in operands {
+      w_expr(e: o, into_verify: into_verify, out: inout out)
+    }
+  }
+  | ast.Or(operands, _) -> {
+    for o: ast.Expr in operands {
+      w_expr(e: o, into_verify: into_verify, out: inout out)
+    }
+  }
+  | ast.Is(expr, pattern, _) -> {
+    w_expr(e: expr, into_verify: into_verify, out: inout out)
+    w_pattern(p: pattern, into_verify: into_verify, out: inout out)
+  }
+  | _ -> skip()
+  return Unit
+}

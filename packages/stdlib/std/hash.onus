@@ -1,0 +1,7 @@
+module std.hash
+import std.host
+
+-- Content hashes for reports and caches (§2.2, §11.1, §13): BLAKE3 over the
+-- UTF-8 encoding of the text, as lowercase hexadecimal.
+pub intrinsic fn blake3_hex(t: Text) -> Text may alloc
+  claims host.js

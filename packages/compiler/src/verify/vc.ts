@@ -23,7 +23,7 @@ import type * as A from '../syntax/ast.js';
 import { children, isExpr, walk } from '../syntax/walk.js';
 import type { TypeTables } from '../types/tables.js';
 import { stripRefinements, type Type } from '../types/type.js';
-import { and, app, BOOL, eq, implies, INT, int, not, TRUE, type Formula, type Sort } from './formula.js';
+import { and, app, BOOL, eq, implies, INT, int, not, or, TRUE, type Formula, type Sort } from './formula.js';
 import { Lowerer, Unlowerable, type Binding, type Env } from './lower.js';
 
 export interface VC {
@@ -238,6 +238,11 @@ class BodyWalker {
   private lower(e: A.Expr): Formula {
     const f = this.lowerer.lower(e, this.env);
     this.facts.push(...this.lowerer.learned.splice(0));
+    // A variable passed `inout` holds the callee's exit value from here on (§3.2.1: an assignment).
+    for (const r of this.lowerer.rebound.splice(0)) {
+      const b = this.env.get(r.def);
+      if (b !== undefined) this.bind(r.def, this.t.def(r.def).name, b.type, r.term);
+    }
     return f;
   }
 
@@ -360,10 +365,13 @@ class BodyWalker {
     const st = this.ty.exprTypes.get(s.scrutinee.id) ?? { k: 'error' };
     const before = { env: new Map(this.env), facts: [...this.facts] };
     const earlier: Formula[] = [];
+    /** The arms control can fall out of: each one's condition, its environment on exit and what it learned. */
+    const taken: { readonly cond: Formula; readonly env: Map<DefId, Binding>; readonly learned: Formula[] }[] = [];
     let allReturn = s.arms.length > 0;
     for (const arm of s.arms) {
+      const failed = earlier.map((f) => not(f));
       this.env = new Map(before.env);
-      this.facts = [...before.facts, ...earlier.map((f) => not(f))];
+      this.facts = [...before.facts, ...failed];
       let test: Formula;
       try {
         test = this.patternFacts(arm.pattern, scrutinee, st);
@@ -378,10 +386,14 @@ class BodyWalker {
         this.facts.push(guard);
       }
       earlier.push(guard === null ? test : and(test, guard));
+      const cond = conj([...failed, test, ...(guard === null ? [] : [guard])]);
       if (arm.body.kind === 'Block') this.block(arm.body);
       else this.stmt(arm.body);
       const returns = arm.body.kind === 'Block' ? blockReturns(arm.body) : stmtReturns(arm.body);
-      if (!returns) allReturn = false;
+      if (!returns) {
+        allReturn = false;
+        taken.push({ cond, env: new Map(this.env), learned: this.facts.slice(before.facts.length) });
+      }
     }
     this.env = new Map(before.env);
     this.facts = [...before.facts];
@@ -389,7 +401,21 @@ class BodyWalker {
       this.facts.push(app('false', [], BOOL));
       return;
     }
-    this.havoc(this.assigned(s));
+    // Join, as for `if`: what an arm learned holds under its condition; a variable an arm assigned is fresh,
+    // and equal to each arm's value under that arm's condition; one of the arms control falls out of was taken
+    // (the arms are exhaustive, §4.4).
+    const eqs: Formula[][] = taken.map(() => []);
+    for (const d of this.assigned(s)) {
+      const b = before.env.get(d);
+      if (b === undefined) continue;
+      const fresh = this.bind(d, this.t.def(d).name, b.type, null);
+      taken.forEach((t, i) => {
+        const tb = t.env.get(d);
+        if (tb !== undefined) eqs[i]?.push(eq(fresh, tb.term));
+      });
+    }
+    taken.forEach((t, i) => this.facts.push(implies(t.cond, conj([...t.learned, ...(eqs[i] ?? [])]))));
+    this.facts.push(or(...taken.map((t) => t.cond)));
   }
 
   /** Facts a matching pattern establishes, binding its variables. */

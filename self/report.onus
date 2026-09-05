@@ -4,12 +4,37 @@ import ast
 -- Diagnostics of the checker in Onus (spec §13; `report/diagnostic.ts`): a
 -- code from the catalogue, a span in a file, the innermost definition and
 -- detail lines. Every diagnostic is an error.
+-- One entry of a counterexample: a source name and the value the solver gave it.
+pub record CounterEntry {
+  name: Text
+  value: Text
+  is_number: Bool
+}
+
+-- The obligation a verifier diagnostic is about (§13).
+pub record ObligationInfo {
+  kind: Text
+  text: Text
+  status: Text
+  has_counterexample: Bool
+  counterexample: List[CounterEntry]
+}
+
+-- A repair a diagnostic offers (§13): replacing `span` with `with_text`.
+pub record Repair {
+  span: ast.Span
+  with_text: Text
+  confidence: Text
+}
+
 pub record Diagnostic {
   code: Text
   file: Int
   span: ast.Span
   def_name: Option[Text]
   context: List[Text]
+  obligation: Option[ObligationInfo]
+  repairs: List[Repair]
 }
 
 -- A source file: its text and the same text as code points, which spans index.
@@ -27,5 +52,51 @@ pub fn diagnostic(
   def_name: Option[Text],
   detail: Text
 ) -> Diagnostic may alloc {
-  return Diagnostic { code: code, file: file, span: span, def_name: def_name, context: [detail] }
+  return Diagnostic {
+    code: code,
+    file: file,
+    span: span,
+    def_name: def_name,
+    context: [detail],
+    obligation: None,
+    repairs: []
+  }
+}
+
+-- A diagnostic offering one repair.
+pub fn diagnostic_repair(
+  code: Text,
+  file: Int,
+  span: ast.Span,
+  detail: Text,
+  repair: Repair
+) -> Diagnostic may alloc {
+  return Diagnostic {
+    code: code,
+    file: file,
+    span: span,
+    def_name: None,
+    context: [detail],
+    obligation: None,
+    repairs: [repair]
+  }
+}
+
+pub fn diagnostic_for(
+  code: Text,
+  file: Int,
+  span: ast.Span,
+  def_name: Option[Text],
+  detail: Text,
+  obligation: ObligationInfo
+) -> Diagnostic may alloc {
+  return Diagnostic {
+    code: code,
+    file: file,
+    span: span,
+    def_name: def_name,
+    context: [detail],
+    obligation: Some(value: obligation),
+    repairs: []
+  }
 }

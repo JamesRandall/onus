@@ -1,0 +1,89 @@
+module obligations
+import ast
+
+-- Obligations (impl spec §3.5; spec §12; `contracts/obligations.ts`).
+-- First-class objects with a status, never a boolean: created by the
+-- contracts pass, resolved by the verifier, consumed by codegen and the
+-- reports.
+pub union Kind =
+  | Requires
+  | Ensures
+  | Refinement
+  | InvariantEntry
+  | InvariantStep
+  | Decreases
+  | Index
+  | Law
+  | Property
+  | Overflow
+  -- An `Int` binding's values fit the JavaScript number range (§19.3); reported, never a runtime check.
+  | Representation
+  -- A bare Bool statement of an `example`, `property` or `law` body (§5.2).
+  | Assertion
+  | ConstCheck
+
+pub fn kind_text(k: Kind) -> Text {
+  match k with
+  | Requires -> return "requires"
+  | Ensures -> return "ensures"
+  | Refinement -> return "refinement"
+  | InvariantEntry -> return "invariant-entry"
+  | InvariantStep -> return "invariant-step"
+  | Decreases -> return "decreases"
+  | Index -> return "index"
+  | Law -> return "law"
+  | Property -> return "property"
+  | Overflow -> return "overflow"
+  | Representation -> return "representation"
+  | Assertion -> return "assertion"
+  | ConstCheck -> return "const-check"
+}
+
+pub union Status =
+  | Pending
+  | Proved
+  | Checked
+  | Assumed
+  | Failed
+
+pub fn status_text(s: Status) -> Text {
+  match s with
+  | Pending -> return "pending"
+  | Proved -> return "proved"
+  | Checked -> return "checked"
+  | Assumed -> return "assumed"
+  | Failed -> return "failed"
+}
+
+-- Where a refinement obligation arises, which decides where its runtime check lives.
+pub union Site =
+  | BindingSite
+  | AssignmentSite
+  | ReturnSite
+  | FieldSite
+  | ArgumentSite
+  | ElementSite
+  | OtherSite
+
+pub record Obligation {
+  id: Int
+  kind: Kind
+  -- The node where the obligation must hold: its key and its position.
+  at: Int
+  at_file: Int
+  at_span: ast.Span
+  -- The enclosing definition.
+  def: Int
+  -- The predicate in canonical Onus syntax.
+  text: Text
+  -- The key of the contract, loop clause or refinement predicate the obligation comes from.
+  source: Option[Int]
+  site: Site
+  pinned: Bool
+  -- For `requires` and argument refinements: the called function and, for the latter, the parameter.
+  callee: Option[Int]
+  param: Option[Text]
+  status: Status
+  -- Where the status came from, for the ledger.
+  by: Option[Text]
+}

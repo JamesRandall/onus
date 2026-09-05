@@ -1004,6 +1004,10 @@ fn bind_value(
         at: name.span,
         detail: "`" ++ name.text ++ "` is already bound (" ++ defs.kind_text(
           k: prev.kind
+        ) ++ " at " ++ where_line(
+          ctx: ctx,
+          file: prev.file,
+          offset: prev.span.start
         ) ++ "); choose another name"
       )
     }
@@ -1169,6 +1173,21 @@ fn module_of_path(
     )
     return None
   }
+}
+
+-- `line N` of an offset in a file, for diagnostics that point back at an earlier binding.
+fn where_line(ctx: context.Context, file: Int, offset: Int) -> Text may alloc {
+  var line: Int = 1
+  if file >= 0 and file < List.built(b: ctx.files) {
+    var i: Int where it >= 0 = 0
+    for c: Int in context.file_at(ctx: ctx, id: file).cps {
+      if i < offset and c == 10 {
+        line = line + 1
+      }
+      i = i + 1
+    }
+  }
+  return "line " ++ Int.to_text(x: line)
 }
 
 -- Resolves a claim name (`Idempotent` or `payments.Idempotent`) to its definition, recording it at `at` when given.

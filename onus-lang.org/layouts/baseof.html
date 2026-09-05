@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+{{ partial "head.html" . }}
+</head>
+<body>
+<div class="wrap">{{ partial "nav.html" . }}</div>
+{{ block "main" . }}{{ end }}
+<div class="wrap">{{ partial "footer.html" . }}</div>
+</body>
+</html>

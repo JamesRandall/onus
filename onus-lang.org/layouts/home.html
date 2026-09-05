@@ -1,0 +1,139 @@
+{{- /* Home: the thesis in under a screen, the ledger rendered from real compiler output, one worked diagnostic, three routes onward. Text is the pitch's (docs/onus-pitch.md). */ -}}
+{{ define "main" }}
+<div class="wrap">
+  <section class="hero">
+    <div>
+      <h1>Onus is a language for code that a <b>model</b> writes and a <b>person</b> has to <b>trust</b>.</h1>
+      <a class="btn" href="{{ "/spec/" | relURL }}">Read the specification</a>
+      <div class="rel">{{ site.Params.specVersion }} · compiles to JavaScript or to native code through LLVM · compiler in TypeScript, being rewritten in Onus</div>
+    </div>
+    <div>
+<pre class="code onus"><code>{{ partial "onus-code.html" `pub fn recent_orders(
+  db:  sql.Db[ReadOnly, schema: "orders"],
+  who: auth.AuthedCustomer
+) -> Result[List[Order], sql.Error] may sql.read, alloc
+  ensures forall o: Order in result: o.customer == who.id` }}</code></pre>
+      <p class="cap">Read-only access to one schema, a caller who has already passed authentication (the type can only be produced by the auth module), no other effects, and every returned order belongs to that customer. The compiler proves the last line from the query itself. A reviewer reads this and moves on.</p>
+    </div>
+  </section>
+
+  <section class="home-prose">
+    <h2 id="the-problem">The problem</h2>
+    <div class="cols">
+    <p>Most of the effort in AI-assisted development now goes into steering: prompt wording, conventions documents, linters bolted on after the fact, and review that means reading every line the model produced. The specification of what the code must not do lives in prose, and prose is not enforced. When the model gets it wrong, someone notices — or doesn't — after the fact.</p>
+    <p>The root of it is the language. Current languages were designed so a human could write them quickly. They trade checkability for convenience at every turn: inferred types, implicit conversions, reflection, exceptions, ambient state. None of that convenience helps a model, and all of it hides things a reviewer needs to see.</p>
+    <p>The tools inherit the problem. A linter runs after the code exists and can only pattern-match what the language failed to say. A review tool shows a diff because there is nothing better to show. A prompt carries the rules because nowhere else can hold them. All of them try to catch problems after they exist, and none of them can see what the model was actually told. Fixing this starts at the language, but it does not end there: once the compiler knows what the code is allowed to do, the loop that drives the model, the ledger, and the review tool can be built on what it knows instead of on what it cannot see.</p>
+    </div>
+    <h2 id="what-onus-does">What Onus does</h2>
+    <p>Onus moves the constraints out of the prompt and into the compiler.</p>
+    <ul class="cols">
+      <li><b>Pure by default.</b> A function that can touch a file, the network, or a database says so in its signature, and the compiler proves that nothing beneath it does anything it didn't declare.</li>
+      <li><b>Authority is handed down, never acquired.</b> Access to a resource is a value that only the program's root can create and that can only be narrowed on the way to the code that uses it. A function that receives a read-only database handle cannot write, because it has nothing to write with.</li>
+      <li><b>Contracts are checked, not commented.</b> Preconditions, postconditions and invariants are part of the language. Each one ends up in exactly one of three states — proved by the compiler, checked at runtime, or explicitly assumed — and the compiler tells you which.</li>
+      <li><b>Critical paths are declared once.</b> A <code>path</code> declaration states what a section of the program may do, and the compiler checks every function reachable from it. If the path declaration is right and the program compiles, the bodies don't matter.</li>
+      <li><b>Everything the reviewer needs is in the interface.</b> Signatures, contracts, effects, examples, assumptions. Bodies are the model's problem. The review tool shows what you are trusting, where each guarantee bottoms out, and what changed — without a source diff.</li>
+      <li><b>One compiler, no linter.</b> There are no warnings and no configurable rule sets. A convention that matters becomes a claim or a path rule and is checked like everything else.</li>
+      <li><b>Projects grow by zone.</b> New code starts as <code>draft</code>, where interfaces change freely and nothing is authoritative, next to a core that is already <code>hardened</code> or <code>critical</code>. The compiler keeps the core from depending on anything the draft has not yet hardened, and a module moves up only by earning it: its bodies are regenerated from its interfaces alone, and anything that does not come back was never written down.</li>
+    </ul>
+  </section>
+
+  <section class="flow">
+    <h2 id="not-just-a-language">Not just a language</h2>
+    <p class="flow-lede">The language is the root, and it is the smaller half. Around it sits the environment: the loop that drives the model, the ledger the compiler writes, and the workbench a person reviews in. Each exists because the compiler knows what the code is allowed to do, and none of them guesses.</p>
+    <div class="stages">
+      <div class="stage">
+        <div class="n">1 · Claims</div>
+        <h3>A person writes the claims</h3>
+        <p>Signatures, contracts, effects, capabilities, paths, and each module's zone. This is the whole specification, and it is the only thing a person writes. If a convention matters, it is a claim; if it is not a claim, nothing downstream knows about it.</p>
+        <a href="{{ "/concepts/contracts/" | relURL }}">Contracts →</a>
+      </div>
+      <div class="stage">
+        <div class="n">2 · Bodies</div>
+        <h3>The model writes bodies, inside the claims</h3>
+        <p>The loop drives the model against the compiler. It sees interfaces and diagnostics, never a conventions document. It edits bodies and never claims, and the module's zone decides what it may touch at all. When a contract cannot be met it stops and proposes, rather than weakening anything to get green.</p>
+        <a href="{{ "/concepts/loop/" | relURL }}">The loop →</a>
+      </div>
+      <div class="stage">
+        <div class="n">3 · The ledger</div>
+        <h3>The compiler checks everything, once</h3>
+        <p>Every obligation ends proved, checked at runtime, or assumed, and the ledger records which, with every assumption's justification and where every capability came from. There is no linter and no second analysis: nothing runs after the fact to catch what the language failed to say.</p>
+        <a href="{{ "/concepts/ledger/" | relURL }}">The ledger →</a>
+      </div>
+      <div class="stage">
+        <div class="n">4 · Review</div>
+        <h3>A person reviews claims, not diffs</h3>
+        <p>The workbench renders the ledger, path reports and interface diffs, and computes nothing of its own. Approvals, contract edits and answers to counterexamples return to the loop as tasks. A module earns promotion to a stricter zone by regenerating cleanly from its interfaces alone.</p>
+        <a href="{{ "/concepts/workbench/" | relURL }}">The workbench →</a>
+      </div>
+    </div>
+    <div class="zone-band">
+      <div class="n">Across the project · Zones</div>
+      <p>Those four stages run once per change. Zones run across the project's whole life, and each module moves through them on its own. A module starts as <code>draft</code>, where interfaces can change freely and nothing is authoritative; it is promoted to <code>hardened</code> when it goes into service, and to <code>critical</code> when it becomes load-bearing, each step earned by regenerating its bodies from its interfaces and finding nothing missing. Nothing forces the project to move together: a subsystem being sketched sits beside a core that is already critical, the compiler refuses to let the core depend on anything the sketch has not yet hardened, and a module that needs rework is demoted alone, with everything that rested on it marked conditional until it earns its way back. <a href="{{ "/practice/#a-project-is-not-uniformly-trusted" | relURL }}">Zones in practice →</a></p>
+    </div>
+  </section>
+</div>
+
+<svg class="wave" viewBox="0 0 800 36" preserveAspectRatio="none" aria-hidden="true"><path d="M0 20 C 200 40, 400 0, 800 22 L800 36 L0 36 Z" fill="#1F2233"/></svg>
+<section class="dark">
+  <div class="wrap">
+    <h2 id="the-ledger">The ledger, live</h2>
+    <p>This is the review artefact for the checkout endpoint of the <a href="{{ "/spec/checkout/" | relURL }}">third worked example</a>: every function reachable from <code>handle_checkout</code>, the effects the path is bounded to, the obligations on it and what discharged each, and every assumption with its justification. Bodies are not shown because the reviewer does not need them. Nothing here was drawn by hand: it is rendered from <code>examples/checkout/review/review.json</code>, which <code>onus review</code> wrote.</p>
+    {{- with resources.Get "examples/checkout/review/review.json" }}
+    {{- $r := .Content | transform.Unmarshal }}
+    {{- with index $r.paths 0 }}
+    {{ partial "path-view.html" (dict "path" . "cream" false) }}
+    {{- end }}
+    <p class="cap">The amber leaf is the one thing on this path that nobody can check: the payment vendor's promise to deduplicate on the idempotency key. The path's policy forbids assumptions outside the project, and names this one as the exception, so it appears here rather than being forgotten. Written by {{ $r.generated.tool }} on {{ $r.generated.at | time.Format "2 January 2006" }}; the <a href="{{ "/review/checkout/" | relURL }}">review page</a> it produced is served unchanged.</p>
+    {{- end }}
+
+    <div class="blk" style="margin-top:48px">
+      <div>
+        <h3 id="one-example"><i>◆</i> One example</h3>
+        <p>A team's conventions document says: <em>reporting code must never write to the database.</em> Today that lives in a prompt, a checklist, and a reviewer's memory. In Onus it is the function's own signature.</p>
+        <p><code>may sql.read, alloc</code> is the complete list of what this function may do, and everything it calls must fit inside it. The model, asked to add run logging, writes an <code>insert</code> into a helper the report calls. The build fails before anyone sees it.</p>
+        <p>The model reads the diagnostic, moves the logging to the caller that holds write access, and the build is green. No prompt was edited, no reviewer read a diff, and the rule cannot be forgotten by the next model or the next person, because it is not advice — it is the function's type. For rules a signature can't express — required guarantees, which assumptions are acceptable, what must hold across a whole critical section — a <code>path</code> declaration applies the same check over every function reachable from an entry point.</p>
+      </div>
+      <div>
+<pre class="panel"><div class="h">reporting.onus</div>{{ partial "onus-code.html" `pub fn monthly_totals(db: sql.Db[ReadOnly], year: Int)
+  -> Result[List[MonthlyTotal], sql.Error] may sql.read, alloc
+
+-- everything this function calls must fit inside sql.read, alloc` }}</pre>
+<pre class="panel" style="margin-top:14px"><div class="h">$ onus check reporting.onus</div><span class="e">reporting.onus:17:3: E0201 undeclared effect</span>
+  in monthly_totals
+  calling `log_run` has effect `sql.write`, which `monthly_totals` does not declare
+
+<span class="m">$ onus check reporting.onus   # after the model moves the logging</span>
+<span class="g">ok</span></pre>
+      </div>
+    </div>
+
+    <div class="blk">
+      <div>
+        <h3 id="zones"><i>◆</i> A project grows one zone at a time</h3>
+        <p>A codebase is never uniformly trusted, and it does not have to be. A subsystem being sketched lives beside a core that is in service, under different rules, and the compiler enforces the one rule that makes that safe: nothing at a higher zone ever rests on a claim from a lower one.</p>
+        <ul>
+          <li><b>draft</b> — where new work starts. Interfaces change freely, by human or model; the ledger is recorded, not authoritative.</li>
+          <li><b>hardened</b> — in service. Interfaces are yours, bodies are the model's, the ledger counts.</li>
+          <li><b>critical</b> — load-bearing. Every entry on a checked path; no unverified assumptions; no <code>recover</code>.</li>
+        </ul>
+        <p>To build against the core, a draft module hardens its boundary first, and the core is permitted to see only that boundary. To move up, a module earns it: its bodies are thrown away and regenerated from its interfaces, and whatever does not come back was never written down. There is no manual override. <a href="{{ "/practice/#a-project-is-not-uniformly-trusted" | relURL }}">How zones work in practice</a>.</p>
+      </div>
+      <div>
+<pre class="panel"><div class="h">onus.toml</div>[zones]
+"app.core.*"     = <span class="g">"critical"</span>
+"app.reporting"  = <span class="g">"hardened"</span>
+"app.payments.*" = <span class="g">"draft"</span>
+
+<span class="m">$ onus zone promote app.payments hardened
+audit: 2 findings → proposals opened. Not promoted.</span></pre>
+      </div>
+    </div>
+
+    <div class="links">
+      <a href="{{ "/practice/" | relURL }}"><b>In practice</b><span>Zones, an HTTP API, testing, the loop and the workbench: what a real project looks like.</span></a>
+      <a href="{{ "/spec/" | relURL }}"><b>Read the specification</b><span>The normative document, with the grammar, the implementation plan and every change since.</span></a>
+      <a href="{{ "/status/" | relURL }}"><b>Status</b><span>What is built, what is specified, what is not, with dates.</span></a>
+    </div>
+  </div>
+</section>
+{{ end }}

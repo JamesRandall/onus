@@ -54,6 +54,11 @@ export class Lowerer {
   olds = new Map<DefId, Formula>();
   /** Facts learned while lowering (e.g. `try e` implies `e` is Ok). */
   readonly learned: Formula[] = [];
+  /**
+   * Variables a call changed through an `inout` argument, with the term of their value after the call.
+   * The body walker re-binds them (the callee's `ensures` relates that value to `old(param)`, the value passed).
+   */
+  readonly rebound: { readonly def: DefId; readonly term: Formula }[] = [];
   /** The term each lowered expression node became. */
   readonly terms = new Map<A.NodeId, Formula>();
   /** Per call node: argument bindings by parameter def, parameter types after instantiation, and the instantiation. */
@@ -683,6 +688,10 @@ export class Lowerer {
       ordered.push(term);
       sorts.push(this.sortOf(this.inContext(p.type)));
     }
+    // The values the callee sees on exit: an `inout` parameter's is a fresh value of its type, distinct from
+    // the one passed, so that an `ensures` relating the two (`built(b) == built(old(b)) + 1`) is a fact about
+    // the change and not a contradiction.
+    const postTerms = new Map<DefId, Binding>(argTerms);
     sig.params.forEach((p, i) => {
       const pd = sig.paramDefs[i];
       const a = e.args.find((x) => x.name.text === p.name);
@@ -700,7 +709,16 @@ export class Lowerer {
       argTerms.set(pd, { term, type });
       ordered.push(term);
       sorts.push(this.sortOf(type));
+      if (!p.inout) {
+        postTerms.set(pd, { term, type });
+        return;
+      }
+      const post = this.freshConst(`post_${p.name}`, this.sortOf(type));
+      postTerms.set(pd, { term: post, type });
+      const target = a.value.kind === 'Name' ? this.t.refs.get(a.value.id) : undefined;
+      if (target !== undefined && target.k === 'def') this.rebound.push({ def: target.def, term: post });
     });
+    for (const [pd, b] of postTerms) if (argTerms.get(pd)?.term !== b.term) this.typeFacts(b.term, b.type, postTerms);
     const ret = this.inContext(substitute(sig.ret, subst));
     const paramTypes = new Map<string, Type>();
     sig.params.forEach((p) => paramTypes.set(p.name, this.inContext(substitute(p.type, subst))));
@@ -727,7 +745,7 @@ export class Lowerer {
     }
     this.substStack.push(subst);
     try {
-      this.calleeFacts(fnDef, sig, argTerms, result, ret);
+      this.calleeFacts(fnDef, sig, postTerms, argTerms, result, ret);
     } finally {
       this.substStack.pop();
     }
@@ -740,26 +758,29 @@ export class Lowerer {
     return term;
   }
 
-  /** The callee's ensures clauses and return refinements, instantiated for this application. */
-  private calleeFacts(fnDef: Def, sig: Signature, args: Map<DefId, Binding>, result: Formula, ret: Type): void {
+  /**
+   * The callee's ensures clauses and return refinements, instantiated for this application: `args` binds
+   * each parameter to its value on exit, `pre` to the value passed (what `old(param)` denotes).
+   */
+  private calleeFacts(fnDef: Def, sig: Signature, args: Map<DefId, Binding>, pre: Map<DefId, Binding>, result: Formula, ret: Type): void {
     const m = this.mutation;
     this.typeFacts(result, m !== null && m.k === 'widen-return' && m.fn === fnDef.id ? stripRefinements(ret) : ret, args);
     // A contract that calls its own function (`ensures compare(a, a) == 0`) is stated once, not unfolded forever.
     if (this.expanding.has(fnDef.id)) return;
     this.expanding.add(fnDef.id);
     try {
-      this.calleeContracts(fnDef, sig, args, result);
+      this.calleeContracts(fnDef, sig, args, pre, result);
     } finally {
       this.expanding.delete(fnDef.id);
     }
   }
 
-  private calleeContracts(fnDef: Def, sig: Signature, args: Map<DefId, Binding>, result: Formula): void {
+  private calleeContracts(fnDef: Def, sig: Signature, args: Map<DefId, Binding>, pre: Map<DefId, Binding>, result: Formula): void {
     const m = this.mutation;
     const savedResult = this.result;
     const savedOlds = this.olds;
     this.result = result;
-    this.olds = new Map([...args].filter(([d]) => this.t.def(d).kind === 'param').map(([d, b]) => [d, b.term] as const));
+    this.olds = new Map([...pre].filter(([d]) => this.t.def(d).kind === 'param').map(([d, b]) => [d, b.term] as const));
     try {
       for (const c of sig.contracts) {
         if (c.clause !== 'ensures') continue;

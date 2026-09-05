@@ -2,7 +2,8 @@
  * `std.io` capabilities over Node APIs (impl spec §5). Root capabilities are
  * constructed only by `runMain`.
  */
-import { closeSync, openSync, readFileSync, writeSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { closeSync, mkdirSync, openSync, readFileSync, writeSync } from 'node:fs';
 import { Capability } from './capability.js';
 import type { Option, Result } from './panic.js';
 
@@ -58,6 +59,36 @@ export class Console extends Capability {
   }
 }
 
+export class Process extends Capability {
+  private constructor() {
+    super('io.Process');
+  }
+  /** @internal */
+  static root(): Process {
+    return new Process();
+  }
+}
+
+/** What a program left behind (`std.io.Output`). */
+export interface Output {
+  readonly status: number;
+  readonly stdout: string;
+  readonly stderr: string;
+}
+
+/** Runs `program` with `args`, feeding `stdin`; Err when it cannot start or exceeds `timeout_ms`. */
+export function run(process: Process, program: string, args: readonly string[], stdin: string, timeout_ms: number): Result<Output, Error> {
+  void process;
+  const r = spawnSync(program, args, { input: stdin, encoding: 'utf8', timeout: timeout_ms });
+  if (r.error !== undefined) {
+    const code = 'code' in r.error && typeof r.error.code === 'string' ? r.error.code : '';
+    if (code === 'ETIMEDOUT') return { tag: 'Err', error: { tag: 'Other', detail: `\`${program}\` did not finish within ${timeout_ms} ms` } };
+    if (code === 'ENOENT') return { tag: 'Err', error: { tag: 'NotFound', path: program } };
+    return { tag: 'Err', error: { tag: 'Other', detail: r.error.message } };
+  }
+  return { tag: 'Ok', value: { status: r.status ?? -1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' } };
+}
+
 export class File extends Capability {
   private constructor(readonly fd: number, readonly path: string) {
     super('io.File');
@@ -94,6 +125,17 @@ export function write(file: File, text: string): Result<undefined, Error> {
     return { tag: 'Ok', value: undefined };
   } catch (e) {
     return { tag: 'Err', error: ioError(e, file.path) };
+  }
+}
+
+/** Creates `path` and any missing parents; Ok when it already exists. */
+export function mkdir(files: Files, path: string): Result<undefined, Error> {
+  void files;
+  try {
+    mkdirSync(path, { recursive: true });
+    return { tag: 'Ok', value: undefined };
+  } catch (e) {
+    return { tag: 'Err', error: { tag: 'Other', detail: e instanceof globalThis.Error ? e.message : String(e) } };
   }
 }
 

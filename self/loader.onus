@@ -73,8 +73,10 @@ fn syntax_diagnostic(file: Int, d: tokens.Diagnostic) -> report.Diagnostic may a
     code: d.code,
     file: file,
     span: ast.Span { start: d.start, end: d.end },
-    def_name: None,
-    context: [d.detail]
+    def_name: d.def_name,
+    context: [d.detail],
+    obligation: None,
+    repairs: []
   }
 }
 
@@ -161,6 +163,12 @@ pub fn canonical(ctx: inout context.Context, file: Int) -> Unit may alloc, mutat
   ) {
     return Unit
   }
+  -- A file that already carries a diagnostic has no canonical text (`canonicalPass`).
+  for d: report.Diagnostic in List.finish(b: ctx.diagnostics) {
+    if d.file == file {
+      return Unit
+    }
+  }
   match module_of_file(ctx: ctx, file: file) with
   | None -> return Unit
   | Some(value) -> {
@@ -173,6 +181,8 @@ pub fn canonical(ctx: inout context.Context, file: Int) -> Unit may alloc, mutat
     let text: Text = printer.print_module(m: value, tab: tab)
     var table: Dict[Int, Text] = ctx.canonical
     Map.set(d: inout table, key: file, value: text)
+    var tabs: Dict[Int, comments.Table] = ctx.comment_tables
+    Map.set(d: inout tabs, key: file, value: tab)
     if text != sf.text {
       let i: Int = first_difference(a: sf.cps, b: Text.code_points(t: text))
       var end: Int = i + 1
@@ -181,12 +191,16 @@ pub fn canonical(ctx: inout context.Context, file: Int) -> Unit may alloc, mutat
       }
       context.report(
         ctx: inout ctx,
-        d: report.diagnostic(
+        d: report.diagnostic_repair(
           code: "E0001",
           file: file,
           span: ast.Span { start: i, end: end },
-          def_name: None,
-          detail: "the source differs from its canonical form at this position; `onus fmt` rewrites it"
+          detail: "the source differs from its canonical form at this position; `onus fmt` rewrites it",
+          repair: report.Repair {
+            span: ast.Span { start: 0, end: List.len(xs: sf.cps) },
+            with_text: text,
+            confidence: "high"
+          }
         )
       )
     }
@@ -515,7 +529,10 @@ pub fn load(ctx: inout context.Context, files: io.Files) -> Unit may io.file, al
     if not p.is_std {
       let name: Text = name_of(m: p.tree)
       let suffix: Text = "/" ++ Text.replace(t: name, from: ".", to: "/") ++ ".onus"
-      let path: Text = context.file_at(ctx: ctx, id: p.file).path
+      var path: Text = "?"
+      if p.file >= 0 and p.file < List.built(b: ctx.files) {
+        path = context.file_at(ctx: ctx, id: p.file).path
+      }
       match root_for(path: path, suffix: suffix, root: root) with
       | None -> {
         ok = false

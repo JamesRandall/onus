@@ -1,0 +1,16 @@
+module ok_inout_post
+
+-- A variable passed `inout` holds the callee's exit value after the call:
+-- the callee's `ensures` relates that value to `old(param)`, the one passed.
+fn one() -> Int where it == 1 may alloc, mutate {
+  var b: Builder[Int] = List.builder()
+  List.push(b: inout b, x: 3)
+  return List.built(b: b)
+}
+
+fn two() -> Int where it == 2 may alloc, mutate {
+  var b: Builder[Int] = List.builder()
+  List.push(b: inout b, x: 3)
+  List.push(b: inout b, x: 4)
+  return List.built(b: b)
+}

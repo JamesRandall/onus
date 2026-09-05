@@ -1,0 +1,952 @@
+module contracts
+import ast
+import parser
+import printer
+import comments
+import defs
+import context
+import types
+import obligations
+import walk
+import effectset
+
+-- The contracts pass (impl spec §4, pass 8; spec §12.1; `contracts/pass.ts`):
+-- creates an obligation object for every site that must hold:
+--   - `requires` of the callee at every call;
+--   - `ensures` of the function at every `return`, and the return type's refinement;
+--   - every flow of a value into a refined type (bindings, assignments, fields, arguments, loop elements);
+--   - `invariant` at loop entry and after each iteration; `decreases`;
+--   - integer arithmetic (`overflow`);
+--   - every `law` on every `impl`; every `property`.
+-- Every obligation starts `checked`, except `requires proved` clauses the
+-- const evaluator discharged, which are `proved`.
+record Cp {
+  file: Int
+  flows: Dict[Int, types.RefinementFlow]
+}
+
+fn skip() -> Unit {
+  return Unit
+}
+
+fn key(cp: Cp, tag: Int, span: ast.Span) -> Int {
+  return defs.node_key(file: cp.file, tag: tag, span: span)
+}
+
+fn or_neg(o: Option[Int]) -> Int {
+  match o with
+  | Some(value) -> return value
+  | None -> return -1
+}
+
+fn def_of_key(ctx: context.Context, k: Int) -> Int {
+  return or_neg(o: Map.find(d: ctx.def_of, key: k))
+}
+
+fn item_def(cp: Cp, ctx: context.Context, span: ast.Span) -> defs.Def {
+  return context.get_def(
+    ctx: ctx,
+    id: def_of_key(ctx: ctx, k: key(cp: cp, tag: defs.tag_item, span: span))
+  )
+}
+
+-- Adds an obligation and returns its id.
+pub fn add(
+  ctx: inout context.Context,
+  kind: obligations.Kind,
+  at: Int,
+  at_file: Int,
+  at_span: ast.Span,
+  def: Int,
+  text: Text,
+  source: Option[Int],
+  site: obligations.Site,
+  pinned: Bool,
+  callee: Option[Int],
+  param: Option[Text],
+  status: obligations.Status,
+  by: Option[Text]
+) -> Int may mutate, alloc {
+  let id: Int = ctx.obligation_count
+  ctx = { ctx with obligation_count: id + 1 }
+  var table: Dict[Int, obligations.Obligation] = ctx.obligations
+  Map.set(
+    d: inout table,
+    key: id,
+    value: obligations.Obligation {
+      id: id,
+      kind: kind,
+      at: at,
+      at_file: at_file,
+      at_span: at_span,
+      def: def,
+      text: text,
+      source: source,
+      site: site,
+      pinned: pinned,
+      callee: callee,
+      param: param,
+      status: status,
+      by: by
+    }
+  )
+  var current: List[Int] = []
+  match Map.find(d: ctx.obligations_at, key: at) with
+  | Some(value) -> current = value
+  | None -> current = []
+  var at_table: Dict[Int, List[Int]] = ctx.obligations_at
+  Map.set(d: inout at_table, key: at, value: List.append(xs: current, x: id))
+  return id
+}
+
+fn remember_contract(
+  ctx: inout context.Context,
+  file: Int,
+  c: ast.Contract
+) -> Int may mutate, alloc {
+  let k: Int = defs.node_key(file: file, tag: defs.tag_sig, span: c.span)
+  var table: Dict[Int, ast.Contract] = ctx.contract_nodes
+  Map.set(d: inout table, key: k, value: c)
+  return k
+}
+
+fn remember_clause(
+  ctx: inout context.Context,
+  file: Int,
+  c: ast.LoopClause
+) -> Int may mutate, alloc {
+  let k: Int = defs.node_key(file: file, tag: defs.tag_sig, span: c.span)
+  var table: Dict[Int, ast.LoopClause] = ctx.clause_nodes
+  Map.set(d: inout table, key: k, value: c)
+  return k
+}
+
+-- Items ----------------------------------------------------------------------------------
+fn decl_span(d: defs.Def) -> ast.Span {
+  match d.node with
+  | defs.ParamNode(decl) -> return decl.span
+  | defs.LawNode(decl) -> return decl.span
+  | _ -> return d.span
+}
+
+-- §19.3: an `Int` binding's values must fit ±2^53 - 1 for the JavaScript backend's number representation.
+fn representation(
+  cp: Cp,
+  ctx: inout context.Context,
+  at: Int,
+  at_span: ast.Span,
+  name: Text,
+  t: types.Type,
+  def: Int
+) -> Unit may mutate, alloc {
+  let pn: Text = types.prim_name(t: types.strip(t: t))
+  if pn != "Int" and pn != "Duration" {
+    return Unit
+  }
+  let id: Int = add(
+    ctx: inout ctx,
+    kind: obligations.Representation,
+    at: at,
+    at_file: cp.file,
+    at_span: at_span,
+    def: def,
+    text: name ++ " within ±2^53 - 1",
+    source: None,
+    site: obligations.BindingSite,
+    pinned: false,
+    callee: None,
+    param: None,
+    status: obligations.Checked,
+    by: None
+  )
+  return Unit
+}
+
+fn sig_or_empty(o: Option[types.Signature]) -> types.Signature may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return types.Signature {
+    def: -1,
+    tparams: [],
+    params: [],
+    param_defs: [],
+    ret: types.ErrorT,
+    effects: effectset.empty(),
+    contracts: [],
+    is_const_fn: false,
+    is_intrinsic: false
+  }
+}
+
+fn block_or_empty(o: Option[ast.Block]) -> ast.Block may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return ast.Block { stmts: [], elided: false, span: ast.Span { start: 0, end: 0 } }
+}
+
+fn fn_item(
+  cp: Cp,
+  ctx: inout context.Context,
+  f: ast.FnDecl,
+  def: defs.Def
+) -> Unit may mutate, alloc {
+  measure_entry(cp: cp, ctx: inout ctx, f: f, def: def)
+  if f.body is None {
+    return Unit
+  }
+  let sig_opt: Option[types.Signature] = Map.find(d: ctx.signatures, key: def.id)
+  if sig_opt is Some {
+    let sig: types.Signature = sig_or_empty(o: sig_opt)
+    for i: Int in 0 ..< List.len(xs: sig.params) {
+      if i < List.len(xs: sig.param_defs) {
+        let p: types.FnParam = List.get(xs: sig.params, i: i)
+        let pd: defs.Def = context.get_def(ctx: ctx, id: List.get(xs: sig.param_defs, i: i))
+        representation(
+          cp: cp,
+          ctx: inout ctx,
+          at: pd.key,
+          at_span: decl_span(d: pd),
+          name: p.name,
+          t: p.ty,
+          def: def.id
+        )
+      }
+    }
+  }
+  body(cp: cp, ctx: inout ctx, b: block_or_empty(o: f.body), def: def, f: Some(value: f))
+  return Unit
+}
+
+record Owner {
+  def: defs.Def
+  f: Option[ast.FnDecl]
+}
+
+-- Walks a body: statements and their expressions, closures included. A
+-- verify block is a function of its own (§20.2): its obligations belong to
+-- its definition, and its nodes lie between `NVerify` and `NVerifyEnd`.
+fn body(
+  cp: Cp,
+  ctx: inout context.Context,
+  b: ast.Block,
+  def: defs.Def,
+  f: Option[ast.FnDecl]
+) -> Unit may mutate, alloc {
+  var owners: List[Owner] = [Owner { def: def, f: f }]
+  for n: walk.Node in walk.nodes_in_block(b: b, into_verify: true) {
+    let owner: Owner = List.get(xs: owners, i: List.len(xs: owners) - 1)
+    match n with
+    | walk.NVerify(v) -> {
+      let vd: Int = def_of_key(ctx: ctx, k: key(cp: cp, tag: defs.tag_misc, span: v.span))
+      var vdef: defs.Def = owner.def
+      if vd >= 0 {
+        vdef = context.get_def(ctx: ctx, id: vd)
+      }
+      owners = List.append(xs: owners, x: Owner { def: vdef, f: None })
+    }
+    | walk.NVerifyEnd -> {
+      if List.len(xs: owners) > 1 {
+        owners = List.slice(xs: owners, from: 0, to: List.len(xs: owners) - 1)
+      }
+    }
+    | walk.NStmt(s) -> stmt_obligations(cp: cp, ctx: inout ctx, s: s, def: owner.def, f: owner.f)
+    | walk.NExpr(e) -> expr_obligations(cp: cp, ctx: inout ctx, e: e, def: owner.def)
+    | _ -> skip()
+  }
+  return Unit
+}
+
+fn or_error(o: Option[types.Type]) -> types.Type {
+  match o with
+  | Some(value) -> return value
+  | None -> return types.ErrorT
+}
+
+fn stmt_obligations(
+  cp: Cp,
+  ctx: inout context.Context,
+  s: ast.Stmt,
+  def: defs.Def,
+  f: Option[ast.FnDecl]
+) -> Unit may mutate, alloc {
+  match s with
+  | ast.Return(value, span) -> return_site(
+    cp: cp,
+    ctx: inout ctx,
+    ret_value: value,
+    at: span,
+    f: f,
+    def: def
+  )
+  | ast.Loop(_, clauses, _, span) -> {
+    let at: Int = key(cp: cp, tag: defs.tag_stmt, span: span)
+    for c: ast.LoopClause in clauses {
+      let source: Int = remember_clause(ctx: inout ctx, file: cp.file, c: c)
+      let text: Text = printer.print_expr(e: c.expr)
+      if c.clause == "invariant" {
+        let id1: Int = add(
+          ctx: inout ctx,
+          kind: obligations.InvariantEntry,
+          at: at,
+          at_file: cp.file,
+          at_span: span,
+          def: def.id,
+          text: text,
+          source: Some(value: source),
+          site: obligations.OtherSite,
+          pinned: false,
+          callee: None,
+          param: None,
+          status: obligations.Checked,
+          by: None
+        )
+        let id2: Int = add(
+          ctx: inout ctx,
+          kind: obligations.InvariantStep,
+          at: at,
+          at_file: cp.file,
+          at_span: span,
+          def: def.id,
+          text: text,
+          source: Some(value: source),
+          site: obligations.OtherSite,
+          pinned: false,
+          callee: None,
+          param: None,
+          status: obligations.Checked,
+          by: None
+        )
+      } else {
+        let id3: Int = add(
+          ctx: inout ctx,
+          kind: obligations.Decreases,
+          at: at,
+          at_file: cp.file,
+          at_span: span,
+          def: def.id,
+          text: text,
+          source: Some(value: source),
+          site: obligations.OtherSite,
+          pinned: false,
+          callee: None,
+          param: None,
+          status: obligations.Checked,
+          by: None
+        )
+      }
+    }
+  }
+  | ast.Let(name, _, value, span) -> {
+    flow(
+      cp: cp,
+      ctx: inout ctx,
+      e: value,
+      def: def,
+      site: obligations.BindingSite,
+      callee: None,
+      param: None
+    )
+    let dt: Option[types.Type] = Map.find(
+      d: ctx.decl_types,
+      key: def_of_key(ctx: ctx, k: key(cp: cp, tag: defs.tag_stmt, span: span))
+    )
+    if dt is Some {
+      representation(
+        cp: cp,
+        ctx: inout ctx,
+        at: key(cp: cp, tag: defs.tag_stmt, span: span),
+        at_span: span,
+        name: name.text,
+        t: or_error(o: dt),
+        def: def.id
+      )
+    }
+  }
+  | ast.Var(name, _, value, span) -> {
+    flow(
+      cp: cp,
+      ctx: inout ctx,
+      e: value,
+      def: def,
+      site: obligations.BindingSite,
+      callee: None,
+      param: None
+    )
+    let dt: Option[types.Type] = Map.find(
+      d: ctx.decl_types,
+      key: def_of_key(ctx: ctx, k: key(cp: cp, tag: defs.tag_stmt, span: span))
+    )
+    if dt is Some {
+      representation(
+        cp: cp,
+        ctx: inout ctx,
+        at: key(cp: cp, tag: defs.tag_stmt, span: span),
+        at_span: span,
+        name: name.text,
+        t: or_error(o: dt),
+        def: def.id
+      )
+    }
+  }
+  | ast.Assign(_, value, _) -> flow(
+    cp: cp,
+    ctx: inout ctx,
+    e: value,
+    def: def,
+    site: obligations.AssignmentSite,
+    callee: None,
+    param: None
+  )
+  | ast.For(_, _, domain, _, _) -> {
+    match domain with
+    | ast.InDomain(expr, _) -> flow(
+      cp: cp,
+      ctx: inout ctx,
+      e: expr,
+      def: def,
+      site: obligations.ElementSite,
+      callee: None,
+      param: None
+    )
+    | ast.RangeDomain(lo, _, _) -> flow(
+      cp: cp,
+      ctx: inout ctx,
+      e: lo,
+      def: def,
+      site: obligations.ElementSite,
+      callee: None,
+      param: None
+    )
+  }
+  | _ -> skip()
+  return Unit
+}
+
+fn expr_obligations(
+  cp: Cp,
+  ctx: inout context.Context,
+  e: ast.Expr,
+  def: defs.Def
+) -> Unit may mutate, alloc {
+  match e with
+  | ast.Call(_, _, _, _) -> call(cp: cp, ctx: inout ctx, e: e, def: def)
+  | ast.Binary(_, _, _, _) -> arith(cp: cp, ctx: inout ctx, e: e, def: def)
+  | ast.Ctor(_, args, fields, _) -> {
+    var ctors: Dict[Int, ast.Expr] = ctx.ctor_of
+    match args with
+    | Some(value) -> {
+      for a: ast.Arg in value {
+        Map.set(
+          d: inout ctors,
+          key: key(cp: cp, tag: defs.tag_expr, span: parser.span_of_expr(e: a.value)),
+          value: e
+        )
+        flow(
+          cp: cp,
+          ctx: inout ctx,
+          e: a.value,
+          def: def,
+          site: obligations.FieldSite,
+          callee: None,
+          param: None
+        )
+      }
+    }
+    | None -> skip()
+    match fields with
+    | Some(value) -> {
+      for fi: ast.FieldInit in value {
+        Map.set(
+          d: inout ctors,
+          key: key(cp: cp, tag: defs.tag_expr, span: parser.span_of_expr(e: fi.value)),
+          value: e
+        )
+        flow(
+          cp: cp,
+          ctx: inout ctx,
+          e: fi.value,
+          def: def,
+          site: obligations.FieldSite,
+          callee: None,
+          param: None
+        )
+      }
+    }
+    | None -> skip()
+  }
+  | ast.RecordUpdate(_, fields, _) -> {
+    for fi: ast.FieldInit in fields {
+      flow(
+        cp: cp,
+        ctx: inout ctx,
+        e: fi.value,
+        def: def,
+        site: obligations.FieldSite,
+        callee: None,
+        param: None
+      )
+    }
+  }
+  | _ -> skip()
+  return Unit
+}
+
+-- Obligations inside an expression outside a body (a constant's initialiser).
+fn exprs(
+  cp: Cp,
+  ctx: inout context.Context,
+  root: ast.Expr,
+  def: defs.Def
+) -> Unit may mutate, alloc {
+  for n: walk.Node in walk.nodes_in_expr(e: root, into_verify: false) {
+    match n with
+    | walk.NExpr(e) -> {
+      if e is ast.Call {
+        call(cp: cp, ctx: inout ctx, e: e, def: def)
+      }
+      if e is ast.Binary {
+        arith(cp: cp, ctx: inout ctx, e: e, def: def)
+      }
+    }
+    | _ -> skip()
+  }
+  return Unit
+}
+
+fn return_site(
+  cp: Cp,
+  ctx: inout context.Context,
+  ret_value: ast.Expr,
+  at: ast.Span,
+  f: Option[ast.FnDecl],
+  def: defs.Def
+) -> Unit may mutate, alloc {
+  match f with
+  | None -> return Unit
+  | Some(value) -> {
+    for c: ast.Contract in value.contracts {
+      if c.clause == "ensures" {
+        let source: Int = remember_contract(ctx: inout ctx, file: cp.file, c: c)
+        let id: Int = add(
+          ctx: inout ctx,
+          kind: obligations.Ensures,
+          at: key(cp: cp, tag: defs.tag_stmt, span: at),
+          at_file: cp.file,
+          at_span: at,
+          def: def.id,
+          text: printer.print_expr(e: c.expr),
+          source: Some(value: source),
+          site: obligations.ReturnSite,
+          pinned: c.is_proved,
+          callee: None,
+          param: None,
+          status: obligations.Checked,
+          by: None
+        )
+      }
+    }
+    flow(
+      cp: cp,
+      ctx: inout ctx,
+      e: ret_value,
+      def: def,
+      site: obligations.ReturnSite,
+      callee: None,
+      param: None
+    )
+    return Unit
+  }
+}
+
+-- A refinement obligation for the flow recorded at expression `e`, if any.
+fn flow(
+  cp: Cp,
+  ctx: inout context.Context,
+  e: ast.Expr,
+  def: defs.Def,
+  site: obligations.Site,
+  callee: Option[Int],
+  param: Option[Text]
+) -> Unit may mutate, alloc {
+  let at: Int = key(cp: cp, tag: defs.tag_expr, span: parser.span_of_expr(e: e))
+  match Map.find(d: cp.flows, key: at) with
+  | None -> skip()
+  | Some(value) -> {
+    var nodes: Dict[Int, ast.Expr] = ctx.expr_nodes
+    Map.set(d: inout nodes, key: at, value: e)
+    let id: Int = add(
+      ctx: inout ctx,
+      kind: obligations.Refinement,
+      at: at,
+      at_file: cp.file,
+      at_span: parser.span_of_expr(e: e),
+      def: def.id,
+      text: refinement_text(ctx: ctx, t: value.to),
+      source: refinement_source(t: value.to),
+      site: site,
+      pinned: false,
+      callee: callee,
+      param: param,
+      status: obligations.Checked,
+      by: None
+    )
+  }
+  return Unit
+}
+
+pub fn refinement_text(ctx: context.Context, t: types.Type) -> Text may alloc, mutate
+  decreases t
+{
+  match t with
+  | types.Refined(base, pred, _) -> {
+    var head: Text = "…"
+    match Map.find(d: ctx.where_exprs, key: pred) with
+    | Some(value) -> head = printer.print_expr(e: value)
+    | None -> head = "…"
+    if base is types.Refined {
+      return head ++ " and " ++ refinement_text(ctx: ctx, t: base)
+    }
+    return head
+  }
+  | _ -> return ""
+}
+
+fn refinement_source(t: types.Type) -> Option[Int] {
+  match t with
+  | types.Refined(_, pred, _) -> return Some(value: pred)
+  | _ -> return None
+}
+
+fn callee_def(ctx: context.Context, k: Int) -> Int {
+  match Map.find(d: ctx.refs, key: k) with
+  | None -> return -1
+  | Some(value) -> {
+    match value with
+    | defs.DefRes(def) -> return def
+    | defs.CompanionRes(owner, fn_def) -> return fn_def
+    | defs.IfaceFnRes(iface, fn_def) -> return fn_def
+    | _ -> return -1
+  }
+}
+
+fn proved_here(ctx: context.Context, call_key: Int, clause_key: Int) -> Bool {
+  match Map.find(d: ctx.proved_at_check_time, key: call_key) with
+  | Some(value) -> return List.contains(xs: value, x: clause_key)
+  | None -> return false
+}
+
+fn cycle_of(ctx: context.Context, def: Int) -> Int {
+  return or_neg(o: Map.find(d: ctx.cycles, key: def))
+}
+
+fn call(cp: Cp, ctx: inout context.Context, e: ast.Expr, def: defs.Def) -> Unit may mutate, alloc {
+  match e with
+  | ast.Call(callee, _, args, span) -> {
+    let fn_id: Int = callee_def(
+      ctx: ctx,
+      k: key(cp: cp, tag: defs.tag_expr, span: parser.span_of_expr(e: callee))
+    )
+    if fn_id < 0 {
+      return Unit
+    }
+    let fn_def: defs.Def = context.get_def(ctx: ctx, id: fn_id)
+    match Map.find(d: ctx.signatures, key: fn_id) with
+    | None -> return Unit
+    | Some(value) -> {
+      let call_key: Int = key(cp: cp, tag: defs.tag_expr, span: span)
+      var nodes: Dict[Int, ast.Expr] = ctx.expr_nodes
+      Map.set(d: inout nodes, key: call_key, value: e)
+      for c: ast.Contract in value.contracts {
+        if c.clause == "requires" {
+          let source: Int = remember_contract(ctx: inout ctx, file: fn_def.file, c: c)
+          let is_proved_here: Bool = proved_here(ctx: ctx, call_key: call_key, clause_key: source)
+          var status: obligations.Status = obligations.Checked
+          var by: Option[Text] = None
+          if is_proved_here {
+            status = obligations.Proved
+            by = Some(value: "const evaluator")
+          }
+          let id: Int = add(
+            ctx: inout ctx,
+            kind: obligations.Requires,
+            at: call_key,
+            at_file: cp.file,
+            at_span: span,
+            def: def.id,
+            text: printer.print_expr(e: c.expr),
+            source: Some(value: source),
+            site: obligations.OtherSite,
+            pinned: c.is_proved,
+            callee: Some(value: fn_id),
+            param: None,
+            status: status,
+            by: by
+          )
+        }
+      }
+      for a: ast.Arg in args {
+        flow(
+          cp: cp,
+          ctx: inout ctx,
+          e: a.value,
+          def: def,
+          site: obligations.ArgumentSite,
+          callee: Some(value: fn_id),
+          param: Some(value: a.name.text)
+        )
+      }
+      -- A call within a recursive cycle must strictly decrease the shared measure (§5.1).
+      let cycle: Int = cycle_of(ctx: ctx, def: def.id)
+      if cycle >= 0 and cycle == cycle_of(ctx: ctx, def: fn_id) {
+        for c: ast.Contract in value.contracts {
+          if c.clause == "decreases" {
+            let source: Int = remember_contract(ctx: inout ctx, file: fn_def.file, c: c)
+            let id: Int = add(
+              ctx: inout ctx,
+              kind: obligations.Decreases,
+              at: call_key,
+              at_file: cp.file,
+              at_span: span,
+              def: def.id,
+              text: printer.print_expr(e: c.expr) ++ " at the call to " ++ fn_def.name,
+              source: Some(value: source),
+              site: obligations.OtherSite,
+              pinned: false,
+              callee: Some(value: fn_id),
+              param: None,
+              status: obligations.Checked,
+              by: None
+            )
+          }
+        }
+      }
+      return Unit
+    }
+  }
+  | _ -> return Unit
+}
+
+-- A recursive function's measure is non-negative at entry (§5.1).
+fn measure_entry(
+  cp: Cp,
+  ctx: inout context.Context,
+  f: ast.FnDecl,
+  def: defs.Def
+) -> Unit may mutate, alloc {
+  if not Map.contains(d: ctx.cycles, key: def.id) {
+    return Unit
+  }
+  for c: ast.Contract in f.contracts {
+    if c.clause == "decreases" {
+      -- A structural measure (a record, union or list value, §5.1) has no lower bound to establish.
+      var numeric: Bool = true
+      match Map.find(
+        d: ctx.expr_types,
+        key: key(cp: cp, tag: defs.tag_expr, span: parser.span_of_expr(e: c.expr))
+      ) with
+      | Some(value) -> {
+        let pn: Text = types.prim_name(t: types.strip(t: value))
+        numeric = pn == "Int" or pn == "Duration"
+      }
+      | None -> numeric = true
+      if numeric {
+        let source: Int = remember_contract(ctx: inout ctx, file: cp.file, c: c)
+        let id: Int = add(
+          ctx: inout ctx,
+          kind: obligations.Decreases,
+          at: source,
+          at_file: cp.file,
+          at_span: c.span,
+          def: def.id,
+          text: printer.print_expr(e: c.expr) ++ " >= 0 at entry",
+          source: Some(value: source),
+          site: obligations.OtherSite,
+          pinned: false,
+          callee: None,
+          param: None,
+          status: obligations.Checked,
+          by: None
+        )
+      }
+    }
+  }
+  return Unit
+}
+
+fn arith(cp: Cp, ctx: inout context.Context, e: ast.Expr, def: defs.Def) -> Unit may mutate, alloc {
+  match e with
+  | ast.Binary(op, left, right, span) -> {
+    if op != "+" and op != "-" and op != "*" and op != "/" and op != "%" {
+      return Unit
+    }
+    match Map.find(
+      d: ctx.expr_types,
+      key: key(cp: cp, tag: defs.tag_expr, span: parser.span_of_expr(e: left))
+    ) with
+    | None -> return Unit
+    | Some(value) -> {
+      let pn: Text = types.prim_name(t: types.strip(t: value))
+      if pn != "Int" and pn != "Duration" {
+        return Unit
+      }
+      var text: Text = printer.print_expr(e: e) ++ " within Int"
+      if op == "/" or op == "%" {
+        text = printer.print_expr(e: right) ++ " != 0"
+      }
+      let id: Int = add(
+        ctx: inout ctx,
+        kind: obligations.Overflow,
+        at: key(cp: cp, tag: defs.tag_expr, span: span),
+        at_file: cp.file,
+        at_span: span,
+        def: def.id,
+        text: text,
+        source: None,
+        site: obligations.OtherSite,
+        pinned: false,
+        callee: None,
+        param: None,
+        status: obligations.Checked,
+        by: None
+      )
+      return Unit
+    }
+  }
+  | _ -> return Unit
+}
+
+-- The bare Bool statements of an assertion block (§5.2), each an obligation the verifier may prove.
+fn assertions(
+  cp: Cp,
+  ctx: inout context.Context,
+  b: ast.Block,
+  def: defs.Def
+) -> Unit may mutate, alloc {
+  for s: ast.Stmt in b.stmts {
+    match s with
+    | ast.ExprStmt(expr, _) -> {
+      let at: ast.Span = parser.span_of_expr(e: expr)
+      let id: Int = add(
+        ctx: inout ctx,
+        kind: obligations.Assertion,
+        at: key(cp: cp, tag: defs.tag_expr, span: at),
+        at_file: cp.file,
+        at_span: at,
+        def: def.id,
+        text: printer.print_expr(e: expr),
+        source: None,
+        site: obligations.OtherSite,
+        pinned: false,
+        callee: None,
+        param: None,
+        status: obligations.Checked,
+        by: Some(value: "run as a test")
+      )
+    }
+    | _ -> skip()
+  }
+  return Unit
+}
+
+fn laws(cp: Cp, ctx: inout context.Context, im: ast.ImplDecl) -> Unit may mutate, alloc {
+  let iface: Int = callee_def(ctx: ctx, k: key(cp: cp, tag: defs.tag_item, span: im.span))
+  if iface < 0 {
+    return Unit
+  }
+  let impl_def: defs.Def = item_def(cp: cp, ctx: ctx, span: im.span)
+  for i: Int in 0 ..< context.def_count(ctx: ctx) {
+    let law: defs.Def = context.get_def(ctx: ctx, id: i)
+    if law.kind == defs.Law and law.parent == Some(value: iface) {
+      let id: Int = add(
+        ctx: inout ctx,
+        kind: obligations.Law,
+        at: key(cp: cp, tag: defs.tag_item, span: im.span),
+        at_file: cp.file,
+        at_span: im.span,
+        def: impl_def.id,
+        text: law.name,
+        source: Some(value: law.key),
+        site: obligations.OtherSite,
+        pinned: false,
+        callee: None,
+        param: None,
+        status: obligations.Checked,
+        by: Some(value: "milestone 5: run under generated inputs")
+      )
+      match law.node with
+      | defs.LawNode(decl) -> {
+        let law_cp: Cp = { cp with file: law.file }
+        assertions(cp: law_cp, ctx: inout ctx, b: decl.body, def: law)
+      }
+      | _ -> skip()
+    }
+  }
+  return Unit
+}
+
+-- Entry ------------------------------------------------------------------------------------
+-- Pass 8: creates obligations. Writes the obligation tables; reports nothing.
+pub fn contracts_pass(ctx: inout context.Context) -> Unit may mutate, alloc {
+  var flows: Dict[Int, types.RefinementFlow] = Map.dict()
+  for f: types.RefinementFlow in List.finish(b: ctx.refinement_flows) {
+    if not Map.contains(d: flows, key: f.at) {
+      Map.set(d: inout flows, key: f.at, value: f)
+    }
+  }
+  for id: Int in 0 ..< ctx.module_count {
+    match Map.find(d: ctx.modules, key: id) with
+    | Some(value) -> {
+      let cp: Cp = Cp { file: value.file, flows: flows }
+      for item: ast.Item in value.tree.items {
+        match item with
+        | ast.FnItem(decl) -> fn_item(
+          cp: cp,
+          ctx: inout ctx,
+          f: decl,
+          def: item_def(cp: cp, ctx: ctx, span: decl.span)
+        )
+        | ast.ImplItem(decl) -> {
+          for f: ast.FnDecl in decl.fns {
+            fn_item(cp: cp, ctx: inout ctx, f: f, def: item_def(cp: cp, ctx: ctx, span: f.span))
+          }
+          laws(cp: cp, ctx: inout ctx, im: decl)
+        }
+        | ast.PropertyItem(decl) -> {
+          let def: defs.Def = item_def(cp: cp, ctx: ctx, span: decl.span)
+          let pid: Int = add(
+            ctx: inout ctx,
+            kind: obligations.Property,
+            at: key(cp: cp, tag: defs.tag_item, span: decl.span),
+            at_file: cp.file,
+            at_span: decl.span,
+            def: def.id,
+            text: decl.name.text,
+            source: Some(value: key(cp: cp, tag: defs.tag_misc, span: decl.body.span)),
+            site: obligations.OtherSite,
+            pinned: false,
+            callee: None,
+            param: None,
+            status: obligations.Checked,
+            by: Some(value: "milestone 5: run under generated inputs")
+          )
+          body(cp: cp, ctx: inout ctx, b: decl.body, def: def, f: None)
+          assertions(cp: cp, ctx: inout ctx, b: decl.body, def: def)
+        }
+        | ast.ExampleItem(decl) -> {
+          let def: defs.Def = item_def(cp: cp, ctx: ctx, span: decl.span)
+          body(cp: cp, ctx: inout ctx, b: decl.body, def: def, f: None)
+          assertions(cp: cp, ctx: inout ctx, b: decl.body, def: def)
+        }
+        | ast.ConstItem(decl) -> exprs(
+          cp: cp,
+          ctx: inout ctx,
+          root: decl.value,
+          def: item_def(cp: cp, ctx: ctx, span: decl.span)
+        )
+        | _ -> skip()
+      }
+    }
+    | None -> skip()
+  }
+  return Unit
+}

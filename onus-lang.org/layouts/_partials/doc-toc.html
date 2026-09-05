@@ -1,0 +1,9 @@
+{{- /* doc-toc.html — nested list of a page's H2/H3 headings. A document whose only top-level heading is its H1 lists that heading's children. */ -}}
+{{- $hs := .Fragments.Headings -}}
+{{- if and (eq (len $hs) 1) (eq (index $hs 0).Level 1) }}{{ $hs = (index $hs 0).Headings }}{{ end -}}
+<ul>
+{{- range $hs }}
+  <li><a href="#{{ .ID }}">{{ .Title | plainify }}</a>
+  {{- with .Headings }}<ul>{{ range . }}<li><a href="#{{ .ID }}">{{ .Title | plainify }}</a></li>{{ end }}</ul>{{ end }}</li>
+{{- end }}
+</ul>

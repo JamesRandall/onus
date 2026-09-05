@@ -1,0 +1,9 @@
+module hash_ops
+import std.hash
+
+-- `std.hash.blake3_hex` (M15.3): the hashes reports and the proof cache use.
+example blake3_known_answers {
+  hash.blake3_hex(t: "") == "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262"
+  hash.blake3_hex(t: "abc") == "6437b3ac38465133ffb63b75273a8db548c558465d79db03fd359c6cd5bd9d85"
+  Text.count(t: hash.blake3_hex(t: "onus")) == 64
+}

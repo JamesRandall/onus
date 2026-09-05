@@ -26,6 +26,74 @@ pub fn print_expr(e: ast.Expr) -> Text may alloc, mutate {
   return doc.render(d: expr_doc(e: e, nb: false, pr: pr), width: line_width)
 }
 
+-- Prints a module with every function body elided to `{ ... }` (§11.1).
+pub fn print_module_elided(m: ast.Module, tab: comments.Table) -> Text may alloc, mutate {
+  let pr: Printer = Printer { tab: tab, elide: true }
+  return doc.render(d: module(m: m, pr: pr), width: line_width)
+}
+
+-- Prints one item in canonical form, with its comments, bodies elided when `elide` is set.
+pub fn print_item(item: ast.Item, tab: comments.Table, elide: Bool) -> Text may alloc, mutate {
+  let pr: Printer = Printer { tab: tab, elide: elide }
+  return doc.render(d: item_doc(item: item, pr: pr), width: line_width)
+}
+
+-- Prints a function's signature: name, parameters, return type and effects, without
+-- visibility, claims, contracts or body (§11.1).
+pub fn print_signature(f: ast.FnDecl) -> Text may alloc, mutate {
+  let pr: Printer = Printer { tab: Map.empty(), elide: false }
+  var head_text: Text = ""
+  if f.is_const {
+    head_text = head_text ++ "const "
+  }
+  if f.is_intrinsic {
+    head_text = head_text ++ "intrinsic "
+  }
+  head_text = head_text ++ "fn " ++ f.name.text
+  return doc.render(
+    d: doc.concat(
+      parts: [
+        s(text: head_text),
+        tparams(ps: f.tparams, pr: pr),
+        params_doc(ps: f.params, pr: pr),
+        s(text: " -> "),
+        type_doc(t: f.ret, pr: pr),
+        effects_doc(es: f.effects)
+      ]
+    ),
+    width: line_width
+  )
+}
+
+-- Prints a `verify` block in canonical form, for the reports (§20.2).
+pub fn print_verify(v: ast.VerifyBlock) -> Text may alloc, mutate {
+  let pr: Printer = Printer { tab: Map.empty(), elide: false }
+  return doc.render(
+    d: doc.concat(
+      parts: [
+        s(text: "verify"),
+        params_doc(ps: v.params, pr: pr),
+        effects_doc(es: v.effects),
+        s(text: " "),
+        block_doc(b: v.body, pr: pr)
+      ]
+    ),
+    width: line_width
+  )
+}
+
+-- Prints a type in canonical form.
+pub fn print_type(t: ast.Type) -> Text may alloc, mutate {
+  let pr: Printer = Printer { tab: Map.empty(), elide: false }
+  return doc.render(d: type_doc(t: t, pr: pr), width: line_width)
+}
+
+-- Prints a statement in canonical form (used in reports and ledger keys).
+pub fn print_stmt(st: ast.Stmt) -> Text may alloc, mutate {
+  let pr: Printer = Printer { tab: Map.empty(), elide: false }
+  return doc.render(d: stmt_doc(st: st, pr: pr), width: line_width)
+}
+
 -- Comments ---------------------------------------------------------------------
 fn line_node(k: Text, d: doc.Doc, pr: Printer) -> doc.Doc may alloc, mutate {
   let cs: comments.CommentSet = comments.lookup(table: pr.tab, k: k)

@@ -1,0 +1,91 @@
+module diagjson
+import std.hash
+import ast
+import report
+import context
+import codes
+import json
+import loc
+
+-- The §13 JSON object of a diagnostic (`report/diagnostic.ts`, `toJson`).
+fn skip() -> Unit {
+  return Unit
+}
+
+fn counterexample_json(entries: List[report.CounterEntry]) -> json.Json may alloc, mutate {
+  var fields: Builder[json.Field] = List.builder()
+  for e: report.CounterEntry in entries {
+    if e.is_number and Int.parse(t: e.value) is Some {
+      List.push(b: inout fields, x: json.field(key: e.name, value: json.JNumber(text: e.value)))
+    } else {
+      List.push(b: inout fields, x: json.field(key: e.name, value: json.text(t: e.value)))
+    }
+  }
+  return json.JObject(fields: List.finish(b: fields))
+}
+
+pub fn to_json(
+  ctx: context.Context,
+  tab: Dict[Int, loc.LineTable],
+  d: report.Diagnostic
+) -> json.Json may alloc, mutate {
+  var repairs: Builder[json.Json] = List.builder()
+  for r: report.Repair in d.repairs {
+    List.push(
+      b: inout repairs,
+      x: json.JObject(
+        fields: [
+          json.field(key: "kind", value: json.text(t: "replace")),
+          json.field(key: "span", value: loc.span_json(tables: tab, file: d.file, span: r.span)),
+          json.field(key: "with", value: json.text(t: r.with_text)),
+          json.field(key: "confidence", value: json.text(t: r.confidence))
+        ]
+      )
+    )
+  }
+  var fields: List[json.Field] = [
+    json.field(key: "code", value: json.text(t: d.code)),
+    json.field(key: "title", value: json.text(t: codes.title(code: d.code))),
+    json.field(
+      key: "location",
+      value: json.JObject(
+        fields: [
+          json.field(key: "file", value: json.text(t: loc.path_of(ctx: ctx, file: d.file))),
+          json.field(key: "def", value: json.text_or_null(o: d.def_name)),
+          json.field(key: "span", value: loc.span_json(tables: tab, file: d.file, span: d.span))
+        ]
+      )
+    ),
+    json.field(key: "context", value: json.texts(ts: d.context)),
+    json.field(key: "repairs", value: json.JArray(items: List.finish(b: repairs)))
+  ]
+  match d.obligation with
+  | Some(value) -> {
+    var counterexample: json.Json = json.JNull
+    if value.has_counterexample {
+      counterexample = counterexample_json(entries: value.counterexample)
+    }
+    fields = List.append(
+      xs: fields,
+      x: json.field(
+        key: "obligation",
+        value: json.JObject(
+          fields: [
+            json.field(key: "kind", value: json.text(t: value.kind)),
+            json.field(key: "text", value: json.text(t: value.text)),
+            json.field(key: "status", value: json.text(t: value.status)),
+            json.field(key: "counterexample", value: counterexample)
+          ]
+        )
+      )
+    )
+  }
+  | None -> skip()
+  match Map.find(d: ctx.canonical, key: d.file) with
+  | Some(value) -> fields = List.append(
+    xs: fields,
+    x: json.field(key: "canonical_hash", value: json.text(t: "b3:" ++ hash.blake3_hex(t: value)))
+  )
+  | None -> skip()
+  return json.JObject(fields: fields)
+}

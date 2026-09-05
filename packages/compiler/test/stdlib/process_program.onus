@@ -1,0 +1,39 @@
+module process_program
+import std.io
+
+-- `io.run` (M15.3): runs a program with arguments and input, and returns its
+-- exit status and streams. `echo` and `cat` exist on every host the tests run on.
+pub fn main(
+  args: List[Text],
+  process: io.Process,
+  console: io.Console
+) -> Result[Unit, io.Error] may io.file, nondet, alloc {
+  let echoed: io.Output = try io.run(
+    process: process,
+    program: "echo",
+    args: ["hello"],
+    stdin: "",
+    timeout_ms: 5000
+  )
+  let copied: io.Output = try io.run(
+    process: process,
+    program: "cat",
+    args: [],
+    stdin: "piped\n",
+    timeout_ms: 5000
+  )
+  io.print(
+    console: console,
+    text: Int.to_text(x: echoed.status) ++ " " ++ echoed.stdout ++ copied.stdout
+  )
+  match io.run(
+    process: process,
+    program: "onus-no-such-program",
+    args: [],
+    stdin: "",
+    timeout_ms: 5000
+  ) with
+  | Ok(value) -> io.print(console: console, text: "started\n")
+  | Err(error) -> io.print(console: console, text: "missing\n")
+  return Ok(value: Unit)
+}

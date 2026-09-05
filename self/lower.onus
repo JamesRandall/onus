@@ -1,0 +1,2322 @@
+module lower
+import ast
+import parser
+import defs
+import context
+import effectset
+import types
+import values
+import formula
+
+-- Lowering Onus expressions to formulas (impl spec §7.1; `verify/lower.ts`).
+-- A lowerer accumulates the declarations and axioms a verification
+-- condition needs: uninterpreted sorts for non-arithmetic types, projections
+-- and tags for records and unions, `len`/`get` for lists, and one
+-- uninterpreted function per called function (per generic instantiation),
+-- whose `ensures` clauses and return-type refinements are asserted about
+-- every application. Expressions of type `Float` are not lowered in v0; a
+-- `Err` reason marks an obligation as `checked`.
+pub record FnDecl {
+  args: List[formula.Sort]
+  ret: formula.Sort
+}
+
+-- Where a name resolves during lowering: an SMT term and the type it has.
+pub record Binding {
+  term: formula.Formula
+  ty: types.Type
+}
+
+-- A variable a call changed through an `inout` argument, with the term of its value after the call.
+pub record Rebound {
+  def: Int
+  term: formula.Formula
+}
+
+pub record CallInfo {
+  args: Dict[Int, Binding]
+  param_types: Dict[Text, types.Type]
+  subst: Dict[Int, types.TypeArg]
+}
+
+pub record Lw {
+  -- The file of the nodes being lowered, for their keys.
+  file: Int
+  sorts: Dict[Text, Bool]
+  fns: Dict[Text, FnDecl]
+  axioms: Builder[formula.Formula]
+  text_lits: Dict[Text, Text]
+  fresh: Int where it >= 0
+  -- Substitutions for contract keywords.
+  it_term: Option[formula.Formula]
+  result_term: Option[formula.Formula]
+  -- `old(x)` to the entry value of parameter x.
+  olds: Dict[Int, formula.Formula]
+  -- Facts learned while lowering (`try e` implies `e` is Ok).
+  learned: Builder[formula.Formula]
+  -- Variables to re-bind after the expression: the body walker gives them the callee's exit value.
+  rebound: Builder[Rebound]
+  -- The term each lowered expression node became, by key.
+  terms: Dict[Int, formula.Formula]
+  -- Per call node: argument bindings, parameter types after instantiation, the instantiation.
+  calls: Dict[Int, CallInfo]
+  -- Outer instantiations in force while lowering a callee's contracts.
+  subst_stack: List[Dict[Int, types.TypeArg]]
+  type_fact_depth: Int where it >= 0
+  -- Functions whose contracts are being lowered right now.
+  expanding: Dict[Int, Bool]
+  -- Functions whose first argument is the container of their result (§5.1, structural measures).
+  projections: Dict[Text, Bool]
+  -- What a bound name stands for: the walker binds every name to a fresh constant equal to its value.
+  aliases: Dict[Text, formula.Formula]
+}
+
+pub fn new_lw(file: Int) -> Lw may alloc {
+  return Lw {
+    file: file,
+    sorts: Map.dict(),
+    fns: Map.dict(),
+    axioms: List.builder(),
+    text_lits: Map.dict(),
+    fresh: 0,
+    it_term: None,
+    result_term: None,
+    olds: Map.dict(),
+    learned: List.builder(),
+    rebound: List.builder(),
+    terms: Map.dict(),
+    calls: Map.dict(),
+    subst_stack: [],
+    type_fact_depth: 0,
+    expanding: Map.dict(),
+    projections: Map.dict(),
+    aliases: Map.dict()
+  }
+}
+
+-- The bound on nested lowering (callee contracts within callee contracts).
+pub const max_depth: Int = 100000
+
+fn skip() -> Unit {
+  return Unit
+}
+
+fn or_neg(o: Option[Int]) -> Int {
+  match o with
+  | Some(value) -> return value
+  | None -> return -1
+}
+
+pub fn key(lw: Lw, tag: Int, span: ast.Span) -> Int {
+  return defs.node_key(file: lw.file, tag: tag, span: span)
+}
+
+pub fn push_axiom(lw: Lw, f: formula.Formula) -> Unit may mutate, alloc {
+  var b: Builder[formula.Formula] = lw.axioms
+  List.push(b: inout b, x: f)
+  return Unit
+}
+
+pub fn axiom_count(lw: Lw) -> Int where it >= 0 {
+  return List.built(b: lw.axioms)
+}
+
+-- Removes and returns the axioms added since `from`, in order.
+pub fn splice_axioms(lw: Lw, from: Int where it >= 0) -> List[formula.Formula] may mutate, alloc {
+  var b: Builder[formula.Formula] = lw.axioms
+  var taken: Builder[formula.Formula] = List.builder()
+  var guard: Int where it >= 0 = List.built(b: b)
+  loop while List.built(b: b) > from and guard > 0
+    invariant guard >= 0
+    decreases guard
+  {
+    guard = guard - 1
+    match List.pop(b: inout b) with
+    | Some(value) -> List.push(b: inout taken, x: value)
+    | None -> guard = 0
+  }
+  return List.reverse(xs: List.finish(b: taken))
+}
+
+pub fn take_learned(lw: Lw) -> List[formula.Formula] may mutate, alloc {
+  var b: Builder[formula.Formula] = lw.learned
+  var taken: Builder[formula.Formula] = List.builder()
+  var guard: Int where it >= 0 = List.built(b: b)
+  loop while List.built(b: b) > 0 and guard > 0
+    invariant guard >= 0
+    decreases guard
+  {
+    guard = guard - 1
+    match List.pop(b: inout b) with
+    | Some(value) -> List.push(b: inout taken, x: value)
+    | None -> guard = 0
+  }
+  return List.reverse(xs: List.finish(b: taken))
+}
+
+-- Removes and returns the variables the last lowering re-bound, in order.
+pub fn take_rebound(lw: Lw) -> List[Rebound] may mutate, alloc {
+  var b: Builder[Rebound] = lw.rebound
+  var taken: Builder[Rebound] = List.builder()
+  var guard: Int where it >= 0 = List.built(b: b)
+  loop while List.built(b: b) > 0 and guard > 0
+    invariant guard >= 0
+    decreases guard
+  {
+    guard = guard - 1
+    match List.pop(b: inout b) with
+    | Some(value) -> List.push(b: inout taken, x: value)
+    | None -> guard = 0
+  }
+  return List.reverse(xs: List.finish(b: taken))
+}
+
+fn push_learned(lw: Lw, f: formula.Formula) -> Unit may mutate, alloc {
+  var b: Builder[formula.Formula] = lw.learned
+  List.push(b: inout b, x: f)
+  return Unit
+}
+
+-- Sorts and names ----------------------------------------------------------------------------
+fn is_ident_cp(c: Int) -> Bool {
+  return (c >= 48 and c <= 57) or (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c == 95
+}
+
+fn clean_name(name: Text, allow_dot: Bool) -> Text may alloc, mutate {
+  var out: Builder[Int where 0 <= it and it <= 1114111] = List.builder()
+  for c: Int in Text.code_points(t: name) {
+    if is_ident_cp(c: c) or (allow_dot and c == 46) {
+      if c >= 0 and c <= 1114111 {
+        List.push(b: inout out, x: c)
+      }
+    } else {
+      List.push(b: inout out, x: 95)
+    }
+  }
+  return Text.of_code_points(cps: List.finish(b: out))
+}
+
+pub fn named_sort(lw: Lw, name: Text) -> formula.Sort may mutate, alloc {
+  let clean: Text = clean_name(name: name, allow_dot: false)
+  var sorts: Dict[Text, Bool] = lw.sorts
+  if not Map.contains(d: sorts, key: clean) {
+    Map.set(d: inout sorts, key: clean, value: true)
+  }
+  return formula.NamedS(name: clean)
+}
+
+-- The sort of a type; declares an uninterpreted sort when needed. Err for Float.
+pub fn sort_of(
+  lw: Lw,
+  ctx: context.Context,
+  t: types.Type
+) -> Result[formula.Sort, Text] may mutate, alloc {
+  let s: types.Type = types.strip(t: t)
+  match s with
+  | types.Prim(name) -> {
+    if name == "Int" or name == "Duration" {
+      return Ok(value: formula.IntS)
+    }
+    if name == "Bool" {
+      return Ok(value: formula.BoolS)
+    }
+    return Ok(value: named_sort(lw: lw, name: name))
+  }
+  | types.ParamT(def) -> return Ok(
+    value: named_sort(
+      lw: lw,
+      name: "T_" ++ context.get_def(ctx: ctx, id: def).name ++ "_" ++ Int.to_text(x: def)
+    )
+  )
+  | types.FnT(_, _, _) -> return Ok(value: named_sort(lw: lw, name: "Fn"))
+  | types.TypeInfoT -> return Ok(value: named_sort(lw: lw, name: "TypeInfo"))
+  | types.SpecT -> return Ok(value: named_sort(lw: lw, name: "Spec"))
+  | types.ErrorT -> return Err(error: "an expression of unknown type")
+  | _ -> return Ok(value: named_sort(lw: lw, name: slug(lw: lw, ctx: ctx, t: s)))
+}
+
+-- A stable, SMT-safe name for a type instantiation.
+pub fn slug(lw: Lw, ctx: context.Context, t: types.Type) -> Text may mutate, alloc
+  decreases t
+{
+  match t with
+  | types.Refined(base, _, _) -> return slug(lw: lw, ctx: ctx, t: base)
+  | types.Prim(name) -> return name
+  | types.RecordT(def, args) -> return context.get_def(ctx: ctx, id: def).name ++ args_slug(
+    lw: lw,
+    ctx: ctx,
+    args: args
+  )
+  | types.UnionT(def, args) -> return context.get_def(ctx: ctx, id: def).name ++ args_slug(
+    lw: lw,
+    ctx: ctx,
+    args: args
+  )
+  | types.Opaque(def, args) -> return context.get_def(ctx: ctx, id: def).name ++ args_slug(
+    lw: lw,
+    ctx: ctx,
+    args: args
+  )
+  | types.Capability(def, args, _) -> return context.get_def(ctx: ctx, id: def).name ++ args_slug(
+    lw: lw,
+    ctx: ctx,
+    args: args
+  )
+  | types.ParamT(def) -> return "T_" ++ context.get_def(
+    ctx: ctx,
+    id: def
+  ).name ++ "_" ++ Int.to_text(x: def)
+  | types.FnT(_, _, _) -> return "Fn"
+  | types.TypeInfoT -> return "TypeInfo"
+  | types.SpecT -> return "Spec"
+  | types.ErrorT -> return "Error"
+}
+
+fn args_slug(lw: Lw, ctx: context.Context, args: List[types.TypeArg]) -> Text may mutate, alloc
+  decreases args
+{
+  var out: Text = ""
+  for a: types.TypeArg in args {
+    out = out ++ "_" ++ arg_slug(lw: lw, ctx: ctx, a: a)
+  }
+  return out
+}
+
+fn arg_slug(lw: Lw, ctx: context.Context, a: types.TypeArg) -> Text may mutate, alloc
+  decreases a
+{
+  match a with
+  | types.TypeA(ty) -> return slug(lw: lw, ctx: ctx, t: ty)
+  | types.EffectsA(_) -> return "e"
+  | types.ConstA(value) -> return const_slug(lw: lw, ctx: ctx, c: value)
+}
+
+fn digits_only(t: Text) -> Text may alloc, mutate {
+  var out: Builder[Int where 0 <= it and it <= 1114111] = List.builder()
+  for c: Int in Text.code_points(t: t) {
+    if c >= 48 and c <= 57 {
+      List.push(b: inout out, x: c)
+    } else {
+      List.push(b: inout out, x: 95)
+    }
+  }
+  return Text.of_code_points(cps: List.finish(b: out))
+}
+
+fn const_slug(lw: Lw, ctx: context.Context, c: types.ConstValue) -> Text may mutate, alloc {
+  match c with
+  | types.IntV(v) -> return Int.to_text(x: v)
+  | types.DurationV(v) -> return Int.to_text(x: v)
+  | types.FloatV(v) -> return digits_only(t: Float.to_text(x: v))
+  | types.BoolV(v) -> return Bool.to_text(b: v)
+  | types.TextV(v) -> return text_lit_name(lw: lw, text: v)
+  | types.UnitV -> return "Unit"
+  | types.VariantV(def) -> return context.get_def(ctx: ctx, id: def).name
+  | types.SymV(def) -> return "s" ++ Int.to_text(x: def)
+  | types.ErrorV -> return "err"
+}
+
+pub fn declare_fn(
+  lw: Lw,
+  name: Text,
+  args: List[formula.Sort],
+  ret: formula.Sort
+) -> Text may mutate, alloc {
+  let clean: Text = clean_name(name: name, allow_dot: true)
+  var fns: Dict[Text, FnDecl] = lw.fns
+  if not Map.contains(d: fns, key: clean) {
+    Map.set(d: inout fns, key: clean, value: FnDecl { args: args, ret: ret })
+  }
+  return clean
+}
+
+-- A fresh constant of the given sort.
+pub fn fresh_const(
+  lw: inout Lw,
+  prefix: Text,
+  sort: formula.Sort
+) -> formula.Formula may mutate, alloc {
+  lw = { lw with fresh: lw.fresh + 1 }
+  let name: Text = prefix ++ "_" ++ Int.to_text(x: lw.fresh)
+  let declared: Text = declare_fn(lw: lw, name: name, args: [], ret: sort)
+  return formula.VarF(name: declared, sort: sort)
+}
+
+fn text_lit_name(lw: Lw, text: Text) -> Text may mutate, alloc {
+  match Map.find(d: lw.text_lits, key: text) with
+  | Some(value) -> return value
+  | None -> skip()
+  let name: Text = "text_lit_" ++ Int.to_text(x: Map.count(d: lw.text_lits) + 1)
+  var lits: Dict[Text, Text] = lw.text_lits
+  Map.set(d: inout lits, key: text, value: name)
+  let declared: Text = declare_fn(
+    lw: lw,
+    name: name,
+    args: [],
+    ret: named_sort(lw: lw, name: "Text")
+  )
+  return name
+}
+
+-- Distinct text literals denote distinct values.
+pub fn text_distinctness(lw: Lw) -> Option[formula.Formula] may mutate, alloc {
+  let names: List[Text] = Map.values(d: lw.text_lits)
+  if List.len(xs: names) < 2 {
+    return None
+  }
+  let text: formula.Sort = named_sort(lw: lw, name: "Text")
+  var vars: Builder[formula.Formula] = List.builder()
+  for n: Text in names {
+    List.push(b: inout vars, x: formula.VarF(name: n, sort: text))
+  }
+  return Some(
+    value: formula.AppF(fn_name: "distinct", args: List.finish(b: vars), sort: formula.BoolS)
+  )
+}
+
+-- Helpers ------------------------------------------------------------------------------------
+fn type_of_expr(lw: Lw, ctx: context.Context, e: ast.Expr) -> Result[types.Type, Text] {
+  match Map.find(
+    d: ctx.expr_types,
+    key: key(lw: lw, tag: defs.tag_expr, span: parser.span_of_expr(e: e))
+  ) with
+  | Some(value) -> return Ok(value: value)
+  | None -> return Err(error: "an expression without a type")
+}
+
+pub fn env_get(env: Dict[Int, Binding], def: Int) -> Option[Binding] {
+  return Map.find(d: env, key: def)
+}
+
+pub fn copy_env(env: Dict[Int, Binding]) -> Dict[Int, Binding] may alloc, mutate {
+  var out: Dict[Int, Binding] = Map.dict()
+  for k: Int in Map.keys(d: env) {
+    match Map.find(d: env, key: k) with
+    | Some(value) -> Map.set(d: inout out, key: k, value: value)
+    | None -> skip()
+  }
+  return out
+}
+
+pub fn with_binding(
+  env: Dict[Int, Binding],
+  def: Int,
+  b: Binding
+) -> Dict[Int, Binding] may alloc, mutate {
+  var out: Dict[Int, Binding] = copy_env(env: env)
+  Map.set(d: inout out, key: def, value: b)
+  return out
+}
+
+-- Applies the outer instantiations to a type mentioned inside a callee's contract.
+pub fn in_context(lw: Lw, t: types.Type) -> types.Type may alloc, mutate {
+  var cur: types.Type = t
+  for s: Dict[Int, types.TypeArg] in lw.subst_stack {
+    cur = types.substitute(t: cur, subst: s)
+  }
+  return cur
+}
+
+fn in_context_arg(lw: Lw, a: types.TypeArg) -> types.TypeArg may alloc, mutate {
+  var cur: types.TypeArg = a
+  for s: Dict[Int, types.TypeArg] in lw.subst_stack {
+    cur = types.substitute_arg(a: cur, subst: s)
+  }
+  return cur
+}
+
+pub fn push_subst(lw: inout Lw, subst: Dict[Int, types.TypeArg]) -> Unit may alloc, mutate {
+  lw = { lw with subst_stack: List.append(xs: lw.subst_stack, x: subst) }
+  return Unit
+}
+
+pub fn pop_subst(lw: inout Lw) -> Unit may alloc, mutate {
+  let n: Int = List.len(xs: lw.subst_stack)
+  if n > 0 {
+    lw = { lw with subst_stack: List.slice(xs: lw.subst_stack, from: 0, to: n - 1) }
+  }
+  return Unit
+}
+
+fn res_at(ctx: context.Context, k: Int) -> Option[defs.Resolution] {
+  return Map.find(d: ctx.refs, key: k)
+}
+
+fn res_def(res: Option[defs.Resolution]) -> Int {
+  match res with
+  | None -> return -1
+  | Some(value) -> {
+    match value with
+    | defs.DefRes(def) -> return def
+    | defs.CompanionRes(owner, fn_def) -> return fn_def
+    | defs.IfaceFnRes(iface, fn_def) -> return fn_def
+    | _ -> return -1
+  }
+}
+
+-- The def a name expression resolves to directly, or -1 for anything else.
+fn name_def(lw: Lw, ctx: context.Context, e: ast.Expr) -> Int {
+  match e with
+  | ast.Name(_, span) -> return res_def_only(
+    res: res_at(ctx: ctx, k: key(lw: lw, tag: defs.tag_expr, span: span))
+  )
+  | _ -> return -1
+}
+
+-- The def a resolution names directly (not through a companion or interface), or -1.
+fn res_def_only(res: Option[defs.Resolution]) -> Int {
+  match res with
+  | None -> return -1
+  | Some(value) -> {
+    match value with
+    | defs.DefRes(def) -> return def
+    | _ -> return -1
+  }
+}
+
+fn res_tag(res: Option[defs.Resolution]) -> Int {
+  match res with
+  | None -> return -1
+  | Some(value) -> {
+    match value with
+    | defs.DefRes(def) -> return 0
+    | defs.PrimRes(name) -> return 1
+    | defs.UnitRes -> return 2
+    | defs.ModuleRes(mod) -> return 3
+    | defs.TypeValueRes(owner) -> return 4
+    | defs.CompanionRes(owner, fn_def) -> return 5
+    | defs.IfaceFnRes(iface, fn_def) -> return 6
+    | defs.EffectRes(effect) -> return 7
+  }
+}
+
+fn variants_of(ctx: context.Context, union_def: Int) -> List[Int] may alloc {
+  match Map.find(d: ctx.variants, key: union_def) with
+  | Some(value) -> return value
+  | None -> return []
+}
+
+fn fields_of(ctx: context.Context, owner: Int) -> List[types.FieldInfo] may alloc {
+  match Map.find(d: ctx.fields, key: owner) with
+  | Some(value) -> return value
+  | None -> return []
+}
+
+fn find_field(fs: List[types.FieldInfo], name: Text) -> Option[types.FieldInfo] {
+  for f: types.FieldInfo in fs {
+    if f.name == name {
+      return Some(value: f)
+    }
+  }
+  return None
+}
+
+fn ok_or_some_variant(ctx: context.Context, union_def: Int) -> Option[Int] may alloc {
+  for v: Int in variants_of(ctx: ctx, union_def: union_def) {
+    let n: Text = context.get_def(ctx: ctx, id: v).name
+    if n == "Ok" or n == "Some" {
+      return Some(value: v)
+    }
+  }
+  return None
+}
+
+fn is_list_type(ctx: context.Context, t: types.Type) -> Bool may alloc {
+  return t is types.Opaque and context.qualified_name(
+    ctx: ctx,
+    id: types.def_of(t: t)
+  ) == "std.list.List"
+}
+
+fn first_type_arg(t: types.Type) -> Option[types.Type] may alloc {
+  let args: List[types.TypeArg] = types.args_of(t: t)
+  if List.len(xs: args) == 0 {
+    return None
+  }
+  let a: types.TypeArg = List.get(xs: args, i: 0)
+  if a is types.TypeA {
+    return Some(value: types.arg_type(a: a))
+  }
+  return None
+}
+
+fn or_error(o: Option[types.Type]) -> types.Type {
+  match o with
+  | Some(value) -> return value
+  | None -> return types.ErrorT
+}
+
+-- Records, unions, lists -------------------------------------------------------------------------
+-- The projection `field` of `term` of record/variant `owner`.
+pub fn projection_of(
+  lw: Lw,
+  ctx: context.Context,
+  term: formula.Formula,
+  ty: types.Type,
+  owner: Int,
+  field: Text,
+  field_type: types.Type
+) -> Result[formula.Formula, Text] may mutate, alloc {
+  let holder: formula.Sort = try sort_of(lw: lw, ctx: ctx, t: ty)
+  let fs: formula.Sort = try sort_of(lw: lw, ctx: ctx, t: field_type)
+  let name: Text = declare_fn(
+    lw: lw,
+    name: slug(lw: lw, ctx: ctx, t: ty) ++ "." ++ context.get_def(
+      ctx: ctx,
+      id: owner
+    ).name ++ "." ++ field,
+    args: [holder],
+    ret: fs
+  )
+  var projections: Dict[Text, Bool] = lw.projections
+  Map.set(d: inout projections, key: name, value: true)
+  return Ok(value: formula.AppF(fn_name: name, args: [term], sort: fs))
+}
+
+fn resolve_alias(lw: Lw, term: formula.Formula) -> formula.Formula {
+  var cur: formula.Formula = term
+  var i: Int where it >= 0 = 0
+  loop while i < 64 and cur is formula.VarF
+    invariant i >= 0
+    decreases 64 - i
+  {
+    match Map.find(d: lw.aliases, key: formula.var_name(f: cur)) with
+    | Some(value) -> cur = value
+    | None -> return cur
+    i = i + 1
+  }
+  return cur
+}
+
+-- Whether `term` is `whole` itself, through aliases: a measure passed on unchanged (§5.1).
+pub fn is_same_part(lw: Lw, term: formula.Formula, whole: formula.Formula) -> Bool may alloc {
+  return formula.formula_equals(
+    a: resolve_alias(lw: lw, term: term),
+    b: resolve_alias(lw: lw, term: whole)
+  )
+}
+
+-- Whether `term` is a proper part of `whole`: a chain of one or more projections or element reads from it.
+pub fn is_proper_part(lw: Lw, term: formula.Formula, whole: formula.Formula) -> Bool may alloc {
+  let target: formula.Formula = resolve_alias(lw: lw, term: whole)
+  var cur: formula.Formula = resolve_alias(lw: lw, term: term)
+  var steps: Int where it >= 0 = 0
+  var guard: Int where it >= 0 = 1000
+  loop while guard > 0
+    invariant guard >= 0
+    decreases guard
+  {
+    guard = guard - 1
+    if steps > 0 and (formula.formula_equals(a: cur, b: target) or formula.formula_equals(
+      a: cur,
+      b: whole
+    )) {
+      return true
+    }
+    if not cur is formula.AppF or not Map.contains(
+      d: lw.projections,
+      key: formula.fn_name_of(f: cur)
+    ) {
+      return false
+    }
+    match formula.first_arg(f: cur) with
+    | None -> return false
+    | Some(value) -> cur = resolve_alias(lw: lw, term: value)
+    steps = steps + 1
+  }
+  return false
+}
+
+pub fn subst_of_type(
+  ctx: context.Context,
+  ty: types.Type
+) -> Dict[Int, types.TypeArg] may alloc, mutate {
+  let s: types.Type = types.strip(t: ty)
+  var subst: Dict[Int, types.TypeArg] = Map.dict()
+  if not (s is types.RecordT or s is types.UnionT or s is types.Opaque) {
+    return subst
+  }
+  var ps: List[types.TParamInfo] = []
+  match Map.find(d: ctx.type_params, key: types.def_of(t: s)) with
+  | Some(value) -> ps = value
+  | None -> ps = []
+  let args: List[types.TypeArg] = types.args_of(t: s)
+  for i: Int in 0 ..< List.len(xs: ps) {
+    if i < List.len(xs: args) {
+      Map.set(
+        d: inout subst,
+        key: types.tparam_def(p: List.get(xs: ps, i: i)),
+        value: List.get(xs: args, i: i)
+      )
+    }
+  }
+  return subst
+}
+
+fn projection(
+  lw: Lw,
+  ctx: context.Context,
+  term: formula.Formula,
+  ty: types.Type,
+  owner: Int,
+  field: Text
+) -> Result[formula.Formula, Text] may mutate, alloc {
+  match find_field(fs: fields_of(ctx: ctx, owner: owner), name: field) with
+  | None -> return Err(error: "no field " ++ field)
+  | Some(value) -> return projection_of(
+    lw: lw,
+    ctx: ctx,
+    term: term,
+    ty: ty,
+    owner: owner,
+    field: field,
+    field_type: types.substitute(t: value.ty, subst: subst_of_type(ctx: ctx, ty: ty))
+  )
+}
+
+-- `tag(term) == index of variant`.
+pub fn is_variant(
+  lw: Lw,
+  ctx: context.Context,
+  term: formula.Formula,
+  ty: types.Type,
+  variant: Int
+) -> Result[formula.Formula, Text] may mutate, alloc {
+  let s: types.Type = types.strip(t: ty)
+  if not s is types.UnionT {
+    return Err(error: "variant test on a non-union")
+  }
+  let index: Int = or_neg(
+    o: List.index_of(xs: variants_of(ctx: ctx, union_def: types.def_of(t: s)), x: variant)
+  )
+  if index < 0 {
+    return Err(error: "variant of another union")
+  }
+  let holder: formula.Sort = try sort_of(lw: lw, ctx: ctx, t: ty)
+  let tag: Text = declare_fn(
+    lw: lw,
+    name: slug(lw: lw, ctx: ctx, t: ty) ++ ".tag",
+    args: [holder],
+    ret: formula.IntS
+  )
+  return Ok(
+    value: formula.eq(
+      a: formula.AppF(fn_name: tag, args: [term], sort: formula.IntS),
+      b: formula.IntF(v: index)
+    )
+  )
+}
+
+record ListFns {
+  len: Text
+  get: Text
+  elem: types.Type
+}
+
+fn list_fns(
+  lw: Lw,
+  ctx: context.Context,
+  ty: types.Type
+) -> Result[ListFns, Text] may mutate, alloc {
+  let s: types.Type = types.strip(t: ty)
+  if not is_list_type(ctx: ctx, t: s) {
+    return Err(error: "not a list")
+  }
+  let elem: Option[types.Type] = first_type_arg(t: s)
+  if elem is None {
+    return Err(error: "not a list")
+  }
+  let sort: formula.Sort = try sort_of(lw: lw, ctx: ctx, t: ty)
+  let elem_sort: formula.Sort = try sort_of(lw: lw, ctx: ctx, t: or_error(o: elem))
+  let len: Text = declare_fn(
+    lw: lw,
+    name: slug(lw: lw, ctx: ctx, t: ty) ++ ".len",
+    args: [sort],
+    ret: formula.IntS
+  )
+  let get: Text = declare_fn(
+    lw: lw,
+    name: slug(lw: lw, ctx: ctx, t: ty) ++ ".get",
+    args: [sort, formula.IntS],
+    ret: elem_sort
+  )
+  return Ok(value: ListFns { len: len, get: get, elem: or_error(o: elem) })
+}
+
+pub fn list_len(
+  lw: Lw,
+  ctx: context.Context,
+  term: formula.Formula,
+  ty: types.Type
+) -> Result[formula.Formula, Text] may mutate, alloc {
+  let fns: ListFns = try list_fns(lw: lw, ctx: ctx, ty: ty)
+  return Ok(value: formula.AppF(fn_name: fns.len, args: [term], sort: formula.IntS))
+}
+
+pub fn list_get(
+  lw: Lw,
+  ctx: context.Context,
+  term: formula.Formula,
+  ty: types.Type,
+  index: formula.Formula
+) -> Result[formula.Formula, Text] may mutate, alloc {
+  let fns: ListFns = try list_fns(lw: lw, ctx: ctx, ty: ty)
+  var projections: Dict[Text, Bool] = lw.projections
+  Map.set(d: inout projections, key: fns.get, value: true)
+  let elem_sort: formula.Sort = try sort_of(lw: lw, ctx: ctx, t: fns.elem)
+  return Ok(value: formula.AppF(fn_name: fns.get, args: [term, index], sort: elem_sort))
+}
+
+-- Constants ---------------------------------------------------------------------------------------
+-- A constant value as a term.
+pub fn const_term(
+  lw: inout Lw,
+  ctx: context.Context,
+  val: values.Value,
+  ty: types.Type
+) -> Result[formula.Formula, Text] may mutate, alloc {
+  match val with
+  | values.IntV(v) -> return Ok(value: formula.IntF(v: v))
+  | values.DurationV(v) -> return Ok(value: formula.IntF(v: v))
+  | values.BoolV(v) -> return Ok(value: formula.BoolF(v: v))
+  | values.TextV(v) -> return Ok(
+    value: formula.VarF(
+      name: text_lit_name(lw: lw, text: v),
+      sort: named_sort(lw: lw, name: "Text")
+    )
+  )
+  | _ -> {
+    let sort: formula.Sort = try sort_of(lw: lw, ctx: ctx, t: ty)
+    return Ok(value: fresh_const(lw: inout lw, prefix: "const", sort: sort))
+  }
+}
+
+-- A type index as a term, for instantiated const parameters.
+pub fn const_arg_term(
+  lw: inout Lw,
+  ctx: context.Context,
+  c: types.ConstValue,
+  env: Dict[Int, Binding]
+) -> Result[formula.Formula, Text] may mutate, alloc {
+  match c with
+  | types.IntV(v) -> return Ok(value: formula.IntF(v: v))
+  | types.DurationV(v) -> return Ok(value: formula.IntF(v: v))
+  | types.BoolV(v) -> return Ok(value: formula.BoolF(v: v))
+  | types.TextV(v) -> return Ok(
+    value: formula.VarF(
+      name: text_lit_name(lw: lw, text: v),
+      sort: named_sort(lw: lw, name: "Text")
+    )
+  )
+  | types.SymV(def) -> {
+    match env_get(env: env, def: def) with
+    | Some(value) -> return Ok(value: value.term)
+    | None -> return Err(error: "a type index outside the verifier's scope")
+  }
+  | types.VariantV(def) -> {
+    -- A constant variant of a non-generic union: a value of the union's sort carrying its tag.
+    let parent: Int = or_neg(o: context.get_def(ctx: ctx, id: def).parent)
+    if parent < 0 {
+      return Err(error: "a variant index of a generic union")
+    }
+    match Map.find(d: ctx.type_params, key: parent) with
+    | Some(value) -> {
+      if List.len(xs: value) > 0 {
+        return Err(error: "a variant index of a generic union")
+      }
+    }
+    | None -> skip()
+    let ty: types.Type = types.UnionT(def: parent, args: [])
+    let sort: formula.Sort = try sort_of(lw: lw, ctx: ctx, t: ty)
+    let term: formula.Formula = fresh_const(
+      lw: inout lw,
+      prefix: "variant_" ++ context.get_def(ctx: ctx, id: def).name,
+      sort: sort
+    )
+    push_axiom(lw: lw, f: try is_variant(lw: lw, ctx: ctx, term: term, ty: ty, variant: def))
+    return Ok(value: term)
+  }
+  | _ -> return Err(error: "an index that is not a value")
+}
+
+-- Expressions ------------------------------------------------------------------------------------
+-- Lowers `e` under `env`. Calls become uninterpreted applications (or fresh
+-- constants when effectful) with the callee's contracts as facts.
+pub fn lower(
+  fuel: Int where it >= 0,
+  lw: inout Lw,
+  ctx: context.Context,
+  e: ast.Expr,
+  env: Dict[Int, Binding]
+) -> Result[formula.Formula, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "lowering too deep")
+  }
+  let term: formula.Formula = try lower_inner(
+    fuel: fuel - 1,
+    lw: inout lw,
+    ctx: ctx,
+    e: e,
+    env: env
+  )
+  var terms: Dict[Int, formula.Formula] = lw.terms
+  Map.set(
+    d: inout terms,
+    key: key(lw: lw, tag: defs.tag_expr, span: parser.span_of_expr(e: e)),
+    value: term
+  )
+  return Ok(value: term)
+}
+
+fn lower_inner(
+  fuel: Int where it >= 0,
+  lw: inout Lw,
+  ctx: context.Context,
+  e: ast.Expr,
+  env: Dict[Int, Binding]
+) -> Result[formula.Formula, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "lowering too deep")
+  }
+  match e with
+  | ast.IntLit(value, _, _) -> return Ok(value: formula.IntF(v: value))
+  | ast.DurationLit(nanos, _) -> return Ok(value: formula.IntF(v: nanos))
+  | ast.BoolLit(value, _) -> return Ok(value: formula.BoolF(v: value))
+  | ast.FloatLit(_, _) -> {
+    -- An opaque value: Float arithmetic is not verified in v0 (§3.2).
+    let sort: formula.Sort = try sort_of(lw: lw, ctx: ctx, t: types.float_t)
+    return Ok(value: fresh_const(lw: inout lw, prefix: "float", sort: sort))
+  }
+  | ast.TextLit(value, _) -> return Ok(
+    value: formula.VarF(
+      name: text_lit_name(lw: lw, text: value),
+      sort: named_sort(lw: lw, name: "Text")
+    )
+  )
+  | ast.Name(_, _) -> return name_term(lw: inout lw, ctx: ctx, e: e, env: env)
+  | ast.It(_) -> {
+    match lw.it_term with
+    | Some(value) -> return Ok(value: value)
+    | None -> return Err(error: "`it` outside a refinement")
+  }
+  | ast.ResultRef(_) -> {
+    match lw.result_term with
+    | Some(value) -> return Ok(value: value)
+    | None -> return Err(error: "`result` outside an ensures clause")
+  }
+  | ast.Old(_, span) -> {
+    let def: Int = res_def(res: res_at(ctx: ctx, k: key(lw: lw, tag: defs.tag_expr, span: span)))
+    if def < 0 {
+      return Err(error: "`old(...)` without an entry value")
+    }
+    match Map.find(d: lw.olds, key: def) with
+    | Some(value) -> return Ok(value: value)
+    | None -> return Err(error: "`old(...)` without an entry value")
+  }
+  | ast.Ctor(_, _, _, _) -> return ctor(fuel: fuel - 1, lw: inout lw, ctx: ctx, e: e, env: env)
+  | ast.RecordUpdate(_, _, _) -> return record_update(
+    fuel: fuel - 1,
+    lw: inout lw,
+    ctx: ctx,
+    e: e,
+    env: env
+  )
+  | ast.ListLit(_, _) -> return list_lit(fuel: fuel - 1, lw: inout lw, ctx: ctx, e: e, env: env)
+  | ast.Try(expr, _, _) -> {
+    let inner: formula.Formula = try lower(
+      fuel: fuel - 1,
+      lw: inout lw,
+      ctx: ctx,
+      e: expr,
+      env: env
+    )
+    let it_type: types.Type = try type_of_expr(lw: lw, ctx: ctx, e: expr)
+    let s: types.Type = types.strip(t: it_type)
+    if not s is types.UnionT {
+      return Err(error: "`try` on a non-union")
+    }
+    let ok: Option[Int] = ok_or_some_variant(ctx: ctx, union_def: types.def_of(t: s))
+    if ok is None {
+      return Err(error: "`try` on an unknown union")
+    }
+    -- Execution continues only when the value was Ok/Some.
+    push_learned(
+      lw: lw,
+      f: try is_variant(lw: lw, ctx: ctx, term: inner, ty: it_type, variant: or_neg(o: ok))
+    )
+    return projection(
+      lw: lw,
+      ctx: ctx,
+      term: inner,
+      ty: it_type,
+      owner: or_neg(o: ok),
+      field: "value"
+    )
+  }
+  | ast.Quantifier(_, _, _, _, _, _, _) -> return quantifier(
+    fuel: fuel - 1,
+    lw: inout lw,
+    ctx: ctx,
+    e: e,
+    env: env
+  )
+  | ast.FieldAccess(_, _, _) -> return field_access(
+    fuel: fuel - 1,
+    lw: inout lw,
+    ctx: ctx,
+    e: e,
+    env: env
+  )
+  | ast.Call(_, _, _, _) -> return call(fuel: fuel - 1, lw: inout lw, ctx: ctx, e: e, env: env)
+  | ast.Unary(op, operand, _) -> {
+    let ot: types.Type = types.strip(t: try type_of_expr(lw: lw, ctx: ctx, e: operand))
+    if op == "neg" and types.prim_name(t: ot) == "Float" {
+      return Err(error: "Float arithmetic is not verified in v0 (§3.2)")
+    }
+    let v: formula.Formula = try lower(fuel: fuel - 1, lw: inout lw, ctx: ctx, e: operand, env: env)
+    if op == "not" {
+      return Ok(value: formula.not_f(x: v))
+    }
+    return Ok(value: formula.AppF(fn_name: "-", args: [v], sort: formula.IntS))
+  }
+  | ast.Binary(_, _, _, _) -> return binary(fuel: fuel - 1, lw: inout lw, ctx: ctx, e: e, env: env)
+  | ast.And(operands, _) -> {
+    var parts: Builder[formula.Formula] = List.builder()
+    for o: ast.Expr in operands {
+      match lower(fuel: fuel - 1, lw: inout lw, ctx: ctx, e: o, env: env) with
+      | Ok(value) -> List.push(b: inout parts, x: value)
+      | Err(_) -> List.push(
+        b: inout parts,
+        x: fresh_const(lw: inout lw, prefix: "unknown", sort: formula.BoolS)
+      )
+    }
+    return Ok(value: formula.and_f(xs: List.finish(b: parts)))
+  }
+  | ast.Or(operands, _) -> {
+    var parts: Builder[formula.Formula] = List.builder()
+    for o: ast.Expr in operands {
+      match lower(fuel: fuel - 1, lw: inout lw, ctx: ctx, e: o, env: env) with
+      | Ok(value) -> List.push(b: inout parts, x: value)
+      | Err(_) -> List.push(
+        b: inout parts,
+        x: fresh_const(lw: inout lw, prefix: "unknown", sort: formula.BoolS)
+      )
+    }
+    return Ok(value: formula.or_f(xs: List.finish(b: parts)))
+  }
+  | ast.Is(expr, pattern, _) -> {
+    let v: formula.Formula = try lower(fuel: fuel - 1, lw: inout lw, ctx: ctx, e: expr, env: env)
+    match pattern with
+    | ast.WildcardPat(_) -> return Ok(value: formula.true_f)
+    | ast.BindPat(_, _) -> return Ok(value: formula.true_f)
+    | ast.LitPat(literal, _) -> return Ok(
+      value: formula.eq(
+        a: v,
+        b: try lower(fuel: fuel - 1, lw: inout lw, ctx: ctx, e: literal, env: env)
+      )
+    )
+    | ast.VariantPat(_, _, span) -> {
+      let def: Int = res_def(
+        res: res_at(ctx: ctx, k: key(lw: lw, tag: defs.tag_pattern, span: span))
+      )
+      if def < 0 {
+        return Err(error: "unresolved pattern")
+      }
+      -- The subject's type is instantiated for the current call context.
+      return is_variant(
+        lw: lw,
+        ctx: ctx,
+        term: v,
+        ty: in_context(lw: lw, t: try type_of_expr(lw: lw, ctx: ctx, e: expr)),
+        variant: def
+      )
+    }
+  }
+  | _ -> {
+    let sort: formula.Sort = try sort_of(
+      lw: lw,
+      ctx: ctx,
+      t: try type_of_expr(lw: lw, ctx: ctx, e: e)
+    )
+    return Ok(value: fresh_const(lw: inout lw, prefix: "opaque", sort: sort))
+  }
+}
+
+fn name_term(
+  lw: inout Lw,
+  ctx: context.Context,
+  e: ast.Expr,
+  env: Dict[Int, Binding]
+) -> Result[formula.Formula, Text] may mutate, alloc {
+  match e with
+  | ast.Name(name, span) -> {
+    let def: Int = res_def(res: res_at(ctx: ctx, k: key(lw: lw, tag: defs.tag_expr, span: span)))
+    if def < 0 {
+      return Err(error: "`" ++ name.text ++ "` is unresolved")
+    }
+    match env_get(env: env, def: def) with
+    | Some(value) -> return Ok(value: value.term)
+    | None -> skip()
+    let d: defs.Def = context.get_def(ctx: ctx, id: def)
+    if d.kind == defs.Const {
+      match Map.find(d: ctx.const_values, key: def) with
+      | Some(value) -> return const_term(
+        lw: inout lw,
+        ctx: ctx,
+        val: value,
+        ty: or_error(o: Map.find(d: ctx.decl_types, key: def))
+      )
+      | None -> skip()
+    }
+    if d.kind == defs.Fn {
+      return Ok(
+        value: fresh_const(
+          lw: inout lw,
+          prefix: "fn_" ++ d.name,
+          sort: named_sort(lw: lw, name: "Fn")
+        )
+      )
+    }
+    return Err(error: "`" ++ d.name ++ "` is not in the verifier's scope")
+  }
+  | _ -> return Err(error: "not a name")
+}
+
+record Init {
+  name: Text
+  value: ast.Expr
+}
+
+fn inits_of(
+  args: Option[List[ast.Arg]],
+  fields: Option[List[ast.FieldInit]]
+) -> List[Init] may alloc, mutate {
+  var out: Builder[Init] = List.builder()
+  match args with
+  | Some(value) -> {
+    for a: ast.Arg in value {
+      List.push(b: inout out, x: Init { name: a.name.text, value: a.value })
+    }
+  }
+  | None -> skip()
+  match fields with
+  | Some(value) -> {
+    for f: ast.FieldInit in value {
+      List.push(b: inout out, x: Init { name: f.name.text, value: f.value })
+    }
+  }
+  | None -> skip()
+  return List.finish(b: out)
+}
+
+fn ctor(
+  fuel: Int where it >= 0,
+  lw: inout Lw,
+  ctx: context.Context,
+  e: ast.Expr,
+  env: Dict[Int, Binding]
+) -> Result[formula.Formula, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "lowering too deep")
+  }
+  match e with
+  | ast.Ctor(_, args, fields, span) -> {
+    let res: Option[defs.Resolution] = res_at(
+      ctx: ctx,
+      k: key(lw: lw, tag: defs.tag_expr, span: span)
+    )
+    let tag: Int = res_tag(res: res)
+    if tag < 0 {
+      return Err(error: "unresolved constructor")
+    }
+    let ty: types.Type = try type_of_expr(lw: lw, ctx: ctx, e: e)
+    let sort: formula.Sort = try sort_of(lw: lw, ctx: ctx, t: ty)
+    if tag == 2 {
+      return Ok(value: fresh_const(lw: inout lw, prefix: "unit", sort: sort))
+    }
+    if tag == 4 {
+      return Ok(value: fresh_const(lw: inout lw, prefix: "typeinfo", sort: sort))
+    }
+    if tag != 0 {
+      return Err(error: "unresolved constructor")
+    }
+    let d: defs.Def = context.get_def(ctx: ctx, id: res_def(res: res))
+    var prefix: Text = "r_" ++ d.name
+    if d.kind == defs.Variant {
+      prefix = "v_" ++ d.name
+    }
+    let term: formula.Formula = fresh_const(lw: inout lw, prefix: prefix, sort: sort)
+    if d.kind == defs.Variant {
+      push_axiom(lw: lw, f: try is_variant(lw: lw, ctx: ctx, term: term, ty: ty, variant: d.id))
+    }
+    for i: Init in inits_of(args: args, fields: fields) {
+      let value: formula.Formula = try lower(
+        fuel: fuel - 1,
+        lw: inout lw,
+        ctx: ctx,
+        e: i.value,
+        env: env
+      )
+      push_axiom(
+        lw: lw,
+        f: formula.eq(
+          a: try projection(lw: lw, ctx: ctx, term: term, ty: ty, owner: d.id, field: i.name),
+          b: value
+        )
+      )
+    }
+    return Ok(value: term)
+  }
+  | _ -> return Err(error: "not a constructor")
+}
+
+fn record_update(
+  fuel: Int where it >= 0,
+  lw: inout Lw,
+  ctx: context.Context,
+  e: ast.Expr,
+  env: Dict[Int, Binding]
+) -> Result[formula.Formula, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "lowering too deep")
+  }
+  match e with
+  | ast.RecordUpdate(base, fields, _) -> {
+    let ty: types.Type = try type_of_expr(lw: lw, ctx: ctx, e: e)
+    let s: types.Type = types.strip(t: ty)
+    if not s is types.RecordT {
+      return Err(error: "`with` on a non-record")
+    }
+    let base_term: formula.Formula = try lower(
+      fuel: fuel - 1,
+      lw: inout lw,
+      ctx: ctx,
+      e: base,
+      env: env
+    )
+    let sort: formula.Sort = try sort_of(lw: lw, ctx: ctx, t: ty)
+    let owner: Int = types.def_of(t: s)
+    let term: formula.Formula = fresh_const(
+      lw: inout lw,
+      prefix: "r_" ++ context.get_def(ctx: ctx, id: owner).name,
+      sort: sort
+    )
+    var updated: Dict[Text, formula.Formula] = Map.dict()
+    for f: ast.FieldInit in fields {
+      Map.set(
+        d: inout updated,
+        key: f.name.text,
+        value: try lower(fuel: fuel - 1, lw: inout lw, ctx: ctx, e: f.value, env: env)
+      )
+    }
+    for f: types.FieldInfo in fields_of(ctx: ctx, owner: owner) {
+      var fv: formula.Formula = formula.true_f
+      match Map.find(d: updated, key: f.name) with
+      | Some(value) -> fv = value
+      | None -> fv = try projection(
+        lw: lw,
+        ctx: ctx,
+        term: base_term,
+        ty: ty,
+        owner: owner,
+        field: f.name
+      )
+      push_axiom(
+        lw: lw,
+        f: formula.eq(
+          a: try projection(lw: lw, ctx: ctx, term: term, ty: ty, owner: owner, field: f.name),
+          b: fv
+        )
+      )
+    }
+    return Ok(value: term)
+  }
+  | _ -> return Err(error: "not a record update")
+}
+
+fn list_lit(
+  fuel: Int where it >= 0,
+  lw: inout Lw,
+  ctx: context.Context,
+  e: ast.Expr,
+  env: Dict[Int, Binding]
+) -> Result[formula.Formula, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "lowering too deep")
+  }
+  match e with
+  | ast.ListLit(elems, _) -> {
+    let ty: types.Type = try type_of_expr(lw: lw, ctx: ctx, e: e)
+    let sort: formula.Sort = try sort_of(lw: lw, ctx: ctx, t: ty)
+    let term: formula.Formula = fresh_const(lw: inout lw, prefix: "list", sort: sort)
+    push_axiom(
+      lw: lw,
+      f: formula.eq(
+        a: try list_len(lw: lw, ctx: ctx, term: term, ty: ty),
+        b: formula.IntF(v: List.len(xs: elems))
+      )
+    )
+    var i: Int = 0
+    for x: ast.Expr in elems {
+      let xv: formula.Formula = try lower(fuel: fuel - 1, lw: inout lw, ctx: ctx, e: x, env: env)
+      push_axiom(
+        lw: lw,
+        f: formula.eq(
+          a: try list_get(lw: lw, ctx: ctx, term: term, ty: ty, index: formula.IntF(v: i)),
+          b: xv
+        )
+      )
+      i = i + 1
+    }
+    return Ok(value: term)
+  }
+  | _ -> return Err(error: "not a list literal")
+}
+
+fn field_access(
+  fuel: Int where it >= 0,
+  lw: inout Lw,
+  ctx: context.Context,
+  e: ast.Expr,
+  env: Dict[Int, Binding]
+) -> Result[formula.Formula, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "lowering too deep")
+  }
+  match e with
+  | ast.FieldAccess(object, name, span) -> {
+    let res: Option[defs.Resolution] = res_at(
+      ctx: ctx,
+      k: key(lw: lw, tag: defs.tag_expr, span: span)
+    )
+    if res is Some {
+      let def: Int = res_def(res: res)
+      if res_tag(res: res) == 0 and def >= 0 and context.get_def(
+        ctx: ctx,
+        id: def
+      ).kind == defs.Const {
+        match Map.find(d: ctx.const_values, key: def) with
+        | Some(value) -> return const_term(
+          lw: inout lw,
+          ctx: ctx,
+          val: value,
+          ty: or_error(o: Map.find(d: ctx.decl_types, key: def))
+        )
+        | None -> skip()
+      }
+      let sort: formula.Sort = try sort_of(
+        lw: lw,
+        ctx: ctx,
+        t: try type_of_expr(lw: lw, ctx: ctx, e: e)
+      )
+      return Ok(value: fresh_const(lw: inout lw, prefix: "member", sort: sort))
+    }
+    let obj: formula.Formula = try lower(
+      fuel: fuel - 1,
+      lw: inout lw,
+      ctx: ctx,
+      e: object,
+      env: env
+    )
+    let ot: types.Type = try type_of_expr(lw: lw, ctx: ctx, e: object)
+    let s: types.Type = types.strip(t: ot)
+    if not s is types.RecordT {
+      return Err(error: "field access on a non-record")
+    }
+    return projection(
+      lw: lw,
+      ctx: ctx,
+      term: obj,
+      ty: ot,
+      owner: types.def_of(t: s),
+      field: name.text
+    )
+  }
+  | _ -> return Err(error: "not a field access")
+}
+
+fn quantifier(
+  fuel: Int where it >= 0,
+  lw: inout Lw,
+  ctx: context.Context,
+  e: ast.Expr,
+  env: Dict[Int, Binding]
+) -> Result[formula.Formula, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "lowering too deep")
+  }
+  match e with
+  | ast.Quantifier(quant, _, _, domain, where_, body, span) -> {
+    let binder: Int = or_neg(
+      o: Map.find(d: ctx.def_of, key: key(lw: lw, tag: defs.tag_expr, span: span))
+    )
+    let binder_type: Option[types.Type] = Map.find(d: ctx.decl_types, key: binder)
+    if binder < 0 or binder_type is None {
+      return Err(error: "unresolved binder")
+    }
+    let bt: types.Type = or_error(o: binder_type)
+    lw = { lw with fresh: lw.fresh + 1 }
+    let name: Text = "q_" ++ context.get_def(ctx: ctx, id: binder).name ++ "_" ++ Int.to_text(
+      x: lw.fresh
+    )
+    let sort: formula.Sort = try sort_of(lw: lw, ctx: ctx, t: bt)
+    let is_forall: Bool = quant == "forall"
+    match domain with
+    | None -> {
+      if types.prim_name(t: types.strip(t: bt)) == "Bool" {
+        let t: formula.Formula = try lower(
+          fuel: fuel - 1,
+          lw: inout lw,
+          ctx: ctx,
+          e: body,
+          env: with_binding(env: env, def: binder, b: Binding { term: formula.true_f, ty: bt })
+        )
+        let f: formula.Formula = try lower(
+          fuel: fuel - 1,
+          lw: inout lw,
+          ctx: ctx,
+          e: body,
+          env: with_binding(env: env, def: binder, b: Binding { term: formula.false_f, ty: bt })
+        )
+        if is_forall {
+          return Ok(value: formula.and_f(xs: [t, f]))
+        }
+        return Ok(value: formula.or_f(xs: [t, f]))
+      }
+      return Err(error: "quantification over a finite union is not lowered in v0")
+    }
+    | Some(value) -> {
+      match value with
+      | ast.RangeDomain(lo, hi, _) -> {
+        let x: formula.Formula = formula.VarF(name: name, sort: sort)
+        let body_env: Dict[Int, Binding] = with_binding(
+          env: env,
+          def: binder,
+          b: Binding { term: x, ty: bt }
+        )
+        let dom: formula.Formula = formula.and_f(
+          xs: [
+            formula.AppF(
+              fn_name: "<=",
+              args: [try lower(fuel: fuel - 1, lw: inout lw, ctx: ctx, e: lo, env: env), x],
+              sort: formula.BoolS
+            ),
+            formula.AppF(
+              fn_name: "<",
+              args: [x, try lower(fuel: fuel - 1, lw: inout lw, ctx: ctx, e: hi, env: env)],
+              sort: formula.BoolS
+            )
+          ]
+        )
+        let scoped: Int where it >= 0 = axiom_count(lw: lw)
+        let where_f: formula.Formula = try lower_where(
+          fuel: fuel - 1,
+          lw: inout lw,
+          ctx: ctx,
+          where_: where_,
+          env: body_env
+        )
+        let body_f: formula.Formula = try lower(
+          fuel: fuel - 1,
+          lw: inout lw,
+          ctx: ctx,
+          e: body,
+          env: body_env
+        )
+        let under: List[formula.Formula] = splice_axioms(lw: lw, from: scoped)
+        var inner: formula.Formula = formula.true_f
+        if is_forall {
+          inner = formula.implies_f(a: formula.and_f(xs: [dom, where_f] ++ under), b: body_f)
+        } else {
+          inner = formula.and_f(xs: [dom, where_f] ++ under ++ [body_f])
+        }
+        return Ok(
+          value: formula.QuantF(
+            quant: quant,
+            vars: [formula.Bound { name: name, sort: sort }],
+            body: inner
+          )
+        )
+      }
+      | ast.InDomain(expr, _) -> {
+        let dt: types.Type = try type_of_expr(lw: lw, ctx: ctx, e: expr)
+        var list: formula.Formula = try lower(
+          fuel: fuel - 1,
+          lw: inout lw,
+          ctx: ctx,
+          e: expr,
+          env: env
+        )
+        var list_type: types.Type = dt
+        var guard: formula.Formula = formula.true_f
+        let s: types.Type = types.strip(t: dt)
+        if s is types.UnionT {
+          -- Result[List[T], E] / Option[List[T]]: quantify over the Ok/Some payload.
+          let ok: Option[Int] = ok_or_some_variant(ctx: ctx, union_def: types.def_of(t: s))
+          if ok is None {
+            return Err(error: "quantifier over an unknown union")
+          }
+          guard = try is_variant(lw: lw, ctx: ctx, term: list, ty: dt, variant: or_neg(o: ok))
+          let payload: Option[types.FieldInfo] = find_field(
+            fs: fields_of(ctx: ctx, owner: or_neg(o: ok)),
+            name: "value"
+          )
+          if payload is None {
+            return Err(error: "malformed Ok")
+          }
+          list_type = types.substitute(
+            t: field_type_or(o: payload),
+            subst: subst_of_type(ctx: ctx, ty: dt)
+          )
+          list = try projection(
+            lw: lw,
+            ctx: ctx,
+            term: list,
+            ty: dt,
+            owner: or_neg(o: ok),
+            field: "value"
+          )
+        }
+        let idx: formula.Formula = formula.VarF(name: name ++ "_i", sort: formula.IntS)
+        let in_range: formula.Formula = formula.and_f(
+          xs: [
+            formula.AppF(fn_name: "<=", args: [formula.IntF(v: 0), idx], sort: formula.BoolS),
+            formula.AppF(
+              fn_name: "<",
+              args: [idx, try list_len(lw: lw, ctx: ctx, term: list, ty: list_type)],
+              sort: formula.BoolS
+            )
+          ]
+        )
+        let elem: formula.Formula = try list_get(
+          lw: lw,
+          ctx: ctx,
+          term: list,
+          ty: list_type,
+          index: idx
+        )
+        let body_env: Dict[Int, Binding] = with_binding(
+          env: env,
+          def: binder,
+          b: Binding { term: elem, ty: bt }
+        )
+        let scoped: Int where it >= 0 = axiom_count(lw: lw)
+        let where_f: formula.Formula = try lower_where(
+          fuel: fuel - 1,
+          lw: inout lw,
+          ctx: ctx,
+          where_: where_,
+          env: body_env
+        )
+        let body_f: formula.Formula = try lower(
+          fuel: fuel - 1,
+          lw: inout lw,
+          ctx: ctx,
+          e: body,
+          env: body_env
+        )
+        -- Facts produced under the binder (callee contracts, constructor definitions) stay under it.
+        let under: List[formula.Formula] = splice_axioms(lw: lw, from: scoped)
+        var inner: formula.Formula = formula.true_f
+        if is_forall {
+          inner = formula.implies_f(a: formula.and_f(xs: [in_range, where_f] ++ under), b: body_f)
+        } else {
+          inner = formula.and_f(xs: [in_range, where_f] ++ under ++ [body_f])
+        }
+        let q: formula.Formula = formula.QuantF(
+          quant: quant,
+          vars: [formula.Bound { name: name ++ "_i", sort: formula.IntS }],
+          body: inner
+        )
+        if is_forall {
+          return Ok(value: formula.implies_f(a: guard, b: q))
+        }
+        return Ok(value: formula.and_f(xs: [guard, q]))
+      }
+    }
+  }
+  | _ -> return Err(error: "not a quantifier")
+}
+
+fn field_type_or(o: Option[types.FieldInfo]) -> types.Type {
+  match o with
+  | Some(value) -> return value.ty
+  | None -> return types.ErrorT
+}
+
+fn lower_where(
+  fuel: Int where it >= 0,
+  lw: inout Lw,
+  ctx: context.Context,
+  where_: Option[ast.Expr],
+  env: Dict[Int, Binding]
+) -> Result[formula.Formula, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "lowering too deep")
+  }
+  match where_ with
+  | None -> return Ok(value: formula.true_f)
+  | Some(value) -> return lower(fuel: fuel - 1, lw: inout lw, ctx: ctx, e: value, env: env)
+}
+
+fn binary(
+  fuel: Int where it >= 0,
+  lw: inout Lw,
+  ctx: context.Context,
+  e: ast.Expr,
+  env: Dict[Int, Binding]
+) -> Result[formula.Formula, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "lowering too deep")
+  }
+  match e with
+  | ast.Binary(op, left, right, _) -> {
+    let lt: types.Type = types.strip(t: try type_of_expr(lw: lw, ctx: ctx, e: left))
+    if types.prim_name(t: lt) == "Float" and op != "==" and op != "!=" {
+      return Err(error: "Float arithmetic is not verified in v0 (§3.2)")
+    }
+    let l: formula.Formula = try lower(fuel: fuel - 1, lw: inout lw, ctx: ctx, e: left, env: env)
+    let r: formula.Formula = try lower(fuel: fuel - 1, lw: inout lw, ctx: ctx, e: right, env: env)
+    if op == "+" or op == "-" or op == "*" {
+      return Ok(value: formula.AppF(fn_name: op, args: [l, r], sort: formula.IntS))
+    }
+    if op == "/" {
+      return Ok(value: formula.AppF(fn_name: "div", args: [l, r], sort: formula.IntS))
+    }
+    if op == "%" {
+      return Ok(value: formula.AppF(fn_name: "mod", args: [l, r], sort: formula.IntS))
+    }
+    if op == "++" {
+      let ty: types.Type = try type_of_expr(lw: lw, ctx: ctx, e: e)
+      let sort: formula.Sort = try sort_of(lw: lw, ctx: ctx, t: ty)
+      if types.prim_name(t: lt) == "Text" {
+        let concat: Text = declare_fn(lw: lw, name: "Text.concat", args: [sort, sort], ret: sort)
+        return Ok(value: formula.AppF(fn_name: concat, args: [l, r], sort: sort))
+      }
+      let term: formula.Formula = fresh_const(lw: inout lw, prefix: "concat", sort: sort)
+      push_axiom(
+        lw: lw,
+        f: formula.eq(
+          a: try list_len(lw: lw, ctx: ctx, term: term, ty: ty),
+          b: formula.AppF(
+            fn_name: "+",
+            args: [
+              try list_len(lw: lw, ctx: ctx, term: l, ty: ty),
+              try list_len(lw: lw, ctx: ctx, term: r, ty: ty)
+            ],
+            sort: formula.IntS
+          )
+        )
+      )
+      return Ok(value: term)
+    }
+    if op == "==" {
+      return Ok(value: formula.eq(a: l, b: r))
+    }
+    if op == "!=" {
+      return Ok(value: formula.not_f(x: formula.eq(a: l, b: r)))
+    }
+    if op == "implies" {
+      return Ok(value: formula.implies_f(a: l, b: r))
+    }
+    return Ok(value: formula.AppF(fn_name: op, args: [l, r], sort: formula.BoolS))
+  }
+  | _ -> return Err(error: "not a binary expression")
+}
+
+-- Calls ------------------------------------------------------------------------------------------
+fn opaque_result(
+  fuel: Int where it >= 0,
+  lw: inout Lw,
+  ctx: context.Context,
+  ty: types.Type,
+  prefix: Text
+) -> Result[formula.Formula, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "lowering too deep")
+  }
+  let sort: formula.Sort = try sort_of(lw: lw, ctx: ctx, t: ty)
+  let term: formula.Formula = fresh_const(lw: inout lw, prefix: prefix, sort: sort)
+  type_facts(fuel: fuel - 1, lw: inout lw, ctx: ctx, term: term, ty: ty, env: Map.dict())
+  return Ok(value: term)
+}
+
+fn param_index(sig: types.Signature, name: Text) -> Int {
+  var i: Int = 0
+  for p: types.FnParam in sig.params {
+    if p.name == name {
+      return i
+    }
+    i = i + 1
+  }
+  return -1
+}
+
+fn find_arg(args: List[ast.Arg], name: Text) -> Option[ast.Arg] {
+  for a: ast.Arg in args {
+    if a.name.text == name {
+      return Some(value: a)
+    }
+  }
+  return None
+}
+
+fn is_pure(sig: types.Signature) -> Bool {
+  for e: defs.Effect in effectset.values(s: sig.effects) {
+    if e != defs.PrimEffect(name: "alloc") {
+      return false
+    }
+  }
+  return true
+}
+
+fn has_inout(sig: types.Signature) -> Bool {
+  for p: types.FnParam in sig.params {
+    if p.is_inout {
+      return true
+    }
+  }
+  return false
+}
+
+fn sorts_text(sorts: List[formula.Sort]) -> Text may alloc, mutate {
+  var parts: Builder[Text] = List.builder()
+  for s: formula.Sort in sorts {
+    List.push(b: inout parts, x: formula.sort_text(s: s))
+  }
+  return Text.join(parts: List.finish(b: parts), sep: ",")
+}
+
+fn call(
+  fuel: Int where it >= 0,
+  lw: inout Lw,
+  ctx: context.Context,
+  e: ast.Expr,
+  env: Dict[Int, Binding]
+) -> Result[formula.Formula, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "lowering too deep")
+  }
+  match e with
+  | ast.Call(callee, _, args, span) -> {
+    let res: Option[defs.Resolution] = res_at(
+      ctx: ctx,
+      k: key(lw: lw, tag: defs.tag_expr, span: parser.span_of_expr(e: callee))
+    )
+    let ret_type: types.Type = try type_of_expr(lw: lw, ctx: ctx, e: e)
+    let fn_id: Int = res_def(res: res)
+    if fn_id < 0 {
+      return opaque_result(fuel: fuel - 1, lw: inout lw, ctx: ctx, ty: ret_type, prefix: "call")
+    }
+    let fn_def: defs.Def = context.get_def(ctx: ctx, id: fn_id)
+    let sig_opt: Option[types.Signature] = Map.find(d: ctx.signatures, key: fn_id)
+    if sig_opt is None or (fn_def.kind != defs.Fn and fn_def.kind != defs.IfaceFn) {
+      return opaque_result(fuel: fuel - 1, lw: inout lw, ctx: ctx, ty: ret_type, prefix: "call")
+    }
+    let sig: types.Signature = sig_or_empty(o: sig_opt)
+    let call_key: Int = key(lw: lw, tag: defs.tag_expr, span: span)
+    var targs: List[types.TypeArg] = []
+    match Map.find(d: ctx.instantiations, key: call_key) with
+    | Some(value) -> targs = value
+    | None -> targs = []
+    var subst: Dict[Int, types.TypeArg] = Map.dict()
+    for i: Int in 0 ..< List.len(xs: sig.tparams) {
+      if i < List.len(xs: targs) {
+        Map.set(
+          d: inout subst,
+          key: types.tparam_def(p: List.get(xs: sig.tparams, i: i)),
+          value: in_context_arg(lw: lw, a: List.get(xs: targs, i: i))
+        )
+      }
+    }
+    -- Value parameters used as indices in the callee's types denote the constants passed for them.
+    match Map.find(d: ctx.index_bindings, key: call_key) with
+    | Some(value) -> {
+      for pd: Int in Map.keys(d: value) {
+        let a_opt: Option[types.TypeArg] = Map.find(d: value, key: pd)
+        if a_opt is Some {
+          Map.set(d: inout subst, key: pd, value: in_context_arg(lw: lw, a: arg_or(o: a_opt)))
+        }
+      }
+    }
+    | None -> skip()
+    var arg_terms: Dict[Int, Binding] = Map.dict()
+    var ordered: Builder[formula.Formula] = List.builder()
+    var sorts: Builder[formula.Sort] = List.builder()
+    for p: types.TParamInfo in sig.tparams {
+      match p with
+      | types.ConstP(def, ty) -> {
+        let a: Option[types.TypeArg] = Map.find(d: subst, key: def)
+        if a is None or not arg_or(o: a) is types.ConstA {
+          return Err(error: "an uninstantiated index")
+        }
+        let term: formula.Formula = try const_arg_term(
+          lw: inout lw,
+          ctx: ctx,
+          c: types.arg_const(a: arg_or(o: a)),
+          env: env
+        )
+        let pt: types.Type = in_context(lw: lw, t: ty)
+        Map.set(d: inout arg_terms, key: def, value: Binding { term: term, ty: pt })
+        List.push(b: inout ordered, x: term)
+        List.push(b: inout sorts, x: try sort_of(lw: lw, ctx: ctx, t: pt))
+      }
+      | _ -> skip()
+    }
+    var param_types: Dict[Text, types.Type] = Map.dict()
+    -- The values the callee sees on exit: an `inout` parameter's is a fresh value of its type, distinct from
+    -- the one passed, so that an `ensures` relating the two (`built(b) == built(old(b)) + 1`) is a fact about
+    -- the change and not a contradiction.
+    var post_terms: Dict[Int, Binding] = copy_env(env: arg_terms)
+    var inout_posts: Builder[Binding] = List.builder()
+    for i: Int in 0 ..< List.len(xs: sig.params) {
+      let p: types.FnParam = List.get(xs: sig.params, i: i)
+      if i >= List.len(xs: sig.param_defs) {
+        return Err(error: "missing argument " ++ p.name)
+      }
+      let pd: Int = List.get(xs: sig.param_defs, i: i)
+      let a: Option[ast.Arg] = find_arg(args: args, name: p.name)
+      if a is None {
+        return Err(error: "missing argument " ++ p.name)
+      }
+      let arg: ast.Arg = arg_node_or(o: a)
+      let pt: types.Type = in_context(lw: lw, t: types.substitute(t: p.ty, subst: subst))
+      Map.set(d: inout param_types, key: p.name, value: pt)
+      var term: formula.Formula = formula.true_f
+      match lower(fuel: fuel - 1, lw: inout lw, ctx: ctx, e: arg.value, env: env) with
+      | Ok(value) -> term = value
+      | Err(_) -> {
+        -- An argument the verifier cannot read (a float expression) is an arbitrary value of its type.
+        term = fresh_const(
+          lw: inout lw,
+          prefix: "arg_" ++ p.name,
+          sort: try sort_of(lw: lw, ctx: ctx, t: pt)
+        )
+        var terms: Dict[Int, formula.Formula] = lw.terms
+        Map.set(
+          d: inout terms,
+          key: key(lw: lw, tag: defs.tag_expr, span: parser.span_of_expr(e: arg.value)),
+          value: term
+        )
+      }
+      Map.set(d: inout arg_terms, key: pd, value: Binding { term: term, ty: pt })
+      List.push(b: inout ordered, x: term)
+      List.push(b: inout sorts, x: try sort_of(lw: lw, ctx: ctx, t: pt))
+      if not p.is_inout {
+        Map.set(d: inout post_terms, key: pd, value: Binding { term: term, ty: pt })
+      } else {
+        let post: formula.Formula = fresh_const(
+          lw: inout lw,
+          prefix: "post_" ++ p.name,
+          sort: try sort_of(lw: lw, ctx: ctx, t: pt)
+        )
+        Map.set(d: inout post_terms, key: pd, value: Binding { term: post, ty: pt })
+        List.push(b: inout inout_posts, x: Binding { term: post, ty: pt })
+        let target: Int = name_def(lw: lw, ctx: ctx, e: arg.value)
+        if target >= 0 {
+          var rebound: Builder[Rebound] = lw.rebound
+          List.push(b: inout rebound, x: Rebound { def: target, term: post })
+        }
+      }
+    }
+    for b: Binding in List.finish(b: inout_posts) {
+      type_facts(fuel: fuel - 1, lw: inout lw, ctx: ctx, term: b.term, ty: b.ty, env: post_terms)
+    }
+    let ret: types.Type = in_context(lw: lw, t: types.substitute(t: sig.ret, subst: subst))
+    var calls: Dict[Int, CallInfo] = lw.calls
+    Map.set(
+      d: inout calls,
+      key: call_key,
+      value: CallInfo { args: arg_terms, param_types: param_types, subst: subst }
+    )
+    let q: Text = context.qualified_name(ctx: ctx, id: fn_id)
+    var res_t: formula.Formula = formula.true_f
+    var handled: Bool = false
+    let xs_i: Int = param_index(sig: sig, name: "xs")
+    let i_i: Int = param_index(sig: sig, name: "i")
+    if q == "std.list.get" and xs_i >= 0 and i_i >= 0 and xs_i < List.len(
+      xs: sig.param_defs
+    ) and i_i < List.len(xs: sig.param_defs) {
+      let xs_arg: Option[Binding] = Map.find(
+        d: arg_terms,
+        key: List.get(xs: sig.param_defs, i: xs_i)
+      )
+      let i_arg: Option[Binding] = Map.find(d: arg_terms, key: List.get(xs: sig.param_defs, i: i_i))
+      if xs_arg is Some and i_arg is Some {
+        -- An element read is the list's projection (§5.1 structural measures).
+        let xb: Binding = binding_or(o: xs_arg)
+        res_t = try list_get(
+          lw: lw,
+          ctx: ctx,
+          term: xb.term,
+          ty: xb.ty,
+          index: binding_or(o: i_arg).term
+        )
+        handled = true
+      }
+    }
+    if not handled and q == "std.list.len" and xs_i >= 0 and xs_i < List.len(xs: sig.param_defs) {
+      let xs_arg: Option[Binding] = Map.find(
+        d: arg_terms,
+        key: List.get(xs: sig.param_defs, i: xs_i)
+      )
+      if xs_arg is Some {
+        let xb: Binding = binding_or(o: xs_arg)
+        res_t = try list_len(lw: lw, ctx: ctx, term: xb.term, ty: xb.ty)
+        handled = true
+      }
+    }
+    if not handled {
+      let ret_sort: formula.Sort = try sort_of(lw: lw, ctx: ctx, t: ret)
+      if is_pure(sig: sig) and not has_inout(sig: sig) {
+        -- One uninterpreted function per instantiation, named by its sorts so that instantiations never clash.
+        let sort_list: List[formula.Sort] = List.finish(b: sorts)
+        let name: Text = declare_fn(
+          lw: lw,
+          name: q ++ "[" ++ sorts_text(sorts: sort_list ++ [ret_sort]) ++ "]",
+          args: sort_list,
+          ret: ret_sort
+        )
+        res_t = formula.AppF(fn_name: name, args: List.finish(b: ordered), sort: ret_sort)
+      } else {
+        res_t = fresh_const(lw: inout lw, prefix: "call_" ++ fn_def.name, sort: ret_sort)
+      }
+    }
+    push_subst(lw: inout lw, subst: subst)
+    callee_facts(
+      fuel: fuel - 1,
+      lw: inout lw,
+      ctx: ctx,
+      fn_def: fn_def,
+      sig: sig,
+      args: post_terms,
+      pre: arg_terms,
+      res: res_t,
+      ret: ret
+    )
+    pop_subst(lw: inout lw)
+    return Ok(value: res_t)
+  }
+  | _ -> return Err(error: "not a call")
+}
+
+fn sig_or_empty(o: Option[types.Signature]) -> types.Signature may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return types.Signature {
+    def: -1,
+    tparams: [],
+    params: [],
+    param_defs: [],
+    ret: types.ErrorT,
+    effects: effectset.empty(),
+    contracts: [],
+    is_const_fn: false,
+    is_intrinsic: false
+  }
+}
+
+fn arg_or(o: Option[types.TypeArg]) -> types.TypeArg {
+  match o with
+  | Some(value) -> return value
+  | None -> return types.TypeA(ty: types.ErrorT)
+}
+
+fn arg_node_or(o: Option[ast.Arg]) -> ast.Arg may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return ast.Arg {
+    name: ast.Ident { text: "", span: ast.Span { start: 0, end: 0 } },
+    is_inout: false,
+    value: ast.IntLit(value: 0, text: "0", span: ast.Span { start: 0, end: 0 }),
+    span: ast.Span { start: 0, end: 0 }
+  }
+}
+
+fn binding_or(o: Option[Binding]) -> Binding {
+  match o with
+  | Some(value) -> return value
+  | None -> return Binding { term: formula.true_f, ty: types.ErrorT }
+}
+
+-- The callee's ensures clauses and return refinements, instantiated for this application.
+-- The callee's ensures clauses and return refinements, instantiated for this application: `args` binds
+-- each parameter to its value on exit, `pre` to the value passed (what `old(param)` denotes).
+fn callee_facts(
+  fuel: Int where it >= 0,
+  lw: inout Lw,
+  ctx: context.Context,
+  fn_def: defs.Def,
+  sig: types.Signature,
+  args: Dict[Int, Binding],
+  pre: Dict[Int, Binding],
+  res: formula.Formula,
+  ret: types.Type
+) -> Unit may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Unit
+  }
+  type_facts(fuel: fuel - 1, lw: inout lw, ctx: ctx, term: res, ty: ret, env: args)
+  -- A contract that calls its own function (`ensures compare(a, a) == 0`) is stated once, not unfolded forever.
+  if Map.contains(d: lw.expanding, key: fn_def.id) {
+    return Unit
+  }
+  var expanding: Dict[Int, Bool] = lw.expanding
+  Map.set(d: inout expanding, key: fn_def.id, value: true)
+  callee_contracts(
+    fuel: fuel - 1,
+    lw: inout lw,
+    ctx: ctx,
+    fn_def: fn_def,
+    sig: sig,
+    args: args,
+    pre: pre,
+    res: res
+  )
+  Map.remove(d: inout expanding, key: fn_def.id)
+  return Unit
+}
+
+fn callee_contracts(
+  fuel: Int where it >= 0,
+  lw: inout Lw,
+  ctx: context.Context,
+  fn_def: defs.Def,
+  sig: types.Signature,
+  args: Dict[Int, Binding],
+  pre: Dict[Int, Binding],
+  res: formula.Formula
+) -> Unit may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Unit
+  }
+  let saved_result: Option[formula.Formula] = lw.result_term
+  let saved_olds: Dict[Int, formula.Formula] = lw.olds
+  let saved_file: Int = lw.file
+  var olds: Dict[Int, formula.Formula] = Map.dict()
+  for d: Int in Map.keys(d: pre) {
+    if context.get_def(ctx: ctx, id: d).kind == defs.Param {
+      match Map.find(d: pre, key: d) with
+      | Some(value) -> Map.set(d: inout olds, key: d, value: value.term)
+      | None -> skip()
+    }
+  }
+  lw = { lw with result_term: Some(value: res), olds: olds, file: fn_def.file }
+  for c: ast.Contract in sig.contracts {
+    if c.clause == "ensures" {
+      match lower(fuel: fuel - 1, lw: inout lw, ctx: ctx, e: c.expr, env: args) with
+      | Ok(value) -> push_axiom(lw: lw, f: value)
+      | Err(_) -> skip()
+    }
+  }
+  lw = { lw with result_term: saved_result, olds: saved_olds, file: saved_file }
+  return Unit
+}
+
+-- Type-derived facts -------------------------------------------------------------------------------
+fn ok_or(r: Result[formula.Formula, Text]) -> formula.Formula {
+  match r with
+  | Ok(value) -> return value
+  | Err(_) -> return formula.true_f
+}
+
+-- Facts a well-typed value of `ty` satisfies: its refinements, recursively
+-- through fields and elements. `env` resolves the names a refinement may
+-- mention (earlier parameters, §3.2); sibling fields are added for records
+-- and variants (§3.3).
+pub fn type_facts(
+  fuel: Int where it >= 0,
+  lw: inout Lw,
+  ctx: context.Context,
+  term: formula.Formula,
+  ty: types.Type,
+  env: Dict[Int, Binding]
+) -> Unit may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 or lw.type_fact_depth > 3 {
+    return Unit
+  }
+  let depth: Int where it >= 0 = lw.type_fact_depth
+  lw = { lw with type_fact_depth: depth + 1 }
+  refinement_facts(fuel: fuel - 1, lw: inout lw, ctx: ctx, term: term, ty: ty, env: env)
+  let s: types.Type = types.strip(t: ty)
+  if s is types.RecordT {
+    let subst: Dict[Int, types.TypeArg] = subst_of_type(ctx: ctx, ty: s)
+    let owner: Int = types.def_of(t: s)
+    var siblings: Dict[Int, Binding] = copy_env(env: env)
+    let fs: List[types.FieldInfo] = fields_of(ctx: ctx, owner: owner)
+    for f: types.FieldInfo in fs {
+      let ft: types.Type = types.substitute(t: f.ty, subst: subst)
+      match projection_of(
+        lw: lw,
+        ctx: ctx,
+        term: term,
+        ty: s,
+        owner: owner,
+        field: f.name,
+        field_type: ft
+      ) with
+      | Ok(value) -> Map.set(d: inout siblings, key: f.def, value: Binding { term: value, ty: ft })
+      | Err(_) -> skip()
+    }
+    for f: types.FieldInfo in fs {
+      let ft: types.Type = types.substitute(t: f.ty, subst: subst)
+      if types.prim_name(t: types.strip(t: ft)) != "Float" {
+        match projection_of(
+          lw: lw,
+          ctx: ctx,
+          term: term,
+          ty: s,
+          owner: owner,
+          field: f.name,
+          field_type: ft
+        ) with
+        | Ok(value) -> type_facts(
+          fuel: fuel - 1,
+          lw: inout lw,
+          ctx: ctx,
+          term: value,
+          ty: ft,
+          env: siblings
+        )
+        | Err(_) -> skip()
+      }
+    }
+  } else {
+    if s is types.UnionT {
+      let subst: Dict[Int, types.TypeArg] = subst_of_type(ctx: ctx, ty: s)
+      for v: Int in variants_of(ctx: ctx, union_def: types.def_of(t: s)) {
+        let fs: List[types.FieldInfo] = fields_of(ctx: ctx, owner: v)
+        var siblings: Dict[Int, Binding] = copy_env(env: env)
+        for f: types.FieldInfo in fs {
+          let ft: types.Type = types.substitute(t: f.ty, subst: subst)
+          match projection_of(
+            lw: lw,
+            ctx: ctx,
+            term: term,
+            ty: s,
+            owner: v,
+            field: f.name,
+            field_type: ft
+          ) with
+          | Ok(value) -> Map.set(
+            d: inout siblings,
+            key: f.def,
+            value: Binding { term: value, ty: ft }
+          )
+          | Err(_) -> skip()
+        }
+        for f: types.FieldInfo in fs {
+          let ft: types.Type = types.substitute(t: f.ty, subst: subst)
+          let gr: Result[formula.Formula, Text] = is_variant(
+            lw: lw,
+            ctx: ctx,
+            term: term,
+            ty: s,
+            variant: v
+          )
+          if gr is Ok {
+            let guard: formula.Formula = ok_or(r: gr)
+            let before: Int where it >= 0 = axiom_count(lw: lw)
+            match projection_of(
+              lw: lw,
+              ctx: ctx,
+              term: term,
+              ty: s,
+              owner: v,
+              field: f.name,
+              field_type: ft
+            ) with
+            | Ok(value) -> type_facts(
+              fuel: fuel - 1,
+              lw: inout lw,
+              ctx: ctx,
+              term: value,
+              ty: ft,
+              env: siblings
+            )
+            | Err(_) -> skip()
+            for a: formula.Formula in splice_axioms(lw: lw, from: before) {
+              push_axiom(lw: lw, f: formula.implies_f(a: guard, b: a))
+            }
+          }
+        }
+      }
+    } else {
+      if is_list_type(ctx: ctx, t: s) {
+        match first_type_arg(t: s) with
+        | None -> skip()
+        | Some(value) -> {
+          let lr: Result[formula.Formula, Text] = list_len(lw: lw, ctx: ctx, term: term, ty: s)
+          if lr is Ok {
+            let len: formula.Formula = ok_or(r: lr)
+            push_axiom(
+              lw: lw,
+              f: formula.AppF(fn_name: ">=", args: [len, formula.IntF(v: 0)], sort: formula.BoolS)
+            )
+            lw = { lw with fresh: lw.fresh + 1 }
+            let idx: formula.Formula = formula.VarF(
+              name: "tf_i_" ++ Int.to_text(x: lw.fresh),
+              sort: formula.IntS
+            )
+            let before: Int where it >= 0 = axiom_count(lw: lw)
+            let er: Result[formula.Formula, Text] = list_get(
+              lw: lw,
+              ctx: ctx,
+              term: term,
+              ty: s,
+              index: idx
+            )
+            if er is Ok {
+              type_facts(
+                fuel: fuel - 1,
+                lw: inout lw,
+                ctx: ctx,
+                term: ok_or(r: er),
+                ty: value,
+                env: Map.dict()
+              )
+            }
+            let added: List[formula.Formula] = splice_axioms(lw: lw, from: before)
+            if List.len(xs: added) > 0 {
+              let in_range: formula.Formula = formula.and_f(
+                xs: [
+                  formula.AppF(fn_name: "<=", args: [formula.IntF(v: 0), idx], sort: formula.BoolS),
+                  formula.AppF(fn_name: "<", args: [idx, len], sort: formula.BoolS)
+                ]
+              )
+              push_axiom(
+                lw: lw,
+                f: formula.QuantF(
+                  quant: "forall",
+                  vars: [formula.Bound { name: formula.var_name(f: idx), sort: formula.IntS }],
+                  body: formula.implies_f(a: in_range, b: formula.and_f(xs: added))
+                )
+              )
+            }
+          }
+        }
+      }
+    }
+  }
+  lw = { lw with type_fact_depth: depth }
+  return Unit
+}
+
+-- The refinement layers of `ty`, each asserted of `term` with `it` bound.
+fn refinement_facts(
+  fuel: Int where it >= 0,
+  lw: inout Lw,
+  ctx: context.Context,
+  term: formula.Formula,
+  ty: types.Type,
+  env: Dict[Int, Binding]
+) -> Unit may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Unit
+  }
+  match ty with
+  | types.Refined(base, pred, _) -> {
+    match Map.find(d: ctx.where_exprs, key: pred) with
+    | Some(value) -> {
+      let saved_it: Option[formula.Formula] = lw.it_term
+      let saved_file: Int = lw.file
+      lw = { lw with it_term: Some(value: term), file: pred_file(k: pred) }
+      let r: Result[formula.Formula, Text] = lower(
+        fuel: fuel - 1,
+        lw: inout lw,
+        ctx: ctx,
+        e: value,
+        env: env
+      )
+      if r is Ok {
+        push_axiom(lw: lw, f: ok_or(r: r))
+      }
+      lw = { lw with it_term: saved_it, file: saved_file }
+    }
+    | None -> skip()
+    refinement_facts(fuel: fuel - 1, lw: inout lw, ctx: ctx, term: term, ty: base, env: env)
+  }
+  | _ -> skip()
+  return Unit
+}
+
+-- The file a node key belongs to.
+pub fn pred_file(k: Int) -> Int {
+  return k / defs.max_span / defs.max_span / 8
+}
+
+-- The refinement predicates of `ty` applied to `term`, as one formula.
+pub fn refinement_of(
+  fuel: Int where it >= 0,
+  lw: inout Lw,
+  ctx: context.Context,
+  ty: types.Type,
+  term: formula.Formula,
+  env: Dict[Int, Binding]
+) -> Result[formula.Formula, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "lowering too deep")
+  }
+  match ty with
+  | types.Refined(base, pred, _) -> {
+    var parts: List[formula.Formula] = []
+    match Map.find(d: ctx.where_exprs, key: pred) with
+    | Some(value) -> {
+      let saved_it: Option[formula.Formula] = lw.it_term
+      let saved_file: Int = lw.file
+      lw = { lw with it_term: Some(value: term), file: pred_file(k: pred) }
+      let r: Result[formula.Formula, Text] = lower(
+        fuel: fuel - 1,
+        lw: inout lw,
+        ctx: ctx,
+        e: value,
+        env: env
+      )
+      lw = { lw with it_term: saved_it, file: saved_file }
+      parts = [try r]
+    }
+    | None -> parts = []
+    let rest: formula.Formula = try refinement_of(
+      fuel: fuel - 1,
+      lw: inout lw,
+      ctx: ctx,
+      ty: base,
+      term: term,
+      env: env
+    )
+    return Ok(value: formula.and_f(xs: parts ++ [rest]))
+  }
+  | _ -> return Ok(value: formula.true_f)
+}

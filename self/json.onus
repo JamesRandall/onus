@@ -1,0 +1,205 @@
+module json
+
+-- JSON values and their text (`JSON.stringify`): compact, or indented by two
+-- spaces the way `JSON.stringify(x, null, 2)` writes it, so that the reports
+-- in Onus are byte-identical to the TypeScript ones.
+pub union Json =
+  | JNull
+  | JBool of value: Bool
+  -- A number as JavaScript prints it.
+  | JNumber of text: Text
+  | JString of value: Text
+  | JArray of items: List[Json]
+  | JObject of fields: List[Field]
+
+pub record Field {
+  key: Text
+  value: Json
+}
+
+pub fn int(v: Int) -> Json may alloc {
+  return JNumber(text: Int.to_text(x: v))
+}
+
+pub fn text(t: Text) -> Json {
+  return JString(value: t)
+}
+
+pub fn bool(b: Bool) -> Json {
+  return JBool(value: b)
+}
+
+pub fn field(key: Text, value: Json) -> Field {
+  return Field { key: key, value: value }
+}
+
+pub fn texts(ts: List[Text]) -> Json may alloc, mutate {
+  var out: Builder[Json] = List.builder()
+  for t: Text in ts {
+    List.push(b: inout out, x: JString(value: t))
+  }
+  return JArray(items: List.finish(b: out))
+}
+
+pub fn text_or_null(o: Option[Text]) -> Json {
+  match o with
+  | Some(value) -> return JString(value: value)
+  | None -> return JNull
+}
+
+fn hex_digit(n: Int) -> Text {
+  if n == 0 {
+    return "0"
+  }
+  if n == 1 {
+    return "1"
+  }
+  if n == 2 {
+    return "2"
+  }
+  if n == 3 {
+    return "3"
+  }
+  if n == 4 {
+    return "4"
+  }
+  if n == 5 {
+    return "5"
+  }
+  if n == 6 {
+    return "6"
+  }
+  if n == 7 {
+    return "7"
+  }
+  if n == 8 {
+    return "8"
+  }
+  if n == 9 {
+    return "9"
+  }
+  if n == 10 {
+    return "a"
+  }
+  if n == 11 {
+    return "b"
+  }
+  if n == 12 {
+    return "c"
+  }
+  if n == 13 {
+    return "d"
+  }
+  if n == 14 {
+    return "e"
+  }
+  return "f"
+}
+
+-- A text as a JSON string literal, escaped as `JSON.stringify` escapes it.
+pub fn quote(t: Text) -> Text may alloc, mutate {
+  var out: Builder[Text] = List.builder()
+  List.push(b: inout out, x: "\"")
+  for c: Int in Text.code_points(t: t) {
+    if c == 34 {
+      List.push(b: inout out, x: "\\\"")
+    } else {
+      if c == 92 {
+        List.push(b: inout out, x: "\\\\")
+      } else {
+        if c == 10 {
+          List.push(b: inout out, x: "\\n")
+        } else {
+          if c == 13 {
+            List.push(b: inout out, x: "\\r")
+          } else {
+            if c == 9 {
+              List.push(b: inout out, x: "\\t")
+            } else {
+              if c == 8 {
+                List.push(b: inout out, x: "\\b")
+              } else {
+                if c == 12 {
+                  List.push(b: inout out, x: "\\f")
+                } else {
+                  if c < 32 {
+                    List.push(
+                      b: inout out,
+                      x: "\\u00" ++ hex_digit(n: c / 16) ++ hex_digit(n: c % 16)
+                    )
+                  } else {
+                    List.push(b: inout out, x: Text.of_code_point(cp: c))
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  List.push(b: inout out, x: "\"")
+  return Text.join(parts: List.finish(b: out), sep: "")
+}
+
+-- The compact text of `j`, as `JSON.stringify(j)` writes it.
+pub fn compact(j: Json) -> Text may alloc, mutate
+  decreases j
+{
+  match j with
+  | JNull -> return "null"
+  | JBool(value) -> return Bool.to_text(b: value)
+  | JNumber(text) -> return text
+  | JString(value) -> return quote(t: value)
+  | JArray(items) -> {
+    var parts: Builder[Text] = List.builder()
+    for x: Json in items {
+      List.push(b: inout parts, x: compact(j: x))
+    }
+    return "[" ++ Text.join(parts: List.finish(b: parts), sep: ",") ++ "]"
+  }
+  | JObject(fields) -> {
+    var parts: Builder[Text] = List.builder()
+    for f: Field in fields {
+      List.push(b: inout parts, x: quote(t: f.key) ++ ":" ++ compact(j: f.value))
+    }
+    return "{" ++ Text.join(parts: List.finish(b: parts), sep: ",") ++ "}"
+  }
+}
+
+-- The text of `j` indented by two spaces per level, as `JSON.stringify(j, null, 2)` writes it.
+pub fn pretty(j: Json) -> Text may alloc, mutate {
+  return pretty_at(j: j, indent: "")
+}
+
+fn pretty_at(j: Json, indent: Text) -> Text may alloc, mutate
+  decreases j
+{
+  match j with
+  | JArray(items) -> {
+    if List.len(xs: items) == 0 {
+      return "[]"
+    }
+    let inner: Text = indent ++ "  "
+    var parts: Builder[Text] = List.builder()
+    for x: Json in items {
+      List.push(b: inout parts, x: inner ++ pretty_at(j: x, indent: inner))
+    }
+    return "[\n" ++ Text.join(parts: List.finish(b: parts), sep: ",\n") ++ "\n" ++ indent ++ "]"
+  }
+  | JObject(fields) -> {
+    if List.len(xs: fields) == 0 {
+      return "{}"
+    }
+    let inner: Text = indent ++ "  "
+    var parts: Builder[Text] = List.builder()
+    for f: Field in fields {
+      List.push(
+        b: inout parts,
+        x: inner ++ quote(t: f.key) ++ ": " ++ pretty_at(j: f.value, indent: inner)
+      )
+    }
+    return "{\n" ++ Text.join(parts: List.finish(b: parts), sep: ",\n") ++ "\n" ++ indent ++ "}"
+  }
+  | _ -> return compact(j: j)
+}

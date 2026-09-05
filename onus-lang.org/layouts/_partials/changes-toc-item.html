@@ -1,0 +1,2 @@
+{{- /* one document's entry in the changes page sidebar */ -}}
+<li><a href="#{{ .id }}">{{ .label }}</a>{{ with .h2 }}<ul>{{ range . }}<li><a href="#{{ .id }}">{{ .title }}</a></li>{{ end }}</ul>{{ end }}</li>

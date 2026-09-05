@@ -1,0 +1,406 @@
+module pathreport
+import ast
+import printer
+import defs
+import context
+import obligations
+import effectset
+import tables
+import claimcheck
+import paths
+import interface
+import json
+import loc
+
+-- Path reports (spec §9.1; `report/path.ts`). `path_report` is the normative
+-- JSON of an analysed path.
+fn skip() -> Unit {
+  return Unit
+}
+
+fn or_neg(o: Option[Int]) -> Int {
+  match o with
+  | Some(value) -> return value
+  | None -> return -1
+}
+
+fn ids_or(o: Option[List[Int]]) -> List[Int] may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return []
+}
+
+-- `xs` in ascending order, as JavaScript's default `sort` orders text.
+fn sorted(xs: List[Text]) -> List[Text] may alloc, mutate {
+  var out: List[Text] = []
+  for x: Text in xs {
+    var placed: Bool = false
+    var next: Builder[Text] = List.builder()
+    for y: Text in out {
+      if not placed and Text.compare(a: x, b: y) < 0 {
+        List.push(b: inout next, x: x)
+        placed = true
+      }
+      List.push(b: inout next, x: y)
+    }
+    if not placed {
+      List.push(b: inout next, x: x)
+    }
+    out = List.finish(b: next)
+  }
+  return out
+}
+
+fn names(ctx: context.Context, s: effectset.EffectSet) -> List[Text] may alloc, mutate {
+  var out: Builder[Text] = List.builder()
+  for e: defs.Effect in effectset.values(s: s) {
+    List.push(b: inout out, x: claimcheck.effect_name(ctx: ctx, e: e))
+  }
+  return sorted(xs: List.finish(b: out))
+}
+
+fn concrete(s: effectset.EffectSet) -> effectset.EffectSet may alloc, mutate {
+  var out: Builder[defs.Effect] = List.builder()
+  for e: defs.Effect in effectset.values(s: s) {
+    match e with
+    | defs.ParamEffect(_) -> skip()
+    | _ -> List.push(b: inout out, x: e)
+  }
+  return effectset.of_list(effects: List.finish(b: out))
+}
+
+fn qualified(ctx: context.Context, id: Int) -> Text may alloc {
+  return context.qualified_name(ctx: ctx, id: id)
+}
+
+fn qualified_all(ctx: context.Context, ids: List[Int]) -> json.Json may alloc, mutate {
+  var out: Builder[Text] = List.builder()
+  for id: Int in ids {
+    List.push(b: inout out, x: qualified(ctx: ctx, id: id))
+  }
+  return json.texts(ts: List.finish(b: out))
+}
+
+-- What a capability's construction site leaves to trust (§8.1): for `sql.connect`, the role's privileges after the connect-time check.
+fn construction_assumes(callee: Text) -> List[Text] may alloc {
+  if callee == "std.sql.connect" {
+    return ["the role named in the DSN keeps the privileges verified at connect time (§8.1)"]
+  }
+  return []
+}
+
+fn site_text(
+  ctx: context.Context,
+  tab: Dict[Int, loc.LineTable],
+  fn_def: Int,
+  file: Int,
+  span: ast.Span
+) -> Text may alloc {
+  return qualified(ctx: ctx, id: fn_def) ++ ":" ++ loc.line_col_text(
+    tables: tab,
+    file: file,
+    span: span
+  )
+}
+
+-- The report of an analysed path.
+-- Preconditions: the paths pass ran and recorded `a`.
+-- Effects: none.
+pub fn path_report(
+  ctx: context.Context,
+  tab: Dict[Int, loc.LineTable],
+  a: tables.PathAnalysis
+) -> json.Json may alloc, mutate {
+  var reachable: Dict[Int, Bool] = Map.dict()
+  for fn_def: Int in a.reachable {
+    Map.set(d: inout reachable, key: fn_def, value: true)
+  }
+  var obs: Builder[obligations.Obligation] = List.builder()
+  var checked_at: Builder[Text] = List.builder()
+  for i: Int in 0 ..< ctx.obligation_count {
+    let o: obligations.Obligation = context.get_obligation(ctx: ctx, id: i)
+    if Map.contains(d: reachable, key: o.def) {
+      List.push(b: inout obs, x: o)
+      if not o.status is obligations.Proved and not o.status is obligations.Assumed and not o.status is obligations.Failed {
+        List.push(
+          b: inout checked_at,
+          x: site_text(ctx: ctx, tab: tab, fn_def: o.def, file: o.at_file, span: o.at_span)
+        )
+      }
+    }
+  }
+  let all: List[obligations.Obligation] = List.finish(b: obs)
+  var nodes: Builder[json.Json] = List.builder()
+  for fn_def: Int in a.reachable {
+    let d: defs.Def = context.get_def(ctx: ctx, id: fn_def)
+    var kind: Text = "fn"
+    if fn_def == a.entry_fn {
+      kind = "entry"
+    } else {
+      if d.is_intrinsic {
+        kind = "intrinsic"
+      }
+    }
+    var own: Builder[obligations.Obligation] = List.builder()
+    for o: obligations.Obligation in all {
+      if o.def == fn_def {
+        List.push(b: inout own, x: o)
+      }
+    }
+    var recovers: Int where it >= 0 = 0
+    for r: tables.RecoverSite in a.recovers {
+      if r.fn_def == fn_def {
+        recovers = recovers + 1
+      }
+    }
+    var unresolvable: Int where it >= 0 = 0
+    for u: tables.UnresolvableCall in a.unresolvable {
+      if u.fn_def == fn_def {
+        unresolvable = unresolvable + 1
+      }
+    }
+    List.push(
+      b: inout nodes,
+      x: json.JObject(
+        fields: [
+          json.field(key: "id", value: json.text(t: qualified(ctx: ctx, id: fn_def))),
+          json.field(key: "module", value: json.text(t: module_name(ctx: ctx, mod: d.mod))),
+          json.field(key: "kind", value: json.text(t: kind)),
+          json.field(
+            key: "effects",
+            value: json.texts(
+              ts: names(ctx: ctx, s: concrete(s: claimcheck.effects_of_fn(ctx: ctx, def: fn_def)))
+            )
+          ),
+          json.field(
+            key: "claims",
+            value: qualified_all(ctx: ctx, ids: ids_or(o: Map.find(d: ctx.carried, key: fn_def)))
+          ),
+          json.field(key: "obligations", value: interface.counts_json(obs: List.finish(b: own))),
+          json.field(
+            key: "assumes",
+            value: json.int(v: List.len(xs: claimcheck.assumes_of(ctx: ctx, fn_def: fn_def)))
+          ),
+          json.field(key: "recovers", value: json.int(v: recovers)),
+          json.field(key: "unresolvable", value: json.int(v: unresolvable))
+        ]
+      )
+    )
+  }
+  var assumes: Builder[json.Json] = List.builder()
+  var assume_entries: Builder[interface.AssumeEntry] = List.builder()
+  for pa: tables.PathAssume in a.assume_sites {
+    var permitted: json.Json = json.JNull
+    if pa.permitted_by != "" {
+      permitted = json.text(t: pa.permitted_by)
+    }
+    var verify_json: json.Json = json.JNull
+    match pa.verify_block with
+    | Some(value) -> verify_json = json.text(t: printer.print_verify(v: value))
+    | None -> skip()
+    let j: json.Json = json.JObject(
+      fields: [
+        json.field(key: "claim", value: json.text(t: qualified(ctx: ctx, id: pa.claim_def))),
+        json.field(key: "at", value: json.text(t: qualified(ctx: ctx, id: pa.fn_def))),
+        json.field(key: "justification", value: json.text(t: pa.justification)),
+        json.field(key: "permitted_by", value: permitted),
+        json.field(key: "verifiable", value: json.bool(b: pa.verify_block is Some)),
+        json.field(key: "verify", value: verify_json),
+        json.field(key: "last_verified", value: json.JNull)
+      ]
+    )
+    List.push(b: inout assumes, x: j)
+    List.push(
+      b: inout assume_entries,
+      x: interface.AssumeEntry { j: j, verifiable: pa.verify_block is Some }
+    )
+  }
+  var edges: Builder[json.Json] = List.builder()
+  for e: tables.CallEdge in a.edges {
+    List.push(
+      b: inout edges,
+      x: json.JObject(
+        fields: [
+          json.field(key: "from", value: json.text(t: qualified(ctx: ctx, id: e.from))),
+          json.field(key: "to", value: json.text(t: qualified(ctx: ctx, id: e.to))),
+          json.field(key: "effects", value: json.texts(ts: names(ctx: ctx, s: e.effects))),
+          json.field(
+            key: "at",
+            value: json.text(
+              t: site_text(ctx: ctx, tab: tab, fn_def: e.from, file: e.at_file, span: e.at_span)
+            )
+          )
+        ]
+      )
+    )
+  }
+  var forbid_names: List[Text] = names(ctx: ctx, s: a.forbidden)
+  for cl: Int in a.forbid_claims {
+    forbid_names = List.append(xs: forbid_names, x: paths.claim_display(ctx: ctx, claim_def: cl))
+  }
+  var bound_json: json.Json = json.JNull
+  if a.has_bound {
+    bound_json = json.texts(ts: names(ctx: ctx, s: a.bound))
+  }
+  var unresolvable: Builder[json.Json] = List.builder()
+  for u: tables.UnresolvableCall in a.unresolvable {
+    List.push(
+      b: inout unresolvable,
+      x: json.JObject(
+        fields: [
+          json.field(
+            key: "at",
+            value: json.text(
+              t: site_text(ctx: ctx, tab: tab, fn_def: u.fn_def, file: u.at_file, span: u.at_span)
+            )
+          ),
+          json.field(key: "reason", value: json.text(t: u.reason))
+        ]
+      )
+    )
+  }
+  var capabilities: Builder[json.Json] = List.builder()
+  for cs: tables.CapabilitySite in a.capabilities {
+    List.push(
+      b: inout capabilities,
+      x: json.JObject(
+        fields: [
+          json.field(key: "type", value: json.text(t: cs.type_text)),
+          json.field(
+            key: "constructed_at",
+            value: json.text(
+              t: site_text(
+                ctx: ctx,
+                tab: tab,
+                fn_def: cs.fn_def,
+                file: cs.at_file,
+                span: cs.at_span
+              )
+            )
+          ),
+          json.field(
+            key: "assumes",
+            value: json.texts(ts: construction_assumes(callee: qualified(ctx: ctx, id: cs.callee)))
+          )
+        ]
+      )
+    )
+  }
+  var gates: Builder[json.Json] = List.builder()
+  for g: tables.Gate in a.gates {
+    List.push(
+      b: inout gates,
+      x: json.JObject(
+        fields: [
+          json.field(key: "evidence", value: json.text(t: qualified(ctx: ctx, id: g.evidence))),
+          json.field(key: "producers", value: qualified_all(ctx: ctx, ids: g.producers)),
+          json.field(key: "guarded", value: qualified_all(ctx: ctx, ids: g.guarded))
+        ]
+      )
+    )
+  }
+  var recovers: Builder[json.Json] = List.builder()
+  for r: tables.RecoverSite in a.recovers {
+    List.push(
+      b: inout recovers,
+      x: json.JObject(
+        fields: [
+          json.field(key: "def", value: json.text(t: qualified(ctx: ctx, id: r.fn_def))),
+          json.field(
+            key: "at",
+            value: json.text(
+              t: site_text(ctx: ctx, tab: tab, fn_def: r.fn_def, file: r.at_file, span: r.at_span)
+            )
+          )
+        ]
+      )
+    )
+  }
+  var ledger: Builder[json.Json] = List.builder()
+  for o: obligations.Obligation in all {
+    List.push(
+      b: inout ledger,
+      x: json.JObject(
+        fields: [
+          json.field(key: "kind", value: json.text(t: obligations.kind_text(k: o.kind))),
+          json.field(key: "text", value: json.text(t: o.text)),
+          json.field(key: "def", value: json.text(t: qualified(ctx: ctx, id: o.def))),
+          json.field(key: "status", value: json.text(t: obligations.status_text(s: o.status))),
+          json.field(key: "by", value: json.text_or_null(o: o.by)),
+          json.field(key: "pinned", value: json.bool(b: o.pinned)),
+          json.field(
+            key: "at",
+            value: json.text(
+              t: loc.location_text(ctx: ctx, tables: tab, file: o.at_file, span: o.at_span)
+            )
+          )
+        ]
+      )
+    )
+  }
+  let counts: json.Json = interface.counts_json(obs: all)
+  var count_fields: List[json.Field] = []
+  match counts with
+  | json.JObject(fields) -> count_fields = fields
+  | _ -> skip()
+  count_fields = List.append(
+    xs: count_fields,
+    x: json.field(key: "checked_at", value: json.texts(ts: List.finish(b: checked_at)))
+  )
+  return json.JObject(
+    fields: [
+      json.field(key: "path", value: json.text(t: context.get_def(ctx: ctx, id: a.def).name)),
+      json.field(key: "entry", value: json.text(t: qualified(ctx: ctx, id: a.entry_fn))),
+      json.field(key: "reachable", value: qualified_all(ctx: ctx, ids: a.reachable)),
+      json.field(
+        key: "effects",
+        value: json.JObject(
+          fields: [
+            json.field(key: "bound", value: bound_json),
+            json.field(key: "forbid", value: json.texts(ts: forbid_names)),
+            json.field(key: "actual", value: json.texts(ts: names(ctx: ctx, s: a.actual)))
+          ]
+        )
+      ),
+      json.field(
+        key: "claims",
+        value: json.JObject(
+          fields: [
+            json.field(key: "required", value: qualified_all(ctx: ctx, ids: a.required)),
+            json.field(key: "satisfied", value: json.bool(b: a.satisfied))
+          ]
+        )
+      ),
+      json.field(key: "assumes", value: json.JArray(items: List.finish(b: assumes))),
+      json.field(key: "obligations", value: json.JObject(fields: count_fields)),
+      json.field(
+        key: "unresolvable_calls",
+        value: json.JArray(items: List.finish(b: unresolvable))
+      ),
+      json.field(key: "capabilities", value: json.JArray(items: List.finish(b: capabilities))),
+      json.field(
+        key: "graph",
+        value: json.JObject(
+          fields: [
+            json.field(key: "nodes", value: json.JArray(items: List.finish(b: nodes))),
+            json.field(key: "edges", value: json.JArray(items: List.finish(b: edges)))
+          ]
+        )
+      ),
+      json.field(key: "gates", value: json.JArray(items: List.finish(b: gates))),
+      json.field(key: "recovers", value: json.JArray(items: List.finish(b: recovers))),
+      json.field(key: "ledger", value: json.JArray(items: List.finish(b: ledger))),
+      json.field(
+        key: "obligation_coverage",
+        value: interface.coverage_json(obs: all, assumes: List.finish(b: assume_entries))
+      ),
+      json.field(key: "ok", value: json.bool(b: a.ok))
+    ]
+  )
+}
+
+fn module_name(ctx: context.Context, mod: Int) -> Text {
+  match Map.find(d: ctx.modules, key: mod) with
+  | Some(value) -> return value.name
+  | None -> return ""
+}

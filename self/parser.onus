@@ -252,6 +252,67 @@ fn advance(p: inout Parser) -> tokens.Token may mutate
   return t
 }
 
+fn current_def_opt(p: Parser) -> Option[Text] {
+  if p.current_def == "" {
+    return None
+  }
+  return Some(value: p.current_def)
+}
+
+-- The source text between two offsets, rebuilt from the tokens (the parser holds no source).
+fn source_text(p: Parser, start: Int, end: Int) -> Text may alloc, mutate {
+  var out: Builder[Text] = List.builder()
+  var prev_end: Int = -1
+  for t: tokens.Token in p.toks {
+    if t.start >= start and t.end <= end and t.end > t.start {
+      if prev_end >= 0 and t.start > prev_end {
+        List.push(b: inout out, x: " ")
+      }
+      List.push(b: inout out, x: token_text(t: t))
+      prev_end = t.end
+    }
+  }
+  return Text.join(parts: List.finish(b: out), sep: "")
+}
+
+fn token_text(t: tokens.Token) -> Text may alloc {
+  match t.kind with
+  | tokens.IntLit(_, text) -> return text
+  | tokens.TextLit(value) -> return "\"" ++ value ++ "\""
+  | _ -> return ident_of(t: t).text
+}
+
+-- Consumes the current token; fails at the end of input.
+fn take(p: inout Parser) -> Result[tokens.Token, Fail] may mutate, alloc
+  ensures p.toks == old(p).toks and p.pos >= old(p).pos and p.pos <= old(p).pos + 1
+  ensures result is Ok implies p.pos == old(p).pos + 1
+{
+  if p.pos < List.len(xs: p.toks) - 1 {
+    let t: tokens.Token = peek(p: p, n: 0)
+    p = { p with pos: p.pos + 1 }
+    return Ok(value: t)
+  }
+  return Err(error: fail(p: inout p, expected: "a token"))
+}
+
+-- 1 while a loop's `more` flag is set, 0 after: the tail of a measure that must also fall when the flag does.
+fn flag(b: Bool) -> Int where it >= 0 and it <= 1
+  ensures b implies result == 1
+  ensures not b implies result == 0
+{
+  if b {
+    return 1
+  }
+  return 0
+}
+
+fn first_segment(q: ast.QName) -> Text {
+  for s: ast.Ident in q.segments {
+    return s.text
+  }
+  return ""
+}
+
 -- Diagnostics ---------------------------------------------------------------
 fn report(
   p: inout Parser,
@@ -265,7 +326,13 @@ fn report(
   p = { p with
     diagnostics: List.append(
       xs: p.diagnostics,
-      x: tokens.Diagnostic { code: code, start: start, end: end, detail: detail }
+      x: tokens.Diagnostic {
+        code: code,
+        start: start,
+        end: end,
+        detail: detail,
+        def_name: current_def_opt(p: p)
+      }
     )
   }
 }
@@ -512,7 +579,7 @@ fn dotted(p: inout Parser) -> Result[ast.QName, Fail] may mutate, alloc
 {
   var segs: Builder[ast.Ident] = List.builder()
   if at_name(p: p, n: 0) or at_tname(p: p, n: 0) {
-    let t: tokens.Token = advance(p: inout p)
+    let t: tokens.Token = try take(p: inout p)
     List.push(b: inout segs, x: ident_of(t: t))
   } else {
     return Err(error: fail(p: inout p, expected: "a name"))
@@ -523,7 +590,7 @@ fn dotted(p: inout Parser) -> Result[ast.QName, Fail] may mutate, alloc
     p: p,
     n: 1
   )) and p.pos < List.len(xs: p.toks) - 2
-    invariant p.pos >= start and p.toks == toks0
+    invariant p.pos >= start and p.toks == toks0 and List.built(b: segs) >= 1
     decreases List.len(xs: p.toks) - p.pos
   {
     skip(p: inout p)
@@ -585,7 +652,7 @@ fn parse_module(p: inout Parser) -> Result[ast.Module, Fail] may mutate, alloc
   p = { p with is_test_module: is_test }
   try need_word(p: inout p, want: "module")
   let name: ast.QName = try module_name(p: inout p)
-  p = { p with is_std_module: List.get(xs: name.segments, i: 0).text == "std" }
+  p = { p with is_std_module: first_segment(q: name) == "std" }
   try need_newline(p: inout p)
   var imports: Builder[ast.Import] = List.builder()
   let toks0: List[tokens.Token] = p.toks
@@ -974,7 +1041,7 @@ fn parse_tparams(p: inout Parser) -> Result[List[ast.TParam], Fail] may mutate, 
   let start0: Int = p.pos
   loop while more and p.pos < List.len(xs: p.toks) - 1
     invariant p.pos >= start0 and p.toks == toks0
-    decreases List.len(xs: p.toks) - p.pos
+    decreases (List.len(xs: p.toks) - p.pos) * 2 + flag(b: more)
   {
     let s: Int = here(p: p)
     if at_tname(p: p, n: 0) {
@@ -1204,7 +1271,7 @@ fn parse_union(
   try need_punct(p: inout p, want: "=")
   try need_newline(p: inout p)
   var variants: Builder[ast.Variant] = List.builder()
-  var end: Int = prev(p: p).end
+  var end: Int where it >= 0 = prev(p: p).end
   let toks0: List[tokens.Token] = p.toks
   let start0: Int = p.pos
   loop while at_punct(p: p, want: "|") and p.pos < List.len(xs: p.toks) - 1
@@ -1360,9 +1427,16 @@ fn parse_impl(
   try need_word(p: inout p, want: "impl")
   let iface: ast.Ident = try expect_tname(p: inout p)
   try need_punct(p: inout p, want: "[")
+  let target_start: Int = here(p: p)
   let target: ast.Type = try parse_type(p: inout p, rank: r_type)
+  let target_end: Int = prev(p: p).end
   try need_punct(p: inout p, want: "]")
-  p = { p with current_def: iface.text }
+  let impl_name: Text = iface.text ++ "[" ++ source_text(
+    p: p,
+    start: target_start,
+    end: target_end
+  ) ++ "]"
+  p = { p with current_def: impl_name }
   try need_punct(p: inout p, want: "{")
   var fns: Builder[ast.FnDecl] = List.builder()
   if accept_newline(p: inout p) {
@@ -1596,7 +1670,7 @@ fn parse_capability(
   }
   try need_newline(p: inout p)
   var grant_list: Builder[ast.Grant] = List.builder()
-  var end: Int = name.span.end
+  var end: Int where it >= 0 = name.span.end
   let toks0: List[tokens.Token] = p.toks
   let start0: Int = p.pos
   loop while at_word(p: p, want: "grants") and p.pos < List.len(xs: p.toks) - 1
@@ -1647,13 +1721,13 @@ fn parse_path(
   let entry_fn: ast.Ident = try expect_name(p: inout p)
   try need_newline(p: inout p)
   var clauses: Builder[ast.PathClause] = List.builder()
-  var end: Int = entry_fn.span.end
+  var end: Int where it >= 0 = entry_fn.span.end
   var more: Bool = true
   let toks0: List[tokens.Token] = p.toks
   let start0: Int = p.pos
   loop while more and p.pos < List.len(xs: p.toks) - 1
     invariant p.pos >= start0 and p.toks == toks0
-    decreases List.len(xs: p.toks) - p.pos
+    decreases (List.len(xs: p.toks) - p.pos) * 2 + flag(b: more)
   {
     let s: Int = here(p: p)
     if accept_word(p: inout p, want: "effects") {
@@ -1768,7 +1842,7 @@ fn parse_policy(
   let start0: Int = p.pos
   loop while more and p.pos < List.len(xs: p.toks) - 1
     invariant p.pos >= start0 and p.toks == toks0
-    decreases List.len(xs: p.toks) - p.pos
+    decreases (List.len(xs: p.toks) - p.pos) * 2 + flag(b: more)
   {
     let s: Int = here(p: p)
     if accept_word(p: inout p, want: "self") {
@@ -1897,6 +1971,7 @@ fn parse_binder_type(p: inout Parser, rank: Int) -> Result[ast.Type, Fail] may m
 fn type_args(p: inout Parser, rank: Int) -> Result[List[ast.TypeArg], Fail] may mutate, alloc
   requires rank == r_type_args
   ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  ensures result is Ok implies p.pos > old(p).pos
   decreases (List.len(xs: p.toks) - p.pos) * 64 + rank
 {
   try need_punct(p: inout p, want: "[")
@@ -1908,7 +1983,7 @@ fn type_args(p: inout Parser, rank: Int) -> Result[List[ast.TypeArg], Fail] may 
   let start0: Int = p.pos
   loop while more and p.pos < List.len(xs: p.toks) - 1
     invariant p.pos >= start0 and p.toks == toks0
-    decreases List.len(xs: p.toks) - p.pos
+    decreases (List.len(xs: p.toks) - p.pos) * 2 + flag(b: more)
   {
     let a: ast.TypeArg = try type_arg(p: inout p, rank: r_type_arg)
     List.push(b: inout out, x: a)
@@ -2065,7 +2140,7 @@ fn parse_stmt(p: inout Parser, rank: Int) -> Result[ast.Stmt, Fail] may mutate, 
     try need_word(p: inout p, want: "with")
     try need_newline(p: inout p)
     var arms: Builder[ast.Arm] = List.builder()
-    var end: Int = span_of_expr(e: scrutinee).end
+    var end: Int where it >= 0 = span_of_expr(e: scrutinee).end
     var more: Bool = at_punct(p: p, want: "|")
     let toks0: List[tokens.Token] = p.toks
     let start0: Int = p.pos
@@ -2603,7 +2678,7 @@ fn postfix_expr(p: inout Parser, rank: Int) -> Result[ast.Expr, Fail] may mutate
   let start0: Int = p.pos
   loop while more and p.pos < List.len(xs: p.toks) - 1
     invariant p.pos >= start0 and p.toks == toks0
-    decreases List.len(xs: p.toks) - p.pos
+    decreases (List.len(xs: p.toks) - p.pos) * 2 + flag(b: more)
   {
     if at_punct(p: p, want: ".") {
       if at_name(p: p, n: 1) {
@@ -2654,6 +2729,7 @@ fn postfix_expr(p: inout Parser, rank: Int) -> Result[ast.Expr, Fail] may mutate
 fn call_args(p: inout Parser, rank: Int) -> Result[List[ast.Arg], Fail] may mutate, alloc
   requires rank == r_call_args
   ensures p.toks == old(p).toks and p.pos >= old(p).pos
+  ensures result is Ok implies p.pos > old(p).pos
   decreases (List.len(xs: p.toks) - p.pos) * 64 + rank
 {
   try need_punct(p: inout p, want: "(")
@@ -2758,19 +2834,19 @@ fn primary(p: inout Parser, rank: Int) -> Result[ast.Expr, Fail] may mutate, all
   let t: tokens.Token = peek(p: p, n: 0)
   match t.kind with
   | tokens.IntLit(value, text) -> {
-    skip(p: inout p)
+    let taken: tokens.Token = try take(p: inout p)
     return Ok(value: ast.IntLit(value: value, text: text, span: span_of(t: t)))
   }
   | tokens.FloatLit(value) -> {
-    skip(p: inout p)
+    let taken: tokens.Token = try take(p: inout p)
     return Ok(value: ast.FloatLit(value: value, span: span_of(t: t)))
   }
   | tokens.TextLit(value) -> {
-    skip(p: inout p)
+    let taken: tokens.Token = try take(p: inout p)
     return Ok(value: ast.TextLit(value: value, span: span_of(t: t)))
   }
   | tokens.DurationLit(nanos) -> {
-    skip(p: inout p)
+    let taken: tokens.Token = try take(p: inout p)
     return Ok(value: ast.DurationLit(nanos: nanos, span: span_of(t: t)))
   }
   | tokens.TName(text) -> {
@@ -2779,19 +2855,19 @@ fn primary(p: inout Parser, rank: Int) -> Result[ast.Expr, Fail] may mutate, all
   }
   | tokens.Keyword(word) -> {
     if word == "true" or word == "false" {
-      skip(p: inout p)
+      try need_word(p: inout p, want: word)
       return Ok(value: ast.BoolLit(value: word == "true", span: span_of(t: t)))
     }
     if word == "it" {
-      skip(p: inout p)
+      try need_word(p: inout p, want: word)
       return Ok(value: ast.It(span: span_of(t: t)))
     }
     if word == "result" {
-      skip(p: inout p)
+      try need_word(p: inout p, want: word)
       return Ok(value: ast.ResultRef(span: span_of(t: t)))
     }
     if word == "try" {
-      skip(p: inout p)
+      try need_word(p: inout p, want: word)
       let expr: ast.Expr = try parse_expr(p: inout p, rank: r_expr)
       var else_: Option[ast.TryElse] = None
       if at_word(p: p, want: "else") {
@@ -2812,19 +2888,19 @@ fn primary(p: inout Parser, rank: Int) -> Result[ast.Expr, Fail] may mutate, all
       return Ok(value: ast.Try(expr: expr, else_: else_, span: span_from(p: p, start: s)))
     }
     if word == "recover" {
-      skip(p: inout p)
+      try need_word(p: inout p, want: word)
       let body: ast.Block = try parse_assertion_block(p: inout p, rank: r_block)
       return Ok(value: ast.Recover(body: body, span: span_from(p: p, start: s)))
     }
     if word == "old" {
-      skip(p: inout p)
+      try need_word(p: inout p, want: word)
       try need_punct(p: inout p, want: "(")
       let name: ast.Ident = try expect_name(p: inout p)
       try need_punct(p: inout p, want: ")")
       return Ok(value: ast.Old(name: name, span: span_from(p: p, start: s)))
     }
     if word == "forall" or word == "exists" {
-      skip(p: inout p)
+      try need_word(p: inout p, want: word)
       let name: ast.Ident = try expect_name(p: inout p)
       try need_punct(p: inout p, want: ":")
       let ty: ast.Type = try parse_binder_type(p: inout p, rank: r_binder_type)
@@ -2853,7 +2929,7 @@ fn primary(p: inout Parser, rank: Int) -> Result[ast.Expr, Fail] may mutate, all
       )
     }
     if word == "fn" {
-      skip(p: inout p)
+      try need_word(p: inout p, want: word)
       let params: List[ast.Param] = try param_list(p: inout p, rank: r_param_list)
       try need_punct(p: inout p, want: "->")
       let saved: Bool = p.no_brace
@@ -2873,7 +2949,7 @@ fn primary(p: inout Parser, rank: Int) -> Result[ast.Expr, Fail] may mutate, all
       )
     }
     if word == "fake" {
-      skip(p: inout p)
+      try need_word(p: inout p, want: word)
       if not p.is_test_module {
         report(
           p: inout p,
@@ -2905,7 +2981,7 @@ fn primary(p: inout Parser, rank: Int) -> Result[ast.Expr, Fail] may mutate, all
           )
         )
       }
-      skip(p: inout p)
+      try need_punct(p: inout p, want: text)
       let base: ast.Expr = try parse_expr(p: inout p, rank: r_expr)
       try need_word(p: inout p, want: "with")
       var fields: Builder[ast.FieldInit] = List.builder()
@@ -2914,7 +2990,7 @@ fn primary(p: inout Parser, rank: Int) -> Result[ast.Expr, Fail] may mutate, all
       let start0: Int = p.pos
       loop while more and p.pos < List.len(xs: p.toks) - 1
         invariant p.pos >= start0 and p.toks == toks0
-        decreases List.len(xs: p.toks) - p.pos
+        decreases (List.len(xs: p.toks) - p.pos) * 2 + flag(b: more)
       {
         skip_newline(p: inout p)
         let fs: Int = here(p: p)
@@ -2938,7 +3014,7 @@ fn primary(p: inout Parser, rank: Int) -> Result[ast.Expr, Fail] may mutate, all
       )
     }
     if text == "(" {
-      skip(p: inout p)
+      try need_punct(p: inout p, want: text)
       let saved: Bool = p.no_brace
       p = { p with no_brace: false }
       let inner: ast.Expr = try parse_expr(p: inout p, rank: r_expr)
@@ -2947,7 +3023,7 @@ fn primary(p: inout Parser, rank: Int) -> Result[ast.Expr, Fail] may mutate, all
       return Ok(value: inner)
     }
     if text == "[" {
-      skip(p: inout p)
+      try need_punct(p: inout p, want: text)
       var elems: Builder[ast.Expr] = List.builder()
       let saved: Bool = p.no_brace
       p = { p with no_brace: false }

@@ -115,6 +115,7 @@ fn fits(next: Cmd, rest: Builder[Cmd], width0: Int) -> Bool may alloc, mutate {
       | Concat(parts, hard) -> {
         var i: Int = List.len(xs: parts) - 1
         loop while i >= 0
+          invariant i < List.len(xs: parts)
           decreases i + 1
         {
           List.push(
@@ -186,6 +187,7 @@ pub fn render(d: Doc, width: Int) -> Text may alloc, mutate {
       | Concat(parts, hard) -> {
         var i: Int = List.len(xs: parts) - 1
         loop while i >= 0
+          invariant i < List.len(xs: parts)
           decreases i + 1
         {
           List.push(

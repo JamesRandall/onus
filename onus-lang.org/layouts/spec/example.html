@@ -1,0 +1,30 @@
+{{- /* /spec/<example>/ — a worked example: its source files, then the ledger from the review output checked in beside it. */ -}}
+{{ define "main" }}
+{{- $ex := .Params.example -}}
+<div class="wrap">
+  {{ partial "spec-nav.html" . }}
+  <article class="prose wide">
+    <h1 class="page-title">{{ .Title }}</h1>
+    {{- with .Params.lede }}<p class="lede">{{ . | markdownify }}</p>{{ end }}
+    {{ .Content }}
+    {{- range $f := .Params.files }}
+    {{- with resources.Get (printf "examples/%s/%s" $ex $f) }}
+    <h2 class="file" id="{{ anchorize $f }}"><code>examples/{{ $ex }}/{{ $f }}</code></h2>
+    <pre class="code onus"><code>{{ partial "onus-code.html" (strings.TrimSuffix "\n" .Content) }}</code></pre>
+    {{- else }}{{ errorf "example page: examples/%s/%s not found" $ex $f }}{{ end }}
+    {{- end }}
+    <h2 id="ledger">Ledger</h2>
+    {{- with resources.Get (printf "examples/%s/review/review.json" $ex) }}
+    {{- $r := .Content | transform.Unmarshal }}
+    <p>What <code>onus review</code> reported for this example, from <code>examples/{{ $ex }}/review/review.json</code>. The <a href="{{ printf "/review/%s/" $ex | relURL }}">review page</a> it wrote is served unchanged.</p>
+    {{ partial "module-ledger.html" (dict "review" $r "cream" true) }}
+    {{- range $r.paths }}
+    <h3 id="path-{{ .path }}">Path <code>{{ .path }}</code></h3>
+    {{ partial "path-view.html" (dict "path" . "cream" true) }}
+    {{- end }}
+    {{- else }}
+    <p>No review output is checked in for this example yet. It will appear here when <code>onus review</code> has been run on it and its output committed under <code>examples/{{ $ex }}/review/</code>.</p>
+    {{- end }}
+  </article>
+</div>
+{{ end }}

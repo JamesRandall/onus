@@ -36,3 +36,28 @@ pub intrinsic fn read(files: Files, path: Text) -> Result[Text, Error] may io.fi
 pub intrinsic fn print(console: Console, text: Text) -> Unit may io.file
 
 pub intrinsic fn eprint(console: Console, text: Text) -> Unit may io.file
+
+-- Running other programs (impl spec M15.0): the verifier in Onus runs z3.
+pub capability Process
+  grants io.file
+  grants nondet
+
+-- What a program left behind: its exit status and both streams.
+pub record Output {
+  status: Int
+  stdout: Text
+  stderr: Text
+}
+
+-- Runs `program` with `args`, feeding it `stdin`, and waits at most
+-- `timeout_ms`; Err when the program cannot start or does not finish in time.
+pub intrinsic fn run(
+  process: Process,
+  program: Text,
+  args: List[Text],
+  stdin: Text,
+  timeout_ms: Int where it >= 0
+) -> Result[Output, Error] may io.file, nondet, alloc
+
+-- Creates a directory and any missing parents; Ok when it already exists.
+pub intrinsic fn mkdir(files: Files, path: Text) -> Result[Unit, Error] may io.file

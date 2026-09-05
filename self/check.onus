@@ -8,45 +8,109 @@ import resolve
 import typecheck
 import consteval
 import effects
+import contracts
+import claimcheck
+import capabilities
+import verifier
+import paths
+import obligations
+import json
+import loc
+import diagjson
+import interface
+import pathreport
 
 -- `onus check` in Onus (impl spec M15.2): runs the passes implemented so
 -- far over an entry file and prints every diagnostic as one line:
 -- code, path, start, end (code points), definition, detail.
 --
 --   check <entry.onus> [--root <dir>] [--stdlib <dir>] [--to <pass>]
+--         [--z3 <path>] [--budget <ms>] [--cache <dir>] [--ledger]
 record Options {
   entry: Text
   root: Option[Text]
   stdlib: Option[Text]
   to: Text
+  ledger: Bool
+  z3: Option[Text]
+  budget: Int where it >= 0
+  cache: Option[Text]
+  diag_json: Bool
+  interface_json: Bool
+  path_json: Bool
+  dump: Option[Text]
 }
 
 fn parse_args(args: List[Text]) -> Result[Options, io.Error] may alloc {
   var entry: Text = ""
   var root: Option[Text] = None
   var stdlib: Option[Text] = None
-  var to: Text = "effects"
+  var to: Text = "paths"
+  var ledger: Bool = false
+  var z3: Option[Text] = None
+  var budget: Int where it >= 0 = verifier.default_budget_ms
+  var cache: Option[Text] = None
+  var diag_json: Bool = false
+  var interface_json: Bool = false
+  var path_json: Bool = false
+  var dump: Option[Text] = None
   var i: Int = 0
   loop while i < List.len(xs: args)
     invariant i >= 0
     decreases List.len(xs: args) - i
   {
     let a: Text = List.get(xs: args, i: i)
-    if (a == "--root" or a == "--stdlib" or a == "--to") and i + 1 < List.len(xs: args) {
+    if (a == "--root" or a == "--stdlib" or a == "--to" or a == "--z3" or a == "--budget" or a == "--cache" or a == "--dump") and i + 1 < List.len(
+      xs: args
+    ) {
       let v: Text = List.get(xs: args, i: i + 1)
       if a == "--root" {
         root = Some(value: v)
-      } else {
-        if a == "--stdlib" {
-          stdlib = Some(value: v)
-        } else {
-          to = v
+      }
+      if a == "--stdlib" {
+        stdlib = Some(value: v)
+      }
+      if a == "--to" {
+        to = v
+      }
+      if a == "--z3" {
+        z3 = Some(value: v)
+      }
+      if a == "--budget" {
+        match Int.parse(t: v) with
+        | Some(value) -> {
+          if value >= 0 {
+            budget = value
+          }
         }
+        | None -> budget = budget
+      }
+      if a == "--cache" {
+        cache = Some(value: v)
+      }
+      if a == "--dump" {
+        dump = Some(value: v)
       }
       i = i + 2
     } else {
-      entry = a
-      i = i + 1
+      if a == "--ledger" or a == "--diag-json" or a == "--interface-json" or a == "--path-json" {
+        if a == "--ledger" {
+          ledger = true
+        }
+        if a == "--diag-json" {
+          diag_json = true
+        }
+        if a == "--interface-json" {
+          interface_json = true
+        }
+        if a == "--path-json" {
+          path_json = true
+        }
+        i = i + 1
+      } else {
+        entry = a
+        i = i + 1
+      }
     }
   }
   if entry == "" {
@@ -56,7 +120,22 @@ fn parse_args(args: List[Text]) -> Result[Options, io.Error] may alloc {
       )
     )
   }
-  return Ok(value: Options { entry: entry, root: root, stdlib: stdlib, to: to })
+  return Ok(
+    value: Options {
+      entry: entry,
+      root: root,
+      stdlib: stdlib,
+      to: to,
+      ledger: ledger,
+      z3: z3,
+      budget: budget,
+      cache: cache,
+      diag_json: diag_json,
+      interface_json: interface_json,
+      path_json: path_json,
+      dump: dump
+    }
+  )
 }
 
 fn pass_index(name: Text) -> Int {
@@ -81,7 +160,22 @@ fn pass_index(name: Text) -> Int {
   if name == "effects" {
     return 6
   }
-  return 6
+  if name == "contracts" {
+    return 7
+  }
+  if name == "claims" {
+    return 8
+  }
+  if name == "capabilities" {
+    return 9
+  }
+  if name == "verify" {
+    return 10
+  }
+  if name == "paths" {
+    return 11
+  }
+  return 11
 }
 
 fn def_text(d: Option[Text]) -> Text {
@@ -93,8 +187,9 @@ fn def_text(d: Option[Text]) -> Text {
 pub fn main(
   args: List[Text],
   files: io.Files,
-  console: io.Console
-) -> Result[Unit, io.Error] may io.file, alloc, mutate {
+  console: io.Console,
+  process: io.Process
+) -> Result[Unit, io.Error] may io.file, nondet, alloc, mutate {
   let opts: Options = try parse_args(args: args)
   let to: Int = pass_index(name: opts.to)
   var ctx: context.Context = context.new_context(root: opts.root, stdlib: opts.stdlib)
@@ -123,20 +218,121 @@ pub fn main(
   if to >= 6 and context.clean(ctx: ctx) {
     effects.effects_pass(ctx: inout ctx)
   }
+  if to >= 7 and context.clean(ctx: ctx) {
+    contracts.contracts_pass(ctx: inout ctx)
+  }
+  if to >= 8 and context.clean(ctx: ctx) {
+    claimcheck.claims_pass(ctx: inout ctx)
+  }
+  if to >= 9 and context.clean(ctx: ctx) {
+    capabilities.capabilities_pass(ctx: inout ctx)
+  }
+  if to >= 10 and context.clean(ctx: ctx) {
+    verifier.verify_pass(
+      ctx: inout ctx,
+      process: process,
+      files: files,
+      console: console,
+      opts: verifier.Options {
+        z3_path: opts.z3,
+        budget_ms: opts.budget,
+        cache_dir: opts.cache,
+        dump_dir: opts.dump
+      }
+    )
+  }
+  if to >= 11 and context.clean(ctx: ctx) {
+    paths.paths_pass(ctx: inout ctx)
+  }
+  let tab: Dict[Int, loc.LineTable] = loc.line_tables(ctx: ctx)
   for d: report.Diagnostic in List.finish(b: ctx.diagnostics) {
+    if opts.diag_json {
+      io.print(
+        console: console,
+        text: json.compact(j: diagjson.to_json(ctx: ctx, tab: tab, d: d)) ++ "\n"
+      )
+    }
     var path: Text = "?"
     if d.file >= 0 and d.file < context.file_count(ctx: ctx) {
       path = context.file_at(ctx: ctx, id: d.file).path
     }
-    io.print(
-      console: console,
-      text: d.code ++ "\t" ++ path ++ "\t" ++ Int.to_text(x: d.span.start) ++ "\t" ++ Int.to_text(
-        x: d.span.end
-      ) ++ "\t" ++ def_text(d: d.def_name) ++ "\t" ++ Text.join(
-        parts: d.context,
-        sep: " | "
-      ) ++ "\n"
-    )
+    if not opts.diag_json {
+      io.print(
+        console: console,
+        text: d.code ++ "\t" ++ path ++ "\t" ++ Int.to_text(x: d.span.start) ++ "\t" ++ Int.to_text(
+          x: d.span.end
+        ) ++ "\t" ++ def_text(d: d.def_name) ++ "\t" ++ Text.join(
+          parts: d.context,
+          sep: " | "
+        ) ++ "\n"
+      )
+    }
+  }
+  if context.clean(ctx: ctx) and (opts.interface_json or opts.path_json) {
+    var entry_mod: Int = -1
+    for mid: Int in 0 ..< ctx.module_count {
+      match Map.find(d: ctx.modules, key: mid) with
+      | Some(value) -> {
+        if value.file == 0 {
+          entry_mod = mid
+        }
+      }
+      | None -> skip_unit()
+    }
+    if opts.interface_json and entry_mod >= 0 {
+      io.print(
+        console: console,
+        text: json.pretty(j: interface.interface_of(ctx: ctx, mod: entry_mod)) ++ "\n"
+      )
+    }
+    if opts.path_json {
+      for k: Int in Map.keys(d: ctx.analyses) {
+        match Map.find(d: ctx.analyses, key: k) with
+        | Some(value) -> {
+          if value.mod == entry_mod {
+            io.print(
+              console: console,
+              text: json.pretty(j: pathreport.path_report(ctx: ctx, tab: tab, a: value)) ++ "\n"
+            )
+          }
+        }
+        | None -> skip_unit()
+      }
+    }
+  }
+  if opts.ledger {
+    for i: Int in 0 ..< ctx.obligation_count {
+      let o: obligations.Obligation = context.get_obligation(ctx: ctx, id: i)
+      var path: Text = "?"
+      if o.at_file >= 0 and o.at_file < context.file_count(ctx: ctx) {
+        path = context.file_at(ctx: ctx, id: o.at_file).path
+      }
+      io.print(
+        console: console,
+        text: "O\t" ++ obligations.kind_text(k: o.kind) ++ "\t" ++ path ++ "\t" ++ Int.to_text(
+          x: o.at_span.start
+        ) ++ "\t" ++ Int.to_text(x: o.at_span.end) ++ "\t" ++ Text.replace(
+          t: o.text,
+          from: "\n",
+          to: "\\n"
+        ) ++ "\t" ++ obligations.status_text(s: o.status) ++ "\t" ++ text_or_dash(
+          o: o.by
+        ) ++ "\t" ++ Bool.to_text(b: o.pinned) ++ "\t" ++ context.get_def(
+          ctx: ctx,
+          id: o.def
+        ).name ++ "\n"
+      )
+    }
   }
   return Ok(value: Unit)
+}
+
+fn skip_unit() -> Unit {
+  return Unit
+}
+
+fn text_or_dash(o: Option[Text]) -> Text {
+  match o with
+  | Some(value) -> return value
+  | None -> return "-"
 }

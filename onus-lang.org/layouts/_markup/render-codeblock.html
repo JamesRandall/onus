@@ -1,0 +1,8 @@
+{{- /* Fenced code: Onus (no language, or `onus`) through the Onus tokenizer; everything else through Chroma. */ -}}
+{{- $lang := .Type -}}
+{{- $src := strings.TrimSuffix "\n" .Inner -}}
+{{- if or (eq $lang "") (eq $lang "onus") (eq $lang "text") -}}
+<pre class="code onus"><code>{{ partial "onus-code.html" $src }}</code></pre>
+{{- else -}}
+{{ transform.Highlight $src $lang }}
+{{- end -}}
