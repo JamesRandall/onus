@@ -1,0 +1,31 @@
+module unexercised
+
+-- The result refinement is a promise no example or property restates:
+-- widening it survives mutation (§20.4).
+fn half(n: Int where it >= 0) -> Int where it >= 0 {
+  return n / 2
+}
+
+-- The result refinement cannot be proved from an unconstrained `n`, so it is
+-- checked at runtime; the example reaches the check (§20.5).
+fn step(n: Int) -> Int where it >= 0 may panic {
+  return n - 1
+}
+
+example halves {
+  half(n: 4) == 2
+}
+
+example steps {
+  step(n: 5) == 4
+}
+
+-- The guard matters: `half` refuses a negative `n`.
+property half_is_smaller(n: Int where it >= 0) {
+  half(n: n) <= n
+}
+
+-- The guard carries nothing: the assertion holds for every Int.
+property plus_zero(n: Int where it >= 0) {
+  n + 0 == n
+}

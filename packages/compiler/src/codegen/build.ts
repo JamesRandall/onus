@@ -9,14 +9,17 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Context } from '../context.js';
+import type { DefId } from '../resolve/defs.js';
 import { runPipeline } from '../driver.js';
-import { emitModule, type EmittedModule } from './emit.js';
+import { emitModule, type EmittedModule, type EmitOptions } from './emit.js';
 
 export interface BuildOptions {
   readonly outDir: string;
   readonly ts: boolean;
   /** Also emit every `verify` block as a function (`onus test --assumptions`). */
   readonly verify?: boolean;
+  /** Negate the guards of this property's generators (`onus test --mutate`, §20.4). */
+  readonly negateGuard?: DefId;
 }
 
 export interface BuildResult {
@@ -59,7 +62,8 @@ export function emitAll(ctx: Context, opts: BuildOptions): BuildResult {
   let launcher: string | null = null;
   const entry = ctx.resolve.modules[0] ?? null;
   for (const m of ctx.resolve.modules) {
-    const out = emitModule(ctx, m, opts.verify === true ? { ts: opts.ts, runtime, verify: true } : { ts: opts.ts, runtime });
+    const emitOpts: EmitOptions = { ts: opts.ts, runtime, ...(opts.verify === true ? { verify: true } : {}), ...(opts.negateGuard === undefined ? {} : { negateGuard: opts.negateGuard }) };
+    const out = emitModule(ctx, m, emitOpts);
     emitted.push(out);
     const path = join(opts.outDir, ...m.name.split('.')) + `.${ext}`;
     mkdirSync(dirname(path), { recursive: true });

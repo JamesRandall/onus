@@ -1,6 +1,7 @@
 node_modules/
 dist/
 out/
+out-mutate/
 .onus/
 .DS_Store
 *.tsbuildinfo

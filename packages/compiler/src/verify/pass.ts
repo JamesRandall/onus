@@ -108,7 +108,7 @@ class Verifier {
             counterexample: counterexample(result, vc),
           });
         } else {
-          o.by = 'z3: not provable';
+          o.by = o.kind === 'assertion' ? 'run as a test' : 'z3: not provable';
         }
         return;
       case 'timeout':

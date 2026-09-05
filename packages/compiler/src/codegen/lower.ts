@@ -32,6 +32,8 @@ import type { IrArm, IrBlock, IrCallTarget, IrDecoder, IrDomain, IrExpr, IrFn, I
 export interface LowerOptions {
   /** Lower every `verify` block too (`onus test --assumptions`, §20.2). */
   readonly verify: boolean;
+  /** Negate the guards of this property's generators (`onus test --mutate`, §20.4). */
+  readonly negateGuard?: DefId;
 }
 
 const ERROR: Type = { k: 'error' };
@@ -968,7 +970,7 @@ class Lowerer {
         examples.push({ name: item.name.text, body: this.assertionBlock(item.body) });
       } else if (item.kind === 'PropertyDecl') {
         this.fn = null;
-        properties.push({ label: `property ${item.name.text}`, params: this.genParams(item.params, new Map()), body: this.assertionBlock(item.body) });
+        properties.push({ label: `property ${item.name.text}`, params: this.genParams(item.params, new Map(), this.t.defOf.get(item.id) === this.opts.negateGuard), body: this.assertionBlock(item.body) });
       } else if (item.kind === 'ImplDecl') {
         const r = this.t.refs.get(item.id);
         if (r === undefined || r.k !== 'def') continue;
@@ -997,19 +999,22 @@ class Lowerer {
     return { examples, properties };
   }
 
-  private genParams(params: readonly A.Param[], subst: Map<DefId, TypeArg>): { name: string; gen: IrGen }[] {
+  private genParams(params: readonly A.Param[], subst: Map<DefId, TypeArg>, negate = false): { name: string; gen: IrGen }[] {
     return params.map((param) => {
       const pd = this.t.defOf.get(param.id);
       const type = pd === undefined ? undefined : this.ty.declTypes.get(pd);
-      return { name: param.name.text, gen: this.generator(substitute(type ?? ERROR, subst)) };
+      return { name: param.name.text, gen: this.generator(substitute(type ?? ERROR, subst), negate) };
     });
   }
 
-  /** A generator for `t`, filtered by its refinements. */
-  private generator(t: Type): IrGen {
+  /** A generator for `t`, filtered by its refinements; `negate` inverts the filters (§20.4, "negate a guard"). */
+  private generator(t: Type, negate = false): IrGen {
     const it = this.tmp('it');
     const local: IrExpr = { k: 'local', name: it, type: t };
-    const filters = this.refinementPreds(t).map((p) => ({ it, cond: this.withIt(local, () => this.expr(p)) }));
+    const filters = this.refinementPreds(t).map((p) => {
+      const cond = this.withIt(local, () => this.expr(p));
+      return { it, cond: negate ? { k: 'not' as const, operand: cond } : cond };
+    });
     return { base: this.baseGenerator(stripRefinements(t)), filters };
   }
 

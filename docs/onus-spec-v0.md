@@ -1272,7 +1272,7 @@ The review tool shows assumptions as *assumed, verified <when> against <target>*
 
 ### 20.4 Contract mutation
 
-`onus test --mutate` weakens contracts one at a time and reports which weakenings no example or property detects. Mutations applied, per obligation: drop an `ensures` clause; replace a refinement bound with its base type; negate a guard in a `property`; drop a `law`. A mutation that survives — every example and property still passes — is reported as `M0001 undetected contract weakening` with the mutation and the function. It is not an error; it is the signal that the examples are not carrying the contract's meaning.
+`onus test --mutate` weakens contracts one at a time and reports which weakenings no example or property detects. Mutations applied, per obligation: drop an `ensures` clause; replace a refinement bound with its base type; negate a guard in a `property`; drop a `law`. A mutation that survives — every example and property still passes — is reported as `M0001 undetected contract weakening` with the mutation and the function. It is not an error; it is the signal that the examples are not carrying the contract's meaning. <!-- changed: 2026-09-05, docs/CHANGES.md items 106–107 — a weakening never changes a body, so "survives" means no assertion the verifier proved from the contracts stops being provable without the clause; guard negation re-runs the property over the complement of its domain; laws are not dropped and parameter refinements are not widened -->
 
 Mutation never touches bodies. Bodies are the model's; weakening them is what the loop already does implicitly by regenerating.
 
@@ -1285,7 +1285,7 @@ The reported test metric is obligation coverage, per module and per path:
 - assumptions, and of those, how many are verifiable and how many have a current passing verification;
 - contract mutations detected versus surviving.
 
-Line coverage is not reported and cannot be enabled.
+Line coverage is not reported and cannot be enabled. <!-- changed: 2026-09-05, docs/CHANGES.md item 108 — reported as `obligation_coverage` in `interface.json`, `path.json` and the review page, from the hits `onus test` records on the JavaScript target -->
 
 ### 20.6 The runner
 

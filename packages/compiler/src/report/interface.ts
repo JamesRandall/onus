@@ -9,6 +9,7 @@
  * body elided to `{ ... }` (the one printer, with an option).
  */
 import type { Context } from '../context.js';
+import { coverageOf, type CoverageJson } from './coverage.js';
 import type { Obligation } from '../contracts/obligations.js';
 import type { Effect } from '../effects/set.js';
 import type { ModuleId, ModuleRecord } from '../resolve/defs.js';
@@ -120,6 +121,8 @@ export interface InterfaceDocument {
   readonly obligations: ObligationCounts;
   /** Every obligation of the module with its status and provenance (§11, §12.2). */
   readonly ledger: readonly LedgerEntry[];
+  /** Obligation coverage of the module (§20.5). */
+  readonly obligation_coverage: CoverageJson;
 }
 
 /**
@@ -177,6 +180,7 @@ class InterfaceBuilder {
       test_module: m.test,
       obligations: counts(this.obligations),
       ledger: this.obligations.map((o) => this.ledgerEntry(o)),
+      obligation_coverage: coverageOf(this.ctx, this.obligations, assumes, (def) => def.startsWith(`${this.rec.name}.`)),
     };
   }
 

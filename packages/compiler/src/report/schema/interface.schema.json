@@ -13,7 +13,8 @@
     "sealed_types",
     "test_module",
     "obligations",
-    "ledger"
+    "ledger",
+    "obligation_coverage"
   ],
   "additionalProperties": false,
   "properties": {
@@ -65,6 +66,55 @@
       "items": {
         "$ref": "#/definitions/ledgerEntry"
       }
+    },
+    "obligation_coverage": {
+      "type": "object",
+      "required": [
+        "proved",
+        "checked",
+        "checked_exercised",
+        "assumptions",
+        "assumptions_verifiable",
+        "assumptions_verified",
+        "mutations_detected",
+        "mutations_surviving"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "proved": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "checked": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "checked_exercised": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "assumptions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "assumptions_verifiable": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "assumptions_verified": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mutations_detected": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mutations_surviving": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "description": "Obligation coverage (\u00a720.5)."
     }
   },
   "definitions": {

@@ -112,7 +112,7 @@ describe('interface documents (§11.1)', () => {
     const prop = doc.items.find((i) => i.kind === 'property' && i.name === 'escape_bounded');
     expect(prop?.properties.length).toBe(1);
     expect(prop?.properties[0]?.status).toBe('checked');
-    if (z3 !== null) expect(doc.ledger.filter((l) => l.status === 'checked' && l.kind !== 'representation').length).toBe(1);
+    if (z3 !== null) expect(doc.ledger.filter((l) => l.status === 'checked' && l.kind !== 'representation' && l.kind !== 'assertion').length).toBe(1);
   });
 });
 

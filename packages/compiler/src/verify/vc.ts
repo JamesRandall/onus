@@ -48,7 +48,13 @@ const INT_MAX = 2n ** 53n;
  * Preconditions: the contracts pass ran.
  * Effects: none beyond the returned structure.
  */
-export function buildVCs(ctx: Context): VCs {
+/** A contract weakening under which the conditions are rebuilt (§20.4). */
+export type Mutation =
+  | { readonly k: 'drop-ensures'; readonly fn: DefId; readonly clause: A.NodeId }
+  | { readonly k: 'widen-return'; readonly fn: DefId }
+  | { readonly k: 'widen-field'; readonly record: DefId; readonly field: string };
+
+export function buildVCs(ctx: Context, mutation: Mutation | null = null): VCs {
   const out: VCs = { built: new Map(), skipped: new Map() };
   const byDef = new Map<DefId, Obligation[]>();
   for (const o of ctx.contracts.obligations) {
@@ -60,10 +66,10 @@ export function buildVCs(ctx: Context): VCs {
   for (const [def, obligations] of byDef) {
     const d = ctx.resolve.def(def);
     const node = ctx.resolve.node(d.node);
-    const walker = new BodyWalker(ctx, d, obligations, out);
+    const walker = new BodyWalker(ctx, d, obligations, out, mutation);
     try {
       if (node.kind === 'FnDecl' && node.body !== null) walker.fnBody(node);
-      else if (node.kind === 'ExampleDecl' || node.kind === 'PropertyDecl') walker.assertionBody(node);
+      else if (node.kind === 'ExampleDecl' || node.kind === 'PropertyDecl' || node.kind === 'Law') walker.assertionBody(node);
       else if (node.kind === 'ConstDecl') walker.constBody(node);
       else if (node.kind === 'VerifyBlock') walker.verifyBody(node);
       else if (node.kind === 'ImplDecl') walker.skipAll('laws are run under generated inputs');
@@ -93,10 +99,11 @@ class BodyWalker {
     private readonly def: Def,
     obligations: readonly Obligation[],
     private readonly out: VCs,
+    mutation: Mutation | null = null,
   ) {
     this.t = ctx.resolve;
     this.ty = ctx.types;
-    this.lowerer = new Lowerer(ctx);
+    this.lowerer = new Lowerer(ctx, mutation);
     this.pending = new Map(obligations.map((o) => [o.id, o]));
   }
 
@@ -136,8 +143,8 @@ class BodyWalker {
     this.skipAll('not reached by the walk');
   }
 
-  assertionBody(node: A.ExampleDecl | A.PropertyDecl): void {
-    if (node.kind === 'PropertyDecl') {
+  assertionBody(node: A.ExampleDecl | A.PropertyDecl | A.Law): void {
+    if (node.kind === 'PropertyDecl' || node.kind === 'Law') {
       for (const p of node.params) {
         const pd = this.t.defOf.get(p.id);
         const type = pd === undefined ? undefined : this.ty.declTypes.get(pd);
@@ -302,9 +309,14 @@ class BodyWalker {
         return;
       case 'Assume':
         return;
-      case 'ExprStmt':
-        this.exprObligations(s.expr);
+      case 'ExprStmt': {
+        const value = this.exprObligations(s.expr);
+        // An assertion of a test body (§5.2): proved when the contracts entail it, and then a fact for the assertions after it.
+        const assertions = this.obligationsAt(s.expr.id, 'assertion');
+        for (const o of assertions) this.tryGoal(o, () => value);
+        if (assertions.length > 0) this.facts.push(value);
         return;
+      }
     }
   }
 

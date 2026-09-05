@@ -603,6 +603,53 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     `postgres:17` Docker container with password `onus`) and skip with a
     notice otherwise.
 
+## M13 — contract mutation and coverage
+
+105. **Assertion obligations (§5.2, §20.4).** Every bare Bool statement of
+    an `example`, `property` or `law` body is an obligation of kind
+    `assertion`: proved when the contracts of what it calls entail it, and
+    otherwise `checked` "run as a test". A proved assertion is a fact for
+    the assertions after it. Tests are not functions, so these are exempt
+    from the panic rule. Lowering test bodies exposed a contract that calls
+    its own function (`ensures compare(a: a, b: a) == 0`); the verifier now
+    states such a contract once instead of unfolding it forever.
+106. **What "detected" means (§20.4).** Weakening a contract never changes a
+    body, so re-running the tests cannot notice it. A mutation of an
+    `ensures` clause, a result refinement or a record field refinement is
+    detected when an assertion the verifier proved from the contracts stops
+    being provable without the clause: the test restates what the clause
+    promised. Negating a property's guards is the one dynamic mutation: the
+    property is re-run over the complement of its domain and detects the
+    mutation by failing. `onus test --mutate` prints one row per mutation,
+    `M0001 undetected contract weakening` for the survivors, exits 0, and
+    writes `.onus/ledger/mutations.json`, which the reports read. Static
+    mutations need z3 and are skipped with a notice without it.
+107. **Two of §20.4's mutations are not applied.** Laws are not dropped: a
+    law is itself the only test of the interface clause it states, so its
+    absence could never be detected and every law would be reported. And
+    parameter refinements are not widened: accepting more inputs is a
+    stronger promise by the callee, not a weaker one, and nothing a caller's
+    test asserts can depend on it. Result and field refinements are widened.
+108. **Obligation coverage (§20.5).** The runtime records a hit per check
+    reached when `ONUS_COVERAGE_DIR` is set; the generated test file writes
+    them after its tests, since test runners end their workers without
+    running exit handlers. `onus test` merges the hits into
+    `.onus/ledger/coverage.json`, keeping the larger count per check across
+    runs, and prints the coverage line. `interface.json`, `path.json` and
+    the review page carry `obligation_coverage`: proved; checked and how
+    many of those a test reached; assumptions, verifiable and verified; and
+    mutations detected and surviving. Representation obligations have no
+    runtime check and are not counted as checks. Coverage is measured on
+    the JavaScript target only.
+109. **The acceptance test is pinned on Mandelbrot.** The `ensures` on
+    `recent_orders` stays deferred (item 36), so the milestone's acceptance
+    is dropping `ensures result <= limit` on `escape_count`, which
+    `property escape_bounded` detects, and widening the result refinement
+    of a fixture function no test restates, which survives and is reported.
+    The build directory for `onus test` is resolved to an absolute path,
+    which vitest needs, and the mutated programs are written beside it in
+    `out-mutate` so the program's own test run does not see them.
+
 ### Deferred, not changed
 
 - `Stream[T] ! e` as a type (§3.11) is not parsed: `-> Stream[T] ! e` is

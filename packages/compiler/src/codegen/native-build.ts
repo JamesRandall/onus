@@ -6,7 +6,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import type { Context } from '../context.js';
 import { diagnostic } from '../report/diagnostic.js';
 import { fileId, span as mkSpan } from '../source.js';
@@ -138,7 +138,8 @@ export function runNativeExamples(exe: string): { results: Map<string, boolean>;
  * example's outcome by qualified name; properties and laws are not examples.
  * Effects: spawns vitest.
  */
-export function runJsExamples(outDir: string): Map<string, boolean> {
+export function runJsExamples(outDirIn: string, includeProperties = false): Map<string, boolean> {
+  const outDir = resolve(outDirIn); // vitest resolves `--config` against `--root`; only absolute paths are safe
   const report = join(outDir, 'examples.report.json');
   spawnSync('npx', ['vitest', 'run', '--root', outDir, '--config', join(outDir, 'vitest.config.mjs'), '--reporter=json', `--outputFile=${report}`], { encoding: 'utf8', env: { ...process.env, CI: '1' } });
   const results = new Map<string, boolean>();
@@ -151,7 +152,7 @@ export function runJsExamples(outDir: string): Map<string, boolean> {
     const module = rel.split('/').join('.');
     for (const a of file.assertionResults) {
       if (typeof a !== 'object' || a === null || !('title' in a) || typeof a.title !== 'string' || !('status' in a)) continue;
-      if (a.title.startsWith('property ') || a.title.startsWith('law ')) continue;
+      if (!includeProperties && (a.title.startsWith('property ') || a.title.startsWith('law '))) continue;
       results.set(`${module}.${a.title}`, a.status === 'passed');
     }
   }

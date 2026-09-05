@@ -10,6 +10,7 @@
  * `Unlowerable` marks an obligation as `checked`.
  */
 import type { Context } from '../context.js';
+import type { Mutation } from './vc.js';
 import type { Value } from '../consteval/values.js';
 import type { Def, DefId, ResolveTables } from '../resolve/defs.js';
 import type * as A from '../syntax/ast.js';
@@ -71,7 +72,14 @@ export class Lowerer {
   /** Outer instantiations in force while lowering a callee's contracts. */
   private readonly substStack: ReadonlyMap<DefId, TypeArg>[] = [];
 
-  constructor(private readonly ctx: Context) {
+  /** Functions whose contracts are being lowered right now (see `calleeFacts`). */
+  private readonly expanding = new Set<DefId>();
+
+  constructor(
+    private readonly ctx: Context,
+    /** A contract weakening whose facts are withheld (§20.4, `onus test --mutate`). */
+    private readonly mutation: Mutation | null = null,
+  ) {
     this.t = ctx.resolve;
     this.ty = ctx.types;
   }
@@ -683,7 +691,20 @@ export class Lowerer {
 
   /** The callee's ensures clauses and return refinements, instantiated for this application. */
   private calleeFacts(fnDef: Def, sig: Signature, args: Map<DefId, Binding>, result: Formula, ret: Type): void {
-    this.typeFacts(result, ret, args);
+    const m = this.mutation;
+    this.typeFacts(result, m !== null && m.k === 'widen-return' && m.fn === fnDef.id ? stripRefinements(ret) : ret, args);
+    // A contract that calls its own function (`ensures compare(a, a) == 0`) is stated once, not unfolded forever.
+    if (this.expanding.has(fnDef.id)) return;
+    this.expanding.add(fnDef.id);
+    try {
+      this.calleeContracts(fnDef, sig, args, result);
+    } finally {
+      this.expanding.delete(fnDef.id);
+    }
+  }
+
+  private calleeContracts(fnDef: Def, sig: Signature, args: Map<DefId, Binding>, result: Formula): void {
+    const m = this.mutation;
     const savedResult = this.result;
     const savedOlds = this.olds;
     this.result = result;
@@ -691,6 +712,7 @@ export class Lowerer {
     try {
       for (const c of sig.contracts) {
         if (c.clause !== 'ensures') continue;
+        if (m !== null && m.k === 'drop-ensures' && m.fn === fnDef.id && m.clause === c.id) continue;
         try {
           this.axioms.push(this.lower(c.expr, args));
         } catch (err) {
@@ -738,7 +760,8 @@ export class Lowerer {
       const s = cur;
       if (s.k === 'record') {
         const subst = this.substOfType(s);
-        const fields = (this.ty.fields.get(s.def) ?? []).map((f) => ({ f, ft: substitute(f.type, subst) }));
+        const wf = this.mutation !== null && this.mutation.k === 'widen-field' && this.mutation.record === s.def ? this.mutation.field : null;
+        const fields = (this.ty.fields.get(s.def) ?? []).map((f) => ({ f, ft: f.name === wf ? stripRefinements(substitute(f.type, subst)) : substitute(f.type, subst) }));
         const siblings = new Map<DefId, Binding>(env);
         for (const { f, ft } of fields) siblings.set(f.def, { term: this.projectionOf(term, s, s.def, f.name, ft), type: ft });
         for (const { f, ft } of fields) {

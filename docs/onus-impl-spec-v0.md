@@ -317,7 +317,7 @@ Each milestone has acceptance tests in `test/`. Do not start the next milestone 
 
 <!-- changed: 2026-09-03, docs/CHANGE-LOG-02.md "Testing model" — M13 added -->
 
-**M13 — Contract mutation and coverage.** `onus test --mutate` with the four mutation kinds; `M0001` reporting (a report row of the test run, not a diagnostic: there are no warnings); obligation coverage in `interface.json`, `path.json` and the review tool. Accept: dropping the `ensures` on `recent_orders` is detected by its property; dropping a deliberately unexercised refinement in a fixture survives and is reported.
+**M13 — Contract mutation and coverage.** `onus test --mutate` with the four mutation kinds; `M0001` reporting (a report row of the test run, not a diagnostic: there are no warnings); obligation coverage in `interface.json`, `path.json` and the review tool. Accept: dropping the `ensures` on `recent_orders` is detected by its property; dropping a deliberately unexercised refinement in a fixture survives and is reported. Done 2026-09-05 (docs/CHANGES.md items 105–109): the acceptance is pinned on `escape_count` and `property escape_bounded`, since the `ensures` on `recent_orders` stays deferred; laws are not mutated (item 107).
 
 ---
 

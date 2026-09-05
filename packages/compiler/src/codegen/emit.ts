@@ -17,6 +17,8 @@ export interface EmitOptions {
   readonly runtime: string;
   /** Emit each `verify` block as an exported Bool-returning function (`onus test --assumptions`, §20.2). */
   readonly verify?: boolean;
+  /** Negate the guards of this property's generators (`onus test --mutate`, §20.4). */
+  readonly negateGuard?: DefId;
 }
 
 /** An emitted `verify` function and what the launcher must supply to it. */
@@ -48,5 +50,5 @@ export interface EmittedModule {
  * Effects: none (returns text).
  */
 export function emitModule(ctx: Context, m: ModuleRecord, opts: EmitOptions): EmittedModule {
-  return emitJs(ctx, lowerModule(ctx, m, { verify: opts.verify === true }), opts);
+  return emitJs(ctx, lowerModule(ctx, m, opts.negateGuard === undefined ? { verify: opts.verify === true } : { verify: opts.verify === true, negateGuard: opts.negateGuard }), opts);
 }

@@ -808,7 +808,7 @@ class JsEmitter {
     const obSaved = this.obDecls.splice(0);
     const obRefsSaved = new Map(this.obRefs);
     this.obRefs.clear();
-    inner.line(`import { test, expect } from 'vitest';`);
+    inner.line(`import { test, expect, afterAll } from 'vitest';`);
     inner.line(`import * as fc from 'fast-check';`);
     this.fn = null;
     for (const ex of tests.examples) {
@@ -832,6 +832,7 @@ class JsEmitter {
     for (const [id, alias] of this.imports) head.line(`import * as ${alias} from ${JSON.stringify(id === this.m.id ? `./${this.m.name.split('.').pop() ?? ''}.js` : this.relativeImport(id))};`);
     head.line('');
     for (const d of this.obDecls) head.line(d);
+    inner.line(`afterAll(() => $rt.coverage.flush());`);
     const text = `${head.text()}\n${inner.text()}\n`;
     this.w = outer;
     this.selfAlias = null;

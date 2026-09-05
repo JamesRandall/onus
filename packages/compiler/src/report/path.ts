@@ -3,6 +3,7 @@
  * `pathText` is its human-readable rendering with the same content.
  */
 import type { Context } from '../context.js';
+import { coverageOf, coverageText, type CoverageJson } from './coverage.js';
 import type { DefId } from '../resolve/defs.js';
 import { lineColOf, type Span } from '../source.js';
 import type { PathAnalysis } from '../paths/tables.js';
@@ -77,6 +78,8 @@ export interface PathReport {
   readonly recovers: readonly { readonly def: string; readonly at: string }[];
   /** Every obligation of a reachable function. */
   readonly ledger: readonly PathLedgerJson[];
+  /** Obligation coverage of what the path reaches (§20.5). */
+  readonly obligation_coverage: CoverageJson;
   readonly ok: boolean;
 }
 
@@ -126,6 +129,8 @@ export function pathReport(ctx: Context, analysis: PathAnalysis): PathReport {
       unresolvable: analysis.unresolvable.filter((u) => u.fn === fn).length,
     };
   });
+  const assumes: PathAssumeJson[] = analysis.assumes.map((a) => ({ claim: t.qualifiedName(a.claim), at: t.qualifiedName(a.fn), justification: a.justification, permitted_by: a.permittedBy, verifiable: a.verify !== null, verify: verifyText(ctx, a.verify), last_verified: verifiedOf(ctx, a.key) }));
+  const reachableNames = new Set(analysis.reachable.map((d) => t.qualifiedName(d)));
   const edges: GraphEdgeJson[] = analysis.edges.map((e) => ({ from: t.qualifiedName(e.from), to: t.qualifiedName(e.to), effects: names(e.effects), at: `${t.qualifiedName(e.from)}:${lineCol(ctx, t.node(e.at).span)}` }));
   return {
     path: t.def(analysis.def).name,
@@ -133,7 +138,7 @@ export function pathReport(ctx: Context, analysis: PathAnalysis): PathReport {
     reachable: analysis.reachable.map((d) => t.qualifiedName(d)),
     effects: { bound: analysis.bound === null ? null : names(analysis.bound), forbid: [...names(analysis.forbid), ...analysis.forbidClaims.map((c) => claimDisplay(ctx, c))], actual: names(analysis.actual) },
     claims: { required: analysis.required.map((c) => t.qualifiedName(c)), satisfied: analysis.satisfied },
-    assumes: analysis.assumes.map((a) => ({ claim: t.qualifiedName(a.claim), at: t.qualifiedName(a.fn), justification: a.justification, permitted_by: a.permittedBy, verifiable: a.verify !== null, verify: verifyText(ctx, a.verify), last_verified: verifiedOf(ctx, a.key) })),
+    assumes,
     obligations: { ...counts, checked_at: checkedAt },
     unresolvable_calls: analysis.unresolvable.map((u) => ({ at: `${t.qualifiedName(u.fn)}:${lineCol(ctx, t.node(u.at).span)}`, reason: u.reason })),
     capabilities: analysis.capabilities.map((c) => ({ type: c.typeText, constructed_at: `${t.qualifiedName(c.fn)}:${lineCol(ctx, t.node(c.at).span)}`, assumes: constructionAssumes(t.qualifiedName(c.callee)) })),
@@ -141,6 +146,7 @@ export function pathReport(ctx: Context, analysis: PathAnalysis): PathReport {
     gates: analysis.gates.map((g) => ({ evidence: t.qualifiedName(g.evidence), producers: g.producers.map((p) => t.qualifiedName(p)), guarded: g.guarded.map((p) => t.qualifiedName(p)) })),
     recovers: analysis.recovers.map((r) => ({ def: t.qualifiedName(r.fn), at: `${t.qualifiedName(r.fn)}:${lineCol(ctx, t.node(r.at).span)}` })),
     ledger: obligations.map((o) => ({ kind: o.kind, text: o.text, def: t.qualifiedName(o.def), status: o.status, by: o.by, pinned: o.pinned !== null, at: `${ctx.fileOf(t.node(o.at).span).path}:${lineCol(ctx, t.node(o.at).span)}` })),
+    obligation_coverage: coverageOf(ctx, obligations, assumes, (def) => reachableNames.has(def)),
     ok: analysis.ok,
   };
 }
@@ -164,6 +170,7 @@ export function pathText(r: PathReport): string {
   const o = r.obligations;
   lines.push(`  obligations: ${o.proved} proved, ${o.checked} checked, ${o.assumed} assumed${o.failed > 0 ? `, ${o.failed} failed` : ''}`);
   for (const c of o.checked_at) lines.push(`    checked at ${c}`);
+  lines.push(`  coverage: ${coverageText(r.obligation_coverage)}`);
   lines.push(r.unresolvable_calls.length === 0 ? '  unresolvable calls: none' : '  unresolvable calls:');
   for (const u of r.unresolvable_calls) lines.push(`    ${u.at}: ${u.reason}`);
   lines.push(r.capabilities.length === 0 ? '  capabilities: none' : '  capabilities:');

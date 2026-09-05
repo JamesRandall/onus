@@ -10,7 +10,7 @@ import { PathTables } from './paths/tables.js';
 import { EffectTables } from './effects/tables.js';
 import { DiagnosticSink, type FileLookup } from './report/diagnostic.js';
 import { b3 } from './report/hash.js';
-import type { AssumptionLedger } from './report/ledger.js';
+import type { AssumptionLedger, CoverageTable, MutationRecord } from './report/ledger.js';
 import { ResolveTables } from './resolve/defs.js';
 import { fileId, makeSourceFile, type FileId, type SourceFile, type Span } from './source.js';
 import type { ParseResult } from './syntax/parser.js';
@@ -41,6 +41,10 @@ export interface ContextOptions {
   readonly assumptionMaxAgeMs: number;
   /** The clock the paths pass judges freshness by, for reproducible tests. */
   readonly now: () => number;
+  /** Obligation checks reached by the last `onus test` (§20.5), as read from `.onus/ledger/`. */
+  readonly coverage: CoverageTable;
+  /** Contract mutation outcomes from the last `onus test --mutate` (§20.4), as read from `.onus/ledger/`. */
+  readonly mutations: readonly MutationRecord[];
 }
 
 /** Reads a file from disk, or null if it cannot be read. Effects: reads the file system. */
@@ -87,6 +91,8 @@ export class Context implements FileLookup {
       assumptions: options.assumptions ?? {},
       assumptionMaxAgeMs: options.assumptionMaxAgeMs ?? 7 * 24 * 60 * 60 * 1000,
       now: options.now ?? (() => Date.now()),
+      coverage: options.coverage ?? {},
+      mutations: options.mutations ?? [],
     };
   }
 

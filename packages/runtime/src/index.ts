@@ -10,6 +10,7 @@ export * as map from './map.js';
 export * as io from './io.js';
 export * as sql from './sql.js';
 export * as typeinfo from './typeinfo.js';
+export * as coverage from './coverage.js';
 export { Panic, check, checked, EarlyReturn, unwrap, unwrapElse, unwrapOption, unwrapOptionElse, unwrapOr, unwrapOptionOr, recover, unreachable } from './panic.js';
 export type { ObligationRef, Result, Option, Panicked } from './panic.js';
 export { eq, range, forall, exists, okList, snapshot, typeInfo, widen } from './values.js';

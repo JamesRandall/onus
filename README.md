@@ -13,7 +13,7 @@ reviews contracts, and the compiler is the only checker.
 
 ## Status
 
-Milestones 1–12 done: lexer, parser, canonical printer, `onus fmt`; module
+Milestones 1–13 done: lexer, parser, canonical printer, `onus fmt`; module
 loading, name resolution, the type checker, the check-time evaluator, the
 effects pass, obligation objects and the z3-backed verifier (`onus check`,
 `--ledger` shows every obligation's status; `--to <pass>` stops early);
@@ -34,7 +34,11 @@ with a WASI SDK), for the subset in `docs/CHANGES.md` item 95; `onus test
 --target all` runs the examples on both and reports disagreement as E0801.
 `std.sql` is real on both targets, over `pg` and `libpq`; the SQL tests use a
 Postgres at `ONUS_TEST_DSN`, by default `docker run -d -e
-POSTGRES_PASSWORD=onus -p 5432:5432 postgres:17`, and skip without one. Effects are declared with `may`
+POSTGRES_PASSWORD=onus -p 5432:5432 postgres:17`, and skip without one.
+`onus test` records which checked obligations the tests reached and reports
+obligation coverage (§20.5) in `interface.json`, `path.json` and the review
+page; `onus test --mutate` weakens contracts one at a time and reports the
+weakenings no example or property detects as `M0001` rows (§20.4). Effects are declared with `may`
 (`-> Int may alloc`). `z3`
 must be on PATH for verification; without it every obligation is checked at
 runtime.

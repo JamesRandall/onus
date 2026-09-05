@@ -6,6 +6,7 @@
  * `Err(Panicked)`. `EarlyReturn` implements `try`: it unwinds to the
  * enclosing function, which returns its value.
  */
+import { hit } from './coverage.js';
 export interface ObligationRef {
   readonly kind: string;
   readonly text: string;
@@ -26,6 +27,7 @@ export class Panic extends Error {
 
 /** Checks an obligation at runtime. Effects: throws `Panic` when `cond` is false. */
 export function check(cond: boolean, ob: ObligationRef): void {
+  hit(ob.at);
   if (!cond) throw new Panic(ob);
 }
 

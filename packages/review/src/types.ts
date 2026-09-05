@@ -76,6 +76,18 @@ export interface InterfaceItem {
   readonly at: Location;
 }
 
+/** Obligation coverage (§20.5), per module or path. */
+export interface Coverage {
+  readonly proved: number;
+  readonly checked: number;
+  readonly checked_exercised: number;
+  readonly assumptions: number;
+  readonly assumptions_verifiable: number;
+  readonly assumptions_verified: number;
+  readonly mutations_detected: number;
+  readonly mutations_surviving: number;
+}
+
 export interface InterfaceDocument {
   readonly module: string;
   readonly hash: string;
@@ -87,6 +99,8 @@ export interface InterfaceDocument {
   readonly test_module: boolean;
   readonly obligations: ObligationCounts;
   readonly ledger: readonly LedgerEntry[];
+  /** Absent in reports written before milestone 13. */
+  readonly obligation_coverage?: Coverage;
 }
 
 export interface GraphNode {
@@ -138,6 +152,8 @@ export interface PathReport {
   readonly gates: readonly Gate[];
   readonly recovers: readonly { readonly def: string; readonly at: string }[];
   readonly ledger: readonly PathLedgerEntry[];
+  /** Absent in reports written before milestone 13. */
+  readonly obligation_coverage?: Coverage;
   readonly ok: boolean;
 }
 

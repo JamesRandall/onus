@@ -5,16 +5,17 @@
  *
  * Exit codes: 0 success, 1 diagnostics reported, 2 usage or I/O failure.
  */
-import { readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Context } from '../context.js';
+import type { DefId } from '../resolve/defs.js';
 import { PASSES, runFrontEnd, runPipeline, type PassName } from '../driver.js';
 import { toJson, toText } from '../report/diagnostic.js';
 import { defaultStdlibRoot } from '../resolve/loader.js';
 import { build, runLauncher } from '../codegen/build.js';
 import { interfaceOf, interfaceText } from '../report/interface.js';
-import { pathReport, pathText } from '../report/path.js';
+import { pathReport, pathText, verifiedOf } from '../report/path.js';
 import { next } from '../next/next.js';
 import { diffText, interfaceDiff } from '../report/diff.js';
 import { reviewData } from '../report/review.js';
@@ -23,7 +24,10 @@ import type { InterfaceDocument } from '../report/interface.js';
 import { mkdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { readConfig } from '../config.js';
-import { readLedger, writeLedger } from '../report/ledger.js';
+import { mergeCoverage, readCoverage, readLedger, readMutations, writeCoverage, writeLedger, writeMutations, type CoverageTable } from '../report/ledger.js';
+import { coverageOf, coverageText, type CoverageJson } from '../report/coverage.js';
+import { enumerateMutations, runMutations } from '../mutate/mutate.js';
+import { findZ3 } from '../verify/z3.js';
 import { checkAssumptionPlan, parseOutcomes, planAssumptions, writeAssumptionsLauncher } from '../codegen/assumptions.js';
 import { emitAll, runtimeEntry } from '../codegen/build.js';
 import { buildNative, compareTargets, runJsExamples, runNativeExamples } from '../codegen/native-build.js';
@@ -131,6 +135,8 @@ function newContext(args: Args): Context {
     stdlib,
     verify: { budgetMs: Number.isFinite(budget) && budget > 0 ? budget : 500, cacheDir, z3Path: null },
     assumptions: readLedger(join(root, '.onus', 'ledger')),
+    coverage: readCoverage(join(root, '.onus', 'ledger')),
+    mutations: readMutations(join(root, '.onus', 'ledger')),
     assumptionMaxAgeMs: config.test.maxAssumptionAgeDays * 24 * 60 * 60 * 1000,
   });
 }
@@ -209,7 +215,7 @@ function buildCommand(args: Args, run: boolean): number {
   }
   const ctx = newContext(args);
   if (!readFiles(ctx, [entry])) return 2;
-  const outDir = args.values.get('out') ?? join(dirname(entry), 'out');
+  const outDir = resolve(args.values.get('out') ?? join(dirname(entry), 'out')); // vitest resolves `--config` against `--root`
   if (emit === 'ir') {
     runPipeline(ctx, 'paths');
     emitDiagnostics(ctx, args.flags.has('json'));
@@ -363,19 +369,46 @@ function nextCommand(args: Args): number {
   return 0;
 }
 
+/** The coverage of the program's own obligations and assumptions (§20.5), for the `onus test` summary line. */
+function programCoverage(ctx: Context, table: CoverageTable): CoverageJson {
+  const t = ctx.resolve;
+  const own = (def: DefId): boolean => !t.qualifiedName(def).startsWith('std.');
+  const assumes = ctx.claims.assumes.filter((a) => own(a.fn)).map((a) => ({ verifiable: a.verify !== null, last_verified: verifiedOf(ctx, a.key) }));
+  return coverageOf(ctx, ctx.contracts.obligations.filter((o) => own(o.def)), assumes, () => true, table);
+}
+
+/** `onus test --mutate` (§20.4): weakens contracts one at a time and reports the weakenings no test detects as M0001 rows. */
+function mutateCommand(args: Args, entry: string): number {
+  const root = rootOf(args);
+  const outDir = resolve(args.values.get('out') ?? join(dirname(entry), 'out')); // vitest resolves `--config` against `--root`
+  const ctx = newContext(args);
+  if (!readFiles(ctx, [entry])) return 2;
+  runPipeline(ctx, 'paths');
+  if (ctx.sink.hasErrors()) {
+    emitDiagnostics(ctx, args.flags.has('json'));
+    return 1;
+  }
+  const z3 = findZ3(ctx.options.verify.z3Path);
+  if (z3 === null) process.stderr.write('onus test --mutate: z3 not found on PATH; only property guards are mutated\n');
+  // A sibling of the build directory: the program's own test run must not see the mutated programs.
+  const records = runMutations(ctx, enumerateMutations(ctx), { z3, budgetMs: ctx.options.verify.budgetMs, outDir: `${outDir}-mutate` });
+  for (const r of records) process.stdout.write(`${r.detected ? 'detected' : 'M0001 undetected contract weakening'}: ${r.text} in ${r.def}: ${r.by}\n`);
+  const surviving = records.filter((r) => !r.detected).length;
+  process.stdout.write(`${records.length} contract mutation${records.length === 1 ? '' : 's'}: ${records.length - surviving} detected, ${surviving} surviving\n`);
+  writeMutations(join(root, '.onus', 'ledger'), records, new Date(ctx.options.now()).toISOString());
+  return 0;
+}
+
 function testCommand(args: Args): number {
   const entry = args.files[0];
   if (entry === undefined) {
     process.stderr.write(USAGE);
     return 2;
   }
-  if (args.flags.has('mutate')) {
-    process.stderr.write('onus test --mutate: not available until milestone 13\n');
-    return 2;
-  }
+  if (args.flags.has('mutate')) return mutateCommand(args, entry);
   const root = rootOf(args);
   const config = readConfig(root);
-  const outDir = args.values.get('out') ?? join(dirname(entry), 'out');
+  const outDir = resolve(args.values.get('out') ?? join(dirname(entry), 'out')); // vitest resolves `--config` against `--root`
   const ctx = newContext(args);
   const target = args.values.get('target') ?? 'js';
   if (!TARGETS.has(target)) {
@@ -392,7 +425,13 @@ function testCommand(args: Args): number {
         process.stdout.write('onus test: no example, property or law to run\n');
         return 0;
       }
-      const r = spawnSync('npx', ['vitest', 'run', '--root', outDir, '--config', join(outDir, 'vitest.config.mjs')], { stdio: 'inherit' });
+      const coverageDir = join(outDir, 'coverage');
+      rmSync(coverageDir, { recursive: true, force: true });
+      const r = spawnSync('npx', ['vitest', 'run', '--root', outDir, '--config', join(outDir, 'vitest.config.mjs')], { stdio: 'inherit', env: { ...process.env, ONUS_COVERAGE_DIR: coverageDir } });
+      const ledgerDir = join(root, '.onus', 'ledger');
+      const table = mergeCoverage(coverageDir, readCoverage(ledgerDir));
+      writeCoverage(ledgerDir, table);
+      process.stdout.write(`obligation coverage: ${coverageText(programCoverage(ctx, table))}\n`);
       return r.status ?? 1;
     }
     const native = buildNative(ctx, { outDir });

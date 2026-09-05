@@ -3,6 +3,7 @@
  * kept within ±2^53 (impl spec §1); leaving that range is a panic on the
  * `overflow` obligation.
  */
+import { hit } from './coverage.js';
 import { Panic, type ObligationRef } from './panic.js';
 
 function guard(x: number, ob: ObligationRef): number {
@@ -11,23 +12,29 @@ function guard(x: number, ob: ObligationRef): number {
 }
 
 export function add(a: number, b: number, ob: ObligationRef): number {
+  hit(ob.at);
   return guard(a + b, ob);
 }
 export function sub(a: number, b: number, ob: ObligationRef): number {
+  hit(ob.at);
   return guard(a - b, ob);
 }
 export function mul(a: number, b: number, ob: ObligationRef): number {
+  hit(ob.at);
   return guard(a * b, ob);
 }
 export function div(a: number, b: number, ob: ObligationRef): number {
+  hit(ob.at);
   if (b === 0) throw new Panic(ob, 'division by zero');
   return Math.trunc(a / b);
 }
 export function rem(a: number, b: number, ob: ObligationRef): number {
+  hit(ob.at);
   if (b === 0) throw new Panic(ob, 'remainder by zero');
   return a % b;
 }
 export function neg(a: number, ob: ObligationRef): number {
+  hit(ob.at);
   return guard(-a, ob);
 }
 

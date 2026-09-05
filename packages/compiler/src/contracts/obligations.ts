@@ -23,6 +23,8 @@ export type ObligationKind =
   | 'overflow'
   /** An `Int` binding's values fit the JavaScript number range (§19.3); reported, never a runtime check. */
   | 'representation'
+  /** A bare Bool statement of an `example`, `property` or `law` body (§5.2): proved when the contracts entail it, otherwise run as a test. */
+  | 'assertion'
   | 'const-check';
 
 export type ObligationStatus = 'pending' | 'proved' | 'checked' | 'assumed' | 'failed';

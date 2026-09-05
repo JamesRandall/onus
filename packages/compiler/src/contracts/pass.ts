@@ -52,9 +52,11 @@ class ContractsPass {
           case 'PropertyDecl':
             this.ctx.contracts.add({ kind: 'property', at: item.id, def: this.defOf(item).id, text: item.name.text, source: item.body.id, site: 'other', pinned: null, callee: null, param: null, status: 'checked', by: 'milestone 5: run under generated inputs' });
             this.body(item.body, this.defOf(item), null);
+            this.assertions(item.body, this.defOf(item));
             break;
           case 'ExampleDecl':
             this.body(item.body, this.defOf(item), null);
+            this.assertions(item.body, this.defOf(item));
             break;
           case 'ConstDecl':
             this.exprs(item.value, this.defOf(item), null);
@@ -222,12 +224,22 @@ class ContractsPass {
     this.ctx.contracts.add({ kind: 'overflow', at: b.id, def: def.id, text, source: null, site: 'other', pinned: null, callee: null, param: null, status: 'checked', by: null });
   }
 
+  /** The bare Bool statements of an assertion block (§5.2), each an obligation the verifier may prove from the contracts. */
+  private assertions(b: A.Block, def: Def): void {
+    for (const s of b.stmts) {
+      if (s.kind !== 'ExprStmt') continue;
+      this.ctx.contracts.add({ kind: 'assertion', at: s.expr.id, def: def.id, text: printExpr(s.expr), source: null, site: 'other', pinned: null, callee: null, param: null, status: 'checked', by: 'run as a test' });
+    }
+  }
+
   private laws(impl: A.ImplDecl): void {
     const ifaceRes = this.ctx.resolve.refs.get(impl.id);
     if (ifaceRes === undefined || ifaceRes.k !== 'def') return;
     const implDef = this.defOf(impl);
     for (const law of this.ctx.resolve.defs.filter((d) => d.parent === ifaceRes.def && d.kind === 'law')) {
       this.ctx.contracts.add({ kind: 'law', at: impl.id, def: implDef.id, text: law.name, source: law.node, site: 'other', pinned: null, callee: null, param: null, status: 'checked', by: 'milestone 5: run under generated inputs' });
+      const lawNode = this.ctx.resolve.node(law.node);
+      if (lawNode.kind === 'Law') this.assertions(lawNode.body, law);
     }
   }
 }
