@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://onus.dev/schema/loop/proposal.schema.json",
+  "title": "Onus loop proposal (docs/onus-loop-v0.md §5)",
+  "type": "object",
+  "required": ["kind", "def", "current", "proposed", "evidence", "rationale"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": { "enum": ["weaken_postcondition", "add_precondition", "widen_effects", "add_claim", "add_example", "new_helper", "unsatisfiable"] },
+    "def": { "type": "string" },
+    "current": { "type": ["string", "null"] },
+    "proposed": { "type": ["string", "null"] },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "counterexample": { "type": ["object", "null"] },
+        "iterations": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "rationale": { "type": "string" }
+  }
+}

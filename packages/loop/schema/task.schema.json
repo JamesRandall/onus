@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://onus.dev/schema/loop/task.schema.json",
+  "title": "Onus loop task (docs/onus-loop-v0.md §2)",
+  "type": "object",
+  "required": ["id", "kind", "scope"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "kind": { "enum": ["implement", "repair", "interface_change", "regenerate", "ticket"] },
+    "scope": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1, "description": "Module names the loop may edit; everything else is read-only." },
+    "target": {
+      "type": "object",
+      "required": ["def"],
+      "additionalProperties": false,
+      "properties": {
+        "def": { "type": "string", "description": "Qualified name of the function (implement, repair) or interface item (interface_change)." },
+        "obligation": { "type": "string", "description": "The obligation text a repair task is about." }
+      }
+    },
+    "counterexample": { "type": "object", "description": "Concrete values violating the obligation, from a build or from production." },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "iterations": { "type": "integer", "minimum": 1 },
+        "tokens": { "type": "integer", "minimum": 1 },
+        "wall_ms": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "context_policy": { "enum": ["none", "module", "scope"] },
+    "origin": {
+      "type": "object",
+      "required": ["kind", "ref"],
+      "additionalProperties": false,
+      "properties": { "kind": { "type": "string" }, "ref": { "type": "string" } }
+    },
+    "description": { "type": "string", "description": "A ticket's description of the defect or feature." },
+    "escalation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "helpers": { "type": "boolean", "description": "Ladder step 3 (off by default)." },
+        "alternate_model": { "type": "string", "description": "Ladder step 4: a model spec to try after widening context." }
+      }
+    }
+  }
+}

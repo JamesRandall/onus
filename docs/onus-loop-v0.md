@@ -1,6 +1,6 @@
 # Onus — regeneration loop, candidate v0
 
-*The component that owns function bodies. Companion to `onus-spec-v0.md` (language, §N references) and `onus-impl-spec-v0.md`. Candidate: every section is a proposal.*
+*The component that owns function bodies. Companion to `onus-spec-v0.md` (language, §N references) and `onus-impl-spec-v0.md`. Candidate: every section is a proposal.* <!-- changed: 2026-09-05 — implemented as written by milestone 14 (`packages/loop`); the deviations are marked below and recorded in docs/CHANGES.md items 110–117 -->
 
 ---
 
@@ -54,7 +54,7 @@ The loop assembles the model's context from compiler output, not from source fil
 4. **Diagnostics** from the last check, as §13 JSON, filtered to the target and its callees. All of them, not the first.
 5. **The counterexample**, if any, rendered as concrete values against the contract text and the path condition that led there.
 6. **The standard library's** relevant interface entries, selected by type: if the target mentions `Grid`, `Grid`'s interface is present.
-7. **Constrained decoding**, where the model runtime supports it: `onus next` (§14) supplies the legal token set and expected type at each position. Where it does not, the loop relies on the check-and-repair cycle alone.
+7. **Constrained decoding**, where the model runtime supports it: `onus next` (§14) supplies the legal token set and expected type at each position. Where it does not, the loop relies on the check-and-repair cycle alone. <!-- changed: 2026-09-05, item 110 — no v0 model supports it; the hook is declared only -->
 
 Not shown, ever: prose conventions documents, prompt-style instructions about behaviour, other people's bodies outside the policy. If a convention matters, it is a claim; if it isn't a claim, the loop doesn't know about it. This is deliberate: it is how the underspecified remainder becomes visible rather than papered over.
 
@@ -92,7 +92,7 @@ On stall, in order, one step per iteration:
 4. Try a different model or sampling temperature, if configured.
 5. Stop; blocked.
 
-Steps 3 and 4 are optional and off by default.
+Steps 3 and 4 are optional and off by default. <!-- changed: 2026-09-05, item 113 — v0 skips them; a model output that adds a helper is refused once and then out of scope -->
 
 ### 4.2 Budgets
 
@@ -125,7 +125,7 @@ Proposals appear in the review tool as interface diffs marked *proposed by loop*
 
 A change is the loop's output for review. It contains:
 
-- **interface diff** — baseline interface documents versus new. Expected to be empty for `implement` and `repair` tasks; non-empty only when a helper was introduced (§4.1 step 3) or the task was an `interface_change`.
+- **interface diff** — baseline interface documents versus new. Expected to be empty for `implement` and `repair` tasks; non-empty only when a helper was introduced (§4.1 step 3) or the task was an `interface_change`. <!-- changed: 2026-09-05, item 114 — empty by construction when the baseline does not check: only target bodies are spliced and signatures are compared textually -->
 - **ledger delta** — obligations whose status moved, new checked sites, anything now `assumed` (which must be zero unless a human put it there).
 - **body diff** — informational. Shown collapsed; the review tool counts if it's opened.
 - **trace** — every iteration: model, prompt hash, diagnostics before and after, tokens, time. Attached to the ledger, not shown by default.
@@ -135,7 +135,7 @@ Opening a change is the loop's last act. Merging is a human decision made in the
 
 ---
 
-## 7. Production feedback
+## 7. Production feedback <!-- changed: 2026-09-05, item 117 — deferred; a `repair` task may carry a production counterexample and origin already -->
 
 The runtime's `Panicked` value carries an obligation id and, where available, the values involved. Telemetry forwards these to task intake, which produces a `repair` task whose counterexample is the production values, with `origin.kind = "production"`.
 
@@ -151,7 +151,7 @@ Checked obligations that are hit frequently in production, and never fail, are r
 
 - obligations that were green and now are not — the interfaces were sufficient to check but not to reconstruct; usually a missing example or invariant;
 - examples or properties that fail on the regenerated bodies — something the old body did that no claim required;
-- bodies that are green but differ in a way the review tool's diff can surface (different effects used, different callees).
+- bodies that are green but differ in a way the review tool's diff can surface (different effects used, different callees). <!-- changed: 2026-09-05, item 115 — not reported in v0; the interface documents carry no call graph -->
 
 Each finding becomes a proposal. A module that survives regeneration with no findings has interfaces that fully describe it; that is the target state, and the review tool reports the fraction of modules that meet it.
 
@@ -169,7 +169,7 @@ Each finding becomes a proposal. A module that survives regeneration with no fin
 ## 10. Interfaces
 
 - `onus loop run <task.json>` — runs one task to conclusion; exits 0 on change opened, 2 on blocked, 1 on error.
-- `onus loop watch` — consumes tasks from intake as they arrive; concurrency limited by repository setting; tasks with overlapping scope are serialised.
+- `onus loop watch` — consumes tasks from intake as they arrive; concurrency limited by repository setting; tasks with overlapping scope are serialised. <!-- changed: 2026-09-05, item 117 — deferred with intake; `onus loop run` forwards to `onus-loop run` in `packages/loop` -->
 - Task schema, change schema and proposal schema are versioned JSON schemas in `packages/loop/schema/`.
 - Model access is behind one interface: `generate(context) → text`, with an optional `next(offset)` hook for constrained decoding. First implementation: the Anthropic API; second: Claude Code as a subprocess, for repositories that already use it.
 

@@ -40,6 +40,15 @@ importers:
         specifier: ^4.0.0
         version: 4.9.0
 
+  packages/loop:
+    dependencies:
+      '@onus/compiler':
+        specifier: workspace:*
+        version: link:../compiler
+      ajv:
+        specifier: ^8.20.0
+        version: 8.20.0
+
   packages/review: {}
 
   packages/runtime:

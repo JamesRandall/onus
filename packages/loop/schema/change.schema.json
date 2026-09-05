@@ -1,0 +1,58 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://onus.dev/schema/loop/change.schema.json",
+  "title": "Onus loop change or blocked report (docs/onus-loop-v0.md §4, §6)",
+  "type": "object",
+  "required": ["schema_version", "task", "status", "interface_diff", "ledger_delta", "body_diff", "trace", "metrics", "proposals", "audit"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "task": { "type": "object" },
+    "status": { "enum": ["opened", "blocked"] },
+    "cause": { "enum": ["stall", "contract_conflict", "out_of_scope", "budget", "compiler_bug", "baseline"], "description": "Why a blocked task stopped." },
+    "generated": { "type": "object", "required": ["at", "model"], "properties": { "at": { "type": "string" }, "model": { "type": "string" } } },
+    "interface_diff": { "type": "array", "items": { "type": "object" }, "description": "One interface diff per module in scope; empty diffs are omitted." },
+    "ledger_delta": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["def", "kind", "text", "before", "after"],
+        "properties": { "def": { "type": "string" }, "kind": { "type": "string" }, "text": { "type": "string" }, "before": { "type": ["string", "null"] }, "after": { "type": ["string", "null"] } }
+      }
+    },
+    "body_diff": {
+      "type": "array",
+      "items": { "type": "object", "required": ["file", "module", "before", "after"], "properties": { "file": { "type": "string" }, "module": { "type": "string" }, "before": { "type": "string" }, "after": { "type": "string" } } }
+    },
+    "trace": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["iteration", "model", "prompt_hash", "diagnostics_before", "diagnostics_after", "codes_after", "tokens", "ms", "classification"],
+        "properties": {
+          "iteration": { "type": "integer" },
+          "model": { "type": "string" },
+          "prompt_hash": { "type": "string" },
+          "diagnostics_before": { "type": "integer" },
+          "diagnostics_after": { "type": "integer" },
+          "codes_after": { "type": "array", "items": { "type": "string" } },
+          "failing_tests": { "type": "array", "items": { "type": "string" } },
+          "mechanical_repairs": { "type": "integer" },
+          "tokens": { "type": "integer" },
+          "ms": { "type": "integer" },
+          "classification": { "type": "string" },
+          "escalation": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "required": ["iterations", "mechanical_repairs", "escalation_steps", "proposals", "tokens"],
+      "properties": { "iterations": { "type": "integer" }, "mechanical_repairs": { "type": "integer" }, "escalation_steps": { "type": "integer" }, "proposals": { "type": "integer" }, "tokens": { "type": "integer" } }
+    },
+    "proposals": { "type": "array", "items": { "$ref": "proposal.schema.json" } },
+    "audit": { "type": "array", "items": { "type": "object", "required": ["finding", "detail"], "properties": { "finding": { "enum": ["obligation_regressed", "example_failed", "body_differs"] }, "detail": { "type": "string" } } }, "description": "Regeneration audit findings (§8)." },
+    "last_diagnostics": { "type": "array", "items": { "type": "object" } },
+    "best_attempt": { "type": ["object", "null"] }
+  }
+}

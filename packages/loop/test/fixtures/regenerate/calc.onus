@@ -1,0 +1,11 @@
+module calc
+
+pub fn double(n: Int where 0 <= it and it <= 1000) -> Int
+  ensures proved result >= n
+{
+  return n * 2
+}
+
+example double {
+  double(n: 3) == 6
+}

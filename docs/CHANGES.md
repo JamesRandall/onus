@@ -650,6 +650,92 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     which vitest needs, and the mutated programs are written beside it in
     `out-mutate` so the program's own test run does not see them.
 
+## M14 — regeneration loop
+
+110. **The loop package (loop spec §1, §10).** `packages/loop` with
+    `onus-loop run <task.json>`; `onus loop run` forwards to it, since the
+    compiler cannot depend on a package that depends on the compiler.
+    `watch` needs task intake and is not in v0. Model access is one
+    interface with three implementations: scripted, for the tests; Claude
+    Code as a subprocess (`claude -p`, the nested-session markers stripped
+    from its environment); the Anthropic Messages API over `fetch`, which
+    could not be exercised here for want of a key. The constrained-decoding
+    hook of §3.7 is declared and supplied by nothing.
+111. **The context (§3).** Assembled through the compiler library, never
+    from an import's source: the targets with bodies elided and the
+    examples and properties that name them; the interfaces of every module
+    in scope and every import; sibling bodies per the context policy; every
+    diagnostic of the last check as §13 JSON, except `E0115` on a target,
+    which is the task itself; failing examples with their text;
+    counterexamples from the task and from the diagnostics; the standard
+    library interfaces the targets' types select. The one fixed text
+    describes the rules and Onus syntax, which is language knowledge, not
+    a convention. Simplification: diagnostics are not narrowed to callees;
+    everything in scope is shown.
+112. **Never a claim (§1, §4).** Model output is parsed as Onus. A target
+    whose signature, contracts, effects or claims differ from the baseline
+    is refused with a note; a second refusal is out of scope, with a
+    proposal built from the difference. An added function is refused once
+    the same way, since helper introduction (§4.1 step 3) is off. Only
+    bodies are spliced, under the target's own signature, and the file is
+    put in canonical form so `E0001` never reaches the model. Mechanical
+    repairs apply only to spans inside a target body.
+113. **Classification and the ladder (§4, §4.1).** A stall is an outcome
+    identical to an earlier one, or one that grew twice running. A contract
+    conflict is a counterexample against a target's clause with the same
+    body proposed twice; it ends in a `weaken_postcondition` or
+    `add_precondition` proposal carrying the counterexample. The ladder
+    walks full history, then a wider context policy, skips steps 3 and 4
+    as configured off, and stops. Examples are evaluated at check time
+    (`E0702`), so a wrong body usually fails there before the verifier
+    runs; the loop treats those like any other diagnostic.
+114. **Changes (§6).** `.onus/changes/<task>/change.json`: the interface
+    diff per module in scope (empty by construction when the baseline had
+    diagnostics, as an `implement` baseline always has, since only target
+    bodies are spliced and signatures are compared textually), the ledger
+    delta, the body diff, the trace, metrics, proposals and audit findings.
+    A blocked report adds the cause, the last diagnostics and the best
+    attempt, and the working tree is left as found. `onus review` gains a
+    Changes view, proposals marked *proposed by loop*.
+115. **Regeneration audits (§8).** Findings are `obligation_regressed`
+    and `example_failed`, each becoming a proposal (`add_example`,
+    `add_claim`). Bodies that differ in callees are not reported: the
+    interface documents carry no call graph.
+116. **A live run.** With Claude Code as the model, `escape_count` was
+    regenerated from its interface alone and was green on the first
+    iteration in 41 seconds, with the loop invariant and measure intact.
+    The test runs only with `ONUS_LOOP_LIVE=1`.
+117. **Deferred.** Production feedback (§7), `onus loop watch`, and the
+    per-repository aggregates of §11; metrics are per change.
+118. **OpenRouter and key files.** A fourth model, `openrouter[:<model>]`,
+    over the chat-completions protocol; the default model is
+    `OPENROUTER_MODEL` or `deepseek/deepseek-v4-flash`, chosen on the
+    results in item 119; `moonshotai/kimi-k2.7-code` is the alternative. The CLI reads
+    `.env` and `.env.local` from the project root and the current
+    directory, never overriding the real environment, so keys stay off the
+    command line; both files are ignored by git. The live test takes its
+    model from `ONUS_LOOP_MODEL`.
+119. **What running four open-weight models taught the loop.** (a) A
+    provider that never answers hangs the task; API requests now time out
+    after three minutes and the task ends as a model error. (b) Each
+    iteration's prompt and answer are kept in the change's work directory
+    (`change.json` still carries only the prompt hash, §6), so a blocked
+    task can be read. (c) A blocked report's `last_diagnostics` are the
+    last iteration's, including syntax diagnostics of an answer that never
+    parsed. (d) When an answer does not parse, the notes quote each
+    offending line and the tokens the grammar admits there, from `onus
+    next`'s machinery (§14): a model that does not know Onus writes
+    `while`, is told "expected an expression", and writes `while` again;
+    told that a line may start with `loop`, it has what it needs. Results
+    on the Mandelbrot task: DeepSeek V4 Flash and Kimi K2.7 Code green on
+    the first iteration (5 s and 20 s), GLM 5.3 Flash green on the second
+    (98 s), Qwen3 Coder Next blocked on the budget without a parseable
+    answer before or after (d), and Claude Sonnet 5 through OpenRouter
+    green on the second (15 s) after a syntax slip on the first. The
+    OpenRouter default is DeepSeek V4 Flash on these results. The runs
+    are logged in `docs/BENCHMARK.md`, and `packages/loop/bench/run.mjs`
+    appends a row per model so the log can be revisited.
+
 ### Deferred, not changed
 
 - `Stream[T] ! e` as a type (§3.11) is not parsed: `-> Stream[T] ! e` is

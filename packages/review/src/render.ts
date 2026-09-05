@@ -5,7 +5,7 @@
  * expansions (§15.1: body-open rate per module).
  */
 import { layoutGraph, NODE_H, NODE_W } from './layout.js';
-import type { Coverage, DiagnosticJson, InterfaceDiff, InterfaceDocument, InterfaceItem, PathReport, ReviewData, Verified } from './types.js';
+import type { Coverage, DiagnosticJson, InterfaceDiff, InterfaceDocument, InterfaceItem, LoopChange, PathReport, ReviewData, Verified } from './types.js';
 
 /** `assumed, verified <when> against <target>` or `assumed, unverified` (§20.3). Effects: none. */
 export function freshness(a: { readonly verifiable: boolean; readonly last_verified: Verified | null }): string {
@@ -195,6 +195,31 @@ export function renderDiffView(diff: InterfaceDiff | null): string {
 }
 
 // ---------------------------------------------------------------------------
+// Changes from the regeneration loop
+// ---------------------------------------------------------------------------
+
+/** One change or blocked report (loop spec §6): proposals marked as the loop's, the interface diff, the ledger delta, the body diff collapsed, the trace. Effects: none. */
+export function renderChange(c: LoopChange): string {
+  const m = c.metrics;
+  const status = c.status === 'opened' ? '<span class="status ok">opened</span>' : `<span class="status failed">blocked${c.cause === null ? '' : `: ${esc(c.cause)}`}</span>`;
+  const proposals = c.proposals.length === 0 ? '<p>No proposals.</p>' : `<table><thead><tr><th>proposed by loop</th><th>on</th><th>current</th><th>proposed</th><th>why</th></tr></thead><tbody>${c.proposals.map((p) => `<tr class="proposal"><td><code>${esc(p.kind)}</code></td><td><code>${esc(p.def)}</code></td><td>${p.current === null ? '' : `<code>${esc(p.current)}</code>`}</td><td>${p.proposed === null ? '<em>for the reviewer to write</em>' : `<code>${esc(p.proposed)}</code>`}</td><td>${esc(p.rationale)}${p.counterexample === null ? '' : `<pre class="counterexample">${esc(JSON.stringify(p.counterexample))}</pre>`}</td></tr>`).join('')}</tbody></table>`;
+  const diffs = c.interface_diff.length === 0 ? `<p>The interface did not change${c.task.kind === 'implement' || c.task.kind === 'repair' ? ', as an implement or repair task requires' : ''}.</p>` : c.interface_diff.map(renderDiffView).join('');
+  const ledger = c.ledger_delta.length === 0 ? '<p>No obligation moved.</p>' : `<table class="ledger"><thead><tr><th>obligation</th><th>in</th><th>before</th><th>after</th></tr></thead><tbody>${c.ledger_delta.map((l) => `<tr><td><code>${esc(l.kind)} ${esc(l.text)}</code></td><td><code>${esc(l.def)}</code></td><td class="status ${esc(l.before ?? 'none')}">${esc(l.before ?? 'none')}</td><td class="status ${esc(l.after ?? 'none')}">${esc(l.after ?? 'none')}</td></tr>`).join('')}</tbody></table>`;
+  const audit = c.audit.length === 0 ? '' : `<h4>Regeneration audit</h4><ul>${c.audit.map((f) => `<li class="audit"><code>${esc(f.finding)}</code> ${esc(f.detail)}</li>`).join('')}</ul>`;
+  const bodies = c.body_diff.length === 0 ? '' : `<details class="body"><summary>Body diff (${c.body_diff.length} file${c.body_diff.length === 1 ? '' : 's'}; informational, counted if opened)</summary>${c.body_diff.map((b) => `<h5><code>${esc(b.module)}</code></h5><pre class="before">${esc(b.before)}</pre><pre class="after">${esc(b.after)}</pre>`).join('')}</details>`;
+  const trace = c.trace.length === 0 ? '' : `<details><summary>Trace (${c.trace.length} iteration${c.trace.length === 1 ? '' : 's'})</summary><table><thead><tr><th>iteration</th><th>result</th><th>diagnostics</th><th>repairs</th><th>tokens</th><th>ms</th><th>escalation</th></tr></thead><tbody>${c.trace.map((t) => `<tr><td>${t.iteration}</td><td>${esc(t.classification)}</td><td>${t.diagnostics_before} → ${t.diagnostics_after}</td><td>${t.mechanical_repairs}</td><td>${t.tokens}</td><td>${t.ms}</td><td>${esc(t.escalation ?? '')}</td></tr>`).join('')}</tbody></table></details>`;
+  return `<section class="change" data-task="${esc(c.task.id)}"><h3>change <code>${esc(c.task.id)}</code> ${status}</h3>
+<p class="meta">${esc(c.task.kind)}${c.task.target === null ? '' : ` of <code>${esc(c.task.target.def)}</code>`} · scope ${esc(c.task.scope.join(', '))} · ${esc(c.generated.model)} at ${esc(c.generated.at)} · ${m.iterations} iteration${m.iterations === 1 ? '' : 's'}, ${m.mechanical_repairs} mechanical repair${m.mechanical_repairs === 1 ? '' : 's'}, ${m.escalation_steps} escalation step${m.escalation_steps === 1 ? '' : 's'}, ${m.tokens} tokens</p>
+<h4>Proposals</h4>${proposals}<h4>Interface diff</h4>${diffs}<h4>Ledger delta</h4>${ledger}${audit}${bodies}${trace}</section>`;
+}
+
+/** The Changes view: every change the loop wrote, newest first. Effects: none. */
+export function renderChangesView(changes: readonly LoopChange[]): string {
+  if (changes.length === 0) return '<section><h2>Changes</h2><p>The regeneration loop has written no change under <code>.onus/changes/</code>.</p></section>';
+  return `<section class="changes"><h2>Changes (${changes.length})</h2>${changes.map(renderChange).join('\n')}</section>`;
+}
+
+// ---------------------------------------------------------------------------
 // Diagnostics and counterexamples
 // ---------------------------------------------------------------------------
 
@@ -292,11 +317,15 @@ export function renderPage(data: ReviewData): string {
     ['interfaces', 'Interfaces', modules === '' ? '<section><h2>Interfaces</h2><p>No modules.</p></section>' : modules],
     ['ledger', 'Ledger', renderLedgerView(data)],
     ['diff', 'Diff', renderDiffView(data.diff)],
+    ['changes', `Changes${(data.changes ?? []).length > 0 ? ` (${(data.changes ?? []).length})` : ''}`, renderChangesView(data.changes ?? [])],
     ['diagnostics', `Diagnostics${data.diagnostics.length > 0 ? ` (${data.diagnostics.length})` : ''}`, renderDiagnosticsView(data.diagnostics)],
   ];
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Onus review: ${esc(data.entry)}</title><style>${CSS}.coverage { color: #555; font-size: 0.95em; }
 .coverage .unexercised, .coverage .surviving { color: #a40; font-weight: 600; }
+.change { border-top: 1px solid #ddd; padding-top: 0.5em; }
+.change tr.proposal td:first-child { border-left: 3px solid #a40; }
+.change pre.before { background: #fff4f4; } .change pre.after { background: #f2fbf2; }
 </style></head>
 <body><header><h1>Onus review · <code>${esc(data.entry)}</code></h1><nav>${views.map(([id, label]) => `<button data-view="${id}">${esc(label)}</button>`).join(' ')}</nav><span class="small">generated by ${esc(data.generated.tool)} at ${esc(data.generated.at)}</span></header>
 <main>${views.map(([id, , html]) => `<div class="view" data-view="${id}" hidden>${html}</div>`).join('\n')}</main>

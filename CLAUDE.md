@@ -53,6 +53,7 @@ See `docs/onus-impl-spec-v0.md` §2. Short version:
 - `packages/runtime` — what generated code imports
 - `packages/stdlib` — `std.*` written in Onus
 - `packages/review` — the review tool, a static page over the JSON reports (last milestone)
+- `packages/loop` — the regeneration loop of `docs/onus-loop-v0.md` (`onus loop run <task.json>`), which edits bodies only
 - `examples/` — mandelbrot, reporting, checkout: the three worked examples from the spec, used as integration tests from milestone 2 onward
 
 ## Commands

@@ -5,7 +5,7 @@
  *
  * Exit codes: 0 success, 1 diagnostics reported, 2 usage or I/O failure.
  */
-import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Context } from '../context.js';
@@ -18,7 +18,7 @@ import { interfaceOf, interfaceText } from '../report/interface.js';
 import { pathReport, pathText, verifiedOf } from '../report/path.js';
 import { next } from '../next/next.js';
 import { diffText, interfaceDiff } from '../report/diff.js';
-import { reviewData } from '../report/review.js';
+import { readChanges, reviewData } from '../report/review.js';
 import { renderPage } from '@onus/review';
 import type { InterfaceDocument } from '../report/interface.js';
 import { mkdirSync } from 'node:fs';
@@ -37,6 +37,8 @@ import { printIr } from '../codegen/irtext.js';
 const USAGE = `usage:
   onus check <file.onus>... [--json] [--root <dir>] [--stdlib <dir>] [--to <pass>] [--budget <ms>] [--ledger] [--no-cache]
       report every diagnostic; exit 1 if any. Passes: ${PASSES.join(', ')}
+  onus loop run <task.json> [--root <dir>] [--model claude-code|anthropic|scripted:<file.json>]
+      run one regeneration-loop task to its conclusion (docs/onus-loop-v0.md); exit 0 change, 2 blocked
   onus fmt <file.onus>... [--stdout]
       rewrite files in canonical form
   onus build <entry.onus> [--out <dir>] [--emit js|ts|ir] [--target js|native] [--root <dir>] [--stdlib <dir>]
@@ -311,7 +313,7 @@ function reviewCommand(args: Args): number {
   if (!readFiles(ctx, [entry])) return 2;
   runPipeline(ctx, 'paths');
   emitDiagnostics(ctx, args.flags.has('json'));
-  const data = reviewData(ctx, against);
+  const data = reviewData(ctx, against, undefined, readChanges(rootOf(args)));
   const outDir = args.values.get('out') ?? join(dirname(entry), 'review');
   mkdirSync(outDir, { recursive: true });
   writeFileSync(join(outDir, 'index.html'), renderPage(data));
@@ -397,6 +399,17 @@ function mutateCommand(args: Args, entry: string): number {
   process.stdout.write(`${records.length} contract mutation${records.length === 1 ? '' : 's'}: ${records.length - surviving} detected, ${surviving} surviving\n`);
   writeMutations(join(root, '.onus', 'ledger'), records, new Date(ctx.options.now()).toISOString());
   return 0;
+}
+
+/** `onus loop …` forwards to the loop package's `onus-loop`, a sibling of this package (docs/onus-loop-v0.md §10). */
+function loopCommand(rest: readonly string[]): number {
+  const script = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'loop', 'dist', 'cli', 'main.js');
+  if (!existsSync(script)) {
+    process.stderr.write('onus loop: the loop package is not built; run `pnpm -r build`\n');
+    return 2;
+  }
+  const r = spawnSync(process.execPath, [script, ...rest], { stdio: 'inherit' });
+  return r.status ?? 1;
 }
 
 function testCommand(args: Args): number {
@@ -503,6 +516,8 @@ function main(argv: readonly string[]): number {
       return nextCommand(args);
     case 'review':
       return reviewCommand(args);
+    case 'loop':
+      return loopCommand(argv.slice(1));
     case 'test':
       return testCommand(args);
     default:

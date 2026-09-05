@@ -1,0 +1,6 @@
+module calc
+
+-- No body can satisfy this: the postcondition is unsatisfiable.
+pub fn impossible(x: Int) -> Int
+  ensures proved result > x and result < x
+{ ... }

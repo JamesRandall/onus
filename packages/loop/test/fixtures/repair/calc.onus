@@ -1,0 +1,11 @@
+module calc
+
+pub fn clamp(x: Int, lo: Int, hi: Int where lo <= it) -> Int
+  ensures proved lo <= result and result <= hi
+{
+  return x
+}
+
+example clamp {
+  clamp(x: 5, lo: 0, hi: 3) == 3
+}

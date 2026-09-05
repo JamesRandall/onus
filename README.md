@@ -13,7 +13,7 @@ reviews contracts, and the compiler is the only checker.
 
 ## Status
 
-Milestones 1–13 done: lexer, parser, canonical printer, `onus fmt`; module
+Milestones 1–14 done: lexer, parser, canonical printer, `onus fmt`; module
 loading, name resolution, the type checker, the check-time evaluator, the
 effects pass, obligation objects and the z3-backed verifier (`onus check`,
 `--ledger` shows every obligation's status; `--to <pass>` stops early);
@@ -38,7 +38,19 @@ POSTGRES_PASSWORD=onus -p 5432:5432 postgres:17`, and skip without one.
 `onus test` records which checked obligations the tests reached and reports
 obligation coverage (§20.5) in `interface.json`, `path.json` and the review
 page; `onus test --mutate` weakens contracts one at a time and reports the
-weakenings no example or property detects as `M0001` rows (§20.4). Effects are declared with `may`
+weakenings no example or property detects as `M0001` rows (§20.4).
+The regeneration loop of `docs/onus-loop-v0.md` lives in `packages/loop`:
+`onus loop run <task.json>` writes function bodies against the compiler,
+edits nothing else, and opens a change under `.onus/changes/` that the
+review page shows; models are Claude Code (`--model claude-code`), the
+Anthropic API (`--model anthropic`), OpenRouter (`--model
+openrouter[:<model>]`) or a scripted answer file. Keys go in a `.env.local`
+at the repository root (`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`,
+optionally `OPENROUTER_MODEL`), which is ignored by git and read by the
+loop; `ONUS_LOOP_LIVE=1 ONUS_LOOP_MODEL=openrouter pnpm --filter
+@onus/loop test` runs the live Mandelbrot case against it, and
+`node packages/loop/bench/run.mjs mandelbrot <model-spec>... --append
+docs/BENCHMARK.md` logs a run per model in `docs/BENCHMARK.md`. Effects are declared with `may`
 (`-> Int may alloc`). `z3`
 must be on PATH for verification; without it every obligation is checked at
 runtime.

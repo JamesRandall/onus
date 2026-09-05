@@ -3,6 +3,8 @@ dist/
 out/
 out-mutate/
 .onus/
+.env
+.env.local
 .DS_Store
 *.tsbuildinfo
 *.pgm

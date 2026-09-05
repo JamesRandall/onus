@@ -1,0 +1,23 @@
+{
+  "name": "@onus/loop",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The Onus regeneration loop (docs/onus-loop-v0.md): turns a task into a change by writing function bodies against the compiler. It never edits a claim.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "bin": {
+    "onus-loop": "./dist/cli/main.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.test.json && vitest run"
+  },
+  "dependencies": {
+    "@onus/compiler": "workspace:*",
+    "ajv": "^8.20.0"
+  }
+}

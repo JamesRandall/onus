@@ -197,6 +197,21 @@ export interface InterfaceDiff {
   readonly breaking: boolean;
 }
 
+/** A change or blocked report from the regeneration loop (docs/onus-loop-v0.md §5, §6). */
+export interface LoopChange {
+  readonly task: { readonly id: string; readonly kind: string; readonly scope: readonly string[]; readonly target: { readonly def: string } | null };
+  readonly status: 'opened' | 'blocked';
+  readonly cause: string | null;
+  readonly generated: { readonly at: string; readonly model: string };
+  readonly interface_diff: readonly InterfaceDiff[];
+  readonly ledger_delta: readonly { readonly def: string; readonly kind: string; readonly text: string; readonly before: string | null; readonly after: string | null }[];
+  readonly body_diff: readonly { readonly file: string; readonly module: string; readonly before: string; readonly after: string }[];
+  readonly trace: readonly { readonly iteration: number; readonly classification: string; readonly diagnostics_before: number; readonly diagnostics_after: number; readonly mechanical_repairs: number; readonly tokens: number; readonly ms: number; readonly escalation: string | null }[];
+  readonly metrics: { readonly iterations: number; readonly mechanical_repairs: number; readonly escalation_steps: number; readonly proposals: number; readonly tokens: number };
+  readonly proposals: readonly { readonly kind: string; readonly def: string; readonly current: string | null; readonly proposed: string | null; readonly rationale: string; readonly counterexample: Readonly<Record<string, unknown>> | null }[];
+  readonly audit: readonly { readonly finding: string; readonly detail: string }[];
+}
+
 /** Everything one page renders. */
 export interface ReviewData {
   readonly generated: { readonly tool: string; readonly at: string };
@@ -207,4 +222,6 @@ export interface ReviewData {
   readonly paths: readonly PathReport[];
   readonly diagnostics: readonly DiagnosticJson[];
   readonly diff: InterfaceDiff | null;
+  /** Absent in data written before milestone 14. */
+  readonly changes?: readonly LoopChange[];
 }
