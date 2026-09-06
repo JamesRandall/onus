@@ -1,0 +1,24 @@
+module clock_native
+import std.io
+
+-- `io.now` on both targets (docs/CHANGES.md item 183): monotonic, so a
+-- second reading is never earlier than the first, and since the program
+-- started, so a reading is small; the output is the same on both targets.
+pub fn main(
+  args: List[Text],
+  console: io.Console,
+  clock: io.Clock
+) -> Result[Unit, io.Error] may io.file, io.clock, nondet, alloc {
+  let first: Duration = io.now(clock: clock)
+  let second: Duration = io.now(clock: clock)
+  if Duration.nanos(d: second) < Duration.nanos(d: first) {
+    io.print(console: console, text: "went backwards\n")
+    return Err(error: Other(detail: "clock"))
+  }
+  if Duration.nanos(d: first) > 3600000000000 {
+    io.print(console: console, text: "not since the program started\n")
+    return Err(error: Other(detail: "clock"))
+  }
+  io.print(console: console, text: "ok\n")
+  return Ok(value: Unit)
+}

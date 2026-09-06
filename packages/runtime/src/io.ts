@@ -39,6 +39,12 @@ export class Net extends Capability {
   }
 }
 
+/** `io.now`: nanoseconds since the program started, monotonic (docs/CHANGES.md item 183). */
+export function now(clock: Clock): number {
+  void clock;
+  return Math.round(performance.now() * 1_000_000);
+}
+
 export class Clock extends Capability {
   private constructor() {
     super('io.Clock');

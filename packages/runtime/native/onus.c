@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /* ------------------------------------------------------------------------ */
 /* Memory, panics                                                            */
@@ -437,8 +438,23 @@ static void close_all(void) {
 static int examples_failed = 0;
 static int examples_run = 0;
 
+/* The program's start on the monotonic clock: `io.now`'s origin (docs/CHANGES.md item 183). */
+static struct timespec clock_origin;
+
 int onus_start(int argc, char **argv) {
+  clock_gettime(CLOCK_MONOTONIC, &clock_origin);
   return argc > 1 && strcmp(argv[1], "--onus-examples") == 0 ? 1 : 0;
+}
+
+/* std.duration: a Duration is an i64 of nanoseconds (docs/CHANGES.md item 183). */
+onus_slot onus_duration_nanos(onus_slot d) { return d; }
+onus_slot onus_duration_of_millis(onus_slot ms) { return ms * 1000000; }
+
+onus_slot onus_io_now(onus_slot clock) {
+  (void)clock;
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (ts.tv_sec - clock_origin.tv_sec) * 1000000000LL + (ts.tv_nsec - clock_origin.tv_nsec);
 }
 
 onus_list *onus_args(int argc, char **argv) {

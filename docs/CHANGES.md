@@ -1672,6 +1672,27 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     notarising the macOS binary would need an Apple developer account and is
     not done; Windows, once ported, gets no Homebrew route.
 
+183. **A clock reading: `io.now` (§19.1; the first M15.6 language change).**
+    `io.now(clock: io.Clock) -> Duration may io.clock, nondet` is a monotonic
+    reading since the program started, at the host's resolution, which two
+    readings compare and subtract; it is not a calendar time. Chosen over
+    nanoseconds since the epoch because a monotonic reading is an exact `Int`
+    on every target, while epoch nanoseconds exceed the JavaScript host's
+    exact range (item 99), and because timing — budgets, timeouts, elapsed
+    time — is what the compiler needs. The JavaScript runtime reads
+    `performance.now()`; the C runtime reads `CLOCK_MONOTONIC` against the
+    origin `onus_start` records. Neither compiler changes: the intrinsic is
+    declared in `std.io` and both emitters map it as they map every
+    primitive. Fixture: `test/native/clock_native.onus`, a `main` whose two
+    readings are ordered and small, run on both targets. The fixture found
+    that the C runtime had never carried the two `std.duration` primitives,
+    `nanos` and `of_millis`, since no native program had used a `Duration`;
+    they are an identity and a multiplication over the nanosecond `i64`, and
+    §19.1's surface is complete again. Process: made through the skill with
+    the chain's native stage and the native differentials;
+    `self/bundle.onus` regenerated so the compiler carries the new runtime;
+    `self/` does not use `io.now` in this change.
+
 ### Deferred, not changed
 
 - Decided 2026-09-06, to apply in M15.5: generics compile natively by

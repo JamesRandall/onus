@@ -18,6 +18,10 @@ pub capability Clock
   grants io.clock
   grants nondet
 
+-- A monotonic reading: the time since the program started, at the host's
+-- resolution, which two readings compare and subtract; not a calendar time.
+pub intrinsic fn now(clock: Clock) -> Duration may io.clock, nondet
+
 pub capability File
   grants io.file
 
