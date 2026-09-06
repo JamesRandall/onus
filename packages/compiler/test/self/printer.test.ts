@@ -6,12 +6,11 @@
  * form); a source with syntax errors must be refused by both.
  */
 import { describe, expect, it } from 'vitest';
-import { spawnSync } from 'node:child_process';
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Context } from '../../src/context.js';
-import { emitAll } from '../../src/codegen/build.js';
+import { runDriver, selfDriver } from './driver.js';
 import { runPipeline } from '../../src/driver.js';
 import { DiagnosticSink, toText } from '../../src/report/diagnostic.js';
 import { parse } from '../../src/syntax/parser.js';
@@ -61,9 +60,7 @@ describe('the printer in Onus (M15.1)', () => {
   rmSync(out, { recursive: true, force: true });
   mkdirSync(out, { recursive: true });
   const ctx = checked(join(selfRoot, 'fmt.onus'), selfRoot);
-  const built = emitAll(ctx, { outDir: out, ts: false });
-  if (built.launcher === null) throw new Error('no launcher for fmt');
-  const launcher = built.launcher;
+  const driver = selfDriver(ctx, out, 'fmt');
 
   it('prints every source in the repository exactly as the TypeScript printer does', () => {
     const files = sources();
@@ -72,7 +69,7 @@ describe('the printer in Onus (M15.1)', () => {
     for (const path of files) {
       const text = readFileSync(path, 'utf8');
       const want = expectedForm(path, text);
-      const r = spawnSync(process.execPath, [launcher, path], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+      const r = runDriver(driver, [path], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
       if (want === null) {
         if (r.status === 0) disagreements.push(`${path}: has syntax errors but fmt printed it`);
         continue;

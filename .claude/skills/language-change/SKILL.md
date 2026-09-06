@@ -79,12 +79,24 @@ the change is small.
   compare stage2 with stage3 byte for byte, file for file:
   `scripts/bootstrap.sh`. It builds `self/cli.onus` with `onus build` at
   every stage and stops at the first stage that reports a diagnostic.
+- The native stage follows (M15.5): stage2 builds the compiler for the
+  native target, and that executable, with neither node nor TypeScript on
+  its path, must build the compiler for JavaScript to stage2's files and
+  for the native target to the LLVM IR stage2 emitted for it. The script
+  does this after the fixed point; a difference is a bug in the native
+  backend or the runtime.
 - A difference is a compiler bug or nondeterminism. Fix it in the compiler.
   Never edit emitted JavaScript or anything under `bootstrap/` by hand.
 
 ### 6. Acceptance, all under stage2
 
 - The fixture suite passes under stage2.
+- The differentials under `packages/compiler/test/self/` pass with the
+  programs of `self/` running natively: `pnpm --filter compiler
+  test:self-native` (`ONUS_SELF_NATIVE=1`), which builds each driver with
+  `onus build --target native` and compares its lexing, parsing, printing,
+  checking, verification, reports, code generation and command line against
+  the TypeScript compiler on every source.
 - `self/` verifies clean under stage2, and the ledger of `self/` is diffed
   against its pre-change ledger: obligations added, removed, and every status
   change. A regression from `proved` to `checked` in `self/` needs its reason

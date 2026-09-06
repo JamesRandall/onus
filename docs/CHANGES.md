@@ -1557,6 +1557,36 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     the oracle — fixed in the port. Fixed point reached from `bootstrap/`;
     promoted.
 
+179. **The native stage of the bootstrap chain, and the differentials run
+    natively (impl spec M15.5).** `scripts/bootstrap.sh`, after the fixed
+    point, has stage2 build `self/cli.onus` for the native target and then
+    runs that executable with a path holding only `clang`, `z3` and the
+    system directories — no node, no TypeScript — to build the compiler for
+    JavaScript, which must equal stage2 file for file, and for the native
+    target, whose LLVM IR must equal what stage2 emitted for it; the stage
+    is skipped with a notice without `clang`. The seven differential tests
+    under `test/self/` take their driver from `test/self/driver.ts`: under
+    node as before, or, with `ONUS_SELF_NATIVE=1` (`pnpm --filter compiler
+    test:self-native`), the program of `self/` built with `onus build
+    --target native` — `lexdump`, `astdump`, `fmt`, `check` and `cli` — so
+    that lexing, parsing, printing, checking, verification, the reports,
+    code generation for both targets and the command line are compared with
+    the TypeScript compiler on every source with the compiler in Onus
+    running natively; the assertions that run a driver's own examples as
+    generated JavaScript tests are skipped in that mode. Measured on this
+    machine: the JavaScript-hosted stage2 builds the compiler natively in
+    5 s, and the native compiler builds itself for JavaScript in 1.2 s and
+    for the native target in 3.6 s. The native run found one disagreement
+    in the repository: `e0701_const_evaluation.onus` declared the constant
+    9007199254740993, which the JavaScript host holds as the double
+    9007199254740992 (item 99's deferred arbitrary-precision path) and the
+    native host holds exactly, so the E0701 text differed by one. The
+    fixture now uses 2^53 itself, outside the safe range and the same
+    number on every host, so it pins the rule rather than the host's
+    rounding; the inexactness of `Int` beyond 2^53 on the JavaScript target
+    stays item 99. No language or compiler change; the skill's steps 5 and
+    6 name the stage and the native differentials.
+
 ### Deferred, not changed
 
 - Decided 2026-09-06, to apply in M15.5: generics compile natively by

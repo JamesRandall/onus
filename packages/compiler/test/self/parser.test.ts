@@ -6,12 +6,11 @@
  * errors compares what both parsers recovered.
  */
 import { describe, expect, it } from 'vitest';
-import { spawnSync } from 'node:child_process';
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Context } from '../../src/context.js';
-import { emitAll } from '../../src/codegen/build.js';
+import { runDriver, selfDriver } from './driver.js';
 import { runJsExamples } from '../../src/codegen/native-build.js';
 import { runPipeline } from '../../src/driver.js';
 import { DiagnosticSink, toText } from '../../src/report/diagnostic.js';
@@ -248,11 +247,9 @@ describe('the parser in Onus (M15.1)', () => {
   rmSync(out, { recursive: true, force: true });
   mkdirSync(out, { recursive: true });
   const ctx = checked(join(selfRoot, 'astdump.onus'), selfRoot);
-  const built = emitAll(ctx, { outDir: out, ts: false });
-  if (built.launcher === null) throw new Error('no launcher for astdump');
-  const launcher = built.launcher;
+  const driver = selfDriver(ctx, out, 'astdump');
 
-  it('the self modules\' own examples pass as generated tests', () => {
+  it.skipIf(driver.native)('the self modules\' own examples pass as generated tests', () => {
     const results = runJsExamples(out, true);
     expect(results.size).toBeGreaterThan(0);
     expect([...results].filter(([, ok]) => !ok).map(([n]) => n)).toEqual([]);
@@ -263,7 +260,7 @@ describe('the parser in Onus (M15.1)', () => {
     const disagreements: string[] = [];
     for (const path of files) {
       const text = readFileSync(path, 'utf8');
-      const r = spawnSync(process.execPath, [launcher, path], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+      const r = runDriver(driver, [path], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
       if (r.status !== 0) {
         disagreements.push(`${path}: astdump exited ${r.status}: ${r.stderr.slice(0, 500)}`);
         continue;

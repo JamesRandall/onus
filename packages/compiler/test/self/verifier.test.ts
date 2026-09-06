@@ -20,7 +20,7 @@ import { mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Context } from '../../src/context.js';
-import { emitAll } from '../../src/codegen/build.js';
+import { selfDriver, type SelfDriver } from './driver.js';
 import { runPipeline } from '../../src/driver.js';
 import { toJson, toText } from '../../src/report/diagnostic.js';
 import { interfaceOf } from '../../src/report/interface.js';
@@ -99,9 +99,9 @@ function expected(path: string, text: string): Expected {
 }
 
 /** Runs the compiler in Onus on `path` and splits its output into the same three parts. */
-function actual(launcher: string, path: string): Promise<{ status: number | null; stderr: string } & Expected> {
+function actual(driver: SelfDriver, path: string): Promise<{ status: number | null; stderr: string } & Expected> {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [launcher, path, '--stdlib', STDLIB_ROOT, '--budget', String(BUDGET_MS), '--cache', cacheDir, '--diag-json', '--ledger', '--interface-json', '--path-json'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(driver.cmd, [...driver.prefix, path, '--stdlib', STDLIB_ROOT, '--budget', String(BUDGET_MS), '--cache', cacheDir, '--diag-json', '--ledger', '--interface-json', '--path-json'], { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     child.stdout.setEncoding('utf8');
@@ -150,9 +150,7 @@ describe('the verifier and the reports in Onus (M15.3)', () => {
   rmSync(out, { recursive: true, force: true });
   mkdirSync(out, { recursive: true });
   const ctx = checked(join(selfRoot, 'check.onus'), selfRoot);
-  const built = emitAll(ctx, { outDir: out, ts: false });
-  if (built.launcher === null) throw new Error('no launcher for check');
-  const launcher = built.launcher;
+  const driver = selfDriver(ctx, out, 'check');
 
   it('agrees with the TypeScript compiler on the diagnostics, the ledger and the reports of every source in the repository', async () => {
     const disagreements: string[] = [];
@@ -167,7 +165,7 @@ describe('the verifier and the reports in Onus (M15.3)', () => {
         const path = paths[next];
         next += 1;
         if (path === undefined) break;
-        results.set(path, await actual(launcher, path));
+        results.set(path, await actual(driver, path));
       }
     };
     await Promise.all(Array.from({ length: WORKERS }, () => worker()));

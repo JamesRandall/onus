@@ -7,12 +7,11 @@
  * elaborated, so both lists are compared sorted.
  */
 import { describe, expect, it } from 'vitest';
-import { spawnSync } from 'node:child_process';
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Context } from '../../src/context.js';
-import { emitAll } from '../../src/codegen/build.js';
+import { runDriver, selfDriver } from './driver.js';
 import { runPipeline, type PassName } from '../../src/driver.js';
 import { toText } from '../../src/report/diagnostic.js';
 import { STDLIB_ROOT } from '../harness.js';
@@ -67,16 +66,14 @@ describe('the checker in Onus (M15.2)', () => {
   rmSync(out, { recursive: true, force: true });
   mkdirSync(out, { recursive: true });
   const ctx = checked(join(selfRoot, 'check.onus'), selfRoot);
-  const built = emitAll(ctx, { outDir: out, ts: false });
-  if (built.launcher === null) throw new Error('no launcher for check');
-  const launcher = built.launcher;
+  const driver = selfDriver(ctx, out, 'check');
 
   it(`agrees with the TypeScript checker up to ${TO} on every source in the repository`, () => {
     const files = sources();
     const disagreements: string[] = [];
     for (const path of files) {
       const text = readFileSync(path, 'utf8');
-      const r = spawnSync(process.execPath, [launcher, path, '--stdlib', STDLIB_ROOT, '--to', TO], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+      const r = runDriver(driver, [path, '--stdlib', STDLIB_ROOT, '--to', TO], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
       if (r.status !== 0) {
         disagreements.push(`${path}: check exited ${r.status}: ${r.stderr.slice(0, 800)}`);
         continue;

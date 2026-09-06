@@ -8,7 +8,8 @@ pub const boom: Int = div(a: 1, b: 0)
 
 pub const out_of_range: Int = List.get(xs: [1, 2], i: 5)
 
-pub const too_big: Int = 9007199254740993
+-- 2^53 itself: outside the safe range, and the same number on every host (docs/CHANGES.md item 179).
+pub const too_big: Int = 9007199254740992
 
 fn runtime_only(files: Int) -> Int may nondet {
   return files

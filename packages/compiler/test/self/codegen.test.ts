@@ -23,6 +23,7 @@ import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Context } from '../../src/context.js';
 import { emitAll, runtimeEntry } from '../../src/codegen/build.js';
+import { selfDriver, type SelfDriver } from './driver.js';
 import { emitNative } from '../../src/codegen/native.js';
 import { findLibpq } from '../../src/codegen/native-build.js';
 import { diagnostic, toJson, toText } from '../../src/report/diagnostic.js';
@@ -112,11 +113,11 @@ function expected(path: string, outDir: string, runtime: string): Expected {
   return { skipped: false, ir, files: tree(outDir), ll: program.ll, native };
 }
 
-function actual(launcher: string, path: string, outDir: string, runtime: string): Promise<{ status: number | null; stderr: string; ir: string; files: Map<string, string>; ll: string; native: string }> {
+function actual(driver: SelfDriver, path: string, outDir: string, runtime: string): Promise<{ status: number | null; stderr: string; ir: string; files: Map<string, string>; ll: string; native: string }> {
   rmSync(outDir, { recursive: true, force: true });
   return new Promise((resolve) => {
-    const args = [launcher, path, '--stdlib', STDLIB_ROOT, '--budget', String(BUDGET_MS), '--cache', cacheDir, '--diag-json', '--ir', '--emit', outDir, '--runtime', runtime, '--native', outDir, ...(LIBPQ ? [] : ['--no-libpq'])];
-    const child = spawn(process.execPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const args = [...driver.prefix, path, '--stdlib', STDLIB_ROOT, '--budget', String(BUDGET_MS), '--cache', cacheDir, '--diag-json', '--ir', '--emit', outDir, '--runtime', runtime, '--native', outDir, ...(LIBPQ ? [] : ['--no-libpq'])];
+    const child = spawn(driver.cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     child.stdout.setEncoding('utf8');
@@ -164,9 +165,7 @@ describe('the lowering and the JavaScript emitter in Onus (M15.4)', () => {
   rmSync(out, { recursive: true, force: true });
   mkdirSync(out, { recursive: true });
   const ctx = checked(join(selfRoot, 'check.onus'), selfRoot);
-  const built = emitAll(ctx, { outDir: join(out, 'compiler'), ts: false });
-  if (built.launcher === null) throw new Error('no launcher for check');
-  const launcher = built.launcher;
+  const driver = selfDriver(ctx, join(out, 'compiler'), 'check');
   const runtime = runtimeEntry();
 
   it('agrees with the TypeScript compiler on the target-neutral form and the emitted JavaScript of every clean source in the repository', async () => {
@@ -183,7 +182,7 @@ describe('the lowering and the JavaScript emitter in Onus (M15.4)', () => {
         next += 1;
         if (path === undefined) break;
         if (wanted.get(path)?.skipped === true) continue;
-        results.set(path, await actual(launcher, path, join(out, 'onus', String(i)), runtime));
+        results.set(path, await actual(driver, path, join(out, 'onus', String(i)), runtime));
       }
     };
     await Promise.all(Array.from({ length: WORKERS }, () => worker()));

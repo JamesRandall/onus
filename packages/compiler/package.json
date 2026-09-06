@@ -12,6 +12,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "tsc -p tsconfig.test.json && vitest run",
+    "test:self-native": "tsc -p tsconfig.test.json && ONUS_SELF_NATIVE=1 vitest run test/self",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

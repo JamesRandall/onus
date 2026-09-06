@@ -11,7 +11,7 @@ import { mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Context } from '../../src/context.js';
-import { emitAll } from '../../src/codegen/build.js';
+import { runDriver, selfDriver } from './driver.js';
 import { buildNative, findClang, runJsExamples } from '../../src/codegen/native-build.js';
 import { runPipeline } from '../../src/driver.js';
 import { lex } from '../../src/lexer/lexer.js';
@@ -90,11 +90,9 @@ describe('the lexer in Onus (M15.1)', () => {
   rmSync(out, { recursive: true, force: true });
   mkdirSync(out, { recursive: true });
   const ctx = checked(join(selfRoot, 'lexdump.onus'), selfRoot);
-  const built = emitAll(ctx, { outDir: out, ts: false });
-  if (built.launcher === null) throw new Error('no launcher for lexdump');
-  const launcher = built.launcher;
+  const driver = selfDriver(ctx, out, 'lexdump');
 
-  it('its own examples pass as generated tests', () => {
+  it.skipIf(driver.native)('its own examples pass as generated tests', () => {
     const results = runJsExamples(out, true);
     expect(results.size).toBeGreaterThan(0);
     expect([...results].filter(([, ok]) => !ok).map(([n]) => n)).toEqual([]);
@@ -106,7 +104,7 @@ describe('the lexer in Onus (M15.1)', () => {
     const disagreements: string[] = [];
     for (const path of files) {
       const text = readFileSync(path, 'utf8');
-      const r = spawnSync(process.execPath, [launcher, path], { encoding: 'utf8' });
+      const r = runDriver(driver, [path], { encoding: 'utf8' });
       if (r.status !== 0) {
         disagreements.push(`${path}: lexdump exited ${r.status}: ${r.stderr}`);
         continue;

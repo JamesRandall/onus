@@ -14,7 +14,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, wri
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Context } from '../../src/context.js';
-import { emitAll, runtimeEntry } from '../../src/codegen/build.js';
+import { runtimeEntry } from '../../src/codegen/build.js';
+import { selfDriver } from './driver.js';
 import { findClang } from '../../src/codegen/native-build.js';
 import { runPipeline } from '../../src/driver.js';
 import { toText } from '../../src/report/diagnostic.js';
@@ -68,22 +69,20 @@ function fresh(name: string): string {
 describe('the command line in Onus (M15.4)', () => {
   const out = fresh('compiler');
   const ctx = checked(join(selfRoot, 'cli.onus'), selfRoot);
-  const built = emitAll(ctx, { outDir: out, ts: false });
-  if (built.launcher === null) throw new Error('no launcher for cli');
-  const launcher = built.launcher;
+  const driver = selfDriver(ctx, out, 'cli');
   const runtime = runtimeEntry();
   const clang = findClang();
 
   /** Runs one command line with the same arguments on both sides; `--stdlib` and `--no-cache` are added to both. */
   function both(args: readonly string[], cwd: { ts: string; onus: string } = { ts: repoRoot, onus: repoRoot }): { ts: Run; onus: Run } {
     const common = [...args, '--stdlib', STDLIB_ROOT, '--no-cache'];
-    const run = (argv: string[], dir: string, env: NodeJS.ProcessEnv): Run => {
-      const r = spawnSync(process.execPath, argv, { encoding: 'utf8', cwd: dir, env });
+    const run = (cmd: string, argv: string[], dir: string, env: NodeJS.ProcessEnv): Run => {
+      const r = spawnSync(cmd, argv, { encoding: 'utf8', cwd: dir, env });
       return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', ok: r.status === 0 };
     };
     return {
-      ts: run([tsCli, ...common], cwd.ts, process.env),
-      onus: run([launcher, ...common], cwd.onus, { ...process.env, ONUS_RUNTIME: runtime }),
+      ts: run(process.execPath, [tsCli, ...common], cwd.ts, process.env),
+      onus: run(driver.cmd, [...driver.prefix, ...common], cwd.onus, { ...process.env, ONUS_RUNTIME: runtime }),
     };
   }
 
