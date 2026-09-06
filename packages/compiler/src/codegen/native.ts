@@ -1325,7 +1325,7 @@ class NativeEmitter {
         const pb = this.fromSlot(b, 'ptr');
         let acc: string | null = null;
         (this.ty.fields.get(s.def) ?? []).forEach((f, i) => {
-          const e = this.eqSlots(substitute(f.type, subst), this.loadSlot(pa.v, i), this.loadSlot(pb.v, i));
+          const e = this.eqField(substitute(f.type, subst), this.loadSlot(pa.v, i), this.loadSlot(pb.v, i));
           if (acc === null) acc = e;
           else {
             const both = this.tmp();
@@ -1358,7 +1358,7 @@ class NativeEmitter {
           this.startBlock(labels[i] ?? differ);
           let acc: string | null = null;
           (this.ty.fields.get(v) ?? []).forEach((f, j) => {
-            const e = this.eqSlots(substitute(f.type, subst), this.loadSlot(pa.v, 1 + j), this.loadSlot(pb.v, 1 + j));
+            const e = this.eqField(substitute(f.type, subst), this.loadSlot(pa.v, 1 + j), this.loadSlot(pb.v, 1 + j));
             if (acc === null) acc = e;
             else {
               const both = this.tmp();
@@ -1392,6 +1392,20 @@ class NativeEmitter {
       default:
         throw new UnsupportedError(`equality on \`${typeToString(s, this.t)}\` values`);
     }
+  }
+
+  /**
+   * Whether two field slots of `type` are equal: primitives inline, everything
+   * else through the type's comparer, so that a recursive type's comparer
+   * refers to itself instead of unfolding without end.
+   */
+  private eqField(type: Type, a: string, b: string): string {
+    const s = stripRefinements(type);
+    if (s.k === 'prim') return this.eqSlots(s, a, b);
+    const fn = this.eqFn(s);
+    const out = this.tmp();
+    this.emit(`${out} = call i1 ${fn}(i64 ${a}, i64 ${b})`);
+    return out;
   }
 
   /** The type arguments of a record or union type, by its parameters. */

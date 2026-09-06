@@ -1,0 +1,62 @@
+module diagtext
+import ast
+import report
+import context
+import codes
+import loc
+
+-- The text rendering of a diagnostic (`report/diagnostic.ts` `toText`), a
+-- view over the object: `path:line:col: CODE title`, the definition, the
+-- context lines, the obligation and the repairs.
+pub fn to_text(
+  ctx: context.Context,
+  tab: Dict[Int, loc.LineTable],
+  d: report.Diagnostic
+) -> Text may alloc, mutate {
+  var lines: Builder[Text] = List.builder()
+  List.push(
+    b: inout lines,
+    x: loc.location_text(
+      ctx: ctx,
+      tables: tab,
+      file: d.file,
+      span: d.span
+    ) ++ ": " ++ d.code ++ " " ++ codes.title(code: d.code)
+  )
+  match d.def_name with
+  | Some(value) -> List.push(b: inout lines, x: "  in " ++ value)
+  | None -> skip()
+  for c: Text in d.context {
+    List.push(b: inout lines, x: "  " ++ c)
+  }
+  match d.obligation with
+  | Some(value) -> List.push(
+    b: inout lines,
+    x: "  obligation " ++ value.kind ++ ": " ++ value.text ++ " [" ++ value.status ++ "]"
+  )
+  | None -> skip()
+  let file_len: Int = file_length(ctx: ctx, file: d.file)
+  for r: report.Repair in d.repairs {
+    if r.span.start == 0 and r.span.end == file_len {
+      List.push(b: inout lines, x: "  repair: replace the file with its canonical form (onus fmt)")
+    } else {
+      List.push(
+        b: inout lines,
+        x: "  repair (" ++ r.confidence ++ "): replace with `" ++ r.with_text ++ "`"
+      )
+    }
+  }
+  return Text.join(parts: List.finish(b: lines), sep: "\n")
+}
+
+-- The length of a file in code points; 0 for an unknown file.
+fn file_length(ctx: context.Context, file: Int) -> Int {
+  if file >= 0 and file < context.file_count(ctx: ctx) {
+    return List.len(xs: context.file_at(ctx: ctx, id: file).cps)
+  }
+  return 0
+}
+
+fn skip() -> Unit {
+  return Unit
+}

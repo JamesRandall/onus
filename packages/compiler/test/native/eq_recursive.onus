@@ -1,0 +1,32 @@
+module eq_recursive
+
+-- Structural equality on a recursive union (§19.1): the comparer of `Tree`
+-- refers to itself for the subtrees instead of unfolding the type without
+-- end, which once overflowed the emitter's stack.
+union Tree =
+  | Leaf of v: Int
+  | Node of left: Tree, right: Tree
+
+fn pair(a: Int, b: Int) -> Tree may alloc {
+  return Node(left: Leaf(v: a), right: Leaf(v: b))
+}
+
+fn deep(n: Int where 0 <= it and it <= 4) -> Tree may alloc
+  decreases n
+{
+  if n == 0 {
+    return Leaf(v: 0)
+  }
+  return Node(left: deep(n: n - 1), right: Leaf(v: n))
+}
+
+example equal_trees {
+  pair(a: 1, b: 2) == pair(a: 1, b: 2)
+  deep(n: 3) == deep(n: 3)
+}
+
+example different_trees {
+  pair(a: 1, b: 2) != pair(a: 2, b: 1)
+  deep(n: 3) != deep(n: 2)
+  Leaf(v: 1) != pair(a: 1, b: 1)
+}

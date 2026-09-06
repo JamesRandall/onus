@@ -203,3 +203,432 @@ fn pretty_at(j: Json, indent: Text) -> Text may alloc, mutate
   }
   | _ -> return compact(j: j)
 }
+
+-- Reading -----------------------------------------------------------------------
+-- A reader over the text's code points.
+record P {
+  cps: List[Int]
+  i: Int where it >= 0
+}
+
+const parse_depth: Int = 100000
+
+fn at_end(p: P) -> Bool {
+  return p.i >= List.len(xs: p.cps)
+}
+
+-- The code point at the reader, or -1 at the end.
+fn peek(p: P) -> Int {
+  if p.i < List.len(xs: p.cps) {
+    return List.get(xs: p.cps, i: p.i)
+  }
+  return -1
+}
+
+fn advance(p: inout P) -> Unit may mutate {
+  p = { p with i: p.i + 1 }
+  return Unit
+}
+
+fn is_ws(c: Int) -> Bool {
+  return c == 32 or c == 9 or c == 10 or c == 13
+}
+
+fn is_digit(c: Int) -> Bool {
+  return c >= 48 and c <= 57
+}
+
+fn skip_ws(p: inout P) -> Unit may mutate {
+  var steps: Int where it >= 0 = List.len(xs: p.cps) + 1
+  loop while steps > 0 and is_ws(c: peek(p: p))
+    invariant steps >= 0
+    decreases steps
+  {
+    steps = steps - 1
+    advance(p: inout p)
+  }
+  return Unit
+}
+
+-- A code point clamped into range, for the text being built.
+fn clamp(c: Int) -> Int where 0 <= it and it <= 1114111 {
+  if c < 0 or c > 1114111 {
+    return 0
+  }
+  return c
+}
+
+fn hex_value(c: Int) -> Int {
+  if c >= 48 and c <= 57 {
+    return c - 48
+  }
+  if c >= 97 and c <= 102 {
+    return c - 87
+  }
+  if c >= 65 and c <= 70 {
+    return c - 55
+  }
+  return -1
+}
+
+-- Four hexadecimal digits at the reader, advanced past them; -1 when malformed.
+fn hex4(p: inout P) -> Int may mutate {
+  var v: Int = 0
+  for k: Int in 0 ..< 4 {
+    let d: Int = hex_value(c: peek(p: p))
+    if d < 0 {
+      return -1
+    }
+    v = v * 16 + d
+    advance(p: inout p)
+  }
+  return v
+}
+
+-- A string at the reader (opening quote included), decoded.
+fn parse_string(p: inout P) -> Option[Text] may alloc, mutate {
+  if peek(p: p) != 34 {
+    return None
+  }
+  advance(p: inout p)
+  var out: Builder[Int where 0 <= it and it <= 1114111] = List.builder()
+  var steps: Int where it >= 0 = List.len(xs: p.cps) + 1
+  loop while steps > 0
+    invariant steps >= 0
+    decreases steps
+  {
+    steps = steps - 1
+    let c: Int = peek(p: p)
+    if c == -1 {
+      return None
+    }
+    if c == 34 {
+      advance(p: inout p)
+      return Some(value: Text.of_code_points(cps: List.finish(b: out)))
+    }
+    if c == 92 {
+      advance(p: inout p)
+      let e: Int = peek(p: p)
+      advance(p: inout p)
+      if e == 34 or e == 92 or e == 47 {
+        List.push(b: inout out, x: clamp(c: e))
+      } else {
+        if e == 98 {
+          List.push(b: inout out, x: 8)
+        } else {
+          if e == 102 {
+            List.push(b: inout out, x: 12)
+          } else {
+            if e == 110 {
+              List.push(b: inout out, x: 10)
+            } else {
+              if e == 114 {
+                List.push(b: inout out, x: 13)
+              } else {
+                if e == 116 {
+                  List.push(b: inout out, x: 9)
+                } else {
+                  if e == 117 {
+                    var unit: Int = hex4(p: inout p)
+                    if unit < 0 {
+                      return None
+                    }
+                    if unit >= 55296 and unit <= 56319 and peek(p: p) == 92 {
+                      -- A surrogate pair: the low half follows as another `\u` escape.
+                      var q: P = p
+                      advance(p: inout q)
+                      if peek(p: q) == 117 {
+                        advance(p: inout q)
+                        let low: Int = hex4(p: inout q)
+                        if low >= 56320 and low <= 57343 {
+                          unit = 65536 + (unit - 55296) * 1024 + (low - 56320)
+                          p = q
+                        }
+                      }
+                    }
+                    List.push(b: inout out, x: clamp(c: unit))
+                  } else {
+                    return None
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    } else {
+      List.push(b: inout out, x: clamp(c: c))
+      advance(p: inout p)
+    }
+  }
+  return None
+}
+
+-- Digits at the reader, advanced past them; the count read.
+fn digits(p: inout P) -> Int may mutate {
+  var n: Int = 0
+  var steps: Int where it >= 0 = List.len(xs: p.cps) + 1
+  loop while steps > 0 and is_digit(c: peek(p: p))
+    invariant steps >= 0
+    decreases steps
+  {
+    steps = steps - 1
+    advance(p: inout p)
+    n = n + 1
+  }
+  return n
+}
+
+fn parse_number(p: inout P) -> Option[Json] may alloc, mutate {
+  let start: Int = p.i
+  if peek(p: p) == 45 {
+    advance(p: inout p)
+  }
+  if digits(p: inout p) == 0 {
+    return None
+  }
+  if peek(p: p) == 46 {
+    advance(p: inout p)
+    if digits(p: inout p) == 0 {
+      return None
+    }
+  }
+  if peek(p: p) == 101 or peek(p: p) == 69 {
+    advance(p: inout p)
+    if peek(p: p) == 43 or peek(p: p) == 45 {
+      advance(p: inout p)
+    }
+    if digits(p: inout p) == 0 {
+      return None
+    }
+  }
+  var out: Builder[Int where 0 <= it and it <= 1114111] = List.builder()
+  for k: Int in start ..< p.i {
+    if k >= 0 and k < List.len(xs: p.cps) {
+      List.push(b: inout out, x: clamp(c: List.get(xs: p.cps, i: k)))
+    }
+  }
+  return Some(value: JNumber(text: Text.of_code_points(cps: List.finish(b: out))))
+}
+
+fn parse_word(p: inout P, word: Text, v: Json) -> Option[Json] may alloc, mutate {
+  for c: Int in Text.code_points(t: word) {
+    if peek(p: p) != c {
+      return None
+    }
+    advance(p: inout p)
+  }
+  return Some(value: v)
+}
+
+fn parse_array(fuel: Int where it >= 0, p: inout P) -> Option[Json] may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return None
+  }
+  advance(p: inout p)
+  var items: Builder[Json] = List.builder()
+  skip_ws(p: inout p)
+  if peek(p: p) == 93 {
+    advance(p: inout p)
+    return Some(value: JArray(items: []))
+  }
+  var steps: Int where it >= 0 = List.len(xs: p.cps) + 1
+  loop while steps > 0
+    invariant steps >= 0
+    decreases steps
+  {
+    steps = steps - 1
+    match parse_value(fuel: fuel - 1, p: inout p) with
+    | Some(value) -> List.push(b: inout items, x: value)
+    | None -> return None
+    skip_ws(p: inout p)
+    let c: Int = peek(p: p)
+    if c == 93 {
+      advance(p: inout p)
+      return Some(value: JArray(items: List.finish(b: items)))
+    }
+    if c != 44 {
+      return None
+    }
+    advance(p: inout p)
+  }
+  return None
+}
+
+fn parse_object(fuel: Int where it >= 0, p: inout P) -> Option[Json] may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return None
+  }
+  advance(p: inout p)
+  var fields: Builder[Field] = List.builder()
+  skip_ws(p: inout p)
+  if peek(p: p) == 125 {
+    advance(p: inout p)
+    return Some(value: JObject(fields: []))
+  }
+  var steps: Int where it >= 0 = List.len(xs: p.cps) + 1
+  loop while steps > 0
+    invariant steps >= 0
+    decreases steps
+  {
+    steps = steps - 1
+    skip_ws(p: inout p)
+    var key: Text = ""
+    match parse_string(p: inout p) with
+    | Some(value) -> key = value
+    | None -> return None
+    skip_ws(p: inout p)
+    if peek(p: p) != 58 {
+      return None
+    }
+    advance(p: inout p)
+    match parse_value(fuel: fuel - 1, p: inout p) with
+    | Some(value) -> List.push(b: inout fields, x: Field { key: key, value: value })
+    | None -> return None
+    skip_ws(p: inout p)
+    let c: Int = peek(p: p)
+    if c == 125 {
+      advance(p: inout p)
+      return Some(value: JObject(fields: List.finish(b: fields)))
+    }
+    if c != 44 {
+      return None
+    }
+    advance(p: inout p)
+  }
+  return None
+}
+
+fn parse_value(fuel: Int where it >= 0, p: inout P) -> Option[Json] may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return None
+  }
+  skip_ws(p: inout p)
+  let c: Int = peek(p: p)
+  if c == 123 {
+    return parse_object(fuel: fuel - 1, p: inout p)
+  }
+  if c == 91 {
+    return parse_array(fuel: fuel - 1, p: inout p)
+  }
+  if c == 34 {
+    match parse_string(p: inout p) with
+    | Some(value) -> return Some(value: JString(value: value))
+    | None -> return None
+  }
+  if c == 116 {
+    return parse_word(p: inout p, word: "true", v: JBool(value: true))
+  }
+  if c == 102 {
+    return parse_word(p: inout p, word: "false", v: JBool(value: false))
+  }
+  if c == 110 {
+    return parse_word(p: inout p, word: "null", v: JNull)
+  }
+  if c == 45 or is_digit(c: c) {
+    return parse_number(p: inout p)
+  }
+  return None
+}
+
+-- Reads a JSON text (RFC 8259) into a value; None for anything malformed. A
+-- number keeps its text.
+pub fn parse(t: Text) -> Option[Json] may alloc, mutate {
+  var p: P = P { cps: Text.code_points(t: t), i: 0 }
+  let v: Option[Json] = parse_value(fuel: parse_depth, p: inout p)
+  skip_ws(p: inout p)
+  if not at_end(p: p) {
+    return None
+  }
+  return v
+}
+
+-- Accessors ---------------------------------------------------------------------
+-- The value under `key` of an object; `JNull` when absent or not an object.
+pub fn at(j: Json, key: Text) -> Json {
+  match j with
+  | JObject(fields) -> {
+    for f: Field in fields {
+      if f.key == key {
+        return f.value
+      }
+    }
+    return JNull
+  }
+  | _ -> return JNull
+}
+
+pub fn has(j: Json, key: Text) -> Bool {
+  match j with
+  | JObject(fields) -> {
+    for f: Field in fields {
+      if f.key == key {
+        return true
+      }
+    }
+    return false
+  }
+  | _ -> return false
+}
+
+pub fn is_null(j: Json) -> Bool {
+  return j is JNull
+}
+
+-- A string's text; "" for anything else.
+pub fn str_of(j: Json) -> Text {
+  match j with
+  | JString(value) -> return value
+  | _ -> return ""
+}
+
+pub fn str_at(j: Json, key: Text) -> Text {
+  return str_of(j: at(j: j, key: key))
+}
+
+-- An array's items; [] for anything else.
+pub fn list_of(j: Json) -> List[Json] may alloc {
+  match j with
+  | JArray(items) -> return items
+  | _ -> return []
+}
+
+pub fn list_at(j: Json, key: Text) -> List[Json] may alloc {
+  return list_of(j: at(j: j, key: key))
+}
+
+-- The strings of an array.
+pub fn texts_of(j: Json) -> List[Text] may alloc, mutate {
+  var out: Builder[Text] = List.builder()
+  for x: Json in list_of(j: j) {
+    List.push(b: inout out, x: str_of(j: x))
+  }
+  return List.finish(b: out)
+}
+
+pub fn texts_at(j: Json, key: Text) -> List[Text] may alloc, mutate {
+  return texts_of(j: at(j: j, key: key))
+}
+
+pub fn bool_at(j: Json, key: Text) -> Bool {
+  match at(j: j, key: key) with
+  | JBool(value) -> return value
+  | _ -> return false
+}
+
+-- A number's integer value; 0 for anything else.
+pub fn int_at(j: Json, key: Text) -> Int {
+  match at(j: j, key: key) with
+  | JNumber(text) -> {
+    match Int.parse(t: text) with
+    | Some(value) -> return value
+    | None -> return 0
+  }
+  | _ -> return 0
+}

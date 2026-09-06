@@ -63,7 +63,7 @@ describe.skipIf(clang === null)('native target (§19)', () => {
   }, 120000);
 
   it('every example passes on both targets', () => {
-    for (const rel of ['examples/mandelbrot/mandelbrot.onus', 'packages/compiler/test/native/primitives.onus']) {
+    for (const rel of ['examples/mandelbrot/mandelbrot.onus', 'packages/compiler/test/native/primitives.onus', 'packages/compiler/test/native/eq_recursive.onus']) {
       const out = fresh(`examples-${rel.split('/').pop() ?? 'x'}`);
       const ctx = checked(join(repoRoot, rel));
       const js = emitAll(ctx, { outDir: out, ts: false });

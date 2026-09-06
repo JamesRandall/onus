@@ -69,6 +69,10 @@ pub record Lw {
   projections: Dict[Text, Bool]
   -- What a bound name stands for: the walker binds every name to a fresh constant equal to its value.
   aliases: Dict[Text, formula.Formula]
+  -- Axioms of the sorts themselves, true of every value: a list's length is non-negative. Printed with the declarations.
+  sort_axioms: Builder[formula.Formula]
+  -- `has_facts` by type key and remaining depth.
+  facts_memo: Dict[Text, Bool]
 }
 
 pub fn new_lw(file: Int) -> Lw may alloc {
@@ -90,7 +94,9 @@ pub fn new_lw(file: Int) -> Lw may alloc {
     type_fact_depth: 0,
     expanding: Map.dict(),
     projections: Map.dict(),
-    aliases: Map.dict()
+    aliases: Map.dict(),
+    sort_axioms: List.builder(),
+    facts_memo: Map.dict()
   }
 }
 
@@ -242,22 +248,22 @@ pub fn slug(lw: Lw, ctx: context.Context, t: types.Type) -> Text may mutate, all
   match t with
   | types.Refined(base, _, _) -> return slug(lw: lw, ctx: ctx, t: base)
   | types.Prim(name) -> return name
-  | types.RecordT(def, args) -> return context.get_def(ctx: ctx, id: def).name ++ args_slug(
+  | types.RecordT(def, args) -> return context.qualified_name(ctx: ctx, id: def) ++ args_slug(
     lw: lw,
     ctx: ctx,
     args: args
   )
-  | types.UnionT(def, args) -> return context.get_def(ctx: ctx, id: def).name ++ args_slug(
+  | types.UnionT(def, args) -> return context.qualified_name(ctx: ctx, id: def) ++ args_slug(
     lw: lw,
     ctx: ctx,
     args: args
   )
-  | types.Opaque(def, args) -> return context.get_def(ctx: ctx, id: def).name ++ args_slug(
+  | types.Opaque(def, args) -> return context.qualified_name(ctx: ctx, id: def) ++ args_slug(
     lw: lw,
     ctx: ctx,
     args: args
   )
-  | types.Capability(def, args, _) -> return context.get_def(ctx: ctx, id: def).name ++ args_slug(
+  | types.Capability(def, args, _) -> return context.qualified_name(ctx: ctx, id: def) ++ args_slug(
     lw: lw,
     ctx: ctx,
     args: args
@@ -311,7 +317,7 @@ fn const_slug(lw: Lw, ctx: context.Context, c: types.ConstValue) -> Text may mut
   | types.BoolV(v) -> return Bool.to_text(b: v)
   | types.TextV(v) -> return text_lit_name(lw: lw, text: v)
   | types.UnitV -> return "Unit"
-  | types.VariantV(def) -> return context.get_def(ctx: ctx, id: def).name
+  | types.VariantV(def) -> return context.qualified_name(ctx: ctx, id: def)
   | types.SymV(def) -> return "s" ++ Int.to_text(x: def)
   | types.ErrorV -> return "err"
 }
@@ -728,12 +734,32 @@ fn list_fns(
   }
   let sort: formula.Sort = try sort_of(lw: lw, ctx: ctx, t: ty)
   let elem_sort: formula.Sort = try sort_of(lw: lw, ctx: ctx, t: or_error(o: elem))
-  let len: Text = declare_fn(
-    lw: lw,
-    name: slug(lw: lw, ctx: ctx, t: ty) ++ ".len",
-    args: [sort],
-    ret: formula.IntS
-  )
+  let len_name: Text = slug(lw: lw, ctx: ctx, t: ty) ++ ".len"
+  let first: Bool = not Map.contains(d: lw.fns, key: clean_name(name: len_name, allow_dot: true))
+  let len: Text = declare_fn(lw: lw, name: len_name, args: [sort], ret: formula.IntS)
+  -- Every list's length is non-negative: an axiom of the sort, stated once, rather than a fact of each list term.
+  if first {
+    var sort_axioms: Builder[formula.Formula] = lw.sort_axioms
+    List.push(
+      b: inout sort_axioms,
+      x: formula.QuantF(
+        quant: "forall",
+        vars: [formula.Bound { name: "xs", sort: sort }],
+        body: formula.AppF(
+          fn_name: ">=",
+          args: [
+            formula.AppF(
+              fn_name: len,
+              args: [formula.VarF(name: "xs", sort: sort)],
+              sort: formula.IntS
+            ),
+            formula.IntF(v: 0)
+          ],
+          sort: formula.BoolS
+        )
+      )
+    )
+  }
   let get: Text = declare_fn(
     lw: lw,
     name: slug(lw: lw, ctx: ctx, t: ty) ++ ".get",
@@ -2063,6 +2089,10 @@ pub fn type_facts(
   if fuel == 0 or lw.type_fact_depth > 3 {
     return Unit
   }
+  -- Nothing to assert within reach: the walk through fields and elements is skipped, not merely fruitless.
+  if not has_facts(fuel: fuel - 1, lw: lw, ctx: ctx, ty: ty, remaining: 3 - lw.type_fact_depth) {
+    return Unit
+  }
   let depth: Int where it >= 0 = lw.type_fact_depth
   lw = { lw with type_fact_depth: depth + 1 }
   refinement_facts(fuel: fuel - 1, lw: inout lw, ctx: ctx, term: term, ty: ty, env: env)
@@ -2177,10 +2207,6 @@ pub fn type_facts(
           let lr: Result[formula.Formula, Text] = list_len(lw: lw, ctx: ctx, term: term, ty: s)
           if lr is Ok {
             let len: formula.Formula = ok_or(r: lr)
-            push_axiom(
-              lw: lw,
-              f: formula.AppF(fn_name: ">=", args: [len, formula.IntF(v: 0)], sort: formula.BoolS)
-            )
             lw = { lw with fresh: lw.fresh + 1 }
             let idx: formula.Formula = formula.VarF(
               name: "tf_i_" ++ Int.to_text(x: lw.fresh),
@@ -2231,6 +2257,129 @@ pub fn type_facts(
 }
 
 -- The refinement layers of `ty`, each asserted of `term` with `it` bound.
+-- Whether `type_facts` on a value of `ty` would assert anything within `remaining` further
+-- levels: a refinement on the type itself, or one reachable through record fields, variant
+-- fields and list elements. A list's length bound is a sort axiom (`list_fns`) and counts for
+-- nothing. Memoised by type and depth.
+fn has_facts(
+  fuel: Int where it >= 0,
+  lw: Lw,
+  ctx: context.Context,
+  ty: types.Type,
+  remaining: Int where it >= 0
+) -> Bool may mutate, alloc
+  decreases fuel
+{
+  if ty is types.Refined {
+    return true
+  }
+  if fuel == 0 or remaining == 0 {
+    return false
+  }
+  let key: Text = type_key(t: ty) ++ "@" ++ Int.to_text(x: remaining)
+  match Map.find(d: lw.facts_memo, key: key) with
+  | Some(value) -> return value
+  | None -> skip()
+  var out: Bool = false
+  match ty with
+  | types.RecordT(def, _) -> {
+    let subst: Dict[Int, types.TypeArg] = subst_of_type(ctx: ctx, ty: ty)
+    for f: types.FieldInfo in fields_of(ctx: ctx, owner: def) {
+      let ft: types.Type = types.substitute(t: f.ty, subst: subst)
+      if types.prim_name(t: types.strip(t: ft)) != "Float" {
+        if has_facts(fuel: fuel - 1, lw: lw, ctx: ctx, ty: ft, remaining: remaining - 1) {
+          out = true
+        }
+      }
+    }
+  }
+  | types.UnionT(def, _) -> {
+    let subst: Dict[Int, types.TypeArg] = subst_of_type(ctx: ctx, ty: ty)
+    for v: Int in variants_of(ctx: ctx, union_def: def) {
+      for f: types.FieldInfo in fields_of(ctx: ctx, owner: v) {
+        let ft: types.Type = types.substitute(t: f.ty, subst: subst)
+        if has_facts(fuel: fuel - 1, lw: lw, ctx: ctx, ty: ft, remaining: remaining - 1) {
+          out = true
+        }
+      }
+    }
+  }
+  | types.Opaque(_, _) -> {
+    if is_list_type(ctx: ctx, t: ty) {
+      match first_type_arg(t: ty) with
+      | Some(value) -> out = has_facts(
+        fuel: fuel - 1,
+        lw: lw,
+        ctx: ctx,
+        ty: value,
+        remaining: remaining - 1
+      )
+      | None -> skip()
+    }
+  }
+  | _ -> skip()
+  var memo: Dict[Text, Bool] = lw.facts_memo
+  Map.set(d: inout memo, key: key, value: out)
+  return out
+}
+
+-- A key identifying a type up to its refinements, for `has_facts`.
+fn type_key(t: types.Type) -> Text may alloc
+  decreases t
+{
+  match t with
+  | types.Prim(name) -> return name
+  | types.Refined(base, pred, _) -> return type_key(t: base) ++ "?" ++ Int.to_text(x: pred)
+  | types.RecordT(def, args) -> return Int.to_text(x: def) ++ "[" ++ args_key(args: args) ++ "]"
+  | types.UnionT(def, args) -> return Int.to_text(x: def) ++ "[" ++ args_key(args: args) ++ "]"
+  | types.Opaque(def, args) -> return Int.to_text(x: def) ++ "[" ++ args_key(args: args) ++ "]"
+  | types.Capability(def, args, _) -> return Int.to_text(x: def) ++ "[" ++ args_key(
+    args: args
+  ) ++ "]"
+  | types.ParamT(def) -> return "P" ++ Int.to_text(x: def)
+  | types.FnT(_, _, _) -> return "fn"
+  | types.TypeInfoT -> return "typeinfo"
+  | types.SpecT -> return "spec"
+  | types.ErrorT -> return "error"
+}
+
+fn args_key(args: List[types.TypeArg]) -> Text may alloc
+  decreases args
+{
+  var out: Text = ""
+  var first: Bool = true
+  for a: types.TypeArg in args {
+    if not first {
+      out = out ++ ","
+    }
+    first = false
+    out = out ++ arg_key(a: a)
+  }
+  return out
+}
+
+fn arg_key(a: types.TypeArg) -> Text may alloc
+  decreases a
+{
+  match a with
+  | types.TypeA(ty) -> return type_key(t: ty)
+  | types.EffectsA(_) -> return "e"
+  | types.ConstA(value) -> return const_key(c: value)
+}
+
+fn const_key(c: types.ConstValue) -> Text may alloc {
+  match c with
+  | types.IntV(v) -> return Int.to_text(x: v)
+  | types.DurationV(v) -> return Int.to_text(x: v)
+  | types.FloatV(v) -> return Float.to_text(x: v)
+  | types.BoolV(v) -> return Bool.to_text(b: v)
+  | types.TextV(v) -> return "t:" ++ v
+  | types.UnitV -> return "Unit"
+  | types.VariantV(def) -> return "v" ++ Int.to_text(x: def)
+  | types.SymV(def) -> return "s" ++ Int.to_text(x: def)
+  | types.ErrorV -> return "err"
+}
+
 fn refinement_facts(
   fuel: Int where it >= 0,
   lw: inout Lw,

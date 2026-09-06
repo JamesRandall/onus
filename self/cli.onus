@@ -1,0 +1,768 @@
+module cli
+import std.io
+import ast
+import context
+import loader
+import check
+import verifier
+import report
+import diagjson
+import diagtext
+import json
+import loc
+import interface
+import pathreport
+import pathtext
+import idiff
+import lowerir
+import irtext
+import build
+import nativebuild
+import obligations
+import ledger
+
+-- The `onus` command line in Onus (impl spec §2, M15.4; `cli/main.ts`):
+-- `check`, `fmt`, `build`, `run`, `interface` and `path`. `test`, `review`,
+-- `loop` and `next` stay with the TypeScript `onus` until M15.5.
+--
+-- Exit status: a run that reports diagnostics, a breaking interface or a
+-- usage error returns `Err`, which the runtime turns into status 1. The
+-- TypeScript command line distinguishes usage and I/O failures as 2; a
+-- `main` that chooses its exit status needs a language change.
+pub const usage: Text = "usage:\n  onus check <file.onus>... [--json] [--root <dir>] [--stdlib <dir>] [--to <pass>] [--budget <ms>] [--ledger] [--no-cache]\n      report every diagnostic; exit 1 if any. Passes: parse, canonical, load, resolve, types, consteval, effects, contracts, claims, capabilities, verify, paths\n  onus fmt <file.onus>... [--stdout]\n      rewrite files in canonical form\n  onus build <entry.onus> [--out <dir>] [--emit js|ir] [--target js|native|wasm] [--root <dir>] [--stdlib <dir>] [--runtime <path>]\n      check, then emit JavaScript for every module into <dir> (default: <entry dir>/out); --target native compiles\n      an executable with clang into <dir>/native (§19); --emit ir prints the target-neutral form\n  onus run <entry.onus> [--out <dir>] [--target js|native|wasm] [-- args...]\n      build, then run the entry module's main\n  onus interface <file.onus> [--json] [--diff <old-interface.json>] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]\n      check, then print the entry module's interface: canonical source with bodies elided, or the §11.1 JSON;\n      with --diff, the changes since a previous interface document (§11.1, §15.1)\n  onus path <file.onus> [<name>] [--json] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]\n      check, then print the §9.1 report of the entry module's paths (or of the named one)\n  test, review, loop and next: run the TypeScript `onus` until M15.5\nThe standard library is --stdlib or ONUS_STDLIB; the runtime for build and run is --runtime or ONUS_RUNTIME.\n"
+
+pub const passes: List[Text] = [
+  "parse",
+  "canonical",
+  "load",
+  "resolve",
+  "types",
+  "consteval",
+  "effects",
+  "contracts",
+  "claims",
+  "capabilities",
+  "verify",
+  "paths"
+]
+
+record Args {
+  command: Option[Text]
+  files: List[Text]
+  flags: Dict[Text, Bool]
+  values: Dict[Text, Text]
+}
+
+fn skip() -> Unit {
+  return Unit
+}
+
+fn is_value_flag(name: Text) -> Bool {
+  return name == "root" or name == "stdlib" or name == "to" or name == "out" or name == "emit" or name == "budget" or name == "offset" or name == "diff" or name == "against" or name == "env" or name == "target" or name == "runtime"
+}
+
+fn parse_args(argv: List[Text]) -> Args may alloc, mutate {
+  var command: Option[Text] = None
+  var files: Builder[Text] = List.builder()
+  var flags: Dict[Text, Bool] = Map.dict()
+  var values: Dict[Text, Text] = Map.dict()
+  var i: Int where it >= 0 = 0
+  loop while i < List.len(xs: argv)
+    invariant i >= 0
+    decreases List.len(xs: argv) - i
+  {
+    let a: Text = List.get(xs: argv, i: i)
+    if Text.starts_with(t: a, prefix: "--") and Text.count(t: a) >= 2 {
+      let name: Text = Text.slice(t: a, from: 2, to: Text.count(t: a))
+      if is_value_flag(name: name) and i + 1 < List.len(xs: argv) {
+        Map.set(d: inout values, key: name, value: List.get(xs: argv, i: i + 1))
+        i = i + 2
+      } else {
+        if is_value_flag(name: name) {
+          i = i + 1
+        } else {
+          Map.set(d: inout flags, key: name, value: true)
+          i = i + 1
+        }
+      }
+    } else {
+      if command is None {
+        command = Some(value: a)
+      } else {
+        List.push(b: inout files, x: a)
+      }
+      i = i + 1
+    }
+  }
+  return Args { command: command, files: List.finish(b: files), flags: flags, values: values }
+}
+
+fn flag(args: Args, name: Text) -> Bool {
+  return Map.contains(d: args.flags, key: name)
+}
+
+fn value(args: Args, name: Text) -> Option[Text] {
+  return Map.find(d: args.values, key: name)
+}
+
+fn value_or(args: Args, name: Text, fallback: Text) -> Text {
+  match Map.find(d: args.values, key: name) with
+  | Some(value) -> return value
+  | None -> return fallback
+}
+
+fn or_empty(o: Option[Text]) -> Text {
+  match o with
+  | Some(value) -> return value
+  | None -> return ""
+}
+
+fn is_pass(name: Text) -> Bool {
+  return List.contains(xs: passes, x: name)
+}
+
+fn plural(n: Int) -> Text {
+  if n == 1 {
+    return ""
+  }
+  return "s"
+}
+
+fn pad(t: Text, n: Int) -> Text may alloc {
+  let width: Int = Text.count(t: t)
+  if width >= n {
+    return t
+  }
+  return t ++ Text.repeat(t: " ", n: n - width)
+}
+
+fn usage_error(console: io.Console) -> Result[Unit, io.Error] may io.file {
+  io.eprint(console: console, text: usage)
+  return Err(error: Other(detail: "usage"))
+}
+
+-- The context and verifier options a command runs with: the module root is
+-- `--root` alone (as the TypeScript command line), the cache lives under
+-- `--root` or the entry's directory.
+record Setup {
+  ctx: context.Context
+  vopts: verifier.Options
+  root: Text
+}
+
+fn setup(args: Args, files: io.Files, env: io.Env) -> Setup may io.file, io.env, alloc, mutate {
+  var root: Text = "."
+  if List.len(xs: args.files) > 0 {
+    root = nativebuild.dir_of(path: List.get(xs: args.files, i: 0))
+  }
+  match value(args: args, name: "root") with
+  | Some(value) -> root = value
+  | None -> skip()
+  var stdlib: Option[Text] = value(args: args, name: "stdlib")
+  if stdlib is None {
+    stdlib = io.get_env(env: env, name: "ONUS_STDLIB")
+  }
+  var budget: Int where it >= 0 = 500
+  match value(args: args, name: "budget") with
+  | Some(value) -> budget = parse_budget(t: value)
+  | None -> skip()
+  var cache: Option[Text] = Some(value: root ++ "/.onus/cache")
+  if flag(args: args, name: "no-cache") {
+    cache = None
+  }
+  let led: ledger.Ledger = ledger.read_ledger(files: files, dir: root ++ "/.onus/ledger")
+  var ctx: context.Context = context.new_context(
+    root: value(args: args, name: "root"),
+    stdlib: stdlib
+  )
+  ctx = { ctx with assumptions: led.assumptions, coverage: led.coverage, mutations: led.mutations }
+  return Setup {
+    ctx: ctx,
+    vopts: verifier.Options { z3_path: None, budget_ms: budget, cache_dir: cache, dump_dir: None },
+    root: root
+  }
+}
+
+-- A positive budget in milliseconds; 500 for anything else.
+fn parse_budget(t: Text) -> Int where it >= 0 {
+  match Int.parse(t: t) with
+  | Some(value) -> {
+    if value > 0 {
+      return value
+    }
+    return 500
+  }
+  | None -> return 500
+}
+
+fn or_null(o: Option[json.Json]) -> json.Json {
+  match o with
+  | Some(value) -> return value
+  | None -> return json.JNull
+}
+
+fn read_entries(
+  ctx: inout context.Context,
+  files: io.Files,
+  paths: List[Text]
+) -> Result[Unit, io.Error] may io.file, alloc, mutate {
+  for p: Text in paths {
+    let text: Text = try io.read(files: files, path: p)
+    if loader.add_file(ctx: inout ctx, path: p, text: text) is None {
+      return Err(error: Other(detail: p ++ " is too long"))
+    }
+  }
+  return Ok(value: Unit)
+}
+
+fn diag_count(ctx: context.Context) -> Int {
+  return List.built(b: ctx.diagnostics)
+}
+
+fn emit_diagnostics(
+  ctx: context.Context,
+  console: io.Console,
+  tab: Dict[Int, loc.LineTable],
+  as_json: Bool
+) -> Unit may io.file, alloc, mutate {
+  for d: report.Diagnostic in List.finish(b: ctx.diagnostics) {
+    if as_json {
+      io.print(
+        console: console,
+        text: json.compact(j: diagjson.to_json(ctx: ctx, tab: tab, d: d)) ++ "\n"
+      )
+    } else {
+      io.print(console: console, text: diagtext.to_text(ctx: ctx, tab: tab, d: d) ++ "\n")
+    }
+  }
+  return Unit
+}
+
+-- One line per obligation of the entry file: the ledger (§11, §12.2).
+fn print_ledger(
+  ctx: context.Context,
+  console: io.Console,
+  tab: Dict[Int, loc.LineTable]
+) -> Unit may io.file, alloc, mutate {
+  for i: Int in 0 ..< ctx.obligation_count {
+    let o: obligations.Obligation = context.get_obligation(ctx: ctx, id: i)
+    if o.at_file == 0 {
+      var by: Text = ""
+      match o.by with
+      | Some(value) -> by = "  [" ++ value ++ "]"
+      | None -> skip()
+      io.print(
+        console: console,
+        text: pad(t: obligations.status_text(s: o.status), n: 8) ++ " " ++ pad(
+          t: obligations.kind_text(k: o.kind),
+          n: 16
+        ) ++ " " ++ loc.location_text(
+          ctx: ctx,
+          tables: tab,
+          file: o.at_file,
+          span: o.at_span
+        ) ++ "  " ++ context.get_def(ctx: ctx, id: o.def).name ++ ": " ++ o.text ++ by ++ "\n"
+      )
+    }
+  }
+  return Unit
+}
+
+-- The module declared by the entry file, when it is one.
+fn entry_module(ctx: context.Context) -> Option[Int] {
+  for mid: Int in 0 ..< ctx.module_count {
+    match Map.find(d: ctx.modules, key: mid) with
+    | Some(value) -> {
+      if value.file == 0 {
+        return Some(value: mid)
+      }
+    }
+    | None -> skip()
+  }
+  return None
+}
+
+fn errors_result(
+  ctx: context.Context,
+  console: io.Console,
+  as_json: Bool
+) -> Result[Unit, io.Error] may io.file, alloc {
+  let n: Int = diag_count(ctx: ctx)
+  let line: Text = Int.to_text(x: n) ++ " error" ++ plural(n: n)
+  if not as_json {
+    io.print(console: console, text: line ++ "\n")
+  }
+  return Err(error: Other(detail: line))
+}
+
+-- `onus check`.
+fn check_command(
+  args: Args,
+  files: io.Files,
+  console: io.Console,
+  process: io.Process,
+  env: io.Env
+) -> Result[Unit, io.Error] may io.file, io.env, nondet, alloc, mutate {
+  if List.len(xs: args.files) == 0 {
+    return usage_error(console: console)
+  }
+  let to: Text = value_or(args: args, name: "to", fallback: "paths")
+  if not is_pass(name: to) {
+    io.eprint(
+      console: console,
+      text: "onus: unknown pass `" ++ to ++ "`; expected one of " ++ Text.join(
+        parts: passes,
+        sep: ", "
+      ) ++ "\n"
+    )
+    return Err(error: Other(detail: "unknown pass"))
+  }
+  let s: Setup = setup(args: args, files: files, env: env)
+  var ctx: context.Context = s.ctx
+  try read_entries(ctx: inout ctx, files: files, paths: args.files)
+  check.run_passes(
+    ctx: inout ctx,
+    to: check.pass_index(name: to),
+    files: files,
+    console: console,
+    process: process,
+    vopts: s.vopts
+  )
+  let tab: Dict[Int, loc.LineTable] = loc.line_tables(ctx: ctx)
+  let as_json: Bool = flag(args: args, name: "json")
+  emit_diagnostics(ctx: ctx, console: console, tab: tab, as_json: as_json)
+  if flag(args: args, name: "ledger") {
+    print_ledger(ctx: ctx, console: console, tab: tab)
+  }
+  if not context.clean(ctx: ctx) {
+    return errors_result(ctx: ctx, console: console, as_json: as_json)
+  }
+  return Ok(value: Unit)
+}
+
+-- `onus fmt`: rewrites files in canonical form, or prints them with `--stdout`.
+fn fmt_command(
+  args: Args,
+  files: io.Files,
+  console: io.Console
+) -> Result[Unit, io.Error] may io.file, alloc, mutate {
+  if List.len(xs: args.files) == 0 {
+    return usage_error(console: console)
+  }
+  var ctx: context.Context = context.new_context(root: None, stdlib: None)
+  try read_entries(ctx: inout ctx, files: files, paths: args.files)
+  for f: Int in 0 ..< context.file_count(ctx: ctx) {
+    loader.canonical(ctx: inout ctx, file: f)
+  }
+  let tab: Dict[Int, loc.LineTable] = loc.line_tables(ctx: ctx)
+  var syntax_errors: Int = 0
+  for d: report.Diagnostic in List.finish(b: ctx.diagnostics) {
+    if d.code != "E0001" {
+      io.print(console: console, text: diagtext.to_text(ctx: ctx, tab: tab, d: d) ++ "\n")
+      syntax_errors = syntax_errors + 1
+    }
+  }
+  if syntax_errors > 0 {
+    return Err(
+      error: Other(
+        detail: Int.to_text(x: syntax_errors) ++ " syntax error" ++ plural(n: syntax_errors)
+      )
+    )
+  }
+  for f: Int in 0 ..< context.file_count(ctx: ctx) {
+    match Map.find(d: ctx.canonical, key: f) with
+    | Some(value) -> {
+      let source: report.SourceFile = context.file_at(ctx: ctx, id: f)
+      if flag(args: args, name: "stdout") {
+        io.print(console: console, text: value)
+      } else {
+        if value != source.text {
+          try build.write_file(files: files, path: source.path, text: value)
+        }
+      }
+    }
+    | None -> skip()
+  }
+  return Ok(value: Unit)
+}
+
+fn io_error_text(e: io.Error) -> Text may alloc {
+  match e with
+  | NotFound(path) -> return "not found: " ++ path
+  | Denied(path) -> return "permission denied: " ++ path
+  | Other(detail) -> return detail
+}
+
+-- Runs a program to completion, then relays its output; its non-zero status is the command's failure.
+fn run_program(
+  process: io.Process,
+  console: io.Console,
+  program: Text,
+  args: List[Text]
+) -> Result[Unit, io.Error] may io.file, nondet, alloc {
+  match io.run(process: process, program: program, args: args, stdin: "", timeout_ms: 0) with
+  | Ok(value) -> {
+    io.print(console: console, text: value.stdout)
+    io.eprint(console: console, text: value.stderr)
+    if value.status != 0 {
+      return Err(error: Other(detail: "exit status " ++ Int.to_text(x: value.status)))
+    }
+    return Ok(value: Unit)
+  }
+  | Err(error) -> {
+    io.eprint(
+      console: console,
+      text: "onus run: cannot run " ++ program ++ ": " ++ io_error_text(e: error) ++ "\n"
+    )
+    return Err(error: error)
+  }
+}
+
+-- The native runtime sources next to the runtime package's entry point, when the runtime is given as a path.
+fn runtime_dir_of(runtime: Text) -> Option[Text] may alloc, mutate {
+  if Text.contains(t: runtime, needle: "/") {
+    return Some(value: nativebuild.dir_of(path: nativebuild.dir_of(path: runtime)) ++ "/native")
+  }
+  return None
+}
+
+-- `onus build` and `onus run`.
+fn build_command(
+  args: Args,
+  files: io.Files,
+  console: io.Console,
+  process: io.Process,
+  env: io.Env,
+  run: Bool
+) -> Result[Unit, io.Error] may io.file, io.env, nondet, alloc, mutate {
+  if List.len(xs: args.files) == 0 {
+    return usage_error(console: console)
+  }
+  let entry: Text = List.get(xs: args.files, i: 0)
+  let rest: List[Text] = List.slice(xs: args.files, from: 1, to: List.len(xs: args.files))
+  let emit: Text = value_or(args: args, name: "emit", fallback: "js")
+  if emit == "ts" {
+    io.eprint(
+      console: console,
+      text: "onus: --emit ts is the TypeScript oracle output; the TypeScript `onus` produces it\n"
+    )
+    return Err(error: Other(detail: "--emit ts"))
+  }
+  if emit != "js" and emit != "ir" {
+    io.eprint(console: console, text: "onus: --emit takes js or ir\n")
+    return Err(error: Other(detail: "--emit"))
+  }
+  let target: Text = value_or(args: args, name: "target", fallback: "js")
+  if target != "js" and target != "native" and target != "wasm" {
+    io.eprint(console: console, text: "onus: --target takes js, native or wasm\n")
+    return Err(error: Other(detail: "--target"))
+  }
+  let s: Setup = setup(args: args, files: files, env: env)
+  var ctx: context.Context = s.ctx
+  try read_entries(ctx: inout ctx, files: files, paths: [entry])
+  let out_dir: Text = value_or(
+    args: args,
+    name: "out",
+    fallback: nativebuild.dir_of(path: entry) ++ "/out"
+  )
+  var runtime: Text = "@onus/runtime"
+  match io.get_env(env: env, name: "ONUS_RUNTIME") with
+  | Some(value) -> runtime = value
+  | None -> skip()
+  runtime = value_or(args: args, name: "runtime", fallback: runtime)
+  check.run_passes(
+    ctx: inout ctx,
+    to: 11,
+    files: files,
+    console: console,
+    process: process,
+    vopts: s.vopts
+  )
+  let tab: Dict[Int, loc.LineTable] = loc.line_tables(ctx: ctx)
+  let as_json: Bool = flag(args: args, name: "json")
+  if emit == "ir" {
+    emit_diagnostics(ctx: ctx, console: console, tab: tab, as_json: as_json)
+    if not context.clean(ctx: ctx) {
+      return Err(error: Other(detail: "diagnostics"))
+    }
+    for mid: Int in 0 ..< ctx.module_count {
+      match Map.find(d: ctx.modules, key: mid) with
+      | Some(value) -> {
+        if not value.is_std {
+          io.print(
+            console: console,
+            text: irtext.print_ir(
+              ctx: ctx,
+              m: lowerir.lower_module(
+                ctx: ctx,
+                m: value,
+                tables: tab,
+                opts: lowerir.Options { verify_all: false, negate_guard: None }
+              )
+            )
+          )
+        }
+      }
+      | None -> skip()
+    }
+    return Ok(value: Unit)
+  }
+  if target == "native" or target == "wasm" {
+    if not context.clean(ctx: ctx) {
+      emit_diagnostics(ctx: ctx, console: console, tab: tab, as_json: as_json)
+      return Err(error: Other(detail: "diagnostics"))
+    }
+    let built: nativebuild.Built = try nativebuild.build_native(
+      ctx: inout ctx,
+      files: files,
+      process: process,
+      env: env,
+      tab: tab,
+      out_dir: out_dir,
+      runtime_dir: runtime_dir_of(runtime: runtime),
+      target: target
+    )
+    emit_diagnostics(ctx: ctx, console: console, tab: tab, as_json: as_json)
+    if not context.clean(ctx: ctx) or built.exe is None {
+      return Err(error: Other(detail: "native build failed"))
+    }
+    let exe: Text = or_empty(o: built.exe)
+    io.eprint(console: console, text: "onus build: wrote " ++ exe ++ "\n")
+    if not run {
+      return Ok(value: Unit)
+    }
+    if not built.has_main {
+      io.eprint(console: console, text: "onus run: " ++ entry ++ " declares no `pub fn main`\n")
+      return Err(error: Other(detail: "no main"))
+    }
+    if target == "wasm" {
+      return run_program(
+        process: process,
+        console: console,
+        program: "node",
+        args: [nativebuild.dir_of(path: exe) ++ "/run_wasm.mjs"] ++ rest
+      )
+    }
+    return run_program(process: process, console: console, program: exe, args: rest)
+  }
+  if not context.clean(ctx: ctx) {
+    emit_diagnostics(ctx: ctx, console: console, tab: tab, as_json: as_json)
+    return Err(error: Other(detail: "diagnostics"))
+  }
+  let built_js: build.Built = try build.emit_all(
+    ctx: ctx,
+    files: files,
+    opts: build.Options {
+      out_dir: out_dir,
+      runtime: runtime,
+      verify_all: false,
+      negate_guard: None
+    }
+  )
+  emit_diagnostics(ctx: ctx, console: console, tab: tab, as_json: as_json)
+  if not run {
+    return Ok(value: Unit)
+  }
+  match built_js.launcher with
+  | None -> {
+    io.eprint(console: console, text: "onus run: " ++ entry ++ " declares no `pub fn main`\n")
+    return Err(error: Other(detail: "no main"))
+  }
+  | Some(value) -> return run_program(
+    process: process,
+    console: console,
+    program: "node",
+    args: [value] ++ rest
+  )
+}
+
+-- Whether a JSON value has the shape of a §11.1 document, to the extent the diff reads it.
+fn is_interface_document(j: json.Json) -> Bool {
+  return json.at(j: j, key: "module") is json.JString and json.has(j: j, key: "hash") and json.at(
+    j: j,
+    key: "items"
+  ) is json.JArray
+}
+
+-- `onus interface`.
+fn interface_command(
+  args: Args,
+  files: io.Files,
+  console: io.Console,
+  process: io.Process,
+  env: io.Env
+) -> Result[Unit, io.Error] may io.file, io.env, nondet, alloc, mutate {
+  if List.len(xs: args.files) == 0 {
+    return usage_error(console: console)
+  }
+  let entry: Text = List.get(xs: args.files, i: 0)
+  let s: Setup = setup(args: args, files: files, env: env)
+  var ctx: context.Context = s.ctx
+  try read_entries(ctx: inout ctx, files: files, paths: [entry])
+  check.run_passes(
+    ctx: inout ctx,
+    to: 11,
+    files: files,
+    console: console,
+    process: process,
+    vopts: s.vopts
+  )
+  let tab: Dict[Int, loc.LineTable] = loc.line_tables(ctx: ctx)
+  let as_json: Bool = flag(args: args, name: "json")
+  emit_diagnostics(ctx: ctx, console: console, tab: tab, as_json: as_json)
+  if not context.clean(ctx: ctx) {
+    return Err(error: Other(detail: "diagnostics"))
+  }
+  var mod: Int = -1
+  match entry_module(ctx: ctx) with
+  | Some(value) -> mod = value
+  | None -> {
+    io.eprint(console: console, text: "onus interface: " ++ entry ++ " is not a module\n")
+    return Err(error: Other(detail: "not a module"))
+  }
+  let doc: json.Json = interface.interface_of(ctx: ctx, mod: mod)
+  match value(args: args, name: "diff") with
+  | Some(value) -> {
+    let old_text: Text = try io.read(files: files, path: value)
+    let old_doc: json.Json = or_null(o: json.parse(t: old_text))
+    if not is_interface_document(j: old_doc) {
+      io.eprint(console: console, text: "onus: " ++ value ++ " is not an interface document\n")
+      return Err(error: Other(detail: "not an interface document"))
+    }
+    let d: idiff.Diff = idiff.interface_diff(before: old_doc, after: doc)
+    if as_json {
+      io.print(console: console, text: json.pretty(j: idiff.diff_json(d: d)) ++ "\n")
+    } else {
+      io.print(console: console, text: idiff.diff_text(d: d))
+    }
+    if d.breaking {
+      return Err(error: Other(detail: "breaking"))
+    }
+    return Ok(value: Unit)
+  }
+  | None -> skip()
+  if as_json {
+    io.print(console: console, text: json.pretty(j: doc) ++ "\n")
+  } else {
+    io.print(console: console, text: interface.interface_text(ctx: ctx, mod: mod))
+  }
+  return Ok(value: Unit)
+}
+
+-- `onus path`.
+fn path_command(
+  args: Args,
+  files: io.Files,
+  console: io.Console,
+  process: io.Process,
+  env: io.Env
+) -> Result[Unit, io.Error] may io.file, io.env, nondet, alloc, mutate {
+  if List.len(xs: args.files) == 0 {
+    return usage_error(console: console)
+  }
+  let entry: Text = List.get(xs: args.files, i: 0)
+  var wanted: Option[Text] = None
+  if List.len(xs: args.files) > 1 {
+    wanted = Some(value: List.get(xs: args.files, i: 1))
+  }
+  let s: Setup = setup(args: args, files: files, env: env)
+  var ctx: context.Context = s.ctx
+  try read_entries(ctx: inout ctx, files: files, paths: [entry])
+  check.run_passes(
+    ctx: inout ctx,
+    to: 11,
+    files: files,
+    console: console,
+    process: process,
+    vopts: s.vopts
+  )
+  let tab: Dict[Int, loc.LineTable] = loc.line_tables(ctx: ctx)
+  let as_json: Bool = flag(args: args, name: "json")
+  emit_diagnostics(ctx: ctx, console: console, tab: tab, as_json: as_json)
+  var entry_mod: Int = -1
+  match entry_module(ctx: ctx) with
+  | Some(value) -> entry_mod = value
+  | None -> skip()
+  var reports: Builder[json.Json] = List.builder()
+  for k: Int in Map.keys(d: ctx.analyses) {
+    match Map.find(d: ctx.analyses, key: k) with
+    | Some(value) -> {
+      if value.mod == entry_mod {
+        var chosen: Bool = true
+        if wanted is Some {
+          chosen = context.get_def(ctx: ctx, id: value.def).name == or_empty(o: wanted)
+        }
+        if chosen {
+          List.push(b: inout reports, x: pathreport.path_report(ctx: ctx, tab: tab, a: value))
+        }
+      }
+    }
+    | None -> skip()
+  }
+  let found: List[json.Json] = List.finish(b: reports)
+  if wanted is Some and List.len(xs: found) == 0 and context.clean(ctx: ctx) {
+    io.eprint(
+      console: console,
+      text: "onus path: no path `" ++ or_empty(o: wanted) ++ "` in " ++ entry ++ "\n"
+    )
+    return Err(error: Other(detail: "no such path"))
+  }
+  for r: json.Json in found {
+    if as_json {
+      io.print(console: console, text: json.pretty(j: r) ++ "\n")
+    } else {
+      io.print(console: console, text: pathtext.path_text(r: r))
+    }
+  }
+  if not context.clean(ctx: ctx) {
+    return Err(error: Other(detail: "diagnostics"))
+  }
+  return Ok(value: Unit)
+}
+
+pub fn main(
+  args: List[Text],
+  files: io.Files,
+  console: io.Console,
+  process: io.Process,
+  env: io.Env
+) -> Result[Unit, io.Error] may io.file, io.env, nondet, alloc, mutate {
+  let a: Args = parse_args(argv: args)
+  match a.command with
+  | None -> return usage_error(console: console)
+  | Some(value) -> {
+    if value == "check" {
+      return check_command(args: a, files: files, console: console, process: process, env: env)
+    }
+    if value == "fmt" {
+      return fmt_command(args: a, files: files, console: console)
+    }
+    if value == "build" {
+      return build_command(
+        args: a,
+        files: files,
+        console: console,
+        process: process,
+        env: env,
+        run: false
+      )
+    }
+    if value == "run" {
+      return build_command(
+        args: a,
+        files: files,
+        console: console,
+        process: process,
+        env: env,
+        run: true
+      )
+    }
+    if value == "interface" {
+      return interface_command(args: a, files: files, console: console, process: process, env: env)
+    }
+    if value == "path" {
+      return path_command(args: a, files: files, console: console, process: process, env: env)
+    }
+    return usage_error(console: console)
+  }
+}

@@ -9,3 +9,4 @@ out-mutate/
 *.tsbuildinfo
 *.pgm
 .onus-tmp/
+.claude/settings.local.json

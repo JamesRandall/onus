@@ -1,0 +1,1617 @@
+module jsemit
+import ast
+import defs
+import context
+import types
+import values
+import ir
+import lowerir
+import json
+
+-- The JavaScript emitter (impl spec §6; `codegen/js.ts`): renders the
+-- target-neutral form of `ir.onus` as one ES module per Onus module, plus
+-- the module's vitest file and `verify` functions. Conventions:
+--   - declared functions take one object of named parameters; function
+--     values are positional, so a declared function used as a value gets an
+--     adapter;
+--   - a function with `inout` parameters returns `[result, ...inout]`;
+--   - `try` unwinds with `EarlyReturn`, caught by the enclosing function;
+--   - `match` is a labelled block of pattern tests in arm order;
+--   - records are plain objects, variants carry `tag`;
+--   - a bounded type parameter `T: I` becomes a hidden dictionary argument;
+--   - a runtime check is `$rt.check(cond, obligationRef)`.
+-- The TypeScript oracle output (`--emit ts`) is not rendered here.
+pub record Options {
+  -- Module specifier for the runtime package.
+  runtime: Text
+}
+
+-- An emitted `verify` function and what the launcher must supply to it.
+pub record VerifyEmit {
+  name: Text
+  key: Text
+  claim: Text
+  def: Text
+  at: Text
+  params: List[ir.VerifyParam]
+}
+
+pub record Emitted {
+  mod: defs.ModuleRecord
+  code: Text
+  verifies: List[VerifyEmit]
+  -- A vitest file for the module's examples, properties and laws, or nothing when it has none.
+  tests: Option[Text]
+  main: Option[ir.MainSpec]
+}
+
+pub const reserved: List[Text] = [
+  "await",
+  "break",
+  "case",
+  "catch",
+  "class",
+  "const",
+  "continue",
+  "debugger",
+  "default",
+  "delete",
+  "do",
+  "else",
+  "enum",
+  "export",
+  "extends",
+  "false",
+  "finally",
+  "for",
+  "function",
+  "if",
+  "import",
+  "in",
+  "instanceof",
+  "new",
+  "null",
+  "return",
+  "super",
+  "switch",
+  "this",
+  "throw",
+  "true",
+  "try",
+  "typeof",
+  "var",
+  "void",
+  "while",
+  "with",
+  "yield",
+  "let",
+  "static",
+  "implements",
+  "interface",
+  "package",
+  "private",
+  "protected",
+  "public",
+  "arguments",
+  "eval",
+  "undefined",
+  "NaN",
+  "Infinity"
+]
+
+pub const max_depth: Int = 100000
+
+const p_atom: Int = 20
+
+const p_call: Int = 17
+
+const p_unary: Int = 14
+
+const p_mul: Int = 12
+
+const p_add: Int = 11
+
+const p_cmp: Int = 9
+
+const p_eq: Int = 8
+
+const p_and: Int = 4
+
+const p_or: Int = 3
+
+const p_arrow: Int = 2
+
+record Piece {
+  code: Text
+  prec: Int
+}
+
+fn piece(code: Text, prec: Int) -> Piece {
+  return Piece { code: code, prec: prec }
+}
+
+fn at(p: Piece, min: Int) -> Text may alloc {
+  if p.prec >= min {
+    return p.code
+  }
+  return "(" ++ p.code ++ ")"
+}
+
+record Writer {
+  lines: Builder[Text]
+  depth: Int where it >= 0
+}
+
+fn new_writer() -> Writer may alloc {
+  return Writer { lines: List.builder(), depth: 0 }
+}
+
+fn writer_text(w: Writer) -> Text may alloc {
+  return Text.join(parts: List.finish(b: w.lines), sep: "\n")
+}
+
+-- What the emitter knows about the function whose body it is writing.
+record FnCtx {
+  inout_names: List[Text]
+  ret: types.Type
+}
+
+record E {
+  m: defs.ModuleRecord
+  w: Writer
+  -- Module id to import alias, in first-use order.
+  imports: Dict[Int, Text]
+  ob_decls: List[Text]
+  -- Obligation key to its constant's name.
+  ob_refs: Dict[Text, Text]
+  self_alias: Option[Text]
+  fn_ctx: Option[FnCtx]
+  -- Counter for the temporaries of `CallInout` statements.
+  inout_seq: Int where it >= 0
+  -- How a bare assertion renders: as a vitest expectation ("expect"), or as an early `return false`.
+  assert_mode: Text
+  opts: Options
+}
+
+fn skip() -> Unit {
+  return Unit
+}
+
+fn line(e: inout E, s: Text) -> Unit may alloc, mutate {
+  var lines: Builder[Text] = e.w.lines
+  if s == "" {
+    List.push(b: inout lines, x: "")
+  } else {
+    List.push(b: inout lines, x: Text.repeat(t: "  ", n: e.w.depth) ++ s)
+  }
+  return Unit
+}
+
+fn indent(e: inout E) -> Unit may alloc, mutate {
+  e = { e with w: { e.w with depth: e.w.depth + 1 } }
+  return Unit
+}
+
+fn dedent(e: inout E) -> Unit may alloc, mutate {
+  let d: Int = e.w.depth
+  if d > 0 {
+    e = { e with w: { e.w with depth: d - 1 } }
+  }
+  return Unit
+}
+
+fn copy_text_dict(d: Dict[Text, Text]) -> Dict[Text, Text] may alloc, mutate {
+  var out: Dict[Text, Text] = Map.dict()
+  for k: Text in Map.keys(d: d) {
+    match Map.find(d: d, key: k) with
+    | Some(value) -> Map.set(d: inout out, key: k, value: value)
+    | None -> skip()
+  }
+  return out
+}
+
+fn copy_int_dict(d: Dict[Int, Text]) -> Dict[Int, Text] may alloc, mutate {
+  var out: Dict[Int, Text] = Map.dict()
+  for k: Int in Map.keys(d: d) {
+    match Map.find(d: d, key: k) with
+    | Some(value) -> Map.set(d: inout out, key: k, value: value)
+    | None -> skip()
+  }
+  return out
+}
+
+-- Emits one lowered module.
+pub fn emit_js(ctx: context.Context, m: ir.Module, opts: Options) -> Emitted may alloc, mutate {
+  var e: E = E {
+    m: m.mod,
+    w: new_writer(),
+    imports: Map.dict(),
+    ob_decls: [],
+    ob_refs: Map.dict(),
+    self_alias: None,
+    fn_ctx: None,
+    inout_seq: 0,
+    assert_mode: "return-false",
+    opts: opts
+  }
+  for item: ir.Item in m.items {
+    item_js(e: inout e, ctx: ctx, item: item)
+  }
+  var verifies: Builder[VerifyEmit] = List.builder()
+  for v: ir.Verify in m.verifies {
+    List.push(b: inout verifies, x: verify_function(e: inout e, ctx: ctx, v: v))
+  }
+  let body: Text = writer_text(w: e.w)
+  var head: Builder[Text] = List.builder()
+  List.push(b: inout head, x: "// Generated by onus from module " ++ m.mod.name ++ ". Do not edit.")
+  List.push(b: inout head, x: "import * as $rt from " ++ json.quote(t: opts.runtime) ++ ";")
+  for id: Int in Map.keys(d: e.imports) {
+    match Map.find(d: e.imports, key: id) with
+    | Some(value) -> List.push(
+      b: inout head,
+      x: "import * as " ++ value ++ " from " ++ json.quote(
+        t: relative_import(e: e, ctx: ctx, id: id)
+      ) ++ ";"
+    )
+    | None -> skip()
+  }
+  List.push(b: inout head, x: "")
+  for d: Text in e.ob_decls {
+    List.push(b: inout head, x: d)
+  }
+  if List.len(xs: e.ob_decls) > 0 {
+    List.push(b: inout head, x: "")
+  }
+  var tests: Option[Text] = None
+  match m.tests with
+  | Some(value) -> tests = Some(value: tests_file(e: inout e, ctx: ctx, tests: value))
+  | None -> skip()
+  return Emitted {
+    mod: m.mod,
+    code: Text.join(parts: List.finish(b: head), sep: "\n") ++ body ++ "\n",
+    verifies: List.finish(b: verifies),
+    tests: tests,
+    main: m.main
+  }
+}
+
+-- Naming ---------------------------------------------------------------------------------
+fn module_name(ctx: context.Context, id: Int) -> Text {
+  match Map.find(d: ctx.modules, key: id) with
+  | Some(value) -> return value.name
+  | None -> return ""
+}
+
+fn relative_import(e: E, ctx: context.Context, id: Int) -> Text may alloc, mutate {
+  let from: List[Text] = Text.split(t: e.m.name, sep: ".")
+  let to: List[Text] = Text.split(t: module_name(ctx: ctx, id: id), sep: ".")
+  let ups: Int = List.len(xs: from) - 1
+  var prefix: Text = "./"
+  if ups > 0 {
+    prefix = Text.repeat(t: "../", n: ups)
+  }
+  return prefix ++ Text.join(parts: to, sep: "/") ++ ".js"
+}
+
+fn alias(e: inout E, ctx: context.Context, id: Int) -> Text may alloc, mutate {
+  if id == e.m.id and e.self_alias is Some {
+    return text_or(o: e.self_alias, dflt: "")
+  }
+  match Map.find(d: e.imports, key: id) with
+  | Some(value) -> return value
+  | None -> skip()
+  let a: Text = "$" ++ Text.replace(t: module_name(ctx: ctx, id: id), from: ".", to: "_")
+  var imports: Dict[Int, Text] = e.imports
+  Map.set(d: inout imports, key: id, value: a)
+  return a
+}
+
+fn text_or(o: Option[Text], dflt: Text) -> Text {
+  match o with
+  | Some(value) -> return value
+  | None -> return dflt
+}
+
+fn local(name: Text) -> Text may alloc {
+  if List.contains(xs: reserved, x: name) {
+    return name ++ "_"
+  }
+  return name
+}
+
+-- A module-level name, qualified by its module's alias when it lives elsewhere.
+fn qualified(e: inout E, ctx: context.Context, mod: Int, name: Text) -> Text may alloc, mutate {
+  let base: Text = local(name: name)
+  if mod == e.m.id and e.self_alias is None {
+    return base
+  }
+  return alias(e: inout e, ctx: ctx, id: mod) ++ "." ++ base
+}
+
+fn ob_ref(e: inout E, o: ir.ObRef) -> Text may alloc, mutate {
+  let key: Text = o.kind ++ "|" ++ o.text ++ "|" ++ o.at ++ "|" ++ o.def
+  match Map.find(d: e.ob_refs, key: key) with
+  | Some(value) -> return value
+  | None -> skip()
+  let name: Text = "$ob" ++ Int.to_text(x: Map.count(d: e.ob_refs) + 1)
+  var refs: Dict[Text, Text] = e.ob_refs
+  Map.set(d: inout refs, key: key, value: name)
+  let literal: Text = "{ kind: " ++ json.quote(t: o.kind) ++ ", text: " ++ json.quote(
+    t: o.text
+  ) ++ ", at: " ++ json.quote(t: o.at) ++ ", def: " ++ json.quote(t: o.def) ++ " }"
+  e = { e with
+    ob_decls: List.append(xs: e.ob_decls, x: "const " ++ name ++ " = " ++ literal ++ ";")
+  }
+  return name
+}
+
+-- Items ----------------------------------------------------------------------------------
+fn item_js(e: inout E, ctx: context.Context, item: ir.Item) -> Unit may alloc, mutate {
+  match item with
+  | ir.FnItem(f) -> fn_decl(e: inout e, ctx: ctx, f: f)
+  | ir.ConstItem(def, _, value) -> {
+    let code: Text = expr(fuel: max_depth, e: inout e, ctx: ctx, x: value).code
+    line(e: inout e, s: "export const " ++ local(name: def.name) ++ " = " ++ code ++ ";")
+    line(e: inout e, s: "")
+  }
+  | ir.ImplItem(_, _, _, dict_name, fns, entries) -> {
+    for f: ir.Fn in fns {
+      fn_decl(e: inout e, ctx: ctx, f: f)
+    }
+    var parts: Builder[Text] = List.builder()
+    for en: ir.Entry in entries {
+      List.push(b: inout parts, x: local(name: en.name) ++ ": " ++ local(name: en.fn_ir.name))
+    }
+    line(
+      e: inout e,
+      s: "export const " ++ dict_name ++ " = { " ++ Text.join(
+        parts: List.finish(b: parts),
+        sep: ", "
+      ) ++ " };"
+    )
+    line(e: inout e, s: "")
+  }
+  | _ -> skip()
+  return Unit
+}
+
+fn fn_decl(e: inout E, ctx: context.Context, f: ir.Fn) -> Unit may alloc, mutate {
+  -- `std.sql.select` also receives the compiler-generated row decoder (§18.2).
+  let is_select: Bool = f.intrinsic is Some and context.qualified_name(
+    ctx: ctx,
+    id: f.def.id
+  ) == "std.sql.select"
+  var names: Builder[Text] = List.builder()
+  for d: ir.DictParam in f.dict_params {
+    List.push(b: inout names, x: d.name)
+  }
+  for c: ir.ConstParam in f.const_params {
+    List.push(b: inout names, x: local(name: c.name))
+  }
+  for p: ir.Param in f.params {
+    List.push(b: inout names, x: local(name: p.name))
+  }
+  if is_select {
+    List.push(b: inout names, x: "$decode")
+  }
+  var destructure: Text = "$args"
+  if List.built(b: names) > 0 {
+    destructure = "{ " ++ Text.join(parts: List.finish(b: names), sep: ", ") ++ " }"
+  }
+  match f.intrinsic with
+  | Some(value) -> {
+    var args: Builder[Text] = List.builder()
+    for c: ir.ConstParam in f.const_params {
+      List.push(b: inout args, x: local(name: c.name))
+    }
+    for p: ir.Param in f.params {
+      List.push(b: inout args, x: local(name: p.name))
+    }
+    if is_select {
+      List.push(b: inout args, x: "$decode ?? null")
+    }
+    line(e: inout e, s: "export function " ++ local(name: f.name) ++ "(" ++ destructure ++ ") {")
+    indent(e: inout e)
+    line(
+      e: inout e,
+      s: "return $rt." ++ value.ns ++ "." ++ value.name ++ "(" ++ Text.join(
+        parts: List.finish(b: args),
+        sep: ", "
+      ) ++ ");"
+    )
+    dedent(e: inout e)
+    line(e: inout e, s: "}")
+    line(e: inout e, s: "")
+    return Unit
+  }
+  | None -> skip()
+  match f.body with
+  | None -> return Unit
+  | Some(value) -> {
+    var inouts: Builder[Text] = List.builder()
+    for p: ir.Param in f.params {
+      if p.is_inout {
+        List.push(b: inout inouts, x: p.name)
+      }
+    }
+    e = { e with fn_ctx: Some(value: FnCtx { inout_names: List.finish(b: inouts), ret: f.ret }) }
+    line(e: inout e, s: "export function " ++ local(name: f.name) ++ "(" ++ destructure ++ ") {")
+    indent(e: inout e)
+    block(fuel: max_depth, e: inout e, ctx: ctx, b: f.entry_checks)
+    early_open(e: inout e, early: f.early_return)
+    block(fuel: max_depth, e: inout e, ctx: ctx, b: value)
+    early_close(e: inout e, early: f.early_return)
+    dedent(e: inout e)
+    line(e: inout e, s: "}")
+    line(e: inout e, s: "")
+    e = { e with fn_ctx: None }
+    return Unit
+  }
+}
+
+-- `try {` before a body that may return early, and the `catch` after it.
+fn early_open(e: inout E, early: Bool) -> Unit may alloc, mutate {
+  if early {
+    line(e: inout e, s: "try {")
+    indent(e: inout e)
+  }
+  return Unit
+}
+
+fn early_close(e: inout E, early: Bool) -> Unit may alloc, mutate {
+  if not early {
+    return Unit
+  }
+  dedent(e: inout e)
+  line(e: inout e, s: "} catch ($e) {")
+  indent(e: inout e)
+  -- A function with `inout` parameters returns them alongside its value, on an early return too.
+  var inouts: Builder[Text] = List.builder()
+  match e.fn_ctx with
+  | Some(value) -> {
+    for n: Text in value.inout_names {
+      List.push(b: inout inouts, x: local(name: n))
+    }
+  }
+  | None -> skip()
+  if List.built(b: inouts) == 0 {
+    line(e: inout e, s: "if ($e instanceof $rt.EarlyReturn) return $e.value;")
+  } else {
+    line(
+      e: inout e,
+      s: "if ($e instanceof $rt.EarlyReturn) return [$e.value, " ++ Text.join(
+        parts: List.finish(b: inouts),
+        sep: ", "
+      ) ++ "];"
+    )
+  }
+  line(e: inout e, s: "throw $e;")
+  dedent(e: inout e)
+  line(e: inout e, s: "}")
+  return Unit
+}
+
+-- Statements -----------------------------------------------------------------------------
+fn block(
+  fuel: Int where it >= 0,
+  e: inout E,
+  ctx: context.Context,
+  b: List[ir.Stmt]
+) -> Unit may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return Unit
+  }
+  for s: ir.Stmt in b {
+    stmt(fuel: fuel - 1, e: inout e, ctx: ctx, s: s)
+  }
+  return Unit
+}
+
+fn stmt(
+  fuel: Int where it >= 0,
+  e: inout E,
+  ctx: context.Context,
+  s: ir.Stmt
+) -> Unit may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return Unit
+  }
+  match s with
+  | ir.Let(name, _, mutable, value) -> {
+    var kw: Text = "const"
+    if mutable {
+      kw = "let"
+    }
+    let code: Text = expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: value).code
+    line(e: inout e, s: kw ++ " " ++ local(name: name) ++ " = " ++ code ++ ";")
+  }
+  | ir.Assign(name, _, value) -> {
+    let code: Text = expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: value).code
+    line(e: inout e, s: local(name: name) ++ " = " ++ code ++ ";")
+  }
+  | ir.Return(value) -> {
+    let code: Text = expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: value).code
+    var inouts: List[Text] = []
+    if e.fn_ctx is Some {
+      inouts = fn_ctx_or(o: e.fn_ctx).inout_names
+    }
+    if List.len(xs: inouts) == 0 {
+      line(e: inout e, s: "return " ++ code ++ ";")
+    } else {
+      var tail: Text = ""
+      for n: Text in inouts {
+        tail = tail ++ ", " ++ local(name: n)
+      }
+      line(e: inout e, s: "return [" ++ code ++ tail ++ "];")
+    }
+  }
+  | ir.If(cond, then_block, else_block) -> {
+    let c: Text = expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: cond).code
+    line(e: inout e, s: "if (" ++ c ++ ") {")
+    indent(e: inout e)
+    block(fuel: fuel - 1, e: inout e, ctx: ctx, b: then_block)
+    dedent(e: inout e)
+    match else_block with
+    | Some(value) -> {
+      line(e: inout e, s: "} else {")
+      indent(e: inout e)
+      block(fuel: fuel - 1, e: inout e, ctx: ctx, b: value)
+      dedent(e: inout e)
+      line(e: inout e, s: "}")
+    }
+    | None -> line(e: inout e, s: "}")
+  }
+  | ir.Match(tmp, _, scrutinee, arms) -> {
+    let sc: Text = expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: scrutinee).code
+    line(e: inout e, s: "const " ++ tmp ++ " = " ++ sc ++ ";")
+    let label: Text = tmp ++ "$match"
+    line(e: inout e, s: label ++ ": {")
+    indent(e: inout e)
+    for arm: ir.Arm in arms {
+      var test: Text = "true"
+      match arm.pattern_test with
+      | Some(value) -> test = expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: value).code
+      | None -> skip()
+      line(e: inout e, s: "if (" ++ test ++ ") {")
+      indent(e: inout e)
+      for bd: ir.Binding in arm.bindings {
+        let v: Text = expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: bd.value).code
+        line(e: inout e, s: "const " ++ local(name: bd.name) ++ " = " ++ v ++ ";")
+      }
+      match arm.guard with
+      | Some(value) -> {
+        let g: Text = expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: value).code
+        line(e: inout e, s: "if (" ++ g ++ ") {")
+        indent(e: inout e)
+        block(fuel: fuel - 1, e: inout e, ctx: ctx, b: arm.body)
+        line(e: inout e, s: "break " ++ label ++ ";")
+        dedent(e: inout e)
+        line(e: inout e, s: "}")
+      }
+      | None -> {
+        block(fuel: fuel - 1, e: inout e, ctx: ctx, b: arm.body)
+        line(e: inout e, s: "break " ++ label ++ ";")
+      }
+      dedent(e: inout e)
+      line(e: inout e, s: "}")
+    }
+    line(e: inout e, s: "$rt.unreachable();")
+    dedent(e: inout e)
+    line(e: inout e, s: "}")
+  }
+  | ir.Loop(cond, body) -> {
+    let c: Text = expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: cond).code
+    line(e: inout e, s: "while (" ++ c ++ ") {")
+    indent(e: inout e)
+    block(fuel: fuel - 1, e: inout e, ctx: ctx, b: body)
+    dedent(e: inout e)
+    line(e: inout e, s: "}")
+  }
+  | ir.ForRange(name, lo, hi, body) -> {
+    let n: Text = local(name: name)
+    let lo_c: Text = expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: lo).code
+    let hi_c: Text = at(p: expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: hi), min: p_cmp + 1)
+    line(
+      e: inout e,
+      s: "for (let " ++ n ++ " = " ++ lo_c ++ "; " ++ n ++ " < " ++ hi_c ++ "; " ++ n ++ "++) {"
+    )
+    indent(e: inout e)
+    block(fuel: fuel - 1, e: inout e, ctx: ctx, b: body)
+    dedent(e: inout e)
+    line(e: inout e, s: "}")
+  }
+  | ir.ForEach(name, _, list, body) -> {
+    let l: Text = expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: list).code
+    line(e: inout e, s: "for (const " ++ local(name: name) ++ " of " ++ l ++ ") {")
+    indent(e: inout e)
+    block(fuel: fuel - 1, e: inout e, ctx: ctx, b: body)
+    dedent(e: inout e)
+    line(e: inout e, s: "}")
+  }
+  | ir.Check(cond, ob) -> {
+    let c: Text = expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: cond).code
+    let r: Text = ob_ref(e: inout e, o: ob)
+    line(e: inout e, s: "$rt.check(" ++ c ++ ", " ++ r ++ ");")
+  }
+  | ir.Assert(cond) -> {
+    let c: Text = expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: cond).code
+    if e.assert_mode == "expect" {
+      line(e: inout e, s: "expect(" ++ c ++ ").toBe(true);")
+    } else {
+      line(e: inout e, s: "if (!(" ++ c ++ ")) return false;")
+    }
+  }
+  | ir.ExprStmt(expr) -> {
+    let code: Text = expr_code(fuel: fuel - 1, e: inout e, ctx: ctx, x: expr)
+    if code != "" {
+      line(e: inout e, s: code ++ ";")
+    }
+  }
+  | ir.CallInout(result_target, call, targets) -> {
+    var names: Builder[Text] = List.builder()
+    for t: ir.Target in targets {
+      List.push(b: inout names, x: local(name: t.name))
+    }
+    -- Unique per call: two `inout` calls on one variable in a block must not redeclare a temporary.
+    e = { e with inout_seq: e.inout_seq + 1 }
+    let seq: Text = Int.to_text(x: e.inout_seq)
+    var tmps: Builder[Text] = List.builder()
+    for n: Text in List.finish(b: names) {
+      List.push(b: inout tmps, x: n ++ "$" ++ seq)
+    }
+    var head: Text = ""
+    match result_target with
+    | Some(value) -> head = local(name: value.name)
+    | None -> skip()
+    let c: Text = expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: call).code
+    line(
+      e: inout e,
+      s: "const [" ++ head ++ ", " ++ Text.join(
+        parts: List.finish(b: tmps),
+        sep: ", "
+      ) ++ "] = " ++ c ++ ";"
+    )
+    var i: Int where it >= 0 = 0
+    let tmp_list: List[Text] = List.finish(b: tmps)
+    for n: Text in List.finish(b: names) {
+      var t: Text = n
+      if i < List.len(xs: tmp_list) {
+        t = List.get(xs: tmp_list, i: i)
+      }
+      line(e: inout e, s: n ++ " = " ++ t ++ ";")
+      i = i + 1
+    }
+  }
+  | ir.Unreachable -> line(e: inout e, s: "$rt.unreachable();")
+  | ir.Comment(text) -> line(e: inout e, s: "// " ++ text)
+  | ir.Reject(cond, column) -> {
+    let c: Text = expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: cond).code
+    line(
+      e: inout e,
+      s: "if (!(" ++ c ++ ")) throw new $rt.sql.Rejected($row, " ++ json.quote(t: column) ++ ");"
+    )
+  }
+  return Unit
+}
+
+fn fn_ctx_or(o: Option[FnCtx]) -> FnCtx may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return FnCtx { inout_names: [], ret: types.ErrorT }
+}
+
+-- `expr` under a name the arms of statements can call when a binder is named `expr`.
+fn expr_code(
+  fuel: Int where it >= 0,
+  e: inout E,
+  ctx: context.Context,
+  x: ir.Expr
+) -> Text may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return ""
+  }
+  return expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: x).code
+}
+
+-- A row decoder (§18.2): the record from the raw row's columns, then its refinements as `reject`s.
+fn decoder_code(
+  fuel: Int where it >= 0,
+  e: inout E,
+  ctx: context.Context,
+  d: ir.Decoder
+) -> Text may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return ""
+  }
+  let it_local: Text = local(name: d.it_name)
+  var fields: Builder[Text] = List.builder()
+  for f: ir.DecoderField in d.fields {
+    List.push(
+      b: inout fields,
+      x: local(name: f.name) ++ ": $rt.sql.column(raw, " ++ json.quote(
+        t: f.name
+      ) ++ ", " ++ json.quote(t: f.kind) ++ ", $row)"
+    )
+  }
+  let checks: Text = inline(fuel: fuel - 1, e: inout e, ctx: ctx, stmts: d.checks)
+  return "(raw, $row) => { const " ++ it_local ++ " = { " ++ Text.join(
+    parts: List.finish(b: fields),
+    sep: ", "
+  ) ++ " }; " ++ checks ++ " return " ++ it_local ++ "; }"
+}
+
+-- Renders statements into a single line, for check lists inside expressions.
+fn inline(
+  fuel: Int where it >= 0,
+  e: inout E,
+  ctx: context.Context,
+  stmts: List[ir.Stmt]
+) -> Text may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return ""
+  }
+  let outer: Writer = e.w
+  e = { e with w: new_writer() }
+  block(fuel: fuel - 1, e: inout e, ctx: ctx, b: stmts)
+  var parts: Builder[Text] = List.builder()
+  for l: Text in List.finish(b: e.w.lines) {
+    let t: Text = Text.trim(t: l)
+    if t != "" {
+      List.push(b: inout parts, x: t)
+    }
+  }
+  e = { e with w: outer }
+  return Text.join(parts: List.finish(b: parts), sep: " ")
+}
+
+-- Expressions ----------------------------------------------------------------------------
+fn exprs_code(
+  fuel: Int where it >= 0,
+  e: inout E,
+  ctx: context.Context,
+  xs: List[ir.Expr],
+  min: Int
+) -> List[Text] may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return []
+  }
+  var out: Builder[Text] = List.builder()
+  for x: ir.Expr in xs {
+    List.push(b: inout out, x: at(p: expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: x), min: min))
+  }
+  return List.finish(b: out)
+}
+
+fn inits_code(
+  fuel: Int where it >= 0,
+  e: inout E,
+  ctx: context.Context,
+  fs: List[ir.FieldInit]
+) -> List[Text] may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return []
+  }
+  var out: Builder[Text] = List.builder()
+  for f: ir.FieldInit in fs {
+    List.push(
+      b: inout out,
+      x: local(name: f.name) ++ ": " ++ expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: f.value).code
+    )
+  }
+  return List.finish(b: out)
+}
+
+fn expr(
+  fuel: Int where it >= 0,
+  e: inout E,
+  ctx: context.Context,
+  x: ir.Expr
+) -> Piece may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return piece(code: "undefined", prec: p_atom)
+  }
+  match x with
+  | ir.IntE(v) -> {
+    if v < 0 {
+      return piece(code: Int.to_text(x: v), prec: p_unary)
+    }
+    return piece(code: Int.to_text(x: v), prec: p_atom)
+  }
+  | ir.FloatE(v) -> {
+    if v < 0.0 {
+      return piece(code: Float.to_text(x: v), prec: p_unary)
+    }
+    return piece(code: Float.to_text(x: v), prec: p_atom)
+  }
+  | ir.TextE(v) -> return piece(code: json.quote(t: v), prec: p_atom)
+  | ir.BoolE(v) -> return piece(code: Bool.to_text(b: v), prec: p_atom)
+  | ir.UnitE -> return piece(code: "undefined", prec: p_atom)
+  | ir.Local(name, _) -> return piece(code: local(name: name), prec: p_atom)
+  | ir.Global(def, _) -> return piece(
+    code: qualified(e: inout e, ctx: ctx, mod: def.mod, name: def.name),
+    prec: p_atom
+  )
+  | ir.FnRef(def, name, sig) -> {
+    var names: Builder[Text] = List.builder()
+    for p: types.FnParam in sig.params {
+      List.push(b: inout names, x: local(name: p.name))
+    }
+    let ns: Text = Text.join(parts: List.finish(b: names), sep: ", ")
+    return piece(
+      code: "(" ++ ns ++ ") => " ++ qualified(
+        e: inout e,
+        ctx: ctx,
+        mod: def.mod,
+        name: name
+      ) ++ "({ " ++ ns ++ " })",
+      prec: p_arrow
+    )
+  }
+  | ir.Call(target, sig, dicts, consts, args, _, decoder) -> {
+    var callee: Text = ""
+    match target with
+    | ir.FnTarget(def, name) -> callee = qualified(e: inout e, ctx: ctx, mod: def.mod, name: name)
+    | ir.DictTarget(dict, name) -> callee = at(
+      p: expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: dict),
+      min: p_call
+    ) ++ "." ++ local(name: name)
+    var parts: Builder[Text] = List.builder()
+    var di: Int where it >= 0 = 0
+    var ci: Int where it >= 0 = 0
+    for p: types.TParamInfo in sig.tparams {
+      match p with
+      | types.TypeP(def, bound) -> {
+        if bound is Some {
+          var d: ir.Expr = ir.UnitE
+          if di < List.len(xs: dicts) {
+            d = List.get(xs: dicts, i: di)
+          }
+          List.push(
+            b: inout parts,
+            x: "$dict_" ++ context.get_def(ctx: ctx, id: def).name ++ ": " ++ expr(
+              fuel: fuel - 1,
+              e: inout e,
+              ctx: ctx,
+              x: d
+            ).code
+          )
+          di = di + 1
+        }
+      }
+      | types.ConstP(def, _) -> {
+        var c: ir.Expr = ir.UnitE
+        if ci < List.len(xs: consts) {
+          c = List.get(xs: consts, i: ci)
+        }
+        List.push(
+          b: inout parts,
+          x: local(name: context.get_def(ctx: ctx, id: def).name) ++ ": " ++ expr(
+            fuel: fuel - 1,
+            e: inout e,
+            ctx: ctx,
+            x: c
+          ).code
+        )
+        ci = ci + 1
+      }
+      | _ -> skip()
+    }
+    var i: Int where it >= 0 = 0
+    for p: types.FnParam in sig.params {
+      var a: ir.Expr = ir.UnitE
+      if i < List.len(xs: args) {
+        a = List.get(xs: args, i: i)
+      }
+      List.push(
+        b: inout parts,
+        x: local(name: p.name) ++ ": " ++ expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: a).code
+      )
+      i = i + 1
+    }
+    match decoder with
+    | Some(value) -> List.push(
+      b: inout parts,
+      x: "$decode: " ++ decoder_code(fuel: fuel - 1, e: inout e, ctx: ctx, d: value)
+    )
+    | None -> skip()
+    return piece(
+      code: callee ++ "({ " ++ Text.join(parts: List.finish(b: parts), sep: ", ") ++ " })",
+      prec: p_call
+    )
+  }
+  | ir.CallValue(callee, _, args, _) -> {
+    let c: Text = at(p: expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: callee), min: p_call)
+    return piece(
+      code: c ++ "(" ++ Text.join(
+        parts: exprs_code(fuel: fuel - 1, e: inout e, ctx: ctx, xs: args, min: 0),
+        sep: ", "
+      ) ++ ")",
+      prec: p_call
+    )
+  }
+  | ir.RecordE(_, _, fields) -> return piece(
+    code: "{ " ++ Text.join(
+      parts: inits_code(fuel: fuel - 1, e: inout e, ctx: ctx, fs: fields),
+      sep: ", "
+    ) ++ " }",
+    prec: p_atom
+  )
+  | ir.VariantE(def, _, fields) -> {
+    let rest: List[Text] = inits_code(fuel: fuel - 1, e: inout e, ctx: ctx, fs: fields)
+    return piece(
+      code: "{ " ++ Text.join(
+        parts: ["tag: " ++ json.quote(t: def.name)] ++ rest,
+        sep: ", "
+      ) ++ " }",
+      prec: p_atom
+    )
+  }
+  | ir.Update(base, _, _, fields) -> {
+    let b: Text = at(p: expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: base), min: p_call)
+    return piece(
+      code: "{ ..." ++ b ++ ", " ++ Text.join(
+        parts: inits_code(fuel: fuel - 1, e: inout e, ctx: ctx, fs: fields),
+        sep: ", "
+      ) ++ " }",
+      prec: p_atom
+    )
+  }
+  | ir.FieldE(object, name, _, _) -> return piece(
+    code: at(p: expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: object), min: p_call) ++ "." ++ local(
+      name: name
+    ),
+    prec: p_call
+  )
+  | ir.ListE(elems, _) -> return piece(
+    code: "[" ++ Text.join(
+      parts: exprs_code(fuel: fuel - 1, e: inout e, ctx: ctx, xs: elems, min: 0),
+      sep: ", "
+    ) ++ "]",
+    prec: p_atom
+  )
+  | ir.Concat(left, right, is_text, _) -> {
+    let l: Piece = expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: left)
+    let r: Piece = expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: right)
+    if is_text {
+      return piece(code: at(p: l, min: p_add) ++ " + " ++ at(p: r, min: p_add + 1), prec: p_add)
+    }
+    return piece(
+      code: "[..." ++ at(p: l, min: p_call) ++ ", ..." ++ at(p: r, min: p_call) ++ "]",
+      prec: p_atom
+    )
+  }
+  | ir.IntOp(op, left, right, ob) -> {
+    let l: Piece = expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: left)
+    let r: Piece = expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: right)
+    match ob with
+    | Some(value) -> {
+      var fn_name: Text = "add"
+      if op == "-" {
+        fn_name = "sub"
+      }
+      if op == "*" {
+        fn_name = "mul"
+      }
+      if op == "/" {
+        fn_name = "div"
+      }
+      if op == "%" {
+        fn_name = "rem"
+      }
+      return piece(
+        code: "$rt.int." ++ fn_name ++ "(" ++ l.code ++ ", " ++ r.code ++ ", " ++ ob_ref(
+          e: inout e,
+          o: value
+        ) ++ ")",
+        prec: p_call
+      )
+    }
+    | None -> skip()
+    if op == "/" {
+      return piece(
+        code: "Math.trunc(" ++ at(p: l, min: p_mul) ++ " / " ++ at(p: r, min: p_mul + 1) ++ ")",
+        prec: p_call
+      )
+    }
+    var prec: Int = p_mul
+    if op == "+" or op == "-" {
+      prec = p_add
+    }
+    return piece(
+      code: at(p: l, min: prec) ++ " " ++ op ++ " " ++ at(p: r, min: prec + 1),
+      prec: prec
+    )
+  }
+  | ir.FloatOp(op, left, right) -> {
+    var prec: Int = p_mul
+    if op == "+" or op == "-" {
+      prec = p_add
+    }
+    let l: Text = at(p: expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: left), min: prec)
+    let r: Text = at(p: expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: right), min: prec + 1)
+    return piece(code: l ++ " " ++ op ++ " " ++ r, prec: prec)
+  }
+  | ir.Neg(operand, _, ob) -> {
+    let v: Piece = expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: operand)
+    match ob with
+    | Some(value) -> return piece(
+      code: "$rt.int.neg(" ++ v.code ++ ", " ++ ob_ref(e: inout e, o: value) ++ ")",
+      prec: p_call
+    )
+    | None -> return piece(code: "-" ++ at(p: v, min: p_unary), prec: p_unary)
+  }
+  | ir.Cmp(op, left, right, _) -> {
+    let l: Text = at(p: expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: left), min: p_cmp + 1)
+    let r: Text = at(p: expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: right), min: p_cmp + 1)
+    return piece(code: l ++ " " ++ op ++ " " ++ r, prec: p_cmp)
+  }
+  | ir.Eq(left, right, _, prim, negate) -> {
+    let l: Piece = expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: left)
+    let r: Piece = expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: right)
+    if prim {
+      var op: Text = "==="
+      if negate {
+        op = "!=="
+      }
+      return piece(
+        code: at(p: l, min: p_eq + 1) ++ " " ++ op ++ " " ++ at(p: r, min: p_eq + 1),
+        prec: p_eq
+      )
+    }
+    let eq: Text = "$rt.eq(" ++ l.code ++ ", " ++ r.code ++ ")"
+    if negate {
+      return piece(code: "!" ++ eq, prec: p_unary)
+    }
+    return piece(code: eq, prec: p_call)
+  }
+  | ir.Not(operand) -> return piece(
+    code: "!" ++ at(p: expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: operand), min: p_unary),
+    prec: p_unary
+  )
+  | ir.And(operands) -> return piece(
+    code: Text.join(
+      parts: exprs_code(fuel: fuel - 1, e: inout e, ctx: ctx, xs: operands, min: p_and + 1),
+      sep: " && "
+    ),
+    prec: p_and
+  )
+  | ir.Or(operands) -> return piece(
+    code: Text.join(
+      parts: exprs_code(fuel: fuel - 1, e: inout e, ctx: ctx, xs: operands, min: p_or + 1),
+      sep: " || "
+    ),
+    prec: p_or
+  )
+  | ir.Implies(left, right) -> {
+    let l: Text = at(p: expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: left), min: p_unary)
+    let r: Text = at(p: expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: right), min: p_or + 1)
+    return piece(code: "!" ++ l ++ " || " ++ r, prec: p_or)
+  }
+  | ir.IsVariant(subject, variant, _) -> return piece(
+    code: at(
+      p: expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: subject),
+      min: p_call
+    ) ++ ".tag === " ++ json.quote(t: variant.name),
+    prec: p_eq
+  )
+  | ir.Try(operand, option, outer_option, else_clause, raw, _) -> {
+    let op: Text = expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: operand).code
+    match else_clause with
+    | None -> {
+      if option and outer_option {
+        return piece(code: "$rt.unwrapOption(" ++ op ++ ")", prec: p_call)
+      }
+      return piece(code: "$rt.unwrap(" ++ op ++ ")", prec: p_call)
+    }
+    | Some(value) -> {
+      let name: Text = local(name: text_or(o: value.name, dflt: "_"))
+      let raw_code: Text = expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: value.value).code
+      -- An arrow function returning an object literal needs the literal parenthesised.
+      var body: Text = raw_code
+      if Text.starts_with(t: raw_code, prefix: "{") {
+        body = "(" ++ raw_code ++ ")"
+      }
+      if raw {
+        var f: Text = "unwrapOr"
+        if option {
+          f = "unwrapOptionOr"
+        }
+        return piece(
+          code: "$rt." ++ f ++ "(" ++ op ++ ", (" ++ name ++ ") => " ++ body ++ ")",
+          prec: p_call
+        )
+      }
+      if option {
+        return piece(
+          code: "$rt.unwrapOptionElse(" ++ op ++ ", (" ++ name ++ ") => " ++ body ++ ")",
+          prec: p_call
+        )
+      }
+      return piece(
+        code: "$rt.unwrapElse(" ++ op ++ ", (" ++ name ++ ") => " ++ body ++ ")",
+        prec: p_call
+      )
+    }
+  }
+  | ir.Recover(body, value, _) -> {
+    let saved: Option[FnCtx] = e.fn_ctx
+    if saved is Some {
+      e = { e with fn_ctx: Some(value: FnCtx { inout_names: [], ret: types.ErrorT }) }
+    }
+    let outer: Writer = e.w
+    e = { e with w: new_writer() }
+    indent(e: inout e)
+    block(fuel: fuel - 1, e: inout e, ctx: ctx, b: body)
+    let v: Text = expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: value).code
+    line(e: inout e, s: "return " ++ v ++ ";")
+    let text: Text = writer_text(w: e.w)
+    e = { e with w: outer, fn_ctx: saved }
+    return piece(code: "$rt.recover(() => {\n" ++ text ++ "\n})", prec: p_call)
+  }
+  | ir.Quantifier(quant, name, _, domain, where_, body) -> {
+    var dom: Text = "[true, false]"
+    match domain with
+    | ir.BoolsD -> dom = "[true, false]"
+    | ir.RangeD(lo, hi) -> dom = "$rt.range(" ++ expr(
+      fuel: fuel - 1,
+      e: inout e,
+      ctx: ctx,
+      x: lo
+    ).code ++ ", " ++ expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: hi).code ++ ")"
+    | ir.ListD(expr) -> dom = expr_code(fuel: fuel - 1, e: inout e, ctx: ctx, x: expr)
+    | ir.OkListD(expr) -> dom = "$rt.okList(" ++ expr_code(
+      fuel: fuel - 1,
+      e: inout e,
+      ctx: ctx,
+      x: expr
+    ) ++ ")"
+    var body_code: Text = ""
+    match where_ with
+    | None -> body_code = expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: body).code
+    | Some(value) -> {
+      var dflt: Text = "false"
+      if quant == "forall" {
+        dflt = "true"
+      }
+      body_code = at(
+        p: expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: value),
+        min: p_or + 1
+      ) ++ " ? " ++ at(
+        p: expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: body),
+        min: p_arrow + 1
+      ) ++ " : " ++ dflt
+    }
+    return piece(
+      code: "$rt." ++ quant ++ "(" ++ dom ++ ", (" ++ local(
+        name: name
+      ) ++ ") => " ++ body_code ++ ")",
+      prec: p_call
+    )
+  }
+  | ir.Closure(params, fn_type, entry_checks, body, early_return) -> {
+    var names: Builder[Text] = List.builder()
+    var inouts: Builder[Text] = List.builder()
+    for p: ir.Param in params {
+      List.push(b: inout names, x: local(name: p.name))
+      if p.is_inout {
+        List.push(b: inout inouts, x: p.name)
+      }
+    }
+    var ret: types.Type = types.ErrorT
+    match fn_type with
+    | Some(value) -> ret = types.ret_of(t: value)
+    | None -> skip()
+    let saved: Option[FnCtx] = e.fn_ctx
+    e = { e with fn_ctx: Some(value: FnCtx { inout_names: List.finish(b: inouts), ret: ret }) }
+    let outer: Writer = e.w
+    e = { e with w: new_writer() }
+    indent(e: inout e)
+    block(fuel: fuel - 1, e: inout e, ctx: ctx, b: entry_checks)
+    early_open(e: inout e, early: early_return)
+    block(fuel: fuel - 1, e: inout e, ctx: ctx, b: body)
+    early_close(e: inout e, early: early_return)
+    let text: Text = writer_text(w: e.w)
+    e = { e with w: outer, fn_ctx: saved }
+    return piece(
+      code: "(" ++ Text.join(
+        parts: List.finish(b: names),
+        sep: ", "
+      ) ++ ") => {\n" ++ text ++ "\n}",
+      prec: p_arrow
+    )
+  }
+  | ir.Fake(kind, fields, _) -> return piece(
+    code: "$rt.Capability.__fake(" ++ json.quote(t: kind) ++ ", { " ++ Text.join(
+      parts: inits_code(fuel: fuel - 1, e: inout e, ctx: ctx, fs: fields),
+      sep: ", "
+    ) ++ " }, $rt.FAKE_TOKEN)",
+    prec: p_call
+  )
+  | ir.Checked(value, it_name, _, checks) -> {
+    let v: Text = expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: value).code
+    let cs: Text = inline(fuel: fuel - 1, e: inout e, ctx: ctx, stmts: checks)
+    return piece(
+      code: "$rt.checked(" ++ v ++ ", (" ++ it_name ++ ") => { " ++ cs ++ " })",
+      prec: p_call
+    )
+  }
+  | ir.TypeInfoE(name, fields) -> {
+    var fs: Builder[Text] = List.builder()
+    for f: ir.TypeInfoField in fields {
+      List.push(
+        b: inout fs,
+        x: "{ name: " ++ json.quote(t: f.name) ++ ", type_name: " ++ json.quote(
+          t: f.type_name
+        ) ++ " }"
+      )
+    }
+    return piece(
+      code: "$rt.typeInfo(" ++ json.quote(t: name) ++ ", [" ++ Text.join(
+        parts: List.finish(b: fs),
+        sep: ", "
+      ) ++ "])",
+      prec: p_call
+    )
+  }
+  | ir.ConstE(value) -> return piece(code: const_literal(ctx: ctx, c: value), prec: p_atom)
+  | ir.ValueE(value) -> return piece(
+    code: value_literal(fuel: fuel - 1, ctx: ctx, val: value),
+    prec: p_atom
+  )
+  | ir.DictE(_, _, mod, name) -> {
+    if mod == e.m.id and e.self_alias is None {
+      return piece(code: local(name: name), prec: p_atom)
+    }
+    return piece(
+      code: alias(e: inout e, ctx: ctx, id: mod) ++ "." ++ local(name: name),
+      prec: p_atom
+    )
+  }
+  | ir.DictParamE(name) -> return piece(code: name, prec: p_atom)
+  | ir.Snapshot(value, _) -> return piece(
+    code: "$rt.snapshot(" ++ expr(fuel: fuel - 1, e: inout e, ctx: ctx, x: value).code ++ ")",
+    prec: p_call
+  )
+}
+
+fn const_literal(ctx: context.Context, c: types.ConstValue) -> Text may alloc {
+  match c with
+  | types.IntV(v) -> return Int.to_text(x: v)
+  | types.DurationV(v) -> return Int.to_text(x: v)
+  | types.FloatV(v) -> return Float.to_text(x: v)
+  | types.BoolV(v) -> return Bool.to_text(b: v)
+  | types.TextV(v) -> return json.quote(t: v)
+  | types.UnitV -> return "undefined"
+  | types.VariantV(def) -> return "{ tag: " ++ json.quote(
+    t: context.get_def(ctx: ctx, id: def).name
+  ) ++ " }"
+  | types.SymV(def) -> return local(name: context.get_def(ctx: ctx, id: def).name)
+  | types.ErrorV -> return "undefined"
+}
+
+fn value_literal(
+  fuel: Int where it >= 0,
+  ctx: context.Context,
+  val: values.Value
+) -> Text may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return "undefined"
+  }
+  match val with
+  | values.IntV(v) -> return Int.to_text(x: v)
+  | values.FloatV(v) -> return Float.to_text(x: v)
+  | values.DurationV(v) -> return Int.to_text(x: v)
+  | values.BoolV(v) -> return Bool.to_text(b: v)
+  | values.TextV(v) -> return json.quote(t: v)
+  | values.UnitV -> return "undefined"
+  | values.BytesV(bytes) -> {
+    var parts: Builder[Text] = List.builder()
+    for b: Int in bytes {
+      List.push(b: inout parts, x: Int.to_text(x: b))
+    }
+    return "new Uint8Array([" ++ Text.join(parts: List.finish(b: parts), sep: ", ") ++ "])"
+  }
+  | values.ListV(items) -> {
+    var parts: Builder[Text] = List.builder()
+    for item: values.Value in items {
+      List.push(b: inout parts, x: value_literal(fuel: fuel - 1, ctx: ctx, val: item))
+    }
+    return "[" ++ Text.join(parts: List.finish(b: parts), sep: ", ") ++ "]"
+  }
+  | values.RecordV(_, fields) -> return "{ " ++ Text.join(
+    parts: value_fields(fuel: fuel - 1, ctx: ctx, fields: fields),
+    sep: ", "
+  ) ++ " }"
+  | values.VariantV(def, fields) -> {
+    let parts: List[Text] = [
+      "tag: " ++ json.quote(t: context.get_def(ctx: ctx, id: def).name)
+    ] ++ value_fields(fuel: fuel - 1, ctx: ctx, fields: fields)
+    return "{ " ++ Text.join(parts: parts, sep: ", ") ++ " }"
+  }
+  | values.TypeInfoV(owner) -> {
+    match owner with
+    | defs.PrimOwner(name) -> return "$rt.typeInfo(" ++ json.quote(t: name) ++ ", [])"
+    | defs.DefOwner(def) -> {
+      var fs: Builder[Text] = List.builder()
+      match Map.find(d: ctx.fields, key: def) with
+      | Some(value) -> {
+        for f: types.FieldInfo in value {
+          List.push(
+            b: inout fs,
+            x: "{ name: " ++ json.quote(t: f.name) ++ ", type_name: " ++ json.quote(
+              t: lowerir.type_slug(fuel: 1000, ctx: ctx, t: f.ty)
+            ) ++ " }"
+          )
+        }
+      }
+      | None -> skip()
+      return "$rt.typeInfo(" ++ json.quote(
+        t: context.get_def(ctx: ctx, id: def).name
+      ) ++ ", [" ++ Text.join(parts: List.finish(b: fs), sep: ", ") ++ "])"
+    }
+  }
+}
+
+fn value_fields(
+  fuel: Int where it >= 0,
+  ctx: context.Context,
+  fields: List[values.Field]
+) -> List[Text] may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return []
+  }
+  var out: Builder[Text] = List.builder()
+  for f: values.Field in fields {
+    List.push(
+      b: inout out,
+      x: local(name: f.name) ++ ": " ++ value_literal(fuel: fuel - 1, ctx: ctx, val: f.value)
+    )
+  }
+  return List.finish(b: out)
+}
+
+-- Generated tests (§5.2, §3.6) and verify functions (§20.2) ---------------------------------
+fn tests_file(e: inout E, ctx: context.Context, tests: ir.Tests) -> Text may alloc, mutate {
+  let outer: Writer = e.w
+  let saved_imports: Dict[Int, Text] = copy_int_dict(d: e.imports)
+  let saved_decls: List[Text] = e.ob_decls
+  let saved_refs: Dict[Text, Text] = copy_text_dict(d: e.ob_refs)
+  var fresh_imports: Dict[Int, Text] = Map.dict()
+  Map.set(d: inout fresh_imports, key: e.m.id, value: "$self")
+  let fresh_w: Writer = new_writer()
+  e = { e with
+    w: fresh_w,
+    imports: fresh_imports,
+    self_alias: Some(value: "$self"),
+    ob_decls: [],
+    ob_refs: Map.dict(),
+    fn_ctx: None
+  }
+  line(e: inout e, s: "import { test, expect, afterAll } from 'vitest';")
+  line(e: inout e, s: "import * as fc from 'fast-check';")
+  for ex: ir.Example in tests.examples {
+    e = { e with assert_mode: "expect" }
+    line(e: inout e, s: "test(" ++ json.quote(t: ex.name) ++ ", () => {")
+    indent(e: inout e)
+    block(fuel: max_depth, e: inout e, ctx: ctx, b: ex.body)
+    dedent(e: inout e)
+    line(e: inout e, s: "});")
+  }
+  e = { e with assert_mode: "return-false" }
+  for p: ir.Property in tests.properties {
+    var gens: Builder[Text] = List.builder()
+    var names: Builder[Text] = List.builder()
+    for gp: ir.GenParam in p.params {
+      List.push(b: inout gens, x: generator(fuel: max_depth, e: inout e, ctx: ctx, g: gp.gen))
+      List.push(b: inout names, x: local(name: gp.name))
+    }
+    line(e: inout e, s: "test(" ++ json.quote(t: p.label) ++ ", () => {")
+    indent(e: inout e)
+    line(
+      e: inout e,
+      s: "fc.assert(fc.property(" ++ Text.join(
+        parts: List.finish(b: gens),
+        sep: ", "
+      ) ++ ", (" ++ Text.join(parts: List.finish(b: names), sep: ", ") ++ ") => {"
+    )
+    indent(e: inout e)
+    block(fuel: max_depth, e: inout e, ctx: ctx, b: p.body)
+    line(e: inout e, s: "return true;")
+    dedent(e: inout e)
+    line(e: inout e, s: "}));")
+    dedent(e: inout e)
+    line(e: inout e, s: "});")
+  }
+  var head: Builder[Text] = List.builder()
+  List.push(b: inout head, x: "// Generated by onus: tests of module " ++ e.m.name ++ ".")
+  List.push(b: inout head, x: "import * as $rt from " ++ json.quote(t: e.opts.runtime) ++ ";")
+  for id: Int in Map.keys(d: e.imports) {
+    var path: Text = ""
+    if id == e.m.id {
+      var last: Text = ""
+      for seg: Text in Text.split(t: e.m.name, sep: ".") {
+        last = seg
+      }
+      path = "./" ++ last ++ ".js"
+    } else {
+      path = relative_import(e: e, ctx: ctx, id: id)
+    }
+    List.push(
+      b: inout head,
+      x: "import * as " ++ text_or(
+        o: Map.find(d: e.imports, key: id),
+        dflt: ""
+      ) ++ " from " ++ json.quote(t: path) ++ ";"
+    )
+  }
+  List.push(b: inout head, x: "")
+  for d: Text in e.ob_decls {
+    List.push(b: inout head, x: d)
+  }
+  line(e: inout e, s: "afterAll(() => $rt.coverage.flush());")
+  let text: Text = Text.join(parts: List.finish(b: head), sep: "\n") ++ "\n" ++ writer_text(
+    w: e.w
+  ) ++ "\n"
+  e = { e with
+    w: outer,
+    self_alias: None,
+    imports: saved_imports,
+    ob_decls: saved_decls,
+    ob_refs: saved_refs
+  }
+  return text
+}
+
+-- A fast-check generator.
+fn generator(
+  fuel: Int where it >= 0,
+  e: inout E,
+  ctx: context.Context,
+  g: ir.Gen
+) -> Text may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return ""
+  }
+  let base: Text = base_generator(fuel: fuel - 1, e: inout e, ctx: ctx, b: g.base)
+  if List.len(xs: g.filters) == 0 {
+    return base
+  }
+  var it_name: Text = "$it"
+  var conds: Builder[Text] = List.builder()
+  var first: Bool = true
+  for f: ir.Filter in g.filters {
+    if first {
+      it_name = f.it_name
+      first = false
+    }
+    List.push(
+      b: inout conds,
+      x: at(p: expr(fuel: fuel, e: inout e, ctx: ctx, x: f.cond), min: p_and + 1)
+    )
+  }
+  return base ++ ".filter((" ++ it_name ++ ") => " ++ Text.join(
+    parts: List.finish(b: conds),
+    sep: " && "
+  ) ++ ")"
+}
+
+fn base_generator(
+  fuel: Int where it >= 0,
+  e: inout E,
+  ctx: context.Context,
+  b: ir.GenBase
+) -> Text may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return "fc.constant(undefined)"
+  }
+  match b with
+  | ir.IntG -> return "fc.integer({ min: -1000000, max: 1000000 })"
+  | ir.FloatG -> return "fc.double({ noNaN: true, noDefaultInfinity: true })"
+  | ir.DurationG -> return "fc.integer({ min: 0, max: 1000000000 })"
+  | ir.BoolG -> return "fc.boolean()"
+  | ir.TextG -> return "fc.string()"
+  | ir.UnitG -> return "fc.constant(undefined)"
+  | ir.UnknownG -> return "fc.constant(undefined)"
+  | ir.ListG(elem) -> return "fc.array(" ++ generator(
+    fuel: fuel - 1,
+    e: inout e,
+    ctx: ctx,
+    g: elem
+  ) ++ ", { maxLength: 8 })"
+  | ir.RecordG(fields) -> return "fc.record({ " ++ Text.join(
+    parts: gen_fields(fuel: fuel - 1, e: inout e, ctx: ctx, fields: fields),
+    sep: ", "
+  ) ++ " })"
+  | ir.UnionG(variants) -> {
+    var parts: Builder[Text] = List.builder()
+    for v: ir.GenVariant in variants {
+      var inner: Text = "tag: fc.constant(" ++ json.quote(t: v.name) ++ ")"
+      if List.len(xs: v.fields) > 0 {
+        inner = inner ++ ", " ++ Text.join(
+          parts: gen_fields(fuel: fuel - 1, e: inout e, ctx: ctx, fields: v.fields),
+          sep: ", "
+        )
+      }
+      List.push(b: inout parts, x: "fc.record({ " ++ inner ++ " })")
+    }
+    return "fc.oneof(" ++ Text.join(parts: List.finish(b: parts), sep: ", ") ++ ")"
+  }
+}
+
+fn gen_fields(
+  fuel: Int where it >= 0,
+  e: inout E,
+  ctx: context.Context,
+  fields: List[ir.GenField]
+) -> List[Text] may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return []
+  }
+  var out: Builder[Text] = List.builder()
+  for f: ir.GenField in fields {
+    List.push(
+      b: inout out,
+      x: local(name: f.name) ++ ": " ++ generator(fuel: fuel - 1, e: inout e, ctx: ctx, g: f.gen)
+    )
+  }
+  return List.finish(b: out)
+}
+
+fn verify_function(e: inout E, ctx: context.Context, v: ir.Verify) -> VerifyEmit may alloc, mutate {
+  var names: Builder[Text] = List.builder()
+  for p: ir.VerifyParam in v.params {
+    List.push(b: inout names, x: local(name: p.name))
+  }
+  var destructure: Text = "$args"
+  if List.built(b: names) > 0 {
+    destructure = "{ " ++ Text.join(parts: List.finish(b: names), sep: ", ") ++ " }"
+  }
+  e = { e with
+    fn_ctx: Some(value: FnCtx { inout_names: [], ret: types.Prim(name: "Bool") }),
+    assert_mode: "return-false"
+  }
+  line(e: inout e, s: "export function " ++ local(name: v.name) ++ "(" ++ destructure ++ ") {")
+  indent(e: inout e)
+  early_open(e: inout e, early: v.early_return)
+  block(fuel: max_depth, e: inout e, ctx: ctx, b: v.body)
+  line(e: inout e, s: "return true;")
+  early_close(e: inout e, early: v.early_return)
+  dedent(e: inout e)
+  line(e: inout e, s: "}")
+  line(e: inout e, s: "")
+  e = { e with fn_ctx: None }
+  return VerifyEmit {
+    name: v.name,
+    key: v.key,
+    claim: v.claim,
+    def: v.def,
+    at: v.at,
+    params: v.params
+  }
+}

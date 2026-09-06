@@ -1,0 +1,19 @@
+module ok_same_name_sorts
+import lib.stmt_a
+import lib.stmt_b
+
+-- Two modules each declare a union `Stmt` with a variant `Let` whose `name`
+-- field has a different type. Their sorts and projections are named by the
+-- qualified type, so they never collide: the verifier once named both
+-- `Stmt.Let.name`, declared the first, and z3 rejected every problem that
+-- used the second (an internal error, not a diagnostic of the program).
+fn pick(s: stmt_a.Stmt, t: stmt_b.Stmt, first: Bool) -> Int where it >= 0 {
+  if first {
+    match s with
+    | stmt_a.Let(name) -> return name.span
+    | stmt_a.Skip -> return 0
+  }
+  match t with
+  | stmt_b.Let(name) -> return name
+  | stmt_b.Skip -> return 0
+}

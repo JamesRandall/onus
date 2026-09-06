@@ -1,0 +1,404 @@
+module nativebuild
+import std.io
+import ast
+import context
+import report
+import loc
+import ir
+import lowerir
+import native
+import build
+
+-- `onus build --target native` (impl spec M11; language spec §19;
+-- `codegen/native-build.ts`): lowers every module, emits one LLVM IR file,
+-- and has `clang` compile and link it against the C runtime. `clang`, the
+-- WASI SDK and `libpq` are found by running them, since the file system
+-- capability has no existence test; `E0800` names each construct the native
+-- subset does not compile, `E0999` a missing `clang` or a rejected program.
+pub record Built {
+  -- The executable, or nothing when the program reaches constructs the native backend does not compile (E0800), or clang is missing or rejects the IR (E0999).
+  exe: Option[Text]
+  -- The path of the LLVM IR file.
+  ll: Text
+  examples: List[Text]
+  has_main: Bool
+}
+
+pub record Libpq {
+  include: Text
+  lib: Text
+}
+
+fn skip() -> Unit {
+  return Unit
+}
+
+fn or_empty(o: Option[Text]) -> Text {
+  match o with
+  | Some(value) -> return value
+  | None -> return ""
+}
+
+-- The directory of a path: everything before its last `/`, `.` when it has none, `/` at the root.
+pub fn dir_of(path: Text) -> Text may alloc, mutate {
+  let cps: List[Int where 0 <= it and it <= 1114111] = Text.code_points(t: path)
+  let n: Int = List.len(xs: cps)
+  for k: Int in 0 ..< n {
+    let i: Int = n - 1 - k
+    if List.get(xs: cps, i: i) == 47 {
+      if i == 0 {
+        return "/"
+      }
+      return Text.of_code_points(cps: List.slice(xs: cps, from: 0, to: i))
+    }
+  }
+  return "."
+}
+
+fn io_error_text(e: io.Error) -> Text may alloc {
+  match e with
+  | NotFound(path) -> return "not found: " ++ path
+  | Denied(path) -> return "permission denied: " ++ path
+  | Other(detail) -> return detail
+}
+
+-- The first `n` lines of a text.
+fn first_lines(t: Text, n: Int where it >= 0) -> List[Text] may alloc, mutate {
+  var out: Builder[Text] = List.builder()
+  var taken: Int = 0
+  for l: Text in Text.split(t: t, sep: "\n") {
+    if taken < n {
+      List.push(b: inout out, x: l)
+      taken = taken + 1
+    }
+  }
+  return List.finish(b: out)
+}
+
+-- Whether `program --version` runs and succeeds.
+fn runs(process: io.Process, program: Text) -> Bool may io.file, nondet, alloc {
+  match io.run(
+    process: process,
+    program: program,
+    args: ["--version"],
+    stdin: "",
+    timeout_ms: 0
+  ) with
+  | Ok(value) -> return value.status == 0
+  | Err(_) -> return false
+}
+
+-- `libpq`'s include and library directories, from `pg_config` on PATH, Homebrew's keg, or `ONUS_LIBPQ`; nothing when absent.
+pub fn find_libpq(
+  files: io.Files,
+  process: io.Process,
+  env: io.Env
+) -> Option[Libpq] may io.file, io.env, nondet, alloc, mutate {
+  var candidates: Builder[Text] = List.builder()
+  match io.get_env(env: env, name: "ONUS_LIBPQ") with
+  | Some(value) -> List.push(b: inout candidates, x: value ++ "/bin/pg_config")
+  | None -> skip()
+  List.push(b: inout candidates, x: "pg_config")
+  List.push(b: inout candidates, x: "/opt/homebrew/opt/libpq/bin/pg_config")
+  List.push(b: inout candidates, x: "/usr/local/opt/libpq/bin/pg_config")
+  for c: Text in List.finish(b: candidates) {
+    match io.run(
+      process: process,
+      program: c,
+      args: ["--includedir", "--libdir"],
+      stdin: "",
+      timeout_ms: 0
+    ) with
+    | Ok(value) -> {
+      if value.status == 0 {
+        let lines: List[Text] = Text.split(t: Text.trim(t: value.stdout), sep: "\n")
+        if List.len(xs: lines) >= 2 {
+          let include: Text = List.get(xs: lines, i: 0)
+          let lib: Text = List.get(xs: lines, i: 1)
+          if io.read(files: files, path: include ++ "/libpq-fe.h") is Ok {
+            return Some(value: Libpq { include: include, lib: lib })
+          }
+        }
+      }
+    }
+    | Err(_) -> skip()
+  }
+  return None
+}
+
+-- A WASI SDK root (`WASI_SDK_PATH`, else `/opt/wasi-sdk`) whose clang runs, or nothing.
+pub fn find_wasi_sdk(
+  process: io.Process,
+  env: io.Env
+) -> Option[Text] may io.file, io.env, nondet, alloc, mutate {
+  var candidates: Builder[Text] = List.builder()
+  match io.get_env(env: env, name: "WASI_SDK_PATH") with
+  | Some(value) -> List.push(b: inout candidates, x: value)
+  | None -> skip()
+  List.push(b: inout candidates, x: "/opt/wasi-sdk")
+  for c: Text in List.finish(b: candidates) {
+    if runs(process: process, program: c ++ "/bin/clang") {
+      return Some(value: c)
+    }
+  }
+  return None
+}
+
+-- The `clang` executable, or nothing when none is on PATH.
+pub fn find_clang(
+  process: io.Process,
+  explicit: Option[Text]
+) -> Option[Text] may io.file, nondet, alloc {
+  var path: Text = "clang"
+  match explicit with
+  | Some(value) -> path = value
+  | None -> skip()
+  if runs(process: process, program: path) {
+    return Some(value: path)
+  }
+  return None
+}
+
+fn report_e0999(ctx: inout context.Context, lines: List[Text]) -> Unit may mutate, alloc {
+  context.report(
+    ctx: inout ctx,
+    d: report.Diagnostic {
+      code: "E0999",
+      file: 0,
+      span: ast.Span { start: 0, end: 0 },
+      def_name: None,
+      context: lines,
+      obligation: None,
+      repairs: []
+    }
+  )
+  return Unit
+}
+
+fn entry_name(entry: Option[ir.Module]) -> Text may alloc {
+  match entry with
+  | Some(value) -> return Text.replace(t: value.mod.name, from: ".", to: "_")
+  | None -> return "program"
+}
+
+-- Builds the native executable for the program in `ctx`.
+-- Preconditions: the pipeline ran to `paths` without diagnostics.
+-- Effects: writes `<out_dir>/native/program.ll` and the executable; runs
+-- `pg_config` and `clang`; reports E0800 and E0999.
+pub fn build_native(
+  ctx: inout context.Context,
+  files: io.Files,
+  process: io.Process,
+  env: io.Env,
+  tab: Dict[Int, loc.LineTable],
+  out_dir: Text,
+  runtime_dir: Option[Text],
+  target: Text
+) -> Result[Built, io.Error] may io.file, io.env, nondet, alloc, mutate {
+  var lowered: Builder[ir.Module] = List.builder()
+  var entry_ir: Option[ir.Module] = None
+  for mid: Int in 0 ..< ctx.module_count {
+    match Map.find(d: ctx.modules, key: mid) with
+    | Some(value) -> {
+      let m_ir: ir.Module = lowerir.lower_module(
+        ctx: ctx,
+        m: value,
+        tables: tab,
+        opts: lowerir.Options { verify_all: false, negate_guard: None }
+      )
+      List.push(b: inout lowered, x: m_ir)
+      if value.file == 0 {
+        entry_ir = Some(value: m_ir)
+      }
+    }
+    | None -> skip()
+  }
+  let wasm: Bool = target == "wasm"
+  var libpq: Option[Libpq] = None
+  if not wasm {
+    libpq = find_libpq(files: files, process: process, env: env)
+  }
+  let dir: Text = out_dir ++ "/native"
+  let ll: Text = dir ++ "/program.ll"
+  match native.emit_native(
+    ctx: ctx,
+    modules: List.finish(b: lowered),
+    entry: entry_ir,
+    opts: native.Options { sql: libpq is Some }
+  ) with
+  | Err(error) -> {
+    report_e0999(ctx: inout ctx, lines: [error])
+    return Ok(value: Built { exe: None, ll: ll, examples: [], has_main: false })
+  }
+  | Ok(value) -> return build_with(
+    ctx: inout ctx,
+    files: files,
+    process: process,
+    env: env,
+    program: value,
+    entry_name: entry_name(entry: entry_ir),
+    dir: dir,
+    ll: ll,
+    runtime_dir: runtime_dir,
+    libpq: libpq,
+    wasm: wasm
+  )
+}
+
+fn build_with(
+  ctx: inout context.Context,
+  files: io.Files,
+  process: io.Process,
+  env: io.Env,
+  program: native.Program,
+  entry_name: Text,
+  dir: Text,
+  ll: Text,
+  runtime_dir: Option[Text],
+  libpq: Option[Libpq],
+  wasm: Bool
+) -> Result[Built, io.Error] may io.file, io.env, nondet, alloc, mutate {
+  try io.mkdir(files: files, path: dir)
+  try build.write_file(files: files, path: ll, text: program.ll)
+  for u: native.Unsupported in program.unsupported {
+    context.report(
+      ctx: inout ctx,
+      d: report.diagnostic(
+        code: "E0800",
+        file: u.file,
+        span: u.span,
+        def_name: Some(value: native.unsupported_def_name(u: u)),
+        detail: native.unsupported_detail(u: u)
+      )
+    )
+  }
+  let none: Built = Built {
+    exe: None,
+    ll: ll,
+    examples: program.examples,
+    has_main: program.has_main
+  }
+  if List.len(xs: program.unsupported) > 0 {
+    return Ok(value: none)
+  }
+  var exe: Text = dir ++ "/" ++ entry_name
+  if wasm {
+    exe = dir ++ "/program.wasm"
+  }
+  var sdk: Option[Text] = None
+  if wasm {
+    sdk = find_wasi_sdk(process: process, env: env)
+  }
+  var clang: Option[Text] = None
+  if wasm {
+    if sdk is Some {
+      clang = Some(value: or_empty(o: sdk) ++ "/bin/clang")
+    }
+  } else {
+    clang = find_clang(process: process, explicit: None)
+  }
+  if clang is None {
+    if wasm {
+      report_e0999(
+        ctx: inout ctx,
+        lines: [
+          "no WASI SDK found: set WASI_SDK_PATH or install it at /opt/wasi-sdk (impl spec M12)"
+        ]
+      )
+    } else {
+      report_e0999(
+        ctx: inout ctx,
+        lines: ["`clang` is not on PATH; the native target needs it (impl spec M11)"]
+      )
+    }
+    return Ok(value: none)
+  }
+  if runtime_dir is None {
+    report_e0999(
+      ctx: inout ctx,
+      lines: [
+        "the runtime location is unknown: pass --runtime <path to packages/runtime/dist/index.js> or set ONUS_RUNTIME"
+      ]
+    )
+    return Ok(value: none)
+  }
+  let rt: Text = or_empty(o: runtime_dir)
+  var args: Builder[Text] = List.builder()
+  List.push(b: inout args, x: "-O1")
+  List.push(b: inout args, x: "-Wno-override-module")
+  if wasm and sdk is Some {
+    List.push(b: inout args, x: "--target=wasm32-wasi")
+    List.push(b: inout args, x: "--sysroot=" ++ or_empty(o: sdk) ++ "/share/wasi-sysroot")
+    List.push(b: inout args, x: "-D_WASI_EMULATED_SIGNAL")
+    List.push(b: inout args, x: "-lwasi-emulated-signal")
+    List.push(b: inout args, x: "-D_WASI_EMULATED_PROCESS_CLOCKS")
+  }
+  List.push(b: inout args, x: "-o")
+  List.push(b: inout args, x: exe)
+  List.push(b: inout args, x: ll)
+  List.push(b: inout args, x: rt ++ "/onus.c")
+  match libpq with
+  | Some(value) -> {
+    List.push(b: inout args, x: rt ++ "/onus_sql.c")
+    List.push(b: inout args, x: "-I")
+    List.push(b: inout args, x: value.include)
+    List.push(b: inout args, x: "-L")
+    List.push(b: inout args, x: value.lib)
+    List.push(b: inout args, x: "-lpq")
+    List.push(b: inout args, x: "-Wl,-rpath," ++ value.lib)
+  }
+  | None -> List.push(b: inout args, x: "-DONUS_NO_SQL")
+  List.push(b: inout args, x: "-I")
+  List.push(b: inout args, x: rt)
+  List.push(b: inout args, x: "-lm")
+  match io.run(
+    process: process,
+    program: or_empty(o: clang),
+    args: List.finish(b: args),
+    stdin: "",
+    timeout_ms: 0
+  ) with
+  | Err(error) -> {
+    report_e0999(ctx: inout ctx, lines: ["clang could not be run: " ++ io_error_text(e: error)])
+    return Ok(value: none)
+  }
+  | Ok(value) -> {
+    if wasm and value.status == 0 {
+      try build.write_file(files: files, path: dir ++ "/run_wasm.mjs", text: wasm_runner())
+    }
+    if value.status != 0 {
+      report_e0999(
+        ctx: inout ctx,
+        lines: [
+          "clang rejected the generated IR; this is a compiler bug, please report it"
+        ] ++ first_lines(t: value.stderr, n: 20)
+      )
+      return Ok(value: none)
+    }
+    return Ok(
+      value: Built {
+        exe: Some(value: exe),
+        ll: ll,
+        examples: program.examples,
+        has_main: program.has_main
+      }
+    )
+  }
+}
+
+-- The Node script that runs `program.wasm` on Node's WASI (§19; impl spec M12).
+fn wasm_runner() -> Text may alloc {
+  return Text.join(
+    parts: [
+      "// Generated by onus: runs program.wasm on Node's WASI (§19; impl spec M12).",
+      "import { WASI } from 'node:wasi';",
+      "import { readFile } from 'node:fs/promises';",
+      "const wasi = new WASI({ version: 'preview1', args: ['program', ...process.argv.slice(2)], env: process.env, preopens: { '.': process.cwd() }, returnOnExit: true });",
+      "const wasm = await WebAssembly.compile(await readFile(new URL('./program.wasm', import.meta.url)));",
+      "const instance = await WebAssembly.instantiate(wasm, wasi.getImportObject());",
+      "process.exitCode = wasi.start(instance);",
+      ""
+    ],
+    sep: "\n"
+  )
+}

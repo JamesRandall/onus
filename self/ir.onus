@@ -1,0 +1,320 @@
+module ir
+import ast
+import defs
+import types
+import values
+
+-- The target-neutral form (impl spec §6, "two targets, one lowering"; spec
+-- §19; `codegen/ir.ts`). `lowerir.onus` produces it from the checked tree
+-- plus obligation statuses; `jsemit.onus` only renders it. Every codegen
+-- decision — which obligations become runtime checks, entry checks, field
+-- checks, dictionary passing, `inout` results, `match` compilation, loop
+-- measures, `old(...)` snapshots, early returns — is made there, once.
+--
+-- Names are Onus names; temporaries begin with `$`. Each emitter mangles for
+-- its target. Types are the checker's, so an emitter that needs them has them.
+-- What a runtime check reports when it fails (§10.2).
+pub record ObRef {
+  kind: Text
+  text: Text
+  at: Text
+  def: Text
+}
+
+pub record Param {
+  name: Text
+  ty: types.Type
+  is_inout: Bool
+}
+
+-- A hidden dictionary parameter for a bounded type parameter.
+pub record DictParam {
+  def: Int
+  iface: Int
+  name: Text
+}
+
+pub record ConstParam {
+  def: Int
+  name: Text
+  ty: types.Type
+}
+
+-- A runtime-provided primitive: the runtime namespace and function it forwards to.
+pub record Intrinsic {
+  ns: Text
+  name: Text
+}
+
+pub record Field {
+  name: Text
+  ty: types.Type
+}
+
+pub record Fn {
+  def: defs.Def
+  sig: types.Signature
+  -- Emitted name: the definition's, or `Iface$Target$fn` inside an impl.
+  name: Text
+  dict_params: List[DictParam]
+  const_params: List[ConstParam]
+  params: List[Param]
+  ret: types.Type
+  intrinsic: Option[Intrinsic]
+  -- Parameter refinement and `requires` checks the callee performs on entry (those every call site proved are omitted).
+  entry_checks: List[Stmt]
+  body: Option[List[Stmt]]
+  -- The body contains a `try`: an early return unwinds to the function boundary.
+  early_return: Bool
+}
+
+pub record Variant {
+  def: defs.Def
+  fields: List[Field]
+}
+
+pub record IfaceFn {
+  def: defs.Def
+  sig: types.Signature
+}
+
+-- Interface function name and the implementing function.
+pub record Entry {
+  name: Text
+  fn_ir: Fn
+}
+
+pub union Item =
+  | FnItem of f: Fn
+  | ConstItem of def: defs.Def, ty: types.Type, value: Expr
+  | AliasItem of def: defs.Def, ty: types.Type
+  | IntrinsicTypeItem of def: defs.Def, params: List[Int]
+  | RecordItem of def: defs.Def, params: List[Int], fields: List[Field]
+  | UnionItem of def: defs.Def, params: List[Int], variants: List[Variant]
+  | InterfaceItem of def: defs.Def, tparam: Option[Text], fns: List[IfaceFn]
+  -- `dict_name`: the dictionary's emitted name, `Iface$Target`.
+  | ImplItem of def: defs.Def, iface: defs.Def, target: types.Type, dict_name: Text, fns: List[Fn], entries: List[Entry]
+  | CapabilityItem of def: defs.Def
+
+pub record Binding {
+  name: Text
+  ty: types.Type
+  value: Expr
+}
+
+pub record Arm {
+  -- The pattern's test on the scrutinee temporary, or nothing when it always matches.
+  pattern_test: Option[Expr]
+  bindings: List[Binding]
+  guard: Option[Expr]
+  body: List[Stmt]
+}
+
+pub record Target {
+  name: Text
+  ty: types.Type
+}
+
+pub record DecoderField {
+  name: Text
+  kind: Text
+}
+
+-- The row decoder of a `std.sql.select` (§18.2): builds the record from the raw row and applies its refinements.
+pub record Decoder {
+  -- The record under construction, as a local the checks read.
+  it_name: Text
+  ty: types.Type
+  fields: List[DecoderField]
+  -- `Reject` statements over the record.
+  checks: List[Stmt]
+}
+
+pub union CallTarget =
+  | FnTarget of def: defs.Def, name: Text
+  -- An interface function on a receiver known only by its dictionary.
+  | DictTarget of dict: Expr, name: Text
+
+pub union Domain =
+  | RangeD of lo: Expr, hi: Expr
+  | ListD of expr: Expr
+  -- The list inside an `Ok`/`Some`, or empty (§5.3).
+  | OkListD of expr: Expr
+  | BoolsD
+
+pub record FieldInit {
+  name: Text
+  value: Expr
+}
+
+pub record ElseClause {
+  name: Option[Text]
+  error_type: types.Type
+  value: Expr
+}
+
+pub record TypeInfoField {
+  name: Text
+  type_name: Text
+}
+
+pub union Stmt =
+  | Let of name: Text, ty: types.Type, mutable: Bool, value: Expr
+  | Assign of name: Text, ty: types.Type, value: Expr
+  | Return of value: Expr
+  | If of cond: Expr, then_block: List[Stmt], else_block: Option[List[Stmt]]
+  | Match of tmp: Text, ty: types.Type, scrutinee: Expr, arms: List[Arm]
+  | Loop of cond: Expr, body: List[Stmt]
+  | ForRange of name: Text, lo: Expr, hi: Expr, body: List[Stmt]
+  | ForEach of name: Text, ty: types.Type, list: Expr, body: List[Stmt]
+  | Check of cond: Expr, ob: ObRef
+  -- In tests and verify blocks: a bare Bool expression that must hold.
+  | Assert of cond: Expr
+  | ExprStmt of expr: Expr
+  -- A call with `inout` arguments: its result (if wanted) and the updated arguments are assigned back.
+  | CallInout of result_target: Option[Target], call: Expr, targets: List[Target]
+  | Unreachable
+  | Comment of text: Text
+  -- In a row decoder: the row is rejected at `column` when `cond` is false (§18.2).
+  | Reject of cond: Expr, column: Text
+
+pub union Expr =
+  | IntE of v: Int
+  | FloatE of v: Float
+  | TextE of v: Text
+  | BoolE of v: Bool
+  | UnitE
+  | Local of name: Text, ty: types.Type
+  -- A module-level constant.
+  | Global of def: defs.Def, ty: types.Type
+  -- A declared function used as a value: an adapter to the positional convention of function values.
+  | FnRef of def: defs.Def, name: Text, sig: types.Signature
+  | Call of target: CallTarget, sig: types.Signature, dicts: List[Expr], consts: List[Expr], args: List[Expr], ty: types.Type, decoder: Option[Decoder]
+  | CallValue of callee: Expr, fn_type: types.Type, args: List[Expr], ty: types.Type
+  | RecordE of def: defs.Def, ty: types.Type, fields: List[FieldInit]
+  | VariantE of def: defs.Def, ty: types.Type, fields: List[FieldInit]
+  | Update of base: Expr, def: defs.Def, ty: types.Type, fields: List[FieldInit]
+  -- `owner`: the record or variant definition the field belongs to, when known.
+  | FieldE of object: Expr, name: Text, ty: types.Type, owner: Option[defs.Def]
+  | ListE of elems: List[Expr], ty: types.Type
+  | Concat of left: Expr, right: Expr, is_text: Bool, ty: types.Type
+  -- Integer (or Duration) arithmetic; `ob` names the overflow obligation when it is a runtime check.
+  | IntOp of op: Text, left: Expr, right: Expr, ob: Option[ObRef]
+  | FloatOp of op: Text, left: Expr, right: Expr
+  | Neg of operand: Expr, is_float: Bool, ob: Option[ObRef]
+  | Cmp of op: Text, left: Expr, right: Expr, is_float: Bool
+  -- Equality: on primitives by value, otherwise structural.
+  | Eq of left: Expr, right: Expr, ty: types.Type, prim: Bool, negate: Bool
+  | Not of operand: Expr
+  | And of operands: List[Expr]
+  | Or of operands: List[Expr]
+  | Implies of left: Expr, right: Expr
+  | IsVariant of subject: Expr, variant: defs.Def, ty: types.Type
+  -- `try`: unwrap or leave the function early. `raw`: inside a verify block, the else value is the function's result.
+  | Try of operand: Expr, option: Bool, outer_option: Bool, else_clause: Option[ElseClause], raw: Bool, ty: types.Type
+  | Recover of body: List[Stmt], value: Expr, ty: types.Type
+  | Quantifier of quant: Text, name: Text, binder: types.Type, domain: Domain, where_: Option[Expr], body: Expr
+  | Closure of params: List[Param], fn_type: Option[types.Type], entry_checks: List[Stmt], body: List[Stmt], early_return: Bool
+  | Fake of kind: Text, fields: List[FieldInit], ty: types.Type
+  -- A value bound to `it` while its refinement checks run.
+  | Checked of value: Expr, it_name: Text, ty: types.Type, checks: List[Stmt]
+  | TypeInfoE of name: Text, fields: List[TypeInfoField]
+  -- A compile-time constant passed as a `const` type argument.
+  | ConstE of value: types.ConstValue
+  -- A check-time value (a `const` item's initialiser).
+  | ValueE of value: values.Value
+  -- The dictionary implementing `iface` for `target`, defined in module `mod`.
+  | DictE of iface: defs.Def, target: types.Type, mod: Int, name: Text
+  | DictParamE of name: Text
+  | Snapshot of value: Expr, ty: types.Type
+
+pub record Filter {
+  it_name: Text
+  cond: Expr
+}
+
+pub record Gen {
+  base: GenBase
+  filters: List[Filter]
+}
+
+pub record GenField {
+  name: Text
+  gen: Gen
+}
+
+pub record GenVariant {
+  name: Text
+  fields: List[GenField]
+}
+
+pub union GenBase =
+  | IntG
+  | FloatG
+  | DurationG
+  | BoolG
+  | TextG
+  | UnitG
+  | ListG of elem: Gen
+  | RecordG of fields: List[GenField]
+  | UnionG of variants: List[GenVariant]
+  | UnknownG
+
+pub record Example {
+  name: Text
+  body: List[Stmt]
+}
+
+pub record GenParam {
+  name: Text
+  gen: Gen
+}
+
+pub record Property {
+  label: Text
+  params: List[GenParam]
+  body: List[Stmt]
+}
+
+pub record Tests {
+  examples: List[Example]
+  properties: List[Property]
+}
+
+pub record VerifyParam {
+  name: Text
+  capability: Int
+  -- The parameter node: its key and position, for E0603.
+  node: Int
+  at_span: ast.Span
+}
+
+pub record Verify {
+  name: Text
+  key: Text
+  claim: Text
+  def: Text
+  at: Text
+  params: List[VerifyParam]
+  body: List[Stmt]
+  early_return: Bool
+}
+
+-- A root capability of `main`: parameter name and capability kind.
+pub record Root {
+  name: Text
+  kind: Text
+}
+
+pub record MainSpec {
+  roots: List[Root]
+  args: Text
+}
+
+pub record Module {
+  mod: defs.ModuleRecord
+  items: List[Item]
+  tests: Option[Tests]
+  verifies: List[Verify]
+  main: Option[MainSpec]
+}

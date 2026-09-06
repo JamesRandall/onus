@@ -18,7 +18,7 @@ import obligations
 -- An entry holds, in creation order, the final status and provenance of
 -- every obligation of the module: a header line, the count, then one
 -- `status<TAB>by` line each (`-` for no provenance).
-pub const format: Int = 1
+pub const format: Int = 2
 
 pub record CachedStatus {
   status: obligations.Status

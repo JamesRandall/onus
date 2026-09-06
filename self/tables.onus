@@ -20,6 +20,24 @@ pub record AssumeSite {
   key: Text
 }
 
+-- A passing or failing verification of an assumption, as `onus test --assumptions` records it (§20.3).
+pub record VerificationRecord {
+  at: Text
+  target: Text
+  outcome: Text
+  claim: Text
+  def: Text
+}
+
+-- A contract mutation and whether a test detected it (§20.4).
+pub record MutationRecord {
+  kind: Text
+  def: Text
+  text: Text
+  detected: Bool
+  by: Text
+}
+
 pub record PathAssume {
   claim_def: Int
   fn_def: Int

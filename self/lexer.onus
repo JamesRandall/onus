@@ -277,7 +277,38 @@ fn scan_number(
   return pos
 }
 
--- The duration token for `number` in `unit` nanoseconds per unit; a value that overflows is `E0008`.
+-- Whether the digits of `number` (underscores and leading zeros aside) exceed `limit`, a
+-- digit string without leading zeros. An exact comparison on every target: the 64-bit bounds
+-- a duration is checked against are not representable `Int`s on the JavaScript target
+-- (impl spec §1), so the check never holds one as a number.
+fn digits_exceed(number: Text, limit: Text) -> Bool may alloc, mutate {
+  var digits: Builder[Int where 0 <= it and it <= 1114111] = List.builder()
+  var leading: Bool = true
+  for c: Int in Text.code_points(t: number) {
+    if c != 95 and not (leading and c == 48) {
+      List.push(b: inout digits, x: c)
+      leading = false
+    }
+  }
+  let ds: List[Int where 0 <= it and it <= 1114111] = List.finish(b: digits)
+  let ls: List[Int where 0 <= it and it <= 1114111] = Text.code_points(t: limit)
+  if List.len(xs: ds) != List.len(xs: ls) {
+    return List.len(xs: ds) > List.len(xs: ls)
+  }
+  for i: Int in 0 ..< List.len(xs: ds) {
+    let d: Int = List.get(xs: ds, i: i)
+    let m: Int = List.get(xs: ls, i: i)
+    if d != m {
+      return d > m
+    }
+  }
+  return false
+}
+
+-- The duration token for `number` in `unit` nanoseconds per unit; a value whose nanoseconds
+-- overflow the 64-bit signed range is `E0008` (the limit per unit is the range's top divided
+-- by the unit, compared as digits). The value is read with the unit's zeros appended, so no
+-- multiplication is needed.
 fn push_duration(
   number: Text,
   unit: Int where it == 1 or it == 1000 or it == 1000000 or it == 1000000000,
@@ -286,57 +317,29 @@ fn push_duration(
   tokens: inout Builder[tokens.Token],
   diagnostics: inout Builder[tokens.Diagnostic]
 ) -> Unit may alloc, mutate {
-  match Int.parse(t: number) with
-  | Some(value) -> {
-    var nanos: Int = 0
-    var overflow: Bool = false
-    if unit == 1 {
-      nanos = value
-    } else {
-      if unit == 1000 {
-        if value > 9223372036854775 {
-          overflow = true
-        } else {
-          nanos = value * 1000
-        }
-      } else {
-        if unit == 1000000 {
-          if value > 9223372036854 {
-            overflow = true
-          } else {
-            nanos = value * 1000000
-          }
-        } else {
-          if value > 9223372036 {
-            overflow = true
-          } else {
-            nanos = value * 1000000000
-          }
-        }
-      }
-    }
-    if overflow {
-      List.push(
-        b: inout diagnostics,
-        x: tokens.Diagnostic {
-          code: "E0008",
-          start: start,
-          end: end,
-          detail: number ++ " exceeds the 64-bit signed range",
-          def_name: None
-        }
-      )
-      List.push(
-        b: inout tokens,
-        x: tokens.Token { kind: tokens.DurationLit(nanos: 0), start: start, end: end }
-      )
-    } else {
-      List.push(
-        b: inout tokens,
-        x: tokens.Token { kind: tokens.DurationLit(nanos: nanos), start: start, end: end }
-      )
-    }
+  var limit: Text = "9223372036854775807"
+  var zeros: Text = ""
+  if unit == 1000 {
+    limit = "9223372036854775"
+    zeros = "000"
   }
+  if unit == 1000000 {
+    limit = "9223372036854"
+    zeros = "000000"
+  }
+  if unit == 1000000000 {
+    limit = "9223372036"
+    zeros = "000000000"
+  }
+  var nanos: Option[Int] = None
+  if not digits_exceed(number: number, limit: limit) {
+    nanos = Int.parse(t: Text.replace(t: number, from: "_", to: "") ++ zeros)
+  }
+  match nanos with
+  | Some(value) -> List.push(
+    b: inout tokens,
+    x: tokens.Token { kind: tokens.DurationLit(nanos: value), start: start, end: end }
+  )
   | None -> {
     List.push(
       b: inout diagnostics,

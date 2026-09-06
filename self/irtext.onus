@@ -1,0 +1,535 @@
+module irtext
+import context
+import types
+import values
+import typecheck
+import ir
+import json
+
+-- A text rendering of the target-neutral form (`ir.onus`), for `--ir` and
+-- the fixture set that pins the lowering (impl spec §6; `codegen/irtext.ts`).
+-- Never consumed by a backend: emitters read the form itself.
+fn ty(ctx: context.Context, t: types.Type) -> Text may alloc, mutate {
+  return typecheck.show(ctx: ctx, t: t)
+}
+
+fn params_text(ctx: context.Context, ps: List[ir.Param]) -> Text may alloc, mutate {
+  var parts: Builder[Text] = List.builder()
+  for p: ir.Param in ps {
+    var head: Text = ""
+    if p.is_inout {
+      head = "inout "
+    }
+    List.push(b: inout parts, x: head ++ p.name ++ ": " ++ ty(ctx: ctx, t: p.ty))
+  }
+  return Text.join(parts: List.finish(b: parts), sep: ", ")
+}
+
+fn fields_text(ctx: context.Context, fs: List[ir.Field]) -> Text may alloc, mutate {
+  var parts: Builder[Text] = List.builder()
+  for f: ir.Field in fs {
+    List.push(b: inout parts, x: f.name ++ ": " ++ ty(ctx: ctx, t: f.ty))
+  }
+  return Text.join(parts: List.finish(b: parts), sep: ", ")
+}
+
+fn push_all(out: inout Builder[Text], lines: List[Text]) -> Unit may mutate, alloc {
+  for l: Text in lines {
+    List.push(b: inout out, x: l)
+  }
+  return Unit
+}
+
+fn fn_lines(ctx: context.Context, f: ir.Fn, with_extra: Bool) -> List[Text] may alloc, mutate {
+  var out: Builder[Text] = List.builder()
+  var extra: Builder[Text] = List.builder()
+  if with_extra {
+    for d: ir.DictParam in f.dict_params {
+      List.push(b: inout extra, x: "dict " ++ d.name)
+    }
+    for c: ir.ConstParam in f.const_params {
+      List.push(b: inout extra, x: "const " ++ c.name ++ ": " ++ ty(ctx: ctx, t: c.ty))
+    }
+  }
+  let ps: Text = params_text(ctx: ctx, ps: f.params)
+  if ps != "" {
+    List.push(b: inout extra, x: ps)
+  }
+  var early: Text = ""
+  if f.early_return and with_extra {
+    early = " early-return"
+  }
+  List.push(
+    b: inout out,
+    x: "fn " ++ f.name ++ "(" ++ Text.join(
+      parts: List.finish(b: extra),
+      sep: ", "
+    ) ++ ") -> " ++ ty(ctx: ctx, t: f.ret) ++ early
+  )
+  match f.intrinsic with
+  | Some(value) -> {
+    if with_extra {
+      List.push(b: inout out, x: "  intrinsic " ++ value.ns ++ "." ++ value.name)
+    }
+  }
+  | None -> skip()
+  if List.len(xs: f.entry_checks) > 0 {
+    List.push(b: inout out, x: "  entry:")
+    push_all(out: inout out, lines: block(ctx: ctx, b: f.entry_checks, indent: "    "))
+  }
+  match f.body with
+  | Some(value) -> {
+    List.push(b: inout out, x: "  body:")
+    push_all(out: inout out, lines: block(ctx: ctx, b: value, indent: "    "))
+  }
+  | None -> skip()
+  return List.finish(b: out)
+}
+
+fn skip() -> Unit {
+  return Unit
+}
+
+-- Renders a lowered module.
+pub fn print_ir(ctx: context.Context, m: ir.Module) -> Text may alloc, mutate {
+  var out: Builder[Text] = List.builder()
+  List.push(b: inout out, x: "module " ++ m.mod.name)
+  for item: ir.Item in m.items {
+    match item with
+    | ir.FnItem(f) -> push_all(out: inout out, lines: fn_lines(ctx: ctx, f: f, with_extra: true))
+    | ir.ConstItem(def, ty, value) -> List.push(
+      b: inout out,
+      x: "const " ++ def.name ++ ": " ++ typecheck.show(ctx: ctx, t: ty) ++ " = " ++ expr(
+        ctx: ctx,
+        e: value
+      )
+    )
+    | ir.ImplItem(_, iface, target, dict_name, fns, entries) -> {
+      var es: Builder[Text] = List.builder()
+      for e: ir.Entry in entries {
+        List.push(b: inout es, x: e.name ++ ": " ++ e.fn_ir.name)
+      }
+      List.push(
+        b: inout out,
+        x: "impl " ++ iface.name ++ "[" ++ typecheck.show(
+          ctx: ctx,
+          t: target
+        ) ++ "] dict " ++ dict_name ++ " { " ++ Text.join(
+          parts: List.finish(b: es),
+          sep: ", "
+        ) ++ " }"
+      )
+      for f: ir.Fn in fns {
+        push_all(out: inout out, lines: fn_lines(ctx: ctx, f: f, with_extra: false))
+      }
+    }
+    | ir.RecordItem(def, _, fields) -> List.push(
+      b: inout out,
+      x: "record " ++ def.name ++ " { " ++ fields_text(ctx: ctx, fs: fields) ++ " }"
+    )
+    | ir.UnionItem(def, _, variants) -> {
+      var vs: Builder[Text] = List.builder()
+      for v: ir.Variant in variants {
+        List.push(b: inout vs, x: v.def.name ++ "(" ++ fields_text(ctx: ctx, fs: v.fields) ++ ")")
+      }
+      List.push(
+        b: inout out,
+        x: "union " ++ def.name ++ " = " ++ Text.join(parts: List.finish(b: vs), sep: " | ")
+      )
+    }
+    | ir.AliasItem(def, _) -> List.push(b: inout out, x: "alias " ++ def.name)
+    | ir.IntrinsicTypeItem(def, _) -> List.push(b: inout out, x: "intrinsic-type " ++ def.name)
+    | ir.InterfaceItem(def, _, _) -> List.push(b: inout out, x: "interface " ++ def.name)
+    | ir.CapabilityItem(def) -> List.push(b: inout out, x: "capability " ++ def.name)
+  }
+  match m.tests with
+  | Some(value) -> {
+    for e: ir.Example in value.examples {
+      List.push(b: inout out, x: "example " ++ e.name ++ ":")
+      push_all(out: inout out, lines: block(ctx: ctx, b: e.body, indent: "  "))
+    }
+    for p: ir.Property in value.properties {
+      var names: Builder[Text] = List.builder()
+      for gp: ir.GenParam in p.params {
+        List.push(b: inout names, x: gp.name)
+      }
+      List.push(
+        b: inout out,
+        x: p.label ++ "(" ++ Text.join(parts: List.finish(b: names), sep: ", ") ++ "):"
+      )
+      push_all(out: inout out, lines: block(ctx: ctx, b: p.body, indent: "  "))
+    }
+  }
+  | None -> skip()
+  for v: ir.Verify in m.verifies {
+    var names: Builder[Text] = List.builder()
+    for p: ir.VerifyParam in v.params {
+      List.push(b: inout names, x: p.name)
+    }
+    List.push(
+      b: inout out,
+      x: "verify " ++ v.name ++ " for " ++ v.def ++ " (" ++ Text.join(
+        parts: List.finish(b: names),
+        sep: ", "
+      ) ++ "):"
+    )
+    push_all(out: inout out, lines: block(ctx: ctx, b: v.body, indent: "  "))
+  }
+  match m.main with
+  | Some(value) -> {
+    var roots: Builder[Text] = List.builder()
+    for r: ir.Root in value.roots {
+      List.push(b: inout roots, x: r.name ++ ": " ++ r.kind)
+    }
+    List.push(
+      b: inout out,
+      x: "main roots { " ++ Text.join(
+        parts: List.finish(b: roots),
+        sep: ", "
+      ) ++ " } args " ++ value.args
+    )
+  }
+  | None -> skip()
+  return Text.join(parts: List.finish(b: out), sep: "\n") ++ "\n"
+}
+
+fn block(ctx: context.Context, b: List[ir.Stmt], indent: Text) -> List[Text] may alloc, mutate
+  decreases b
+{
+  var out: Builder[Text] = List.builder()
+  for s: ir.Stmt in b {
+    for l: Text in stmt(ctx: ctx, s: s) {
+      List.push(b: inout out, x: indent ++ l)
+    }
+  }
+  return List.finish(b: out)
+}
+
+fn stmts_inline(ctx: context.Context, b: List[ir.Stmt]) -> Text may alloc, mutate
+  decreases b
+{
+  var parts: Builder[Text] = List.builder()
+  for s: ir.Stmt in b {
+    for l: Text in stmt(ctx: ctx, s: s) {
+      List.push(b: inout parts, x: l)
+    }
+  }
+  return Text.join(parts: List.finish(b: parts), sep: "; ")
+}
+
+fn stmt(ctx: context.Context, s: ir.Stmt) -> List[Text] may alloc, mutate
+  decreases s
+{
+  match s with
+  | ir.Let(name, ty, mutable, value) -> {
+    var kw: Text = "let"
+    if mutable {
+      kw = "var"
+    }
+    return [
+      kw ++ " " ++ name ++ ": " ++ typecheck.show(ctx: ctx, t: ty) ++ " = " ++ expr(
+        ctx: ctx,
+        e: value
+      )
+    ]
+  }
+  | ir.Assign(name, _, value) -> return [name ++ " = " ++ expr(ctx: ctx, e: value)]
+  | ir.Return(value) -> return ["return " ++ expr(ctx: ctx, e: value)]
+  | ir.If(cond, then_block, else_block) -> {
+    var out: Builder[Text] = List.builder()
+    List.push(b: inout out, x: "if " ++ expr(ctx: ctx, e: cond) ++ ":")
+    push_all(out: inout out, lines: block(ctx: ctx, b: then_block, indent: "  "))
+    match else_block with
+    | Some(value) -> {
+      List.push(b: inout out, x: "else:")
+      push_all(out: inout out, lines: block(ctx: ctx, b: value, indent: "  "))
+    }
+    | None -> skip()
+    return List.finish(b: out)
+  }
+  | ir.Match(tmp, _, scrutinee, arms) -> {
+    var out: Builder[Text] = List.builder()
+    List.push(b: inout out, x: "match " ++ tmp ++ " = " ++ expr(ctx: ctx, e: scrutinee) ++ ":")
+    for a: ir.Arm in arms {
+      var head: Text = "  arm "
+      match a.pattern_test with
+      | Some(value) -> head = head ++ expr(ctx: ctx, e: value)
+      | None -> head = head ++ "always"
+      match a.guard with
+      | Some(value) -> head = head ++ " when " ++ expr(ctx: ctx, e: value)
+      | None -> skip()
+      if List.len(xs: a.bindings) > 0 {
+        var bs: Builder[Text] = List.builder()
+        for bd: ir.Binding in a.bindings {
+          List.push(b: inout bs, x: bd.name ++ " = " ++ expr(ctx: ctx, e: bd.value))
+        }
+        head = head ++ " bind " ++ Text.join(parts: List.finish(b: bs), sep: ", ")
+      }
+      List.push(b: inout out, x: head ++ ":")
+      push_all(out: inout out, lines: block(ctx: ctx, b: a.body, indent: "    "))
+    }
+    return List.finish(b: out)
+  }
+  | ir.Loop(cond, body) -> {
+    var out: Builder[Text] = List.builder()
+    List.push(b: inout out, x: "loop " ++ expr(ctx: ctx, e: cond) ++ ":")
+    push_all(out: inout out, lines: block(ctx: ctx, b: body, indent: "  "))
+    return List.finish(b: out)
+  }
+  | ir.ForRange(name, lo, hi, body) -> {
+    var out: Builder[Text] = List.builder()
+    List.push(
+      b: inout out,
+      x: "for " ++ name ++ " in " ++ expr(ctx: ctx, e: lo) ++ " ..< " ++ expr(
+        ctx: ctx,
+        e: hi
+      ) ++ ":"
+    )
+    push_all(out: inout out, lines: block(ctx: ctx, b: body, indent: "  "))
+    return List.finish(b: out)
+  }
+  | ir.ForEach(name, ty, list, body) -> {
+    var out: Builder[Text] = List.builder()
+    List.push(
+      b: inout out,
+      x: "for " ++ name ++ ": " ++ typecheck.show(ctx: ctx, t: ty) ++ " in " ++ expr(
+        ctx: ctx,
+        e: list
+      ) ++ ":"
+    )
+    push_all(out: inout out, lines: block(ctx: ctx, b: body, indent: "  "))
+    return List.finish(b: out)
+  }
+  | ir.Check(cond, ob) -> return [
+    "check " ++ expr(
+      ctx: ctx,
+      e: cond
+    ) ++ " [" ++ ob.kind ++ " " ++ ob.text ++ " @ " ++ ob.def ++ "]"
+  ]
+  | ir.Assert(cond) -> return ["assert " ++ expr(ctx: ctx, e: cond)]
+  | ir.ExprStmt(expr) -> return [expr_text(ctx: ctx, e: expr)]
+  | ir.CallInout(result_target, call, targets) -> {
+    var head: Text = ""
+    match result_target with
+    | Some(value) -> head = value.name ++ " = "
+    | None -> skip()
+    var names: Builder[Text] = List.builder()
+    for t: ir.Target in targets {
+      List.push(b: inout names, x: t.name)
+    }
+    return [
+      head ++ expr(ctx: ctx, e: call) ++ " inout " ++ Text.join(
+        parts: List.finish(b: names),
+        sep: ", "
+      )
+    ]
+  }
+  | ir.Unreachable -> return ["unreachable"]
+  | ir.Comment(text) -> return ["-- " ++ text]
+  | ir.Reject(cond, column) -> return ["reject " ++ column ++ " unless " ++ expr(ctx: ctx, e: cond)]
+}
+
+fn expr_text(ctx: context.Context, e: ir.Expr) -> Text may alloc, mutate
+  decreases e
+{
+  return expr(ctx: ctx, e: e)
+}
+
+fn exprs(ctx: context.Context, es: List[ir.Expr], sep: Text) -> Text may alloc, mutate
+  decreases es
+{
+  var parts: Builder[Text] = List.builder()
+  for x: ir.Expr in es {
+    List.push(b: inout parts, x: expr(ctx: ctx, e: x))
+  }
+  return Text.join(parts: List.finish(b: parts), sep: sep)
+}
+
+fn inits(ctx: context.Context, fs: List[ir.FieldInit]) -> Text may alloc, mutate
+  decreases fs
+{
+  var parts: Builder[Text] = List.builder()
+  for f: ir.FieldInit in fs {
+    List.push(b: inout parts, x: f.name ++ ": " ++ expr(ctx: ctx, e: f.value))
+  }
+  return Text.join(parts: List.finish(b: parts), sep: ", ")
+}
+
+fn expr(ctx: context.Context, e: ir.Expr) -> Text may alloc, mutate
+  decreases e
+{
+  match e with
+  | ir.IntE(v) -> return Int.to_text(x: v)
+  | ir.FloatE(v) -> return Float.to_text(x: v)
+  | ir.TextE(v) -> return json.quote(t: v)
+  | ir.BoolE(v) -> return Bool.to_text(b: v)
+  | ir.UnitE -> return "unit"
+  | ir.Local(name, _) -> return name
+  | ir.Global(def, _) -> return "global " ++ def.name
+  | ir.FnRef(_, name, _) -> return "fnref " ++ name
+  | ir.Call(target, _, dicts, consts, args, _, decoder) -> {
+    var head: Text = ""
+    match target with
+    | ir.FnTarget(_, name) -> head = name
+    | ir.DictTarget(dict, name) -> head = expr(ctx: ctx, e: dict) ++ "." ++ name
+    var parts: Builder[Text] = List.builder()
+    for d: ir.Expr in dicts {
+      List.push(b: inout parts, x: "dict " ++ expr(ctx: ctx, e: d))
+    }
+    for c: ir.Expr in consts {
+      List.push(b: inout parts, x: "const " ++ expr(ctx: ctx, e: c))
+    }
+    for a: ir.Expr in args {
+      List.push(b: inout parts, x: expr(ctx: ctx, e: a))
+    }
+    var decode: Text = ""
+    match decoder with
+    | Some(value) -> {
+      var fs: Builder[Text] = List.builder()
+      for f: ir.DecoderField in value.fields {
+        List.push(b: inout fs, x: f.name ++ ": " ++ f.kind)
+      }
+      decode = " decode(" ++ Text.join(parts: List.finish(b: fs), sep: ", ")
+      if List.len(xs: value.checks) > 0 {
+        decode = decode ++ "; " ++ stmts_inline(ctx: ctx, b: value.checks)
+      }
+      decode = decode ++ ")"
+    }
+    | None -> skip()
+    return head ++ "(" ++ Text.join(parts: List.finish(b: parts), sep: ", ") ++ ")" ++ decode
+  }
+  | ir.CallValue(callee, _, args, _) -> return expr(ctx: ctx, e: callee) ++ "(" ++ exprs(
+    ctx: ctx,
+    es: args,
+    sep: ", "
+  ) ++ ")"
+  | ir.RecordE(def, _, fields) -> return def.name ++ " { " ++ inits(ctx: ctx, fs: fields) ++ " }"
+  | ir.VariantE(def, _, fields) -> return def.name ++ "(" ++ inits(ctx: ctx, fs: fields) ++ ")"
+  | ir.Update(base, _, _, fields) -> return "{ " ++ expr(ctx: ctx, e: base) ++ " with " ++ inits(
+    ctx: ctx,
+    fs: fields
+  ) ++ " }"
+  | ir.FieldE(object, name, _, _) -> return expr(ctx: ctx, e: object) ++ "." ++ name
+  | ir.ListE(elems, _) -> return "[" ++ exprs(ctx: ctx, es: elems, sep: ", ") ++ "]"
+  | ir.Concat(left, right, _, _) -> return "(" ++ expr(ctx: ctx, e: left) ++ " ++ " ++ expr(
+    ctx: ctx,
+    e: right
+  ) ++ ")"
+  | ir.IntOp(op, left, right, ob) -> {
+    var q: Text = ""
+    if ob is Some {
+      q = "?"
+    }
+    return "(" ++ expr(ctx: ctx, e: left) ++ " " ++ op ++ q ++ " " ++ expr(
+      ctx: ctx,
+      e: right
+    ) ++ ")"
+  }
+  | ir.FloatOp(op, left, right) -> return "(" ++ expr(
+    ctx: ctx,
+    e: left
+  ) ++ " " ++ op ++ ". " ++ expr(ctx: ctx, e: right) ++ ")"
+  | ir.Neg(operand, _, ob) -> {
+    var q: Text = ""
+    if ob is Some {
+      q = "?"
+    }
+    return "(-" ++ q ++ expr(ctx: ctx, e: operand) ++ ")"
+  }
+  | ir.Cmp(op, left, right, _) -> return "(" ++ expr(ctx: ctx, e: left) ++ " " ++ op ++ " " ++ expr(
+    ctx: ctx,
+    e: right
+  ) ++ ")"
+  | ir.Eq(left, right, _, prim, negate) -> {
+    var op: Text = "=="
+    if negate {
+      op = "!="
+    }
+    if not prim {
+      op = op ++ "deep"
+    }
+    return "(" ++ expr(ctx: ctx, e: left) ++ " " ++ op ++ " " ++ expr(ctx: ctx, e: right) ++ ")"
+  }
+  | ir.Not(operand) -> return "not " ++ expr(ctx: ctx, e: operand)
+  | ir.And(operands) -> return "(" ++ exprs(ctx: ctx, es: operands, sep: " and ") ++ ")"
+  | ir.Or(operands) -> return "(" ++ exprs(ctx: ctx, es: operands, sep: " or ") ++ ")"
+  | ir.Implies(left, right) -> return "(" ++ expr(ctx: ctx, e: left) ++ " implies " ++ expr(
+    ctx: ctx,
+    e: right
+  ) ++ ")"
+  | ir.IsVariant(subject, variant, _) -> return "(" ++ expr(
+    ctx: ctx,
+    e: subject
+  ) ++ " is " ++ variant.name ++ ")"
+  | ir.Try(operand, _, _, else_clause, raw, _) -> {
+    var head: Text = "try"
+    if raw {
+      head = "try-raw"
+    }
+    var tail: Text = ""
+    match else_clause with
+    | Some(value) -> {
+      tail = " else " ++ name_or_underscore(o: value.name) ++ ": " ++ expr(ctx: ctx, e: value.value)
+    }
+    | None -> skip()
+    return head ++ " " ++ expr(ctx: ctx, e: operand) ++ tail
+  }
+  | ir.Recover(_, value, _) -> return "recover { ... " ++ expr(ctx: ctx, e: value) ++ " }"
+  | ir.Quantifier(quant, name, _, _, _, body) -> return quant ++ " " ++ name ++ ": " ++ expr(
+    ctx: ctx,
+    e: body
+  )
+  | ir.Closure(params, _, _, _, _) -> {
+    var names: Builder[Text] = List.builder()
+    for p: ir.Param in params {
+      List.push(b: inout names, x: p.name)
+    }
+    return "fn(" ++ Text.join(parts: List.finish(b: names), sep: ", ") ++ ") { ... }"
+  }
+  | ir.Fake(kind, _, _) -> return "fake " ++ kind
+  | ir.Checked(value, it_name, _, checks) -> return "checked(" ++ expr(
+    ctx: ctx,
+    e: value
+  ) ++ " as " ++ it_name ++ "; " ++ stmts_inline(ctx: ctx, b: checks) ++ ")"
+  | ir.TypeInfoE(name, _) -> return "typeinfo " ++ name
+  | ir.ConstE(value) -> return "const " ++ const_kind(c: value)
+  | ir.ValueE(value) -> return "value " ++ value_kind(v: value)
+  | ir.DictE(_, _, _, name) -> return "dict " ++ name
+  | ir.DictParamE(name) -> return name
+  | ir.Snapshot(value, _) -> return "snapshot " ++ expr(ctx: ctx, e: value)
+}
+
+fn name_or_underscore(o: Option[Text]) -> Text {
+  match o with
+  | Some(value) -> return value
+  | None -> return "_"
+}
+
+-- The `k` tag of a constant, as the TypeScript form names it.
+fn const_kind(c: types.ConstValue) -> Text {
+  match c with
+  | types.IntV(_) -> return "int"
+  | types.FloatV(_) -> return "float"
+  | types.BoolV(_) -> return "bool"
+  | types.TextV(_) -> return "text"
+  | types.DurationV(_) -> return "duration"
+  | types.UnitV -> return "unit"
+  | types.VariantV(_) -> return "variant"
+  | types.SymV(_) -> return "sym"
+  | types.ErrorV -> return "error"
+}
+
+fn value_kind(v: values.Value) -> Text {
+  match v with
+  | values.IntV(_) -> return "int"
+  | values.FloatV(_) -> return "float"
+  | values.BoolV(_) -> return "bool"
+  | values.TextV(_) -> return "text"
+  | values.DurationV(_) -> return "duration"
+  | values.UnitV -> return "unit"
+  | values.BytesV(_) -> return "bytes"
+  | values.ListV(_) -> return "list"
+  | values.RecordV(_, _) -> return "record"
+  | values.VariantV(_, _) -> return "variant"
+  | values.TypeInfoV(_) -> return "typeinfo"
+}

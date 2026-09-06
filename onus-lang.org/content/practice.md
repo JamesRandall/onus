@@ -65,7 +65,85 @@ pub fn export_orders(
 ) -> Result[Unit, ExportError] may sql.read, io.file, alloc
 ```
 
-The router is `main`. It is the only function that receives root capabilities — the network, the file system, the environment — and it narrows them before handing them on: the catalogue handler gets `sql.narrow(db: db, to: ReadOnly)` restricted to one schema, the export gets read-only orders and the files capability, and only checkout gets the read-write handle and the payment client. A handler cannot reach anything `main` did not give it, because there is nowhere else to get it from.
+Put those three handlers in a module `app.shop`. The router is the rest of it. `main` is the only function that receives root capabilities — the environment, the file system, the network, the clock — and it constructs everything else from them: the database connection from `net`, the vendor clients from `net`. Then, per request, `route` narrows what it holds to what each handler is allowed and calls it. A handler cannot reach anything `route` did not give it, because there is nowhere else to get it from.
+
+```
+union Route =
+  | GetCatalogue of page: Int where it >= 0
+  | PostCheckout of req: Request
+  | GetExport of year: Int where 2000 <= it and it <= 2100
+
+union RouteError =
+  | Db of detail: sql.Error
+  | Purchase of detail: CheckoutError
+  | Export of detail: ExportError
+
+record Reply {
+  status: Int where 200 <= it and it < 600
+  body: Text
+}
+
+-- The router holds the widest authority in the program and hands each handler
+-- exactly the slice it needs. The signature is the complete list of what any
+-- request can do.
+fn route(
+  r: Route,
+  db: sql.Db[ReadWrite],
+  files: io.Files,
+  clock: io.Clock,
+  pay: payments.Client,
+  auth: auth.Service
+) -> Result[Reply, RouteError] may sql.read, sql.write, io.net, io.file, io.clock, alloc {
+  match r with
+  | GetCatalogue(page) -> {
+    let ro: sql.Db[ReadOnly] = sql.narrow(db: db, to: ReadOnly)
+    let catalogue: sql.Db[ReadOnly, schema: "catalogue"] = sql.restrict(db: ro, schema: "catalogue")
+    let products: List[Product] = try list_products(db: catalogue, page: page) else e: Db(detail: e)
+    return Ok(value: Reply { status: 200, body: products_json(products: products) })
+  }
+  | PostCheckout(req) -> {
+    let orders: sql.Db[ReadWrite, schema: "orders"] = sql.restrict(db: db, schema: "orders")
+    let receipt: payments.Receipt = try handle_checkout(req: req, clock: clock, db: orders, pay: pay, auth: auth)
+      else e: Purchase(detail: e)
+    return Ok(value: Reply { status: 201, body: receipt_json(receipt: receipt) })
+  }
+  | GetExport(year) -> {
+    let ro: sql.Db[ReadOnly] = sql.narrow(db: db, to: ReadOnly)
+    let orders: sql.Db[ReadOnly, schema: "orders"] = sql.restrict(db: ro, schema: "orders")
+    try export_orders(db: orders, files: files, year: year) else e: Export(detail: e)
+    return Ok(value: Reply { status: 202, body: "" })
+  }
+}
+
+union AppError =
+  | Config of detail: config.Error
+  | Connect of detail: sql.Error
+  | Transport of detail: io.Error
+  | Handled of detail: RouteError
+
+pub fn main(
+  args: List[Text],
+  env: io.Env,
+  files: io.Files,
+  net: io.Net,
+  clock: io.Clock
+) -> Result[Unit, AppError] may io.env, io.file, io.net, io.clock, sql.read, sql.write, alloc, diverge {
+  let cfg: config.Config = try config.load(env: env) else e: Config(detail: e)
+  let db: sql.Db[ReadWrite] = try sql.connect(net: net, dsn: cfg.orders_dsn, mode: ReadWrite)
+    else e: Connect(detail: e)
+  let pay: payments.Client = payments.client(net: net, key: cfg.payments_key)
+  let auth: auth.Service = auth.service(net: net, issuer: cfg.auth_issuer)
+  -- A server runs until stopped, so main declares diverge and the loop needs no measure.
+  loop while true {
+    let r: Route = try next_request(net: net) else e: Transport(detail: e)
+    let reply: Reply = try route(r: r, db: db, files: files, clock: clock, pay: pay, auth: auth)
+      else e: Handled(detail: e)
+    try send(net: net, reply: reply) else e: Transport(detail: e)
+  }
+}
+```
+
+Two things to read off this. First, the catalogue handler gets a handle that has been narrowed to read-only and restricted to one schema before the call, so `list_products` could not write even if its body tried: it would have nothing to write with, and its own `may sql.read, alloc` would refuse the call anyway. Second, `main` declares `diverge` because a server does not terminate; every other function in the program is proved to. The pure helpers that render replies are elided, and `next_request` and `send` stand for a transport the standard library does not have yet — the language has capabilities for the network but no HTTP module, which the [status page](/status/) tracks.
 
 Then three declarations state what each region of the program must satisfy, and the compiler checks every function reachable from the entry point against them:
 

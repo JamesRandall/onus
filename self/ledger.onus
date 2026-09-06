@@ -1,0 +1,246 @@
+module ledger
+import std.io
+import ast
+import context
+import tables
+import json
+import loc
+import obligations
+import defs
+
+-- The ledgers a project keeps under `<root>/.onus/ledger/` (`report/ledger.ts`,
+-- §20.3–§20.5): the assumption verifications `onus test --assumptions`
+-- records, the runtime-check coverage a test run leaves, and the contract
+-- mutations `onus test --mutate` reports. The reports read them; a file that
+-- is absent or malformed reads as empty, as the TypeScript command line
+-- treats it.
+pub record Ledger {
+  assumptions: Dict[Text, tables.VerificationRecord]
+  coverage: Dict[Text, Int]
+  mutations: List[tables.MutationRecord]
+}
+
+-- What counts as "in the module" or "on the path" for mutation records: a
+-- module's qualified-name prefix, or the qualified names reachable on a path.
+pub record Scope {
+  prefix: Option[Text]
+  names: Dict[Text, Bool]
+}
+
+fn skip() -> Unit {
+  return Unit
+}
+
+fn read_json(files: io.Files, path: Text) -> Option[json.Json] may io.file, alloc, mutate {
+  match io.read(files: files, path: path) with
+  | Ok(value) -> return json.parse(t: value)
+  | Err(_) -> return None
+}
+
+fn record_of(j: json.Json) -> Option[tables.VerificationRecord] may alloc {
+  if not (json.has(j: j, key: "at") and json.has(j: j, key: "target") and json.has(
+    j: j,
+    key: "result"
+  ) and json.has(j: j, key: "claim") and json.has(j: j, key: "def")) {
+    return None
+  }
+  let outcome: Text = json.str_at(j: j, key: "result")
+  if outcome != "passed" and outcome != "failed" {
+    return None
+  }
+  return Some(
+    value: tables.VerificationRecord {
+      at: json.str_at(j: j, key: "at"),
+      target: json.str_at(j: j, key: "target"),
+      outcome: outcome,
+      claim: json.str_at(j: j, key: "claim"),
+      def: json.str_at(j: j, key: "def")
+    }
+  )
+}
+
+fn put_record(
+  out: inout Dict[Text, tables.VerificationRecord],
+  key: Text,
+  r: Option[tables.VerificationRecord]
+) -> Unit may mutate, alloc {
+  match r with
+  | Some(value) -> Map.set(d: inout out, key: key, value: value)
+  | None -> skip()
+  return Unit
+}
+
+fn put_count(out: inout Dict[Text, Int], key: Text, n: Option[Int]) -> Unit may mutate, alloc {
+  match n with
+  | Some(value) -> Map.set(d: inout out, key: key, value: value)
+  | None -> skip()
+  return Unit
+}
+
+fn read_assumptions(
+  files: io.Files,
+  path: Text
+) -> Dict[Text, tables.VerificationRecord] may io.file, alloc, mutate {
+  var out: Dict[Text, tables.VerificationRecord] = Map.dict()
+  match read_json(files: files, path: path) with
+  | Some(value) -> {
+    match value with
+    | json.JObject(fields) -> {
+      for f: json.Field in fields {
+        put_record(out: inout out, key: f.key, r: record_of(j: f.value))
+      }
+    }
+    | _ -> skip()
+  }
+  | None -> skip()
+  return out
+}
+
+fn read_coverage(files: io.Files, path: Text) -> Dict[Text, Int] may io.file, alloc, mutate {
+  var out: Dict[Text, Int] = Map.dict()
+  match read_json(files: files, path: path) with
+  | Some(value) -> {
+    match value with
+    | json.JObject(fields) -> {
+      for f: json.Field in fields {
+        match f.value with
+        | json.JNumber(text) -> put_count(out: inout out, key: f.key, n: Int.parse(t: text))
+        | _ -> skip()
+      }
+    }
+    | _ -> skip()
+  }
+  | None -> skip()
+  return out
+}
+
+fn is_mutation_kind(k: Text) -> Bool {
+  return k == "drop-ensures" or k == "widen-return" or k == "widen-field" or k == "negate-guard"
+}
+
+fn read_mutations(
+  files: io.Files,
+  path: Text
+) -> List[tables.MutationRecord] may io.file, alloc, mutate {
+  var out: Builder[tables.MutationRecord] = List.builder()
+  match read_json(files: files, path: path) with
+  | Some(value) -> {
+    for r: json.Json in json.list_at(j: value, key: "results") {
+      let kind: Text = json.str_at(j: r, key: "kind")
+      let detected: json.Json = json.at(j: r, key: "detected")
+      if is_mutation_kind(k: kind) and json.at(j: r, key: "def") is json.JString and json.at(
+        j: r,
+        key: "text"
+      ) is json.JString and detected is json.JBool and json.at(j: r, key: "by") is json.JString {
+        List.push(
+          b: inout out,
+          x: tables.MutationRecord {
+            kind: kind,
+            def: json.str_at(j: r, key: "def"),
+            text: json.str_at(j: r, key: "text"),
+            detected: json.bool_at(j: r, key: "detected"),
+            by: json.str_at(j: r, key: "by")
+          }
+        )
+      }
+    }
+  }
+  | None -> skip()
+  return List.finish(b: out)
+}
+
+-- Reads the three ledgers under `dir`; each is empty when absent or malformed.
+pub fn read_ledger(files: io.Files, dir: Text) -> Ledger may io.file, alloc, mutate {
+  return Ledger {
+    assumptions: read_assumptions(files: files, path: dir ++ "/assumptions.json"),
+    coverage: read_coverage(files: files, path: dir ++ "/coverage.json"),
+    mutations: read_mutations(files: files, path: dir ++ "/mutations.json")
+  }
+}
+
+-- Whether the assumption under `key` has a passing verification record. The
+-- record's age is not yet checked: that needs a clock the standard library
+-- does not expose (`io.Clock` has no reading primitive), so a passing record
+-- stays current.
+pub fn is_verified(ctx: context.Context, key: Text) -> Bool {
+  match Map.find(d: ctx.assumptions, key: key) with
+  | Some(value) -> return value.outcome == "passed"
+  | None -> return false
+}
+
+-- The ledger's record for an assumption as the reports show it, or null.
+pub fn verified_json(ctx: context.Context, key: Text) -> json.Json may alloc {
+  match Map.find(d: ctx.assumptions, key: key) with
+  | Some(value) -> return json.JObject(
+    fields: [
+      json.field(key: "at", value: json.text(t: value.at)),
+      json.field(key: "target", value: json.text(t: value.target)),
+      json.field(key: "result", value: json.text(t: value.outcome))
+    ]
+  )
+  | None -> return json.JNull
+}
+
+-- The ledger key of the `assume` statement with node key `node`, or "" when the claims pass recorded none.
+pub fn site_key_at(ctx: context.Context, node: Int) -> Text may alloc {
+  for s: tables.AssumeSite in List.finish(b: ctx.assume_sites) {
+    if s.node == node {
+      return s.key
+    }
+  }
+  return ""
+}
+
+pub fn in_scope(scope: Scope, def: Text) -> Bool {
+  match scope.prefix with
+  | Some(value) -> return Text.starts_with(t: def, prefix: value)
+  | None -> return Map.contains(d: scope.names, key: def)
+}
+
+-- The `file:line:col` the runtime check for `o` reports (`coverage.ts`
+-- `checkSite`): a refinement on an argument is checked once at the callee's
+-- parameter, anything else at its own node.
+pub fn check_site(
+  ctx: context.Context,
+  tab: Dict[Int, loc.LineTable],
+  o: obligations.Obligation
+) -> Text may alloc {
+  var file: Int = o.at_file
+  var span: ast.Span = o.at_span
+  if o.callee is Some and o.param is Some {
+    match param_def(ctx: ctx, callee: or_int(o: o.callee), name: or_text(o: o.param)) with
+    | Some(value) -> {
+      let d: defs.Def = context.get_def(ctx: ctx, id: value)
+      file = d.file
+      span = d.span
+    }
+    | None -> skip()
+  }
+  return loc.location_text(ctx: ctx, tables: tab, file: file, span: span)
+}
+
+-- The definition of the parameter `name` of `callee`, when the signature has it.
+fn param_def(ctx: context.Context, callee: Int, name: Text) -> Option[Int] {
+  match Map.find(d: ctx.signatures, key: callee) with
+  | Some(value) -> {
+    for i: Int in 0 ..< List.len(xs: value.params) {
+      if List.get(xs: value.params, i: i).name == name and i < List.len(xs: value.param_defs) {
+        return Some(value: List.get(xs: value.param_defs, i: i))
+      }
+    }
+    return None
+  }
+  | None -> return None
+}
+
+fn or_int(o: Option[Int]) -> Int {
+  match o with
+  | Some(value) -> return value
+  | None -> return -1
+}
+
+fn or_text(o: Option[Text]) -> Text {
+  match o with
+  | Some(value) -> return value
+  | None -> return ""
+}

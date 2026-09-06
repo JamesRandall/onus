@@ -39,12 +39,21 @@ interface FnDecl {
  * Lowers expressions and collects declarations for one verification
  * condition. Not reusable across conditions: declarations are per problem.
  */
+/** The SMT-safe spelling of a function name. Effects: none. */
+function cleanFnName(name: string): string {
+  return name.replace(/[^A-Za-z0-9_.]/g, '_');
+}
+
 export class Lowerer {
   private readonly t: ResolveTables;
   private readonly ty: TypeTables;
   readonly sorts = new Set<string>();
   readonly fns = new Map<string, FnDecl>();
   readonly axioms: Formula[] = [];
+  /** Axioms of the sorts themselves, true of every value: a list's length is non-negative. Printed with the declarations. */
+  readonly sortAxioms: Formula[] = [];
+  /** `hasFacts` by type key and remaining depth. */
+  private readonly factsMemo = new Map<string, boolean>();
   private readonly textLits = new Map<string, string>();
   private fresh = 0;
   /** Substitutions for contract keywords. */
@@ -142,7 +151,7 @@ export class Lowerer {
       case 'union':
       case 'opaque':
       case 'capability':
-        return `${this.t.def(s.def).name}${s.args.map((a) => `_${this.argSlug(a)}`).join('')}`;
+        return `${this.t.qualifiedName(s.def)}${s.args.map((a) => `_${this.argSlug(a)}`).join('')}`;
       case 'param':
         return `T_${this.t.def(s.def).name}_${s.def}`;
       case 'fn':
@@ -178,7 +187,7 @@ export class Lowerer {
       case 'unit':
         return 'Unit';
       case 'variant':
-        return this.t.def(v.def).name;
+        return this.t.qualifiedName(v.def);
       case 'sym':
         return `s${v.def}`;
       case 'error':
@@ -187,7 +196,7 @@ export class Lowerer {
   }
 
   declareFn(name: string, args: readonly Sort[], ret: Sort): string {
-    const clean = name.replace(/[^A-Za-z0-9_.]/g, '_');
+    const clean = cleanFnName(name);
     if (!this.fns.has(clean)) this.fns.set(clean, { args, ret });
     return clean;
   }
@@ -514,7 +523,11 @@ export class Lowerer {
     const a0 = s.k === 'opaque' ? s.args[0] : undefined;
     if (s.k !== 'opaque' || a0 === undefined || a0.k !== 'type' || this.t.qualifiedName(s.def) !== 'std.list.List') throw new Unlowerable('not a list');
     const sort = this.sortOf(type);
-    const len = this.declareFn(`${this.slug(type)}.len`, [sort], INT);
+    const lenName = `${this.slug(type)}.len`;
+    const first = !this.fns.has(cleanFnName(lenName));
+    const len = this.declareFn(lenName, [sort], INT);
+    // Every list's length is non-negative: an axiom of the sort, stated once, rather than a fact of each list term.
+    if (first) this.sortAxioms.push({ k: 'quant', quant: 'forall', vars: [{ name: 'xs', sort }], body: app('>=', [app(len, [variable('xs', sort)], INT), int(0)], BOOL) });
     const get = this.declareFn(`${this.slug(type)}.get`, [sort, INT], this.sortOf(a0.type));
     return { len, get, elem: a0.type };
   }
@@ -811,6 +824,8 @@ export class Lowerer {
    */
   typeFacts(term: Formula, type: Type, env: Env = new Map()): void {
     if (this.typeFactDepth > 3) return;
+    // Nothing to assert within reach: the walk through fields and elements is skipped, not merely fruitless.
+    if (!this.hasFacts(type, 3 - this.typeFactDepth)) return;
     this.typeFactDepth += 1;
     try {
       let cur = type;
@@ -868,7 +883,6 @@ export class Lowerer {
         if (a0 === undefined || a0.k !== 'type') return;
         try {
           const len = this.listLen(term, s);
-          this.axioms.push(app('>=', [len, int(0)], BOOL));
           this.fresh += 1;
           const idx = variable(`tf_i_${this.fresh}`, INT);
           const before = this.axioms.length;
@@ -884,6 +898,86 @@ export class Lowerer {
       }
     } finally {
       this.typeFactDepth -= 1;
+    }
+  }
+
+  /**
+   * Whether `typeFacts` on a value of `type` would assert anything within
+   * `remaining` further levels: a refinement on the type itself, or one
+   * reachable through record fields, variant fields and list elements. A
+   * list's length bound is a sort axiom (`listFns`) and counts for nothing.
+   * Memoised by type and depth. Effects: the memo only.
+   */
+  private hasFacts(type: Type, remaining: number): boolean {
+    if (type.k === 'refined') return true;
+    if (remaining <= 0) return false;
+    const key = `${this.typeKey(type)}@${remaining}`;
+    const known = this.factsMemo.get(key);
+    if (known !== undefined) return known;
+    let out = false;
+    if (type.k === 'record') {
+      const subst = this.substOfType(type);
+      for (const f of this.ty.fields.get(type.def) ?? []) {
+        const ft = substitute(f.type, subst);
+        const fs = stripRefinements(ft);
+        if (fs.k === 'prim' && fs.name === 'Float') continue;
+        if (this.hasFacts(ft, remaining - 1)) out = true;
+      }
+    } else if (type.k === 'union') {
+      const subst = this.substOfType(type);
+      for (const v of this.ty.variants.get(type.def) ?? []) for (const f of this.ty.fields.get(v) ?? []) if (this.hasFacts(substitute(f.type, subst), remaining - 1)) out = true;
+    } else if (type.k === 'opaque' && this.t.qualifiedName(type.def) === 'std.list.List') {
+      const a0 = type.args[0];
+      if (a0 !== undefined && a0.k === 'type') out = this.hasFacts(a0.type, remaining - 1);
+    }
+    this.factsMemo.set(key, out);
+    return out;
+  }
+
+  /** A key identifying a type up to its refinements, for `hasFacts`. Effects: none. */
+  private typeKey(t: Type): string {
+    switch (t.k) {
+      case 'prim':
+        return t.name;
+      case 'refined':
+        return `${this.typeKey(t.base)}?${t.pred}`;
+      case 'record':
+      case 'union':
+      case 'opaque':
+      case 'capability':
+        return `${t.def}[${t.args.map((a) => this.argKey(a)).join(',')}]`;
+      case 'param':
+        return `P${t.def}`;
+      case 'fn':
+      case 'typeinfo':
+      case 'spec':
+      case 'error':
+        return t.k;
+    }
+  }
+
+  private argKey(a: TypeArg): string {
+    if (a.k === 'type') return this.typeKey(a.type);
+    if (a.k === 'effects') return 'e';
+    const v = a.value;
+    switch (v.k) {
+      case 'int':
+      case 'duration':
+        return v.v.toString();
+      case 'float':
+        return String(v.v);
+      case 'bool':
+        return v.v ? 'true' : 'false';
+      case 'text':
+        return `t:${v.v}`;
+      case 'unit':
+        return 'Unit';
+      case 'variant':
+        return `v${v.def}`;
+      case 'sym':
+        return `s${v.def}`;
+      case 'error':
+        return 'err';
     }
   }
 }

@@ -3,6 +3,7 @@ import ast
 import parser
 import defs
 import context
+import ledger
 import types
 import effectset
 import walk
@@ -25,8 +26,9 @@ import resolve
 -- policy (E0415) over every `assume` in the reachable set. The analysis is
 -- recorded for the path report (§9.1) whether or not it passed.
 --
--- The driver in Onus reads no assumption ledger yet, so under
--- `policy verified_assumptions_only` every assumption is unverified (E0416),
+-- Under `policy verified_assumptions_only` an assumption without a passing
+-- record in the assumption ledger is unverified (E0416); the record's age is
+-- not yet checked (`ledger.onus`),
 -- as the TypeScript compiler behaves without a ledger.
 pub const assumption_max_age_days: Int = 7
 
@@ -391,26 +393,30 @@ fn check_path(pc: inout Checker, ctx: inout context.Context) -> Unit may mutate,
       | None -> skip()
       match verified_only with
       | Some(value) -> {
-        var why: Text = "with no `verify` block"
-        if a.verify_key is Some {
-          why = "without a passing verification in the last " ++ Int.to_text(
-            x: assumption_max_age_days
-          ) ++ " days"
+        if ledger.is_verified(ctx: ctx, key: a.key) {
+          skip()
+        } else {
+          var why: Text = "with no `verify` block"
+          if a.verify_key is Some {
+            why = "without a passing verification in the last " ++ Int.to_text(
+              x: assumption_max_age_days
+            ) ++ " days"
+          }
+          rep(
+            pc: inout pc,
+            ctx: inout ctx,
+            code: "E0416",
+            at: value,
+            detail: "`" ++ context.qualified_name(
+              ctx: ctx,
+              id: fn_def
+            ) ++ "` assumes `" ++ context.get_def(
+              ctx: ctx,
+              id: a.claim_def
+            ).name ++ "` " ++ why ++ "; `policy " ++ resolve.builtin_policy ++ "` requires one (§20.3)",
+            def_name: path_name(pc: pc)
+          )
         }
-        rep(
-          pc: inout pc,
-          ctx: inout ctx,
-          code: "E0416",
-          at: value,
-          detail: "`" ++ context.qualified_name(
-            ctx: ctx,
-            id: fn_def
-          ) ++ "` assumes `" ++ context.get_def(
-            ctx: ctx,
-            id: a.claim_def
-          ).name ++ "` " ++ why ++ "; `policy " ++ resolve.builtin_policy ++ "` requires one (§20.3)",
-          def_name: path_name(pc: pc)
-        )
       }
       | None -> skip()
       List.push(

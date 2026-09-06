@@ -1,0 +1,9 @@
+module lib.stmt_a
+
+pub record Ident {
+  span: Int where it >= 0
+}
+
+pub union Stmt =
+  | Let of name: Ident
+  | Skip

@@ -1,0 +1,3822 @@
+module lowerir
+import ast
+import parser
+import printer
+import defs
+import context
+import types
+import obligations
+import walk
+import claimcheck
+import values
+import lower
+import ir
+import json
+import loc
+import tables
+
+-- Lowering (impl spec §6; spec §19; `codegen/lower.ts`): the checked tree
+-- plus obligation statuses become the target-neutral form of `ir.onus`. This
+-- is the one place that decides what generated code does; emitters only
+-- render:
+--   - a `checked` obligation becomes a `Check` (or a `Checked` wrapper for a
+--     value flowing into a refined position); a `proved` one becomes nothing;
+--   - a callee checks its parameter refinements and non-pinned `requires` on
+--     entry unless every call site proved them;
+--   - `inout` calls become `CallInout` statements that assign the results
+--     back; a function with `inout` parameters returns them with its result;
+--   - `match` becomes a scrutinee temporary, per-arm tests and bindings;
+--   - loops carry their `invariant`/`decreases` checks as statements;
+--   - `old(x)` is a snapshot at entry; `result` is the return temporary;
+--   - interface calls resolve statically on concrete receivers and go through
+--     a dictionary parameter otherwise;
+--   - `example`/`property`/`law` bodies become assertion blocks; `verify`
+--     blocks become Bool-yielding assertion functions.
+pub record Options {
+  -- Lower every `verify` block too (`onus test --assumptions`, §20.2).
+  verify_all: Bool
+  -- Negate the guards of this property's generators (`onus test --mutate`, §20.4).
+  negate_guard: Option[Int]
+}
+
+pub const max_depth: Int = 100000
+
+record FieldObject {
+  record_def: Int
+  name: Text
+  ty: types.Type
+}
+
+record ImplFn {
+  def: defs.Def
+  name: Text
+}
+
+-- Per-function lowering context.
+record FnCtx {
+  inout_names: List[Text]
+  ret: types.Type
+  post: List[ast.Contract]
+  def: Option[defs.Def]
+  dicts: Dict[Int, Text]
+  result_expr: Option[ir.Expr]
+  -- The local holding the recursion measure taken at entry, when a decreases obligation is checked at runtime (§5.1).
+  measure: Option[Text]
+}
+
+-- A refinement predicate and the file its nodes are keyed in.
+record Pred {
+  e: ast.Expr
+  file: Int
+}
+
+record Init {
+  name: Text
+  value: ast.Expr
+}
+
+record L {
+  file: Int
+  m: defs.ModuleRecord
+  tables: Dict[Int, loc.LineTable]
+  fn_ctx: Option[FnCtx]
+  -- Parameters of a callee denoting the arguments, while its measure is lowered at a recursive call (§5.1).
+  subst: Dict[Int, ir.Expr]
+  -- The value `it` names inside a refinement predicate.
+  it_expr: Option[ir.Expr]
+  -- Inside a record or variant literal's field checks: sibling fields read from the literal.
+  field_object: Option[FieldObject]
+  temp: Int where it >= 0
+  -- Statements an expression needed before itself (`inout` calls), flushed before the enclosing statement.
+  pre: List[ir.Stmt]
+  -- Inside an impl: interface function to the implementing function.
+  impl_fns: Dict[Int, ImplFn]
+  verifying: Bool
+  opts: Options
+}
+
+fn skip() -> Unit {
+  return Unit
+}
+
+fn or_neg(o: Option[Int]) -> Int {
+  match o with
+  | Some(value) -> return value
+  | None -> return -1
+}
+
+fn type_or(o: Option[types.Type]) -> types.Type {
+  match o with
+  | Some(value) -> return value
+  | None -> return types.ErrorT
+}
+
+fn fields_or(o: Option[List[types.FieldInfo]]) -> List[types.FieldInfo] may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return []
+}
+
+fn ids_or(o: Option[List[Int]]) -> List[Int] may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return []
+}
+
+fn args_or(o: Option[List[types.TypeArg]]) -> List[types.TypeArg] may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return []
+}
+
+fn tparams_or(o: Option[List[types.TParamInfo]]) -> List[types.TParamInfo] may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return []
+}
+
+fn expr_or_unit(o: Option[ir.Expr]) -> ir.Expr {
+  match o with
+  | Some(value) -> return value
+  | None -> return ir.UnitE
+}
+
+fn text_or(o: Option[Text], dflt: Text) -> Text {
+  match o with
+  | Some(value) -> return value
+  | None -> return dflt
+}
+
+fn key(l: L, tag: Int, span: ast.Span) -> Int {
+  return defs.node_key(file: l.file, tag: tag, span: span)
+}
+
+fn expr_key(l: L, e: ast.Expr) -> Int {
+  return key(l: l, tag: defs.tag_expr, span: parser.span_of_expr(e: e))
+}
+
+fn type_of_expr(l: L, ctx: context.Context, e: ast.Expr) -> types.Type {
+  return type_or(o: Map.find(d: ctx.expr_types, key: expr_key(l: l, e: e)))
+}
+
+fn def_at(l: L, ctx: context.Context, tag: Int, span: ast.Span) -> Int {
+  return or_neg(o: Map.find(d: ctx.def_of, key: key(l: l, tag: tag, span: span)))
+}
+
+fn ref_def(ctx: context.Context, k: Int) -> Int {
+  match Map.find(d: ctx.refs, key: k) with
+  | None -> return -1
+  | Some(value) -> {
+    match value with
+    | defs.DefRes(def) -> return def
+    | _ -> return -1
+  }
+}
+
+fn tmp(l: inout L, prefix: Text) -> Text may alloc, mutate {
+  l = { l with temp: l.temp + 1 }
+  return "$" ++ prefix ++ Int.to_text(x: l.temp)
+}
+
+fn where_text(l: L, ctx: context.Context, file: Int, span: ast.Span) -> Text may alloc {
+  return loc.location_text(ctx: ctx, tables: l.tables, file: file, span: span)
+}
+
+fn ob_ref(
+  l: L,
+  ctx: context.Context,
+  kind: Text,
+  text: Text,
+  file: Int,
+  span: ast.Span,
+  def: Text
+) -> ir.ObRef may alloc {
+  return ir.ObRef {
+    kind: kind,
+    text: text,
+    at: where_text(l: l, ctx: ctx, file: file, span: span),
+    def: def
+  }
+}
+
+fn ob_ref_of(l: L, ctx: context.Context, o: obligations.Obligation) -> ir.ObRef may alloc {
+  return ob_ref(
+    l: l,
+    ctx: ctx,
+    kind: obligations.kind_text(k: o.kind),
+    text: o.text,
+    file: o.at_file,
+    span: o.at_span,
+    def: context.get_def(ctx: ctx, id: o.def).name
+  )
+}
+
+-- The obligations at a node key, in creation order.
+fn obligations_at(ctx: context.Context, k: Int) -> List[obligations.Obligation] may alloc, mutate {
+  var out: Builder[obligations.Obligation] = List.builder()
+  for id: Int in ids_or(o: Map.find(d: ctx.obligations_at, key: k)) {
+    List.push(b: inout out, x: context.get_obligation(ctx: ctx, id: id))
+  }
+  return List.finish(b: out)
+}
+
+fn same_kind(a: obligations.Kind, b: obligations.Kind) -> Bool {
+  return obligations.kind_text(k: a) == obligations.kind_text(k: b)
+}
+
+-- The first obligation of `kind` at a node key.
+fn find_ob(
+  ctx: context.Context,
+  k: Int,
+  kind: obligations.Kind
+) -> Option[obligations.Obligation] may alloc, mutate {
+  for o: obligations.Obligation in obligations_at(ctx: ctx, k: k) {
+    if same_kind(a: o.kind, b: kind) {
+      return Some(value: o)
+    }
+  }
+  return None
+}
+
+fn is_proved(o: obligations.Obligation) -> Bool {
+  return o.status is obligations.Proved
+}
+
+fn is_checked(o: obligations.Obligation) -> Bool {
+  return o.status is obligations.Checked
+}
+
+-- The refinement predicates of `t`, outermost first, each with the file its nodes are keyed in.
+fn refinement_preds(ctx: context.Context, t: types.Type) -> List[Pred] may alloc, mutate {
+  var out: Builder[Pred] = List.builder()
+  var cur: types.Type = t
+  var guard: Int where it >= 0 = 1000
+  loop while cur is types.Refined and guard > 0
+    invariant guard >= 0
+    decreases guard
+  {
+    guard = guard - 1
+    match cur with
+    | types.Refined(base, pred, _) -> {
+      match Map.find(d: ctx.where_exprs, key: pred) with
+      | Some(value) -> List.push(b: inout out, x: Pred { e: value, file: lower.pred_file(k: pred) })
+      | None -> skip()
+      cur = base
+    }
+    | _ -> guard = 0
+  }
+  return List.finish(b: out)
+}
+
+fn is_option(ctx: context.Context, t: types.Type) -> Bool may alloc {
+  let s: types.Type = types.strip(t: t)
+  if s is types.UnionT {
+    return context.qualified_name(ctx: ctx, id: types.def_of(t: s)) == "std.option.Option"
+  }
+  return false
+}
+
+fn is_unit(t: types.Type) -> Bool {
+  let s: types.Type = types.strip(t: t)
+  return s is types.Prim and types.prim_name(t: s) == "Unit"
+}
+
+fn is_int_like(t: types.Type) -> Bool {
+  let s: types.Type = types.strip(t: t)
+  if not s is types.Prim {
+    return false
+  }
+  let n: Text = types.prim_name(t: s)
+  return n == "Int" or n == "Duration"
+}
+
+pub fn type_slug(
+  fuel: Int where it >= 0,
+  ctx: context.Context,
+  t: types.Type
+) -> Text may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return "X"
+  }
+  let s: types.Type = types.strip(t: t)
+  match s with
+  | types.Prim(name) -> return name
+  | types.RecordT(def, args) -> return context.get_def(ctx: ctx, id: def).name ++ args_slug(
+    fuel: fuel - 1,
+    ctx: ctx,
+    args: args
+  )
+  | types.UnionT(def, args) -> return context.get_def(ctx: ctx, id: def).name ++ args_slug(
+    fuel: fuel - 1,
+    ctx: ctx,
+    args: args
+  )
+  | types.Opaque(def, args) -> return context.get_def(ctx: ctx, id: def).name ++ args_slug(
+    fuel: fuel - 1,
+    ctx: ctx,
+    args: args
+  )
+  | types.Capability(def, args, _) -> return context.get_def(ctx: ctx, id: def).name ++ args_slug(
+    fuel: fuel - 1,
+    ctx: ctx,
+    args: args
+  )
+  | types.ParamT(def) -> return context.get_def(ctx: ctx, id: def).name
+  | _ -> return "X"
+}
+
+fn args_slug(
+  fuel: Int where it >= 0,
+  ctx: context.Context,
+  args: List[types.TypeArg]
+) -> Text may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return ""
+  }
+  var out: Text = ""
+  for a: types.TypeArg in args {
+    match a with
+    | types.TypeA(ty) -> out = out ++ "_" ++ type_slug(fuel: fuel - 1, ctx: ctx, t: ty)
+    | _ -> skip()
+  }
+  return out
+}
+
+-- The target type of an impl, as the checker recorded it.
+fn impl_target(ctx: context.Context, impl_def: Int) -> types.Type may alloc {
+  for iface: Int in Map.keys(d: ctx.impls) {
+    match Map.find(d: ctx.impls, key: iface) with
+    | Some(value) -> {
+      for im: types.ImplInfo in value {
+        if im.def == impl_def {
+          return im.target
+        }
+      }
+    }
+    | None -> skip()
+  }
+  return types.ErrorT
+}
+
+fn impl_fn_name(ctx: context.Context, def: defs.Def) -> Text may alloc, mutate {
+  let parent: Int = or_neg(o: def.parent)
+  if parent < 0 {
+    return def.name
+  }
+  let im: defs.Def = context.get_def(ctx: ctx, id: parent)
+  return im.name ++ "$" ++ type_slug(
+    fuel: 1000,
+    ctx: ctx,
+    t: impl_target(ctx: ctx, impl_def: parent)
+  ) ++ "$" ++ def.name
+}
+
+-- The emitted name of a function: its own, or `Iface$Target$fn` inside an impl.
+fn emitted_name(ctx: context.Context, def: defs.Def) -> Text may alloc, mutate {
+  let parent: Int = or_neg(o: def.parent)
+  if parent >= 0 and context.get_def(ctx: ctx, id: parent).kind == defs.Impl {
+    return impl_fn_name(ctx: ctx, def: def)
+  }
+  return def.name
+}
+
+fn impl_dict_name(
+  ctx: context.Context,
+  iface: defs.Def,
+  target: types.Type
+) -> Text may alloc, mutate {
+  return iface.name ++ "$" ++ type_slug(fuel: 1000, ctx: ctx, t: target)
+}
+
+-- Type parameters of a record or union instantiation, bound to its arguments.
+fn subst_of(ctx: context.Context, ty: types.Type) -> Dict[Int, types.TypeArg] may alloc, mutate {
+  let s: types.Type = types.strip(t: ty)
+  var subst: Dict[Int, types.TypeArg] = Map.dict()
+  if not (s is types.RecordT or s is types.UnionT or s is types.Opaque) {
+    return subst
+  }
+  let args: List[types.TypeArg] = types.args_of(t: s)
+  var i: Int where it >= 0 = 0
+  for p: types.TParamInfo in tparams_or(o: Map.find(d: ctx.type_params, key: types.def_of(t: s))) {
+    if i < List.len(xs: args) {
+      Map.set(d: inout subst, key: types.tparam_def(p: p), value: List.get(xs: args, i: i))
+    }
+    i = i + 1
+  }
+  return subst
+}
+
+fn type_param_defs(ctx: context.Context, owner: Int) -> List[Int] may alloc, mutate {
+  var out: Builder[Int] = List.builder()
+  for p: types.TParamInfo in tparams_or(o: Map.find(d: ctx.type_params, key: owner)) {
+    match p with
+    | types.TypeP(def, _) -> List.push(b: inout out, x: def)
+    | _ -> skip()
+  }
+  return List.finish(b: out)
+}
+
+fn field_list(ctx: context.Context, owner: Int) -> List[ir.Field] may alloc, mutate {
+  var out: Builder[ir.Field] = List.builder()
+  for f: types.FieldInfo in fields_or(o: Map.find(d: ctx.fields, key: owner)) {
+    List.push(b: inout out, x: ir.Field { name: f.name, ty: f.ty })
+  }
+  return List.finish(b: out)
+}
+
+fn find_field(fs: List[types.FieldInfo], name: Text) -> Option[types.FieldInfo] {
+  for f: types.FieldInfo in fs {
+    if f.name == name {
+      return Some(value: f)
+    }
+  }
+  return None
+}
+
+-- Runs the pre-statement buffer protocol: `begin_collect` empties it, `end_collect` returns what gathered followed by `out` and restores it.
+fn begin_collect(l: inout L) -> List[ir.Stmt] may alloc, mutate {
+  let saved: List[ir.Stmt] = l.pre
+  l = { l with pre: [] }
+  return saved
+}
+
+fn end_collect(
+  l: inout L,
+  saved: List[ir.Stmt],
+  out: List[ir.Stmt]
+) -> List[ir.Stmt] may alloc, mutate {
+  let result_stmts: List[ir.Stmt] = l.pre ++ out
+  l = { l with pre: saved }
+  return result_stmts
+}
+
+fn push_pre(l: inout L, s: ir.Stmt) -> Unit may alloc, mutate {
+  l = { l with pre: List.append(xs: l.pre, x: s) }
+  return Unit
+}
+
+-- Lowers one module.
+-- Preconditions: every pass through `paths` ran without diagnostics.
+-- Effects: none beyond the returned form.
+pub fn lower_module(
+  ctx: context.Context,
+  m: defs.ModuleRecord,
+  tables: Dict[Int, loc.LineTable],
+  opts: Options
+) -> ir.Module may alloc, mutate {
+  var l: L = L {
+    file: m.file,
+    m: m,
+    tables: tables,
+    fn_ctx: None,
+    subst: Map.dict(),
+    it_expr: None,
+    field_object: None,
+    temp: 0,
+    pre: [],
+    impl_fns: Map.dict(),
+    verifying: false,
+    opts: opts
+  }
+  var items: Builder[ir.Item] = List.builder()
+  var main: Option[ir.MainSpec] = None
+  for item: ast.Item in m.tree.items {
+    match item_ir(l: inout l, ctx: ctx, item: item) with
+    | Some(value) -> List.push(b: inout items, x: value)
+    | None -> skip()
+    match item with
+    | ast.FnItem(decl) -> {
+      if decl.name.text == "main" and decl.vis.is_pub {
+        main = main_spec(l: l, ctx: ctx, f: decl)
+      }
+    }
+    | _ -> skip()
+  }
+  let tests: Option[ir.Tests] = tests_of(l: inout l, ctx: ctx)
+  var verifies: List[ir.Verify] = []
+  if opts.verify_all {
+    verifies = verifies_of(l: inout l, ctx: ctx)
+  }
+  return ir.Module {
+    mod: m,
+    items: List.finish(b: items),
+    tests: tests,
+    verifies: verifies,
+    main: main
+  }
+}
+
+-- Items ----------------------------------------------------------------------------------
+fn item_ir(l: inout L, ctx: context.Context, item: ast.Item) -> Option[ir.Item] may alloc, mutate {
+  match item with
+  | ast.FnItem(decl) -> {
+    match fn_decl(l: inout l, ctx: ctx, f: decl, impl_name: None) with
+    | Some(value) -> return Some(value: ir.FnItem(f: value))
+    | None -> return None
+  }
+  | ast.ConstItem(decl) -> {
+    let def: defs.Def = context.get_def(
+      ctx: ctx,
+      id: def_at(l: l, ctx: ctx, tag: defs.tag_item, span: decl.span)
+    )
+    let ty: types.Type = type_or(o: Map.find(d: ctx.decl_types, key: def.id))
+    match Map.find(d: ctx.const_values, key: def.id) with
+    | Some(value) -> return Some(
+      value: ir.ConstItem(def: def, ty: ty, value: ir.ValueE(value: value))
+    )
+    | None -> return Some(
+      value: ir.ConstItem(
+        def: def,
+        ty: ty,
+        value: expr(fuel: max_depth, l: inout l, ctx: ctx, e: decl.value, discard: false)
+      )
+    )
+  }
+  | ast.TypeAliasItem(decl) -> {
+    let def: defs.Def = context.get_def(
+      ctx: ctx,
+      id: def_at(l: l, ctx: ctx, tag: defs.tag_item, span: decl.span)
+    )
+    return Some(
+      value: ir.AliasItem(def: def, ty: type_or(o: Map.find(d: ctx.type_aliases, key: def.id)))
+    )
+  }
+  | ast.IntrinsicTypeItem(decl) -> {
+    let def: defs.Def = context.get_def(
+      ctx: ctx,
+      id: def_at(l: l, ctx: ctx, tag: defs.tag_item, span: decl.span)
+    )
+    return Some(
+      value: ir.IntrinsicTypeItem(def: def, params: type_param_defs(ctx: ctx, owner: def.id))
+    )
+  }
+  | ast.RecordItem(decl) -> {
+    let def: defs.Def = context.get_def(
+      ctx: ctx,
+      id: def_at(l: l, ctx: ctx, tag: defs.tag_item, span: decl.span)
+    )
+    return Some(
+      value: ir.RecordItem(
+        def: def,
+        params: type_param_defs(ctx: ctx, owner: def.id),
+        fields: field_list(ctx: ctx, owner: def.id)
+      )
+    )
+  }
+  | ast.UnionItem(decl) -> {
+    let def: defs.Def = context.get_def(
+      ctx: ctx,
+      id: def_at(l: l, ctx: ctx, tag: defs.tag_item, span: decl.span)
+    )
+    var variants: Builder[ir.Variant] = List.builder()
+    for v: Int in ids_or(o: Map.find(d: ctx.variants, key: def.id)) {
+      List.push(
+        b: inout variants,
+        x: ir.Variant {
+          def: context.get_def(ctx: ctx, id: v),
+          fields: field_list(ctx: ctx, owner: v)
+        }
+      )
+    }
+    return Some(
+      value: ir.UnionItem(
+        def: def,
+        params: type_param_defs(ctx: ctx, owner: def.id),
+        variants: List.finish(b: variants)
+      )
+    )
+  }
+  | ast.InterfaceItem(decl) -> {
+    let def: defs.Def = context.get_def(
+      ctx: ctx,
+      id: def_at(l: l, ctx: ctx, tag: defs.tag_item, span: decl.span)
+    )
+    var tparam: Option[Text] = None
+    var fns: Builder[ir.IfaceFn] = List.builder()
+    for d: defs.Def in List.finish(b: ctx.defs) {
+      if or_neg(o: d.parent) == def.id {
+        if d.kind == defs.TypeParam and tparam is None {
+          tparam = Some(value: d.name)
+        }
+        if d.kind == defs.IfaceFn {
+          match Map.find(d: ctx.signatures, key: d.id) with
+          | Some(value) -> List.push(b: inout fns, x: ir.IfaceFn { def: d, sig: value })
+          | None -> skip()
+        }
+      }
+    }
+    return Some(value: ir.InterfaceItem(def: def, tparam: tparam, fns: List.finish(b: fns)))
+  }
+  | ast.ImplItem(decl) -> return impl_item(l: inout l, ctx: ctx, item: decl)
+  | ast.CapabilityItem(decl) -> return Some(
+    value: ir.CapabilityItem(
+      def: context.get_def(
+        ctx: ctx,
+        id: def_at(l: l, ctx: ctx, tag: defs.tag_item, span: decl.span)
+      )
+    )
+  )
+  | _ -> return None
+}
+
+-- The interface function of `iface` named `name`, or -1.
+fn iface_fn_named(ctx: context.Context, iface: Int, name: Text) -> Int may alloc {
+  for d: defs.Def in List.finish(b: ctx.defs) {
+    if or_neg(o: d.parent) == iface and d.kind == defs.IfaceFn and d.name == name {
+      return d.id
+    }
+  }
+  return -1
+}
+
+fn impl_map(
+  l: L,
+  ctx: context.Context,
+  iface: Int,
+  fns: List[ast.FnDecl]
+) -> Dict[Int, ImplFn] may alloc, mutate {
+  var map: Dict[Int, ImplFn] = Map.dict()
+  for f: ast.FnDecl in fns {
+    let fd: defs.Def = context.get_def(
+      ctx: ctx,
+      id: def_at(l: l, ctx: ctx, tag: defs.tag_item, span: f.span)
+    )
+    let want: Int = iface_fn_named(ctx: ctx, iface: iface, name: f.name.text)
+    if want >= 0 {
+      Map.set(
+        d: inout map,
+        key: want,
+        value: ImplFn { def: fd, name: impl_fn_name(ctx: ctx, def: fd) }
+      )
+    }
+  }
+  return map
+}
+
+fn impl_item(
+  l: inout L,
+  ctx: context.Context,
+  item: ast.ImplDecl
+) -> Option[ir.Item] may alloc, mutate {
+  let impl_key: Int = key(l: l, tag: defs.tag_item, span: item.span)
+  let iface_id: Int = ref_def(ctx: ctx, k: impl_key)
+  if iface_id < 0 {
+    return None
+  }
+  let iface: defs.Def = context.get_def(ctx: ctx, id: iface_id)
+  let def: defs.Def = context.get_def(
+    ctx: ctx,
+    id: or_neg(o: Map.find(d: ctx.def_of, key: impl_key))
+  )
+  let target: types.Type = impl_target(ctx: ctx, impl_def: def.id)
+  l = { l with impl_fns: impl_map(l: l, ctx: ctx, iface: iface_id, fns: item.fns) }
+  var fns: Builder[ir.Fn] = List.builder()
+  for f: ast.FnDecl in item.fns {
+    let fd: defs.Def = context.get_def(
+      ctx: ctx,
+      id: def_at(l: l, ctx: ctx, tag: defs.tag_item, span: f.span)
+    )
+    match fn_decl(
+      l: inout l,
+      ctx: ctx,
+      f: f,
+      impl_name: Some(value: impl_fn_name(ctx: ctx, def: fd))
+    ) with
+    | Some(value) -> List.push(b: inout fns, x: value)
+    | None -> skip()
+  }
+  l = { l with impl_fns: Map.dict() }
+  let fn_list: List[ir.Fn] = List.finish(b: fns)
+  var entries: Builder[ir.Entry] = List.builder()
+  for f: ir.Fn in fn_list {
+    List.push(b: inout entries, x: ir.Entry { name: f.def.name, fn_ir: f })
+  }
+  return Some(
+    value: ir.ImplItem(
+      def: def,
+      iface: iface,
+      target: target,
+      dict_name: impl_dict_name(ctx: ctx, iface: iface, target: target),
+      fns: fn_list,
+      entries: List.finish(b: entries)
+    )
+  )
+}
+
+-- Whether an obligation from `source` (a contract key) is not proved somewhere.
+fn checked_somewhere(ctx: context.Context, source: Int) -> Bool may alloc {
+  for i: Int in 0 ..< ctx.obligation_count {
+    let o: obligations.Obligation = context.get_obligation(ctx: ctx, id: i)
+    if or_neg(o: o.source) == source and not is_proved(o: o) {
+      return true
+    }
+  }
+  return false
+}
+
+fn old_names(root: ast.Expr) -> List[Text] may alloc, mutate {
+  var out: Builder[Text] = List.builder()
+  for n: walk.Node in walk.nodes_in_expr(e: root, into_verify: true) {
+    match n with
+    | walk.NExpr(e) -> {
+      match e with
+      | ast.Old(name, _) -> List.push(b: inout out, x: name.text)
+      | _ -> skip()
+    }
+    | _ -> skip()
+  }
+  return List.finish(b: out)
+}
+
+fn contains_text(xs: List[Text], x: Text) -> Bool {
+  for y: Text in xs {
+    if y == x {
+      return true
+    }
+  }
+  return false
+}
+
+fn fn_decl(
+  l: inout L,
+  ctx: context.Context,
+  f: ast.FnDecl,
+  impl_name: Option[Text]
+) -> Option[ir.Fn] may alloc, mutate {
+  let def: defs.Def = context.get_def(
+    ctx: ctx,
+    id: def_at(l: l, ctx: ctx, tag: defs.tag_item, span: f.span)
+  )
+  match Map.find(d: ctx.signatures, key: def.id) with
+  | None -> return None
+  | Some(value) -> return fn_decl_sig(
+    l: inout l,
+    ctx: ctx,
+    f: f,
+    def: def,
+    sig: value,
+    impl_name: impl_name
+  )
+}
+
+fn fn_decl_sig(
+  l: inout L,
+  ctx: context.Context,
+  f: ast.FnDecl,
+  def: defs.Def,
+  sig: types.Signature,
+  impl_name: Option[Text]
+) -> Option[ir.Fn] may alloc, mutate {
+  let tp: TParamLists = tparam_lists(ctx: ctx, sig: sig)
+  let dicts: Dict[Int, Text] = tp.dicts
+  var params: Builder[ir.Param] = List.builder()
+  var inout_names: Builder[Text] = List.builder()
+  for p: types.FnParam in sig.params {
+    List.push(b: inout params, x: ir.Param { name: p.name, ty: p.ty, is_inout: p.is_inout })
+    if p.is_inout {
+      List.push(b: inout inout_names, x: p.name)
+    }
+  }
+  let param_list: List[ir.Param] = List.finish(b: params)
+  let name: Text = text_or(o: impl_name, dflt: def.name)
+  if f.is_intrinsic {
+    let q: Text = context.qualified_name(ctx: ctx, id: def.id)
+    var ns: Text = ""
+    var i: Int where it >= 0 = 0
+    for seg: Text in Text.split(t: q, sep: ".") {
+      if i == 1 {
+        ns = seg
+      }
+      i = i + 1
+    }
+    return Some(
+      value: ir.Fn {
+        def: def,
+        sig: sig,
+        name: name,
+        dict_params: tp.dict_params,
+        const_params: tp.const_params,
+        params: param_list,
+        ret: sig.ret,
+        intrinsic: Some(value: ir.Intrinsic { ns: ns, name: def.name }),
+        entry_checks: [],
+        body: None,
+        early_return: false
+      }
+    )
+  }
+  if f.body is None {
+    return None
+  }
+  -- `old(x)` snapshots are taken only for contracts some obligation of which is checked at runtime:
+  -- a proved postcondition emits no check, and copying a large `inout` value on every call is what a
+  -- recursive-descent parser cannot afford.
+  var olds: List[Text] = []
+  var post: Builder[ast.Contract] = List.builder()
+  var measure_clause: Option[ast.Contract] = None
+  for c: ast.Contract in f.contracts {
+    if c.clause == "ensures" {
+      List.push(b: inout post, x: c)
+    }
+    if c.clause == "decreases" and measure_clause is None {
+      measure_clause = Some(value: c)
+    }
+    if checked_somewhere(ctx: ctx, source: key(l: l, tag: defs.tag_sig, span: c.span)) {
+      for n: Text in old_names(root: c.expr) {
+        if not contains_text(xs: olds, x: n) {
+          olds = List.append(xs: olds, x: n)
+        }
+      }
+    }
+  }
+  var measured: Bool = false
+  var measure_key: Int = -1
+  match measure_clause with
+  | Some(value) -> {
+    measure_key = key(l: l, tag: defs.tag_sig, span: value.span)
+    for i: Int in 0 ..< ctx.obligation_count {
+      let o: obligations.Obligation = context.get_obligation(ctx: ctx, id: i)
+      if o.def == def.id and o.kind is obligations.Decreases and (o.callee is Some or o.at == measure_key) and not is_proved(
+        o: o
+      ) {
+        measured = true
+      }
+    }
+  }
+  | None -> skip()
+  var measure_name: Option[Text] = None
+  if measured {
+    measure_name = Some(value: "$measure")
+  }
+  let fctx: FnCtx = FnCtx {
+    inout_names: List.finish(b: inout_names),
+    ret: sig.ret,
+    post: List.finish(b: post),
+    def: Some(value: def),
+    dicts: dicts,
+    result_expr: None,
+    measure: measure_name
+  }
+  l = { l with fn_ctx: Some(value: fctx) }
+  let saved: List[ir.Stmt] = begin_collect(l: inout l)
+  let checks: List[ir.Stmt] = entry_checks(
+    l: inout l,
+    ctx: ctx,
+    sig: sig,
+    contracts: f.contracts,
+    def_name: def.name
+  )
+  var entry: List[ir.Stmt] = end_collect(l: inout l, saved: saved, out: checks)
+  match measure_clause with
+  | Some(value) -> {
+    if measured {
+      let saved2: List[ir.Stmt] = begin_collect(l: inout l)
+      let m: ir.Expr = expr(fuel: max_depth, l: inout l, ctx: ctx, e: value.expr, discard: false)
+      entry = entry ++ end_collect(
+        l: inout l,
+        saved: saved2,
+        out: [ir.Let(name: "$measure", ty: types.Prim(name: "Int"), mutable: false, value: m)]
+      )
+      for i: Int in 0 ..< ctx.obligation_count {
+        let o: obligations.Obligation = context.get_obligation(ctx: ctx, id: i)
+        if o.def == def.id and o.kind is obligations.Decreases and o.at == measure_key {
+          if not is_proved(o: o) {
+            entry = List.append(
+              xs: entry,
+              x: ir.Check(
+                cond: ir.Cmp(
+                  op: ">=",
+                  left: ir.Local(name: "$measure", ty: types.Prim(name: "Int")),
+                  right: ir.IntE(v: 0),
+                  is_float: false
+                ),
+                ob: ob_ref_of(l: l, ctx: ctx, o: o)
+              )
+            )
+          }
+        }
+      }
+    }
+  }
+  | None -> skip()
+  for o: Text in olds {
+    var ty: types.Type = types.ErrorT
+    for p: ir.Param in param_list {
+      if p.name == o {
+        ty = p.ty
+      }
+    }
+    entry = List.append(
+      xs: entry,
+      x: ir.Let(
+        name: "$old_" ++ o,
+        ty: ty,
+        mutable: false,
+        value: ir.Snapshot(value: ir.Local(name: o, ty: ty), ty: ty)
+      )
+    )
+  }
+  var body: List[ir.Stmt] = []
+  var early: Bool = false
+  match f.body with
+  | Some(value) -> {
+    body = block(fuel: max_depth, l: inout l, ctx: ctx, b: value)
+    early = block_has_try(b: value)
+  }
+  | None -> skip()
+  if List.len(xs: inout_names_of(l: l)) > 0 and is_unit(t: sig.ret) {
+    body = List.append(xs: body, x: ir.Return(value: ir.UnitE))
+  }
+  l = { l with fn_ctx: None }
+  return Some(
+    value: ir.Fn {
+      def: def,
+      sig: sig,
+      name: name,
+      dict_params: tp.dict_params,
+      const_params: tp.const_params,
+      params: param_list,
+      ret: sig.ret,
+      intrinsic: None,
+      entry_checks: entry,
+      body: Some(value: body),
+      early_return: early
+    }
+  )
+}
+
+record TParamLists {
+  dict_params: List[ir.DictParam]
+  const_params: List[ir.ConstParam]
+  dicts: Dict[Int, Text]
+}
+
+fn tparam_lists(ctx: context.Context, sig: types.Signature) -> TParamLists may alloc, mutate {
+  var dict_params: Builder[ir.DictParam] = List.builder()
+  var const_params: Builder[ir.ConstParam] = List.builder()
+  var dicts: Dict[Int, Text] = Map.dict()
+  for p: types.TParamInfo in sig.tparams {
+    match p with
+    | types.TypeP(def, bound) -> {
+      match bound with
+      | Some(value) -> {
+        let name: Text = "$dict_" ++ context.get_def(ctx: ctx, id: def).name
+        List.push(b: inout dict_params, x: ir.DictParam { def: def, iface: value, name: name })
+        Map.set(d: inout dicts, key: def, value: name)
+      }
+      | None -> skip()
+    }
+    | types.ConstP(def, ty) -> List.push(
+      b: inout const_params,
+      x: ir.ConstParam { def: def, name: context.get_def(ctx: ctx, id: def).name, ty: ty }
+    )
+    | _ -> skip()
+  }
+  return TParamLists {
+    dict_params: List.finish(b: dict_params),
+    const_params: List.finish(b: const_params),
+    dicts: dicts
+  }
+}
+
+fn inout_names_of(l: L) -> List[Text] may alloc {
+  match l.fn_ctx with
+  | Some(value) -> return value.inout_names
+  | None -> return []
+}
+
+-- Parameter refinements and non-pinned `requires` the callee checks on entry, unless every call site proved them.
+fn entry_checks(
+  l: inout L,
+  ctx: context.Context,
+  sig: types.Signature,
+  contracts: List[ast.Contract],
+  def_name: Text
+) -> List[ir.Stmt] may alloc, mutate {
+  var out: Builder[ir.Stmt] = List.builder()
+  var call_sites: Builder[obligations.Obligation] = List.builder()
+  for i: Int in 0 ..< ctx.obligation_count {
+    let o: obligations.Obligation = context.get_obligation(ctx: ctx, id: i)
+    if or_neg(o: o.callee) == sig.def {
+      List.push(b: inout call_sites, x: o)
+    }
+  }
+  let sites: List[obligations.Obligation] = List.finish(b: call_sites)
+  var i: Int where it >= 0 = 0
+  for p: types.FnParam in sig.params {
+    if i < List.len(xs: sig.param_defs) {
+      let pd: Int = List.get(xs: sig.param_defs, i: i)
+      match Map.find(d: ctx.decl_types, key: pd) with
+      | None -> skip()
+      | Some(value) -> {
+        var flows: Int where it >= 0 = 0
+        var all_proved: Bool = true
+        for o: obligations.Obligation in sites {
+          if o.kind is obligations.Refinement and text_or(o: o.param, dflt: "") == p.name {
+            flows = flows + 1
+            if not is_proved(o: o) {
+              all_proved = false
+            }
+          }
+        }
+        if not (flows > 0 and all_proved) {
+          let pdef: defs.Def = context.get_def(ctx: ctx, id: pd)
+          let local: ir.Expr = ir.Local(name: p.name, ty: value)
+          for pred: Pred in refinement_preds(ctx: ctx, t: value) {
+            let cond: ir.Expr = with_it(
+              fuel: max_depth,
+              l: inout l,
+              ctx: ctx,
+              it_expr: local,
+              pred: pred
+            )
+            List.push(
+              b: inout out,
+              x: ir.Check(
+                cond: cond,
+                ob: ob_ref(
+                  l: l,
+                  ctx: ctx,
+                  kind: "refinement",
+                  text: printer.print_expr(e: pred.e),
+                  file: pdef.file,
+                  span: pdef.span,
+                  def: def_name
+                )
+              )
+            )
+          }
+        }
+      }
+    }
+    i = i + 1
+  }
+  for c: ast.Contract in contracts {
+    if c.clause == "requires" and not c.is_proved {
+      let ck: Int = key(l: l, tag: defs.tag_sig, span: c.span)
+      var n: Int where it >= 0 = 0
+      var all_proved: Bool = true
+      for o: obligations.Obligation in sites {
+        if o.kind is obligations.Requires and or_neg(o: o.source) == ck {
+          n = n + 1
+          if not is_proved(o: o) {
+            all_proved = false
+          }
+        }
+      }
+      if not (n > 0 and all_proved) {
+        List.push(
+          b: inout out,
+          x: ir.Check(
+            cond: expr(fuel: max_depth, l: inout l, ctx: ctx, e: c.expr, discard: false),
+            ob: ob_ref(
+              l: l,
+              ctx: ctx,
+              kind: "requires",
+              text: printer.print_expr(e: c.expr),
+              file: l.file,
+              span: c.span,
+              def: def_name
+            )
+          )
+        )
+      }
+    }
+  }
+  return List.finish(b: out)
+}
+
+-- Lowers a refinement predicate with `it` bound to `it_expr`, in the predicate's own file.
+fn with_it(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  it_expr: ir.Expr,
+  pred: Pred
+) -> ir.Expr may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return ir.UnitE
+  }
+  let saved_it: Option[ir.Expr] = l.it_expr
+  let saved_file: Int = l.file
+  l = { l with it_expr: Some(value: it_expr), file: pred.file }
+  let out: ir.Expr = expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: pred.e, discard: false)
+  l = { l with it_expr: saved_it, file: saved_file }
+  return out
+}
+
+fn main_spec(l: L, ctx: context.Context, f: ast.FnDecl) -> Option[ir.MainSpec] may alloc, mutate {
+  let fn_id: Int = def_at(l: l, ctx: ctx, tag: defs.tag_item, span: f.span)
+  match Map.find(d: ctx.signatures, key: fn_id) with
+  | None -> return None
+  | Some(value) -> {
+    var roots: Builder[ir.Root] = List.builder()
+    var args: Text = "args"
+    for p: types.FnParam in value.params {
+      let s: types.Type = types.strip(t: p.ty)
+      match s with
+      | types.Capability(def, _, _) -> {
+        if Text.starts_with(t: context.qualified_name(ctx: ctx, id: def), prefix: "std.io.") {
+          List.push(
+            b: inout roots,
+            x: ir.Root { name: p.name, kind: context.get_def(ctx: ctx, id: def).name }
+          )
+        }
+      }
+      | types.Opaque(_, _) -> args = p.name
+      | _ -> skip()
+    }
+    return Some(value: ir.MainSpec { roots: List.finish(b: roots), args: args })
+  }
+}
+
+-- Statements -----------------------------------------------------------------------------
+fn block(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  b: ast.Block
+) -> List[ir.Stmt] may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return []
+  }
+  var out: List[ir.Stmt] = []
+  for s: ast.Stmt in b.stmts {
+    out = out ++ stmt(fuel: fuel - 1, l: inout l, ctx: ctx, s: s)
+  }
+  return out
+}
+
+fn stmt(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  s: ast.Stmt
+) -> List[ir.Stmt] may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return []
+  }
+  let saved: List[ir.Stmt] = begin_collect(l: inout l)
+  let out: List[ir.Stmt] = stmt_inner(fuel: fuel - 1, l: inout l, ctx: ctx, s: s)
+  return end_collect(l: inout l, saved: saved, out: out)
+}
+
+fn stmt_inner(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  s: ast.Stmt
+) -> List[ir.Stmt] may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return []
+  }
+  match s with
+  | ast.Let(name, _, value, span) -> return let_stmt(
+    fuel: fuel - 1,
+    l: inout l,
+    ctx: ctx,
+    name: name.text,
+    e: value,
+    at: span,
+    mutable: false
+  )
+  | ast.Var(name, _, value, span) -> return let_stmt(
+    fuel: fuel - 1,
+    l: inout l,
+    ctx: ctx,
+    name: name.text,
+    e: value,
+    at: span,
+    mutable: true
+  )
+  | ast.Assign(name, value, span) -> {
+    let def: Int = ref_def(ctx: ctx, k: key(l: l, tag: defs.tag_stmt, span: span))
+    var declared: types.Type = types.ErrorT
+    var target: Text = name.text
+    if def >= 0 {
+      declared = type_or(o: Map.find(d: ctx.decl_types, key: def))
+      target = context.get_def(ctx: ctx, id: def).name
+    }
+    return [
+      ir.Assign(
+        name: target,
+        ty: declared,
+        value: checked_flow(fuel: fuel - 1, l: inout l, ctx: ctx, e: value, declared: declared)
+      )
+    ]
+  }
+  | ast.Return(value, span) -> return return_stmt(
+    fuel: fuel - 1,
+    l: inout l,
+    ctx: ctx,
+    e: value,
+    at: span
+  )
+  | ast.If(cond, then_block, else_block, _) -> {
+    let c: ir.Expr = expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: cond, discard: false)
+    let then_ir: List[ir.Stmt] = block(fuel: fuel - 1, l: inout l, ctx: ctx, b: then_block)
+    var else_ir: Option[List[ir.Stmt]] = None
+    match else_block with
+    | Some(value) -> else_ir = Some(value: block(fuel: fuel - 1, l: inout l, ctx: ctx, b: value))
+    | None -> skip()
+    return [ir.If(cond: c, then_block: then_ir, else_block: else_ir)]
+  }
+  | ast.Match(scrutinee, arms, _) -> return match_stmt(
+    fuel: fuel - 1,
+    l: inout l,
+    ctx: ctx,
+    scrutinee: scrutinee,
+    arms: arms
+  )
+  | ast.Loop(cond, clauses, body, span) -> return loop_stmt(
+    fuel: fuel - 1,
+    l: inout l,
+    ctx: ctx,
+    cond: cond,
+    clauses: clauses,
+    body: body,
+    at: span
+  )
+  | ast.For(name, _, domain, body, span) -> return for_stmt(
+    fuel: fuel - 1,
+    l: inout l,
+    ctx: ctx,
+    domain: domain,
+    body: body,
+    at: span
+  )
+  | ast.Assume(claim, justification, _, _) -> return [
+    ir.Comment(text: "assume " ++ qname_text(q: claim) ++ " " ++ json.quote(t: justification))
+  ]
+  | ast.ExprStmt(expr, _) -> {
+    let e: ir.Expr = expr_of(fuel: fuel - 1, l: inout l, ctx: ctx, e: expr, discard: true)
+    if e is ir.UnitE {
+      return []
+    }
+    return [ir.ExprStmt(expr: e)]
+  }
+}
+
+fn qname_text(q: ast.QName) -> Text may alloc, mutate {
+  var parts: Builder[Text] = List.builder()
+  for s: ast.Ident in q.segments {
+    List.push(b: inout parts, x: s.text)
+  }
+  return Text.join(parts: List.finish(b: parts), sep: ".")
+}
+
+fn let_stmt(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  name: Text,
+  e: ast.Expr,
+  at: ast.Span,
+  mutable: Bool
+) -> List[ir.Stmt] may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return []
+  }
+  let def: Int = def_at(l: l, ctx: ctx, tag: defs.tag_stmt, span: at)
+  var declared: types.Type = types.ErrorT
+  var target: Text = name
+  if def >= 0 {
+    declared = type_or(o: Map.find(d: ctx.decl_types, key: def))
+    target = context.get_def(ctx: ctx, id: def).name
+  }
+  return [
+    ir.Let(
+      name: target,
+      ty: declared,
+      mutable: mutable,
+      value: checked_flow(fuel: fuel - 1, l: inout l, ctx: ctx, e: e, declared: declared)
+    )
+  ]
+}
+
+-- `value` flowing into `declared`: wrapped in the refinement checks when that flow is a checked obligation.
+fn checked_flow(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  e: ast.Expr,
+  declared: types.Type
+) -> ir.Expr may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return ir.UnitE
+  }
+  let ob: Option[obligations.Obligation] = find_ob(
+    ctx: ctx,
+    k: expr_key(l: l, e: e),
+    kind: obligations.Refinement
+  )
+  let value: ir.Expr = expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: e, discard: false)
+  if ob is None {
+    return value
+  }
+  let o: obligations.Obligation = ob_or(o: ob)
+  if not is_checked(o: o) {
+    return value
+  }
+  let preds: List[Pred] = refinement_preds(ctx: ctx, t: declared)
+  if List.len(xs: preds) == 0 {
+    return value
+  }
+  let it_name: Text = tmp(l: inout l, prefix: "it")
+  let it_expr: ir.Expr = ir.Local(name: it_name, ty: declared)
+  var checks: Builder[ir.Stmt] = List.builder()
+  for p: Pred in preds {
+    List.push(
+      b: inout checks,
+      x: ir.Check(
+        cond: with_it(fuel: fuel - 1, l: inout l, ctx: ctx, it_expr: it_expr, pred: p),
+        ob: ob_ref_of(l: l, ctx: ctx, o: o)
+      )
+    )
+  }
+  return ir.Checked(value: value, it_name: it_name, ty: declared, checks: List.finish(b: checks))
+}
+
+fn ob_or(o: Option[obligations.Obligation]) -> obligations.Obligation may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return obligations.Obligation {
+    id: -1,
+    kind: obligations.Assertion,
+    at: 0,
+    at_file: 0,
+    at_span: ast.Span { start: 0, end: 0 },
+    def: 0,
+    text: "",
+    source: None,
+    site: obligations.OtherSite,
+    pinned: false,
+    callee: None,
+    param: None,
+    status: obligations.Pending,
+    by: None
+  }
+}
+
+fn return_stmt(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  e: ast.Expr,
+  at: ast.Span
+) -> List[ir.Stmt] may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return []
+  }
+  match l.fn_ctx with
+  | None -> return [
+    ir.Return(value: expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: e, discard: false))
+  ]
+  | Some(value) -> {
+    let v: ir.Expr = checked_flow(fuel: fuel - 1, l: inout l, ctx: ctx, e: e, declared: value.ret)
+    var post_obs: Builder[obligations.Obligation] = List.builder()
+    for o: obligations.Obligation in obligations_at(
+      ctx: ctx,
+      k: key(l: l, tag: defs.tag_stmt, span: at)
+    ) {
+      if o.kind is obligations.Ensures and is_checked(o: o) {
+        List.push(b: inout post_obs, x: o)
+      }
+    }
+    if List.built(b: post_obs) == 0 {
+      return [ir.Return(value: v)]
+    }
+    let r: Text = tmp(l: inout l, prefix: "r")
+    let result_expr: ir.Expr = ir.Local(name: r, ty: value.ret)
+    var out: List[ir.Stmt] = [ir.Let(name: r, ty: value.ret, mutable: false, value: v)]
+    l = { l with fn_ctx: Some(value: { value with result_expr: Some(value: result_expr) }) }
+    for o: obligations.Obligation in List.finish(b: post_obs) {
+      let src: Int = or_neg(o: o.source)
+      for c: ast.Contract in value.post {
+        if key(l: l, tag: defs.tag_sig, span: c.span) == src {
+          out = List.append(
+            xs: out,
+            x: ir.Check(
+              cond: expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: c.expr, discard: false),
+              ob: ob_ref_of(l: l, ctx: ctx, o: o)
+            )
+          )
+        }
+      }
+    }
+    l = { l with fn_ctx: Some(value: { value with result_expr: None }) }
+    return List.append(xs: out, x: ir.Return(value: result_expr))
+  }
+}
+
+fn match_stmt(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  scrutinee: ast.Expr,
+  arms: List[ast.Arm]
+) -> List[ir.Stmt] may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return []
+  }
+  let t: Text = tmp(l: inout l, prefix: "m")
+  let ty: types.Type = type_of_expr(l: l, ctx: ctx, e: scrutinee)
+  let scrut: ir.Expr = expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: scrutinee, discard: false)
+  let subject: ir.Expr = ir.Local(name: t, ty: ty)
+  var out: Builder[ir.Arm] = List.builder()
+  for arm: ast.Arm in arms {
+    let pattern_test: Option[ir.Expr] = pattern_test_of(
+      fuel: fuel - 1,
+      l: inout l,
+      ctx: ctx,
+      p: arm.pattern,
+      subject: subject,
+      ty: ty
+    )
+    let bindings: List[ir.Binding] = pattern_bindings(
+      l: l,
+      ctx: ctx,
+      p: arm.pattern,
+      subject: subject,
+      ty: ty
+    )
+    var guard: Option[ir.Expr] = None
+    match arm.guard with
+    | Some(value) -> guard = Some(
+      value: expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: value, discard: false)
+    )
+    | None -> skip()
+    var body: List[ir.Stmt] = []
+    match arm.body with
+    | ast.ArmBlock(block) -> body = block_ir(fuel: fuel - 1, l: inout l, ctx: ctx, b: block)
+    | ast.ArmStmt(stmt) -> body = stmt_ir(fuel: fuel - 1, l: inout l, ctx: ctx, s: stmt)
+    List.push(
+      b: inout out,
+      x: ir.Arm { pattern_test: pattern_test, bindings: bindings, guard: guard, body: body }
+    )
+  }
+  return [ir.Match(tmp: t, ty: ty, scrutinee: scrut, arms: List.finish(b: out))]
+}
+
+fn block_ir(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  b: ast.Block
+) -> List[ir.Stmt] may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return []
+  }
+  return block(fuel: fuel - 1, l: inout l, ctx: ctx, b: b)
+}
+
+fn stmt_ir(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  s: ast.Stmt
+) -> List[ir.Stmt] may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return []
+  }
+  return stmt(fuel: fuel - 1, l: inout l, ctx: ctx, s: s)
+}
+
+fn pattern_test_of(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  p: ast.Pattern,
+  subject: ir.Expr,
+  ty: types.Type
+) -> Option[ir.Expr] may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return None
+  }
+  match p with
+  | ast.WildcardPat(_) -> return None
+  | ast.BindPat(_, _) -> return None
+  | ast.LitPat(literal, _) -> return Some(
+    value: ir.Eq(
+      left: subject,
+      right: expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: literal, discard: false),
+      ty: ty,
+      prim: false,
+      negate: false
+    )
+  )
+  | ast.VariantPat(_, _, span) -> {
+    let def: Int = ref_def(ctx: ctx, k: key(l: l, tag: defs.tag_pattern, span: span))
+    if def < 0 {
+      return Some(value: ir.BoolE(v: false))
+    }
+    return Some(
+      value: ir.IsVariant(subject: subject, variant: context.get_def(ctx: ctx, id: def), ty: ty)
+    )
+  }
+}
+
+fn pattern_bindings(
+  l: L,
+  ctx: context.Context,
+  p: ast.Pattern,
+  subject: ir.Expr,
+  ty: types.Type
+) -> List[ir.Binding] may alloc, mutate {
+  match p with
+  | ast.BindPat(name, _) -> return [ir.Binding { name: name.text, ty: ty, value: subject }]
+  | ast.VariantPat(_, fields, span) -> {
+    match fields with
+    | None -> return []
+    | Some(value) -> {
+      let def: Int = ref_def(ctx: ctx, k: key(l: l, tag: defs.tag_pattern, span: span))
+      if def < 0 {
+        return []
+      }
+      let fs: List[types.FieldInfo] = fields_or(o: Map.find(d: ctx.fields, key: def))
+      let subst: Dict[Int, types.TypeArg] = subst_of(ctx: ctx, ty: ty)
+      var out: Builder[ir.Binding] = List.builder()
+      var i: Int where it >= 0 = 0
+      var stop: Bool = false
+      for pf: ast.PatField in value {
+        if not stop {
+          match pf with
+          | ast.PatFieldRest(_) -> stop = true
+          | ast.PatFieldName(name, _) -> {
+            if i < List.len(xs: fs) {
+              let f: types.FieldInfo = List.get(xs: fs, i: i)
+              let ft: types.Type = types.substitute(t: f.ty, subst: subst)
+              List.push(
+                b: inout out,
+                x: ir.Binding {
+                  name: name.text,
+                  ty: ft,
+                  value: ir.FieldE(
+                    object: subject,
+                    name: f.name,
+                    ty: ft,
+                    owner: Some(value: context.get_def(ctx: ctx, id: def))
+                  )
+                }
+              )
+            }
+            i = i + 1
+          }
+          | ast.PatFieldSkip(_) -> i = i + 1
+        }
+      }
+      return List.finish(b: out)
+    }
+  }
+  | _ -> return []
+}
+
+fn find_source(
+  obs: List[obligations.Obligation],
+  kind: obligations.Kind,
+  src: Int
+) -> Option[obligations.Obligation] {
+  for o: obligations.Obligation in obs {
+    if same_kind(a: o.kind, b: kind) and or_neg(o: o.source) == src {
+      return Some(value: o)
+    }
+  }
+  return None
+}
+
+fn loop_stmt(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  cond: ast.Expr,
+  clauses: List[ast.LoopClause],
+  body: ast.Block,
+  at: ast.Span
+) -> List[ir.Stmt] may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return []
+  }
+  let obs: List[obligations.Obligation] = obligations_at(
+    ctx: ctx,
+    k: key(l: l, tag: defs.tag_stmt, span: at)
+  )
+  var invariants: Builder[ast.LoopClause] = List.builder()
+  var dec_clause: Option[ast.LoopClause] = None
+  for c: ast.LoopClause in clauses {
+    if c.clause == "invariant" {
+      List.push(b: inout invariants, x: c)
+    }
+    if c.clause == "decreases" and dec_clause is None {
+      dec_clause = Some(value: c)
+    }
+  }
+  let invs: List[ast.LoopClause] = List.finish(b: invariants)
+  var out: List[ir.Stmt] = []
+  for inv: ast.LoopClause in invs {
+    match find_source(
+      obs: obs,
+      kind: obligations.InvariantEntry,
+      src: key(l: l, tag: defs.tag_sig, span: inv.span)
+    ) with
+    | Some(value) -> {
+      if is_checked(o: value) {
+        out = List.append(
+          xs: out,
+          x: ir.Check(
+            cond: expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: inv.expr, discard: false),
+            ob: ob_ref_of(l: l, ctx: ctx, o: value)
+          )
+        )
+      }
+    }
+    | None -> skip()
+  }
+  let c: ir.Expr = expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: cond, discard: false)
+  var body_ir: List[ir.Stmt] = []
+  var dec: Option[obligations.Obligation] = None
+  match dec_clause with
+  | Some(value) -> dec = find_source(
+    obs: obs,
+    kind: obligations.Decreases,
+    src: key(l: l, tag: defs.tag_sig, span: value.span)
+  )
+  | None -> skip()
+  let measure: Text = tmp(l: inout l, prefix: "measure")
+  let measure_expr: ir.Expr = ir.Local(name: measure, ty: types.Prim(name: "Int"))
+  var checked_decreases: Bool = false
+  match dec with
+  | Some(value) -> checked_decreases = is_checked(o: value)
+  | None -> skip()
+  if checked_decreases {
+    let saved: List[ir.Stmt] = begin_collect(l: inout l)
+    let m: ir.Expr = expr(
+      fuel: fuel - 1,
+      l: inout l,
+      ctx: ctx,
+      e: clause_expr(o: dec_clause),
+      discard: false
+    )
+    body_ir = body_ir ++ end_collect(
+      l: inout l,
+      saved: saved,
+      out: [ir.Let(name: measure, ty: types.Prim(name: "Int"), mutable: false, value: m)]
+    )
+    body_ir = List.append(
+      xs: body_ir,
+      x: ir.Check(
+        cond: ir.Cmp(op: ">=", left: measure_expr, right: ir.IntE(v: 0), is_float: false),
+        ob: ob_ref_of(l: l, ctx: ctx, o: ob_or(o: dec))
+      )
+    )
+  }
+  body_ir = body_ir ++ block(fuel: fuel - 1, l: inout l, ctx: ctx, b: body)
+  for inv: ast.LoopClause in invs {
+    match find_source(
+      obs: obs,
+      kind: obligations.InvariantStep,
+      src: key(l: l, tag: defs.tag_sig, span: inv.span)
+    ) with
+    | Some(value) -> {
+      if is_checked(o: value) {
+        let saved: List[ir.Stmt] = begin_collect(l: inout l)
+        let cond_ir: ir.Expr = expr(
+          fuel: fuel - 1,
+          l: inout l,
+          ctx: ctx,
+          e: inv.expr,
+          discard: false
+        )
+        body_ir = body_ir ++ end_collect(
+          l: inout l,
+          saved: saved,
+          out: [ir.Check(cond: cond_ir, ob: ob_ref_of(l: l, ctx: ctx, o: value))]
+        )
+      }
+    }
+    | None -> skip()
+  }
+  if checked_decreases {
+    let saved: List[ir.Stmt] = begin_collect(l: inout l)
+    let again: ir.Expr = expr(
+      fuel: fuel - 1,
+      l: inout l,
+      ctx: ctx,
+      e: clause_expr(o: dec_clause),
+      discard: false
+    )
+    body_ir = body_ir ++ end_collect(
+      l: inout l,
+      saved: saved,
+      out: [
+        ir.Check(
+          cond: ir.Cmp(op: "<", left: again, right: measure_expr, is_float: false),
+          ob: ob_ref_of(l: l, ctx: ctx, o: ob_or(o: dec))
+        )
+      ]
+    )
+  }
+  return List.append(xs: out, x: ir.Loop(cond: c, body: body_ir))
+}
+
+fn clause_expr(o: Option[ast.LoopClause]) -> ast.Expr may alloc {
+  match o with
+  | Some(value) -> return value.expr
+  | None -> return ast.Hole(span: ast.Span { start: 0, end: 0 })
+}
+
+fn for_stmt(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  domain: ast.Domain,
+  body: ast.Block,
+  at: ast.Span
+) -> List[ir.Stmt] may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return []
+  }
+  let def: defs.Def = context.get_def(
+    ctx: ctx,
+    id: def_at(l: l, ctx: ctx, tag: defs.tag_stmt, span: at)
+  )
+  let declared: types.Type = type_or(o: Map.find(d: ctx.decl_types, key: def.id))
+  match domain with
+  | ast.RangeDomain(lo, hi, _) -> {
+    let lo_ir: ir.Expr = expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: lo, discard: false)
+    var hi_ir: ir.Expr = expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: hi, discard: false)
+    if not (hi_ir is ir.IntE or hi_ir is ir.Local) {
+      let name: Text = tmp(l: inout l, prefix: "hi")
+      push_pre(
+        l: inout l,
+        s: ir.Let(name: name, ty: types.Prim(name: "Int"), mutable: false, value: hi_ir)
+      )
+      hi_ir = ir.Local(name: name, ty: types.Prim(name: "Int"))
+    }
+    return [
+      ir.ForRange(
+        name: def.name,
+        lo: lo_ir,
+        hi: hi_ir,
+        body: block(fuel: fuel - 1, l: inout l, ctx: ctx, b: body)
+      )
+    ]
+  }
+  | ast.InDomain(expr, _) -> {
+    let list: ir.Expr = expr_of(fuel: fuel - 1, l: inout l, ctx: ctx, e: expr, discard: false)
+    let ob: Option[obligations.Obligation] = find_ob(
+      ctx: ctx,
+      k: expr_key(l: l, e: expr),
+      kind: obligations.Refinement
+    )
+    var body_ir: List[ir.Stmt] = []
+    match ob with
+    | Some(value) -> {
+      if is_checked(o: value) {
+        let local: ir.Expr = ir.Local(name: def.name, ty: declared)
+        for p: Pred in refinement_preds(ctx: ctx, t: declared) {
+          let saved: List[ir.Stmt] = begin_collect(l: inout l)
+          let cond: ir.Expr = with_it(fuel: fuel - 1, l: inout l, ctx: ctx, it_expr: local, pred: p)
+          body_ir = body_ir ++ end_collect(
+            l: inout l,
+            saved: saved,
+            out: [ir.Check(cond: cond, ob: ob_ref_of(l: l, ctx: ctx, o: value))]
+          )
+        }
+      }
+    }
+    | None -> skip()
+    body_ir = body_ir ++ block(fuel: fuel - 1, l: inout l, ctx: ctx, b: body)
+    return [ir.ForEach(name: def.name, ty: declared, list: list, body: body_ir)]
+  }
+}
+
+-- Expressions ----------------------------------------------------------------------------
+-- `expr` under a name the arms of statements can call when a binder is named `expr`.
+fn expr_of(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  e: ast.Expr,
+  discard: Bool
+) -> ir.Expr may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return ir.UnitE
+  }
+  return expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: e, discard: discard)
+}
+
+-- Lowers `e`; with `discard`, a call whose `inout` results were assigned yields unit.
+fn expr(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  e: ast.Expr,
+  discard: Bool
+) -> ir.Expr may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return ir.UnitE
+  }
+  match e with
+  | ast.IntLit(value, _, _) -> return ir.IntE(v: value)
+  | ast.FloatLit(value, _) -> return ir.FloatE(v: value)
+  | ast.TextLit(value, _) -> return ir.TextE(v: value)
+  | ast.BoolLit(value, _) -> return ir.BoolE(v: value)
+  | ast.DurationLit(nanos, _) -> return ir.IntE(v: nanos)
+  | ast.Name(_, _) -> return name_expr(l: l, ctx: ctx, e: e)
+  | ast.It(_) -> {
+    match l.it_expr with
+    | Some(value) -> return value
+    | None -> return ir.Local(name: "$it", ty: type_of_expr(l: l, ctx: ctx, e: e))
+  }
+  | ast.ResultRef(_) -> {
+    match l.fn_ctx with
+    | Some(value) -> {
+      if value.result_expr is Some {
+        return expr_or_unit(o: value.result_expr)
+      }
+    }
+    | None -> skip()
+    return ir.Local(name: "$r", ty: type_of_expr(l: l, ctx: ctx, e: e))
+  }
+  | ast.Old(name, _) -> return ir.Local(
+    name: "$old_" ++ name.text,
+    ty: type_of_expr(l: l, ctx: ctx, e: e)
+  )
+  | ast.Ctor(_, _, _, _) -> return ctor(fuel: fuel - 1, l: inout l, ctx: ctx, e: e)
+  | ast.RecordUpdate(_, _, _) -> return record_update(fuel: fuel - 1, l: inout l, ctx: ctx, e: e)
+  | ast.ListLit(elems, _) -> {
+    var out: Builder[ir.Expr] = List.builder()
+    for x: ast.Expr in elems {
+      List.push(b: inout out, x: expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: x, discard: false))
+    }
+    return ir.ListE(elems: List.finish(b: out), ty: type_of_expr(l: l, ctx: ctx, e: e))
+  }
+  | ast.Try(_, _, _) -> return try_expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: e)
+  | ast.Recover(_, _) -> return recover_expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: e)
+  | ast.Quantifier(_, _, _, _, _, _, _) -> return quantifier(
+    fuel: fuel - 1,
+    l: inout l,
+    ctx: ctx,
+    e: e
+  )
+  | ast.Closure(_, _, _, _, _) -> return closure(fuel: fuel - 1, l: inout l, ctx: ctx, e: e)
+  | ast.Fake(_, _, _) -> return fake_expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: e)
+  | ast.Hole(_) -> return ir.UnitE
+  | ast.FieldAccess(_, _, _) -> return field_access(fuel: fuel - 1, l: inout l, ctx: ctx, e: e)
+  | ast.Call(_, _, _, _) -> return call(
+    fuel: fuel - 1,
+    l: inout l,
+    ctx: ctx,
+    e: e,
+    discard: discard
+  )
+  | ast.Unary(_, _, _) -> return unary(fuel: fuel - 1, l: inout l, ctx: ctx, e: e)
+  | ast.Binary(_, _, _, _) -> return binary(fuel: fuel - 1, l: inout l, ctx: ctx, e: e)
+  | ast.And(operands, _) -> return ir.And(
+    operands: exprs(fuel: fuel - 1, l: inout l, ctx: ctx, es: operands)
+  )
+  | ast.Or(operands, _) -> return ir.Or(
+    operands: exprs(fuel: fuel - 1, l: inout l, ctx: ctx, es: operands)
+  )
+  | ast.Is(expr, pattern, _) -> {
+    let subject: ir.Expr = expr_of(fuel: fuel - 1, l: inout l, ctx: ctx, e: expr, discard: false)
+    match pattern_test_of(
+      fuel: fuel - 1,
+      l: inout l,
+      ctx: ctx,
+      p: pattern,
+      subject: subject,
+      ty: type_of_expr(l: l, ctx: ctx, e: expr)
+    ) with
+    | Some(value) -> return value
+    | None -> return ir.BoolE(v: true)
+  }
+}
+
+fn exprs(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  es: List[ast.Expr]
+) -> List[ir.Expr] may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return []
+  }
+  var out: Builder[ir.Expr] = List.builder()
+  for x: ast.Expr in es {
+    List.push(b: inout out, x: expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: x, discard: false))
+  }
+  return List.finish(b: out)
+}
+
+fn fn_value(ctx: context.Context, def: defs.Def) -> ir.Expr may alloc, mutate {
+  match Map.find(d: ctx.signatures, key: def.id) with
+  | None -> return ir.Local(name: def.name, ty: types.ErrorT)
+  | Some(value) -> return ir.FnRef(def: def, name: emitted_name(ctx: ctx, def: def), sig: value)
+}
+
+fn name_expr(l: L, ctx: context.Context, e: ast.Expr) -> ir.Expr may alloc, mutate {
+  let ty: types.Type = type_of_expr(l: l, ctx: ctx, e: e)
+  var source: Text = ""
+  match e with
+  | ast.Name(name, _) -> source = name.text
+  | _ -> skip()
+  let def: Int = ref_def(ctx: ctx, k: expr_key(l: l, e: e))
+  if def < 0 {
+    return ir.Local(name: source, ty: ty)
+  }
+  match Map.find(d: l.subst, key: def) with
+  | Some(value) -> return value
+  | None -> skip()
+  let d: defs.Def = context.get_def(ctx: ctx, id: def)
+  if d.kind == defs.Fn {
+    return fn_value(ctx: ctx, def: d)
+  }
+  if d.kind == defs.Const {
+    return ir.Global(def: d, ty: ty)
+  }
+  if d.kind == defs.Field {
+    match l.field_object with
+    | Some(value) -> {
+      if value.record_def == or_neg(o: d.parent) {
+        return ir.FieldE(
+          object: ir.Local(name: value.name, ty: value.ty),
+          name: d.name,
+          ty: ty,
+          owner: Some(value: context.get_def(ctx: ctx, id: value.record_def))
+        )
+      }
+    }
+    | None -> skip()
+  }
+  return ir.Local(name: d.name, ty: ty)
+}
+
+fn type_info_of(ctx: context.Context, owner: defs.TypeOwner) -> ir.Expr may alloc, mutate {
+  match owner with
+  | defs.PrimOwner(name) -> return ir.TypeInfoE(name: name, fields: [])
+  | defs.DefOwner(def) -> {
+    var fields: Builder[ir.TypeInfoField] = List.builder()
+    for f: types.FieldInfo in fields_or(o: Map.find(d: ctx.fields, key: def)) {
+      List.push(
+        b: inout fields,
+        x: ir.TypeInfoField { name: f.name, type_name: type_slug(fuel: 1000, ctx: ctx, t: f.ty) }
+      )
+    }
+    return ir.TypeInfoE(
+      name: context.get_def(ctx: ctx, id: def).name,
+      fields: List.finish(b: fields)
+    )
+  }
+}
+
+fn ctor(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  e: ast.Expr
+) -> ir.Expr may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return ir.UnitE
+  }
+  match e with
+  | ast.Ctor(_, args, fields, span) -> {
+    let k: Int = key(l: l, tag: defs.tag_expr, span: span)
+    match Map.find(d: ctx.refs, key: k) with
+    | None -> return ir.UnitE
+    | Some(value) -> {
+      match value with
+      | defs.UnitRes -> return ir.UnitE
+      | defs.TypeValueRes(owner) -> return type_info_of(ctx: ctx, owner: owner)
+      | defs.DefRes(def) -> {
+        let d: defs.Def = context.get_def(ctx: ctx, id: def)
+        let ty: types.Type = type_of_expr(l: l, ctx: ctx, e: e)
+        var inits: Builder[Init] = List.builder()
+        for a: ast.Arg in args_list(o: args) {
+          List.push(b: inout inits, x: Init { name: a.name.text, value: a.value })
+        }
+        for f: ast.FieldInit in field_inits(o: fields) {
+          List.push(b: inout inits, x: Init { name: f.name.text, value: f.value })
+        }
+        let init_list: List[Init] = List.finish(b: inits)
+        var lowered: Builder[ir.FieldInit] = List.builder()
+        for i: Init in init_list {
+          List.push(
+            b: inout lowered,
+            x: ir.FieldInit {
+              name: i.name,
+              value: expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: i.value, discard: false)
+            }
+          )
+        }
+        var literal: ir.Expr = ir.RecordE(def: d, ty: ty, fields: List.finish(b: lowered))
+        if d.kind == defs.Variant {
+          literal = ir.VariantE(def: d, ty: ty, fields: List.finish(b: lowered))
+        }
+        return field_checks(
+          fuel: fuel - 1,
+          l: inout l,
+          ctx: ctx,
+          def: d,
+          literal: literal,
+          ty: ty,
+          inits: init_list
+        )
+      }
+      | _ -> return ir.UnitE
+    }
+  }
+  | _ -> return ir.UnitE
+}
+
+fn args_list(o: Option[List[ast.Arg]]) -> List[ast.Arg] may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return []
+}
+
+fn field_inits(o: Option[List[ast.FieldInit]]) -> List[ast.FieldInit] may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return []
+}
+
+fn record_update(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  e: ast.Expr
+) -> ir.Expr may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return ir.UnitE
+  }
+  match e with
+  | ast.RecordUpdate(base, fields, _) -> {
+    let ty: types.Type = type_of_expr(l: l, ctx: ctx, e: e)
+    let base_ir: ir.Expr = expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: base, discard: false)
+    let s: types.Type = types.strip(t: type_of_expr(l: l, ctx: ctx, e: base))
+    var inits: Builder[Init] = List.builder()
+    for f: ast.FieldInit in fields {
+      List.push(b: inout inits, x: Init { name: f.name.text, value: f.value })
+    }
+    let init_list: List[Init] = List.finish(b: inits)
+    var lowered: Builder[ir.FieldInit] = List.builder()
+    for i: Init in init_list {
+      List.push(
+        b: inout lowered,
+        x: ir.FieldInit {
+          name: i.name,
+          value: expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: i.value, discard: false)
+        }
+      )
+    }
+    if not s is types.RecordT {
+      let module_def: defs.Def = context.get_def(
+        ctx: ctx,
+        id: def_at(l: l, ctx: ctx, tag: defs.tag_item, span: l.m.tree.span)
+      )
+      return ir.Update(base: base_ir, def: module_def, ty: ty, fields: List.finish(b: lowered))
+    }
+    let d: defs.Def = context.get_def(ctx: ctx, id: types.def_of(t: s))
+    return field_checks(
+      fuel: fuel - 1,
+      l: inout l,
+      ctx: ctx,
+      def: d,
+      literal: ir.Update(base: base_ir, def: d, ty: ty, fields: List.finish(b: lowered)),
+      ty: ty,
+      inits: init_list
+    )
+  }
+  | _ -> return ir.UnitE
+}
+
+-- Wraps a record or variant literal in the checks of its refined fields whose flows are checked obligations.
+fn field_checks(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  def: defs.Def,
+  literal: ir.Expr,
+  ty: types.Type,
+  inits: List[Init]
+) -> ir.Expr may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return ir.UnitE
+  }
+  let fs: List[types.FieldInfo] = fields_or(o: Map.find(d: ctx.fields, key: def.id))
+  var checks: Builder[ir.Stmt] = List.builder()
+  let v: Text = tmp(l: inout l, prefix: "v")
+  let object: ir.Expr = ir.Local(name: v, ty: ty)
+  let saved: Option[FieldObject] = l.field_object
+  l = { l with field_object: Some(value: FieldObject { record_def: def.id, name: v, ty: ty }) }
+  for init: Init in inits {
+    match find_ob(ctx: ctx, k: expr_key(l: l, e: init.value), kind: obligations.Refinement) with
+    | None -> skip()
+    | Some(value) -> {
+      if is_checked(o: value) {
+        let fo: Option[types.FieldInfo] = find_field(fs: fs, name: init.name)
+        if fo is Some {
+          let field: types.FieldInfo = field_or(o: fo)
+          let it_expr: ir.Expr = ir.FieldE(
+            object: object,
+            name: field.name,
+            ty: field.ty,
+            owner: Some(value: def)
+          )
+          for p: Pred in refinement_preds(ctx: ctx, t: field.ty) {
+            List.push(
+              b: inout checks,
+              x: ir.Check(
+                cond: with_it(fuel: fuel - 1, l: inout l, ctx: ctx, it_expr: it_expr, pred: p),
+                ob: ob_ref_of(l: l, ctx: ctx, o: value)
+              )
+            )
+          }
+        }
+      }
+    }
+  }
+  l = { l with field_object: saved }
+  if List.built(b: checks) == 0 {
+    return literal
+  }
+  return ir.Checked(value: literal, it_name: v, ty: ty, checks: List.finish(b: checks))
+}
+
+fn field_or(o: Option[types.FieldInfo]) -> types.FieldInfo {
+  match o with
+  | Some(value) -> return value
+  | None -> return types.FieldInfo { def: -1, name: "", ty: types.ErrorT }
+}
+
+fn try_expr(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  e: ast.Expr
+) -> ir.Expr may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return ir.UnitE
+  }
+  match e with
+  | ast.Try(expr, else_, _) -> {
+    let operand: ir.Expr = expr_of(fuel: fuel - 1, l: inout l, ctx: ctx, e: expr, discard: false)
+    let option: Bool = is_option(ctx: ctx, t: type_of_expr(l: l, ctx: ctx, e: expr))
+    var outer_option: Bool = false
+    match l.fn_ctx with
+    | Some(value) -> outer_option = is_option(ctx: ctx, t: value.ret)
+    | None -> skip()
+    let ty: types.Type = type_of_expr(l: l, ctx: ctx, e: e)
+    match else_ with
+    | None -> return ir.Try(
+      operand: operand,
+      option: option,
+      outer_option: outer_option,
+      else_clause: None,
+      raw: false,
+      ty: ty
+    )
+    | Some(value) -> {
+      var name: Option[Text] = None
+      var error_type: types.Type = types.ErrorT
+      if value.name.text != "_" {
+        name = Some(value: value.name.text)
+        error_type = type_or(
+          o: Map.find(
+            d: ctx.decl_types,
+            key: def_at(l: l, ctx: ctx, tag: defs.tag_misc, span: value.span)
+          )
+        )
+      }
+      let else_value: ir.Expr = expr_of(
+        fuel: fuel - 1,
+        l: inout l,
+        ctx: ctx,
+        e: value.expr,
+        discard: false
+      )
+      return ir.Try(
+        operand: operand,
+        option: option,
+        outer_option: outer_option,
+        else_clause: Some(
+          value: ir.ElseClause { name: name, error_type: error_type, value: else_value }
+        ),
+        raw: l.verifying,
+        ty: ty
+      )
+    }
+  }
+  | _ -> return ir.UnitE
+}
+
+fn recover_expr(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  e: ast.Expr
+) -> ir.Expr may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return ir.UnitE
+  }
+  match e with
+  | ast.Recover(body, _) -> {
+    let saved: Option[FnCtx] = l.fn_ctx
+    match saved with
+    | Some(value) -> l = { l with
+      fn_ctx: Some(value: { value with ret: types.ErrorT, post: [], inout_names: [] })
+    }
+    | None -> skip()
+    let n: Int = List.len(xs: body.stmts)
+    var out: List[ir.Stmt] = []
+    var value_ir: ir.Expr = ir.UnitE
+    var i: Int where it >= 0 = 0
+    for s: ast.Stmt in body.stmts {
+      var last_expr: Option[ast.Expr] = None
+      if i == n - 1 {
+        match s with
+        | ast.ExprStmt(expr, _) -> last_expr = Some(value: expr)
+        | _ -> skip()
+      }
+      match last_expr with
+      | Some(value) -> {
+        let saved_pre: List[ir.Stmt] = begin_collect(l: inout l)
+        value_ir = expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: value, discard: false)
+        out = out ++ end_collect(l: inout l, saved: saved_pre, out: [])
+      }
+      | None -> out = out ++ stmt(fuel: fuel - 1, l: inout l, ctx: ctx, s: s)
+      i = i + 1
+    }
+    l = { l with fn_ctx: saved }
+    return ir.Recover(body: out, value: value_ir, ty: type_of_expr(l: l, ctx: ctx, e: e))
+  }
+  | _ -> return ir.UnitE
+}
+
+fn quantifier(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  e: ast.Expr
+) -> ir.Expr may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return ir.UnitE
+  }
+  match e with
+  | ast.Quantifier(quant, _, _, domain, where_, body, span) -> {
+    let def: defs.Def = context.get_def(
+      ctx: ctx,
+      id: def_at(l: l, ctx: ctx, tag: defs.tag_expr, span: span)
+    )
+    let binder: types.Type = type_or(o: Map.find(d: ctx.decl_types, key: def.id))
+    var dom: ir.Domain = ir.BoolsD
+    match domain with
+    | None -> dom = ir.BoolsD
+    | Some(value) -> {
+      match value with
+      | ast.RangeDomain(lo, hi, _) -> dom = ir.RangeD(
+        lo: expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: lo, discard: false),
+        hi: expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: hi, discard: false)
+      )
+      | ast.InDomain(expr, _) -> {
+        let s: types.Type = types.strip(t: type_of_expr(l: l, ctx: ctx, e: expr))
+        let list: ir.Expr = expr_of(fuel: fuel - 1, l: inout l, ctx: ctx, e: expr, discard: false)
+        if s is types.UnionT {
+          dom = ir.OkListD(expr: list)
+        } else {
+          dom = ir.ListD(expr: list)
+        }
+      }
+    }
+    var where_ir: Option[ir.Expr] = None
+    match where_ with
+    | Some(value) -> where_ir = Some(
+      value: expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: value, discard: false)
+    )
+    | None -> skip()
+    return ir.Quantifier(
+      quant: quant,
+      name: def.name,
+      binder: binder,
+      domain: dom,
+      where_: where_ir,
+      body: expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: body, discard: false)
+    )
+  }
+  | _ -> return ir.UnitE
+}
+
+fn closure(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  e: ast.Expr
+) -> ir.Expr may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return ir.UnitE
+  }
+  match e with
+  | ast.Closure(params, _, _, body, _) -> {
+    let ty: types.Type = type_of_expr(l: l, ctx: ctx, e: e)
+    var fn_type: Option[types.Type] = None
+    var ret: types.Type = types.ErrorT
+    if ty is types.FnT {
+      fn_type = Some(value: ty)
+      ret = types.ret_of(t: ty)
+    }
+    var ps: Builder[ir.Param] = List.builder()
+    var inout_names: Builder[Text] = List.builder()
+    for p: ast.Param in params {
+      let pd: Int = def_at(l: l, ctx: ctx, tag: defs.tag_sig, span: p.span)
+      var pt: types.Type = types.ErrorT
+      if pd >= 0 {
+        pt = type_or(o: Map.find(d: ctx.decl_types, key: pd))
+      }
+      List.push(b: inout ps, x: ir.Param { name: p.name.text, ty: pt, is_inout: p.is_inout })
+      if p.is_inout {
+        List.push(b: inout inout_names, x: p.name.text)
+      }
+    }
+    let param_list: List[ir.Param] = List.finish(b: ps)
+    let saved: Option[FnCtx] = l.fn_ctx
+    var outer_def: Option[defs.Def] = None
+    var outer_dicts: Dict[Int, Text] = Map.dict()
+    var outer_measure: Option[Text] = None
+    match saved with
+    | Some(value) -> {
+      outer_def = value.def
+      outer_dicts = value.dicts
+      outer_measure = value.measure
+    }
+    | None -> skip()
+    let cctx: FnCtx = FnCtx {
+      inout_names: List.finish(b: inout_names),
+      ret: ret,
+      post: [],
+      def: outer_def,
+      dicts: outer_dicts,
+      result_expr: None,
+      measure: outer_measure
+    }
+    l = { l with fn_ctx: Some(value: cctx) }
+    var entry: List[ir.Stmt] = []
+    var def_name: Text = "closure"
+    match outer_def with
+    | Some(value) -> def_name = value.name
+    | None -> skip()
+    var i: Int where it >= 0 = 0
+    for p: ast.Param in params {
+      if i < List.len(xs: param_list) {
+        let param: ir.Param = List.get(xs: param_list, i: i)
+        let local: ir.Expr = ir.Local(name: param.name, ty: param.ty)
+        for pred: Pred in refinement_preds(ctx: ctx, t: param.ty) {
+          let saved_pre: List[ir.Stmt] = begin_collect(l: inout l)
+          let cond: ir.Expr = with_it(
+            fuel: fuel - 1,
+            l: inout l,
+            ctx: ctx,
+            it_expr: local,
+            pred: pred
+          )
+          entry = entry ++ end_collect(
+            l: inout l,
+            saved: saved_pre,
+            out: [
+              ir.Check(
+                cond: cond,
+                ob: ob_ref(
+                  l: l,
+                  ctx: ctx,
+                  kind: "refinement",
+                  text: printer.print_expr(e: pred.e),
+                  file: l.file,
+                  span: p.span,
+                  def: def_name
+                )
+              )
+            ]
+          )
+        }
+      }
+      i = i + 1
+    }
+    var body_ir: List[ir.Stmt] = block(fuel: fuel - 1, l: inout l, ctx: ctx, b: body)
+    if List.built(b: inout_names) > 0 and fn_type is Some and is_unit(t: ret) {
+      body_ir = List.append(xs: body_ir, x: ir.Return(value: ir.UnitE))
+    }
+    l = { l with fn_ctx: saved }
+    return ir.Closure(
+      params: param_list,
+      fn_type: fn_type,
+      entry_checks: entry,
+      body: body_ir,
+      early_return: block_has_try(b: body)
+    )
+  }
+  | _ -> return ir.UnitE
+}
+
+fn fake_expr(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  e: ast.Expr
+) -> ir.Expr may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return ir.UnitE
+  }
+  match e with
+  | ast.Fake(_, fields, span) -> {
+    let def: Int = ref_def(ctx: ctx, k: key(l: l, tag: defs.tag_expr, span: span))
+    var kind: Text = "capability"
+    if def >= 0 {
+      kind = context.get_def(ctx: ctx, id: def).name
+    }
+    var out: Builder[ir.FieldInit] = List.builder()
+    for f: ast.FieldInit in fields {
+      List.push(
+        b: inout out,
+        x: ir.FieldInit {
+          name: f.name.text,
+          value: expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: f.value, discard: false)
+        }
+      )
+    }
+    return ir.Fake(kind: kind, fields: List.finish(b: out), ty: type_of_expr(l: l, ctx: ctx, e: e))
+  }
+  | _ -> return ir.UnitE
+}
+
+fn field_access(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  e: ast.Expr
+) -> ir.Expr may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return ir.UnitE
+  }
+  match e with
+  | ast.FieldAccess(object, name, span) -> {
+    let ty: types.Type = type_of_expr(l: l, ctx: ctx, e: e)
+    match Map.find(d: ctx.refs, key: key(l: l, tag: defs.tag_expr, span: span)) with
+    | Some(value) -> {
+      match value with
+      | defs.DefRes(def) -> {
+        let d: defs.Def = context.get_def(ctx: ctx, id: def)
+        if d.kind == defs.Fn {
+          return fn_value(ctx: ctx, def: d)
+        }
+        return ir.Global(def: d, ty: ty)
+      }
+      | defs.CompanionRes(_, fn_def) -> return fn_value(
+        ctx: ctx,
+        def: context.get_def(ctx: ctx, id: fn_def)
+      )
+      | defs.UnitRes -> return ir.UnitE
+      | defs.TypeValueRes(owner) -> return type_info_of(ctx: ctx, owner: owner)
+      | _ -> return ir.UnitE
+    }
+    | None -> skip()
+    let s: types.Type = types.strip(t: type_of_expr(l: l, ctx: ctx, e: object))
+    var owner: Option[defs.Def] = None
+    if s is types.RecordT {
+      owner = Some(value: context.get_def(ctx: ctx, id: types.def_of(t: s)))
+    }
+    return ir.FieldE(
+      object: expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: object, discard: false),
+      name: name.text,
+      ty: ty,
+      owner: owner
+    )
+  }
+  | _ -> return ir.UnitE
+}
+
+fn find_arg(args: List[ast.Arg], name: Text) -> Option[ast.Arg] {
+  for a: ast.Arg in args {
+    if a.name.text == name {
+      return Some(value: a)
+    }
+  }
+  return None
+}
+
+fn call(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  e: ast.Expr,
+  discard: Bool
+) -> ir.Expr may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return ir.UnitE
+  }
+  match e with
+  | ast.Call(callee, _, args, span) -> {
+    let callee_key: Int = key(l: l, tag: defs.tag_expr, span: parser.span_of_expr(e: callee))
+    let call_key: Int = key(l: l, tag: defs.tag_expr, span: span)
+    let ty: types.Type = type_of_expr(l: l, ctx: ctx, e: e)
+    var target_id: Int = -1
+    var via_iface: Int = -1
+    match Map.find(d: ctx.refs, key: callee_key) with
+    | Some(value) -> {
+      match value with
+      | defs.DefRes(def) -> target_id = def
+      | defs.CompanionRes(_, fn_def) -> target_id = fn_def
+      | defs.IfaceFnRes(iface, fn_def) -> {
+        target_id = fn_def
+        via_iface = iface
+      }
+      | _ -> skip()
+    }
+    | None -> skip()
+    if target_id >= 0 {
+      let target: defs.Def = context.get_def(ctx: ctx, id: target_id)
+      if target.kind == defs.Fn or target.kind == defs.IfaceFn {
+        match Map.find(d: ctx.signatures, key: target.id) with
+        | None -> return ir.UnitE
+        | Some(value) -> return named_call(
+          fuel: fuel - 1,
+          l: inout l,
+          ctx: ctx,
+          target: target,
+          via_iface: via_iface,
+          sig: value,
+          args: args,
+          call_key: call_key,
+          call_ty: ty,
+          discard: discard,
+          e: e
+        )
+      }
+    }
+    let callee_ir: ir.Expr = expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: callee, discard: false)
+    let ct: types.Type = types.strip(t: type_of_expr(l: l, ctx: ctx, e: callee))
+    if not ct is types.FnT {
+      return ir.UnitE
+    }
+    var ordered: Builder[ir.Expr] = List.builder()
+    var inout_args: Builder[Option[ast.Arg]] = List.builder()
+    for p: types.FnParam in types.params_of(t: ct) {
+      let a: Option[ast.Arg] = find_arg(args: args, name: p.name)
+      match a with
+      | Some(value) -> List.push(
+        b: inout ordered,
+        x: expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: value.value, discard: false)
+      )
+      | None -> List.push(b: inout ordered, x: ir.UnitE)
+      if p.is_inout {
+        List.push(b: inout inout_args, x: a)
+      }
+    }
+    let call_ir: ir.Expr = ir.CallValue(
+      callee: callee_ir,
+      fn_type: ct,
+      args: List.finish(b: ordered),
+      ty: ty
+    )
+    if List.built(b: inout_args) == 0 {
+      return call_ir
+    }
+    return inout_call(
+      l: inout l,
+      ctx: ctx,
+      call_ir: call_ir,
+      ty: ty,
+      args: List.finish(b: inout_args),
+      discard: discard
+    )
+  }
+  | _ -> return ir.UnitE
+}
+
+fn named_call(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  target: defs.Def,
+  via_iface: Int,
+  sig: types.Signature,
+  args: List[ast.Arg],
+  call_key: Int,
+  call_ty: types.Type,
+  discard: Bool,
+  e: ast.Expr
+) -> ir.Expr may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return ir.UnitE
+  }
+  var call_target: ir.CallTarget = ir.FnTarget(
+    def: target,
+    name: emitted_name(ctx: ctx, def: target)
+  )
+  if via_iface >= 0 {
+    call_target = dispatch(
+      l: l,
+      ctx: ctx,
+      iface: via_iface,
+      fn_def: target,
+      call_key: call_key,
+      e: e
+    )
+  } else {
+    if target.kind == defs.IfaceFn {
+      match Map.find(d: l.impl_fns, key: target.id) with
+      | Some(value) -> call_target = ir.FnTarget(def: value.def, name: value.name)
+      | None -> call_target = ir.FnTarget(def: target, name: target.name)
+    }
+  }
+  let targs: List[types.TypeArg] = args_or(o: Map.find(d: ctx.instantiations, key: call_key))
+  var dicts: Builder[ir.Expr] = List.builder()
+  var consts: Builder[ir.Expr] = List.builder()
+  var i: Int where it >= 0 = 0
+  for p: types.TParamInfo in sig.tparams {
+    var a: Option[types.TypeArg] = None
+    if i < List.len(xs: targs) {
+      a = Some(value: List.get(xs: targs, i: i))
+    }
+    match p with
+    | types.TypeP(_, bound) -> {
+      match bound with
+      | Some(value) -> {
+        var bound_type: Option[types.Type] = None
+        if a is Some {
+          match arg_or(o: a) with
+          | types.TypeA(ty) -> bound_type = Some(value: ty)
+          | _ -> skip()
+        }
+        if bound_type is Some {
+          List.push(
+            b: inout dicts,
+            x: dict_for(l: l, ctx: ctx, iface: value, target: type_or(o: bound_type))
+          )
+        } else {
+          List.push(b: inout dicts, x: ir.UnitE)
+        }
+      }
+      | None -> skip()
+    }
+    | types.ConstP(_, _) -> {
+      var pushed: Bool = false
+      if a is Some {
+        match arg_or(o: a) with
+        | types.ConstA(value) -> {
+          List.push(b: inout consts, x: const_literal(ctx: ctx, v: value))
+          pushed = true
+        }
+        | _ -> skip()
+      }
+      if not pushed {
+        List.push(b: inout consts, x: ir.UnitE)
+      }
+    }
+    | _ -> skip()
+    i = i + 1
+  }
+  var arg_exprs: Builder[ir.Expr] = List.builder()
+  var inout_args: Builder[Option[ast.Arg]] = List.builder()
+  for p: types.FnParam in sig.params {
+    let a: Option[ast.Arg] = find_arg(args: args, name: p.name)
+    match a with
+    | Some(value) -> List.push(
+      b: inout arg_exprs,
+      x: expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: value.value, discard: false)
+    )
+    | None -> List.push(b: inout arg_exprs, x: ir.UnitE)
+    if p.is_inout {
+      List.push(b: inout inout_args, x: a)
+    }
+  }
+  let arg_list: List[ir.Expr] = decreases_check(
+    fuel: fuel - 1,
+    l: inout l,
+    ctx: ctx,
+    call_key: call_key,
+    sig: sig,
+    args: List.finish(b: arg_exprs)
+  )
+  var decoder: Option[ir.Decoder] = None
+  if context.qualified_name(ctx: ctx, id: target.id) == "std.sql.select" {
+    decoder = select_decoder(fuel: fuel - 1, l: inout l, ctx: ctx, call_key: call_key, sig: sig)
+  }
+  let call_ir: ir.Expr = ir.Call(
+    target: call_target,
+    sig: sig,
+    dicts: List.finish(b: dicts),
+    consts: List.finish(b: consts),
+    args: arg_list,
+    ty: call_ty,
+    decoder: decoder
+  )
+  if List.built(b: inout_args) == 0 {
+    return call_ir
+  }
+  return inout_call(
+    l: inout l,
+    ctx: ctx,
+    call_ir: call_ir,
+    ty: call_ty,
+    args: List.finish(b: inout_args),
+    discard: discard
+  )
+}
+
+fn arg_or(o: Option[types.TypeArg]) -> types.TypeArg {
+  match o with
+  | Some(value) -> return value
+  | None -> return types.TypeA(ty: types.ErrorT)
+}
+
+-- The runtime check of a checked `decreases` obligation at a recursive call (§5.1): the callee's
+-- measure over the arguments must be below the caller's measure taken at entry. Arguments are
+-- bound to temporaries first so they are evaluated once; the call then uses those temporaries.
+fn decreases_check(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  call_key: Int,
+  sig: types.Signature,
+  args: List[ir.Expr]
+) -> List[ir.Expr] may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return []
+  }
+  var ob: Option[obligations.Obligation] = None
+  for o: obligations.Obligation in obligations_at(ctx: ctx, k: call_key) {
+    if ob is None and o.kind is obligations.Decreases and not is_proved(o: o) {
+      ob = Some(value: o)
+    }
+  }
+  var measure: Option[Text] = None
+  match l.fn_ctx with
+  | Some(value) -> measure = value.measure
+  | None -> skip()
+  if ob is None or measure is None {
+    return args
+  }
+  let o: obligations.Obligation = ob_or(o: ob)
+  let src: Int = or_neg(o: o.source)
+  let clause: Option[ast.Contract] = Map.find(d: ctx.contract_nodes, key: src)
+  if clause is None {
+    return args
+  }
+  var bound: Builder[ir.Expr] = List.builder()
+  var subst: Dict[Int, ir.Expr] = Map.dict()
+  var i: Int where it >= 0 = 0
+  for p: types.FnParam in sig.params {
+    var value_ir: ir.Expr = ir.UnitE
+    if i < List.len(xs: args) {
+      value_ir = List.get(xs: args, i: i)
+    }
+    var local: ir.Expr = value_ir
+    if not p.is_inout and not (value_ir is ir.Local or value_ir is ir.IntE or value_ir is ir.BoolE or value_ir is ir.TextE) {
+      let name: Text = tmp(l: inout l, prefix: "arg")
+      push_pre(l: inout l, s: ir.Let(name: name, ty: p.ty, mutable: false, value: value_ir))
+      local = ir.Local(name: name, ty: p.ty)
+    }
+    List.push(b: inout bound, x: local)
+    if i < List.len(xs: sig.param_defs) {
+      Map.set(d: inout subst, key: List.get(xs: sig.param_defs, i: i), value: local)
+    }
+    i = i + 1
+  }
+  let saved_subst: Dict[Int, ir.Expr] = l.subst
+  let saved_file: Int = l.file
+  l = { l with subst: subst, file: lower.pred_file(k: src) }
+  let callee_measure: ir.Expr = expr(
+    fuel: fuel - 1,
+    l: inout l,
+    ctx: ctx,
+    e: contract_or(o: clause).expr,
+    discard: false
+  )
+  l = { l with subst: saved_subst, file: saved_file }
+  push_pre(
+    l: inout l,
+    s: ir.Check(
+      cond: ir.Cmp(
+        op: "<",
+        left: callee_measure,
+        right: ir.Local(name: text_or(o: measure, dflt: "$measure"), ty: types.Prim(name: "Int")),
+        is_float: false
+      ),
+      ob: ob_ref_of(l: l, ctx: ctx, o: o)
+    )
+  )
+  return List.finish(b: bound)
+}
+
+fn contract_or(o: Option[ast.Contract]) -> ast.Contract may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return ast.Contract {
+    clause: "",
+    is_proved: false,
+    expr: ast.Hole(span: ast.Span { start: 0, end: 0 }),
+    span: ast.Span { start: 0, end: 0 }
+  }
+}
+
+-- The row decoder of a `std.sql.select` whose row type is a record: one column per primitive field, then the record's refinements (§18.2).
+fn select_decoder(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  call_key: Int,
+  sig: types.Signature
+) -> Option[ir.Decoder] may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return None
+  }
+  let targs: List[types.TypeArg] = args_or(o: Map.find(d: ctx.instantiations, key: call_key))
+  var index: Int = -1
+  var i: Int where it >= 0 = 0
+  for p: types.TParamInfo in sig.tparams {
+    if index < 0 and p is types.TypeP {
+      index = i
+    }
+    i = i + 1
+  }
+  if index < 0 or index >= List.len(xs: targs) {
+    return None
+  }
+  var row_type: Option[types.Type] = None
+  match List.get(xs: targs, i: index) with
+  | types.TypeA(ty) -> row_type = Some(value: ty)
+  | _ -> skip()
+  if row_type is None {
+    return None
+  }
+  let ty: types.Type = type_or(o: row_type)
+  let s: types.Type = types.strip(t: ty)
+  if not s is types.RecordT {
+    return None
+  }
+  let def: defs.Def = context.get_def(ctx: ctx, id: types.def_of(t: s))
+  let it_name: Text = tmp(l: inout l, prefix: "row")
+  let object: ir.Expr = ir.Local(name: it_name, ty: ty)
+  var fields: Builder[ir.DecoderField] = List.builder()
+  var checks: List[ir.Stmt] = []
+  let saved: Option[FieldObject] = l.field_object
+  l = { l with
+    field_object: Some(value: FieldObject { record_def: def.id, name: it_name, ty: ty })
+  }
+  for f: types.FieldInfo in fields_or(o: Map.find(d: ctx.fields, key: def.id)) {
+    let fs: types.Type = types.strip(t: f.ty)
+    var kind: Text = "other"
+    if fs is types.Prim {
+      kind = types.prim_name(t: fs)
+    }
+    List.push(b: inout fields, x: ir.DecoderField { name: f.name, kind: kind })
+    let value_ir: ir.Expr = ir.FieldE(
+      object: object,
+      name: f.name,
+      ty: f.ty,
+      owner: Some(value: def)
+    )
+    for p: Pred in refinement_preds(ctx: ctx, t: f.ty) {
+      let saved_pre: List[ir.Stmt] = begin_collect(l: inout l)
+      let cond: ir.Expr = with_it(fuel: fuel - 1, l: inout l, ctx: ctx, it_expr: value_ir, pred: p)
+      checks = checks ++ end_collect(
+        l: inout l,
+        saved: saved_pre,
+        out: [ir.Reject(cond: cond, column: f.name)]
+      )
+    }
+  }
+  l = { l with field_object: saved }
+  return Some(
+    value: ir.Decoder { it_name: it_name, ty: ty, fields: List.finish(b: fields), checks: checks }
+  )
+}
+
+-- A call with `inout` arguments becomes a statement assigning its results back; the expression is the result temporary.
+fn inout_call(
+  l: inout L,
+  ctx: context.Context,
+  call_ir: ir.Expr,
+  ty: types.Type,
+  args: List[Option[ast.Arg]],
+  discard: Bool
+) -> ir.Expr may alloc, mutate {
+  var targets: Builder[ir.Target] = List.builder()
+  for a: Option[ast.Arg] in args {
+    var target: Option[ir.Target] = None
+    match a with
+    | Some(value) -> {
+      match value.value with
+      | ast.Name(name, _) -> target = Some(
+        value: ir.Target { name: name.text, ty: type_of_expr(l: l, ctx: ctx, e: value.value) }
+      )
+      | _ -> skip()
+    }
+    | None -> skip()
+    match target with
+    | Some(value) -> List.push(b: inout targets, x: value)
+    | None -> List.push(
+      b: inout targets,
+      x: ir.Target { name: tmp(l: inout l, prefix: "x"), ty: types.ErrorT }
+    )
+  }
+  var result_target: Option[ir.Target] = None
+  if not discard {
+    result_target = Some(value: ir.Target { name: tmp(l: inout l, prefix: "r"), ty: ty })
+  }
+  push_pre(
+    l: inout l,
+    s: ir.CallInout(result_target: result_target, call: call_ir, targets: List.finish(b: targets))
+  )
+  match result_target with
+  | None -> return ir.UnitE
+  | Some(value) -> return ir.Local(name: value.name, ty: ty)
+}
+
+fn const_literal(ctx: context.Context, v: types.ConstValue) -> ir.Expr may alloc {
+  match v with
+  | types.SymV(def) -> return ir.Local(
+    name: context.get_def(ctx: ctx, id: def).name,
+    ty: types.ErrorT
+  )
+  | _ -> return ir.ConstE(value: v)
+}
+
+-- The dictionary implementing `iface` for `target`: a parameter, an impl of some module, or nothing.
+fn dict_for(
+  l: L,
+  ctx: context.Context,
+  iface: Int,
+  target: types.Type
+) -> ir.Expr may alloc, mutate {
+  let s: types.Type = types.strip(t: target)
+  if s is types.ParamT {
+    match l.fn_ctx with
+    | Some(value) -> {
+      let dn: Option[Text] = Map.find(d: value.dicts, key: types.def_of(t: s))
+      if dn is Some {
+        return ir.DictParamE(name: text_or(o: dn, dflt: ""))
+      }
+    }
+    | None -> skip()
+  }
+  let iface_def: defs.Def = context.get_def(ctx: ctx, id: iface)
+  let want: Text = type_slug(fuel: 1000, ctx: ctx, t: s)
+  for mid: Int in 0 ..< ctx.module_count {
+    match Map.find(d: ctx.modules, key: mid) with
+    | None -> skip()
+    | Some(value) -> {
+      for item: ast.Item in value.tree.items {
+        match item with
+        | ast.ImplItem(decl) -> {
+          let k: Int = defs.node_key(file: value.file, tag: defs.tag_item, span: decl.span)
+          if ref_def(ctx: ctx, k: k) == iface {
+            let impl_def: Int = or_neg(o: Map.find(d: ctx.def_of, key: k))
+            let target_type: types.Type = impl_target(ctx: ctx, impl_def: impl_def)
+            if type_slug(fuel: 1000, ctx: ctx, t: target_type) == want {
+              return ir.DictE(
+                iface: iface_def,
+                target: target_type,
+                mod: mid,
+                name: impl_dict_name(ctx: ctx, iface: iface_def, target: target_type)
+              )
+            }
+          }
+        }
+        | _ -> skip()
+      }
+    }
+  }
+  return ir.UnitE
+}
+
+fn dispatch(
+  l: L,
+  ctx: context.Context,
+  iface: Int,
+  fn_def: defs.Def,
+  call_key: Int,
+  e: ast.Expr
+) -> ir.CallTarget may alloc, mutate {
+  let targs: List[types.TypeArg] = args_or(o: Map.find(d: ctx.instantiations, key: call_key))
+  var target: Option[types.Type] = None
+  let n: Int = List.len(xs: targs)
+  if n > 0 {
+    match List.get(xs: targs, i: n - 1) with
+    | types.TypeA(ty) -> target = Some(value: ty)
+    | _ -> skip()
+  }
+  var target_is_param: Bool = false
+  match target with
+  | Some(value) -> target_is_param = types.strip(t: value) is types.ParamT
+  | None -> skip()
+  match Map.find(d: l.impl_fns, key: fn_def.id) with
+  | Some(value) -> {
+    if target is Some and target_is_param {
+      return ir.FnTarget(def: value.def, name: value.name)
+    }
+  }
+  | None -> skip()
+  if target is None {
+    return ir.DictTarget(dict: ir.UnitE, name: fn_def.name)
+  }
+  if not target_is_param {
+    match claimcheck.callee_of(ctx: ctx, file: l.file, e: e) with
+    | claimcheck.ImplCallee(def) -> {
+      let d: defs.Def = context.get_def(ctx: ctx, id: def)
+      return ir.FnTarget(def: d, name: emitted_name(ctx: ctx, def: d))
+    }
+    | _ -> skip()
+  }
+  return ir.DictTarget(
+    dict: dict_for(l: l, ctx: ctx, iface: iface, target: type_or(o: target)),
+    name: fn_def.name
+  )
+}
+
+fn unary(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  e: ast.Expr
+) -> ir.Expr may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return ir.UnitE
+  }
+  match e with
+  | ast.Unary(op, operand, span) -> {
+    let v: ir.Expr = expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: operand, discard: false)
+    if op == "not" {
+      return ir.Not(operand: v)
+    }
+    if is_int_like(t: type_of_expr(l: l, ctx: ctx, e: operand)) {
+      var def_name: Text = "?"
+      match l.fn_ctx with
+      | Some(value) -> {
+        if value.def is Some {
+          def_name = def_or(o: value.def).name
+        }
+      }
+      | None -> skip()
+      return ir.Neg(
+        operand: v,
+        is_float: false,
+        ob: Some(
+          value: ob_ref(
+            l: l,
+            ctx: ctx,
+            kind: "overflow",
+            text: "-" ++ printer.print_expr(e: operand) ++ " within Int",
+            file: l.file,
+            span: span,
+            def: def_name
+          )
+        )
+      )
+    }
+    return ir.Neg(operand: v, is_float: true, ob: None)
+  }
+  | _ -> return ir.UnitE
+}
+
+fn def_or(o: Option[defs.Def]) -> defs.Def may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return defs.Def {
+    id: -1,
+    kind: defs.Fn,
+    name: "?",
+    node: defs.NoNode,
+    mod: -1,
+    file: -1,
+    key: -1,
+    span: ast.Span { start: 0, end: 0 },
+    is_pub: false,
+    is_sealed: false,
+    is_intrinsic: false,
+    parent: None,
+    frame: -1,
+    is_inout: false
+  }
+}
+
+fn binary(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  e: ast.Expr
+) -> ir.Expr may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return ir.UnitE
+  }
+  match e with
+  | ast.Binary(op, left, right, span) -> {
+    let lt: types.Type = type_of_expr(l: l, ctx: ctx, e: left)
+    let s: types.Type = types.strip(t: lt)
+    let left_ir: ir.Expr = expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: left, discard: false)
+    let right_ir: ir.Expr = expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: right, discard: false)
+    if op == "+" or op == "-" or op == "*" or op == "/" or op == "%" {
+      if is_int_like(t: lt) {
+        var ob: Option[ir.ObRef] = None
+        match find_ob(
+          ctx: ctx,
+          k: key(l: l, tag: defs.tag_expr, span: span),
+          kind: obligations.Overflow
+        ) with
+        | Some(value) -> {
+          if is_checked(o: value) {
+            ob = Some(value: ob_ref_of(l: l, ctx: ctx, o: value))
+          }
+        }
+        | None -> skip()
+        return ir.IntOp(op: op, left: left_ir, right: right_ir, ob: ob)
+      }
+      return ir.FloatOp(op: op, left: left_ir, right: right_ir)
+    }
+    if op == "++" {
+      return ir.Concat(
+        left: left_ir,
+        right: right_ir,
+        is_text: s is types.Prim and types.prim_name(t: s) == "Text",
+        ty: type_of_expr(l: l, ctx: ctx, e: e)
+      )
+    }
+    if op == "==" or op == "!=" {
+      return ir.Eq(
+        left: left_ir,
+        right: right_ir,
+        ty: lt,
+        prim: s is types.Prim,
+        negate: op == "!="
+      )
+    }
+    if op == "<" or op == "<=" or op == ">" or op == ">=" {
+      return ir.Cmp(
+        op: op,
+        left: left_ir,
+        right: right_ir,
+        is_float: s is types.Prim and types.prim_name(t: s) == "Float"
+      )
+    }
+    return ir.Implies(left: left_ir, right: right_ir)
+  }
+  | _ -> return ir.UnitE
+}
+
+-- Tests, verify blocks -------------------------------------------------------------------
+-- An assertion block (§5.2): bare expressions must hold.
+fn assertion_block(
+  l: inout L,
+  ctx: context.Context,
+  b: ast.Block
+) -> List[ir.Stmt] may alloc, mutate {
+  var out: List[ir.Stmt] = []
+  for s: ast.Stmt in b.stmts {
+    match s with
+    | ast.ExprStmt(expr, _) -> {
+      let saved: List[ir.Stmt] = begin_collect(l: inout l)
+      let cond: ir.Expr = expr_of(fuel: max_depth, l: inout l, ctx: ctx, e: expr, discard: false)
+      out = out ++ end_collect(l: inout l, saved: saved, out: [ir.Assert(cond: cond)])
+    }
+    | _ -> out = out ++ stmt(fuel: max_depth, l: inout l, ctx: ctx, s: s)
+  }
+  return out
+}
+
+fn tests_of(l: inout L, ctx: context.Context) -> Option[ir.Tests] may alloc, mutate {
+  var examples: Builder[ir.Example] = List.builder()
+  var properties: Builder[ir.Property] = List.builder()
+  for item: ast.Item in l.m.tree.items {
+    match item with
+    | ast.ExampleItem(decl) -> {
+      l = { l with fn_ctx: None }
+      List.push(
+        b: inout examples,
+        x: ir.Example {
+          name: decl.name.text,
+          body: assertion_block(l: inout l, ctx: ctx, b: decl.body)
+        }
+      )
+    }
+    | ast.PropertyItem(decl) -> {
+      l = { l with fn_ctx: None }
+      let negate: Bool = def_at(l: l, ctx: ctx, tag: defs.tag_item, span: decl.span) == or_neg(
+        o: l.opts.negate_guard
+      )
+      let params: List[ir.GenParam] = gen_params(
+        l: inout l,
+        ctx: ctx,
+        params: decl.params,
+        subst: Map.dict(),
+        negate: negate
+      )
+      List.push(
+        b: inout properties,
+        x: ir.Property {
+          label: "property " ++ decl.name.text,
+          params: params,
+          body: assertion_block(l: inout l, ctx: ctx, b: decl.body)
+        }
+      )
+    }
+    | ast.ImplItem(decl) -> {
+      let impl_key: Int = key(l: l, tag: defs.tag_item, span: decl.span)
+      let iface_id: Int = ref_def(ctx: ctx, k: impl_key)
+      if iface_id >= 0 {
+        let iface: defs.Def = context.get_def(ctx: ctx, id: iface_id)
+        let impl_def: Int = or_neg(o: Map.find(d: ctx.def_of, key: impl_key))
+        let target: types.Type = impl_target(ctx: ctx, impl_def: impl_def)
+        var subst: Dict[Int, types.TypeArg] = Map.dict()
+        for d: defs.Def in List.finish(b: ctx.defs) {
+          if or_neg(o: d.parent) == iface_id and d.kind == defs.TypeParam {
+            Map.set(d: inout subst, key: d.id, value: types.TypeA(ty: target))
+          }
+        }
+        let map: Dict[Int, ImplFn] = impl_map(l: l, ctx: ctx, iface: iface_id, fns: decl.fns)
+        law_properties(
+          l: inout l,
+          ctx: ctx,
+          iface: iface,
+          iface_id: iface_id,
+          target: target,
+          subst: subst,
+          map: map,
+          properties: inout properties
+        )
+      }
+    }
+    | _ -> skip()
+  }
+  if List.built(b: examples) == 0 and List.built(b: properties) == 0 {
+    return None
+  }
+  return Some(
+    value: ir.Tests { examples: List.finish(b: examples), properties: List.finish(b: properties) }
+  )
+}
+
+fn law_properties(
+  l: inout L,
+  ctx: context.Context,
+  iface: defs.Def,
+  iface_id: Int,
+  target: types.Type,
+  subst: Dict[Int, types.TypeArg],
+  map: Dict[Int, ImplFn],
+  properties: inout Builder[ir.Property]
+) -> Unit may alloc, mutate {
+  for d: defs.Def in List.finish(b: ctx.defs) {
+    if or_neg(o: d.parent) == iface_id and d.kind == defs.Law {
+      match d.node with
+      | defs.LawNode(decl) -> {
+        l = { l with impl_fns: map, fn_ctx: None }
+        let params: List[ir.GenParam] = gen_params(
+          l: inout l,
+          ctx: ctx,
+          params: decl.params,
+          subst: subst,
+          negate: false
+        )
+        List.push(
+          b: inout properties,
+          x: ir.Property {
+            label: "law " ++ iface.name ++ "[" ++ type_slug(
+              fuel: 1000,
+              ctx: ctx,
+              t: target
+            ) ++ "]." ++ d.name,
+            params: params,
+            body: assertion_block(l: inout l, ctx: ctx, b: decl.body)
+          }
+        )
+        l = { l with impl_fns: Map.dict() }
+      }
+      | _ -> skip()
+    }
+  }
+  return Unit
+}
+
+fn gen_params(
+  l: inout L,
+  ctx: context.Context,
+  params: List[ast.Param],
+  subst: Dict[Int, types.TypeArg],
+  negate: Bool
+) -> List[ir.GenParam] may alloc, mutate {
+  var out: Builder[ir.GenParam] = List.builder()
+  for p: ast.Param in params {
+    let pd: Int = def_at(l: l, ctx: ctx, tag: defs.tag_sig, span: p.span)
+    var ty: types.Type = types.ErrorT
+    if pd >= 0 {
+      ty = type_or(o: Map.find(d: ctx.decl_types, key: pd))
+    }
+    List.push(
+      b: inout out,
+      x: ir.GenParam {
+        name: p.name.text,
+        gen: generator(
+          fuel: max_depth,
+          l: inout l,
+          ctx: ctx,
+          t: types.substitute(t: ty, subst: subst),
+          negate: negate
+        )
+      }
+    )
+  }
+  return List.finish(b: out)
+}
+
+-- A generator for `t`, filtered by its refinements; `negate` inverts the filters (§20.4, "negate a guard").
+fn generator(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  t: types.Type,
+  negate: Bool
+) -> ir.Gen may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return ir.Gen { base: ir.UnknownG, filters: [] }
+  }
+  let it_name: Text = tmp(l: inout l, prefix: "it")
+  let local: ir.Expr = ir.Local(name: it_name, ty: t)
+  var filters: Builder[ir.Filter] = List.builder()
+  for p: Pred in refinement_preds(ctx: ctx, t: t) {
+    var cond: ir.Expr = with_it(fuel: fuel, l: inout l, ctx: ctx, it_expr: local, pred: p)
+    if negate {
+      cond = ir.Not(operand: cond)
+    }
+    List.push(b: inout filters, x: ir.Filter { it_name: it_name, cond: cond })
+  }
+  return ir.Gen {
+    base: base_generator(fuel: fuel - 1, l: inout l, ctx: ctx, s: types.strip(t: t)),
+    filters: List.finish(b: filters)
+  }
+}
+
+fn base_generator(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  s: types.Type
+) -> ir.GenBase may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return ir.UnknownG
+  }
+  match s with
+  | types.Prim(name) -> {
+    if name == "Int" {
+      return ir.IntG
+    }
+    if name == "Float" {
+      return ir.FloatG
+    }
+    if name == "Duration" {
+      return ir.DurationG
+    }
+    if name == "Bool" {
+      return ir.BoolG
+    }
+    if name == "Text" {
+      return ir.TextG
+    }
+    if name == "Unit" {
+      return ir.UnitG
+    }
+    return ir.UnknownG
+  }
+  | types.Opaque(def, args) -> {
+    if context.qualified_name(ctx: ctx, id: def) == "std.list.List" and List.len(xs: args) > 0 {
+      match List.get(xs: args, i: 0) with
+      | types.TypeA(ty) -> return ir.ListG(
+        elem: generator(fuel: fuel - 1, l: inout l, ctx: ctx, t: ty, negate: false)
+      )
+      | _ -> return ir.UnknownG
+    }
+    return ir.UnknownG
+  }
+  | types.RecordT(def, _) -> return ir.RecordG(
+    fields: gen_fields(fuel: fuel - 1, l: inout l, ctx: ctx, owner: def)
+  )
+  | types.UnionT(def, _) -> {
+    var variants: Builder[ir.GenVariant] = List.builder()
+    for v: Int in ids_or(o: Map.find(d: ctx.variants, key: def)) {
+      List.push(
+        b: inout variants,
+        x: ir.GenVariant {
+          name: context.get_def(ctx: ctx, id: v).name,
+          fields: gen_fields(fuel: fuel - 1, l: inout l, ctx: ctx, owner: v)
+        }
+      )
+    }
+    return ir.UnionG(variants: List.finish(b: variants))
+  }
+  | _ -> return ir.UnknownG
+}
+
+fn gen_fields(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  owner: Int
+) -> List[ir.GenField] may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return []
+  }
+  var out: Builder[ir.GenField] = List.builder()
+  for f: types.FieldInfo in fields_or(o: Map.find(d: ctx.fields, key: owner)) {
+    List.push(
+      b: inout out,
+      x: ir.GenField {
+        name: f.name,
+        gen: generator(fuel: fuel - 1, l: inout l, ctx: ctx, t: f.ty, negate: false)
+      }
+    )
+  }
+  return List.finish(b: out)
+}
+
+-- Every `verify` block as a Bool-yielding function (§20.2).
+fn verifies_of(l: inout L, ctx: context.Context) -> List[ir.Verify] may alloc, mutate {
+  var out: Builder[ir.Verify] = List.builder()
+  var fns: Builder[ast.FnDecl] = List.builder()
+  for item: ast.Item in l.m.tree.items {
+    match item with
+    | ast.FnItem(decl) -> List.push(b: inout fns, x: decl)
+    | ast.ImplItem(decl) -> {
+      for f: ast.FnDecl in decl.fns {
+        List.push(b: inout fns, x: f)
+      }
+    }
+    | _ -> skip()
+  }
+  for f: ast.FnDecl in List.finish(b: fns) {
+    match f.body with
+    | None -> skip()
+    | Some(value) -> {
+      let fn_id: Int = def_at(l: l, ctx: ctx, tag: defs.tag_item, span: f.span)
+      for n: walk.Node in walk.nodes_in_block(b: value, into_verify: false) {
+        match n with
+        | walk.NStmt(s) -> {
+          match s with
+          | ast.Assume(_, _, verify_block, span) -> {
+            if verify_block is Some {
+              verify_of(
+                l: inout l,
+                ctx: ctx,
+                fn_id: fn_id,
+                v: verify_or(o: verify_block),
+                at: span,
+                out: inout out
+              )
+            }
+          }
+          | _ -> skip()
+        }
+        | _ -> skip()
+      }
+    }
+  }
+  return List.finish(b: out)
+}
+
+fn verify_or(o: Option[ast.VerifyBlock]) -> ast.VerifyBlock may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return ast.VerifyBlock {
+    params: [],
+    effects: [],
+    body: ast.Block { stmts: [], elided: false, span: ast.Span { start: 0, end: 0 } },
+    span: ast.Span { start: 0, end: 0 }
+  }
+}
+
+fn verify_of(
+  l: inout L,
+  ctx: context.Context,
+  fn_id: Int,
+  v: ast.VerifyBlock,
+  at: ast.Span,
+  out: inout Builder[ir.Verify]
+) -> Unit may alloc, mutate {
+  let node_key: Int = key(l: l, tag: defs.tag_stmt, span: at)
+  var site: Option[tables.AssumeSite] = None
+  for a: tables.AssumeSite in claimcheck.assumes_of(ctx: ctx, fn_def: fn_id) {
+    if a.node == node_key and site is None {
+      site = Some(value: a)
+    }
+  }
+  let vd: Int = def_at(l: l, ctx: ctx, tag: defs.tag_misc, span: v.span)
+  if site is None or vd < 0 {
+    return Unit
+  }
+  let a: tables.AssumeSite = site_or(o: site)
+  var params: Builder[ir.VerifyParam] = List.builder()
+  for p: ast.Param in v.params {
+    let pd: Int = def_at(l: l, ctx: ctx, tag: defs.tag_sig, span: p.span)
+    if pd >= 0 {
+      match types.strip(t: type_or(o: Map.find(d: ctx.decl_types, key: pd))) with
+      | types.Capability(def, _, _) -> List.push(
+        b: inout params,
+        x: ir.VerifyParam {
+          name: p.name.text,
+          capability: def,
+          node: key(l: l, tag: defs.tag_sig, span: p.span),
+          at_span: p.span
+        }
+      )
+      | _ -> skip()
+    }
+  }
+  let pos: loc.LineCol = loc.line_col(tables: l.tables, file: l.file, offset: at.start)
+  let vctx: FnCtx = FnCtx {
+    inout_names: [],
+    ret: types.Prim(name: "Bool"),
+    post: [],
+    def: Some(value: context.get_def(ctx: ctx, id: vd)),
+    dicts: Map.dict(),
+    result_expr: None,
+    measure: None
+  }
+  l = { l with fn_ctx: Some(value: vctx), verifying: true }
+  let body: List[ir.Stmt] = assertion_block(l: inout l, ctx: ctx, b: v.body)
+  l = { l with verifying: false, fn_ctx: None }
+  let owner: Text = context.qualified_name(ctx: ctx, id: a.fn_def)
+  List.push(
+    b: inout out,
+    x: ir.Verify {
+      name: "verify$" ++ Int.to_text(x: List.built(b: out)),
+      key: a.key,
+      claim: context.qualified_name(ctx: ctx, id: a.claim_def),
+      def: owner,
+      at: owner ++ ":" ++ Int.to_text(x: pos.line) ++ ":" ++ Int.to_text(x: pos.col),
+      params: List.finish(b: params),
+      body: body,
+      early_return: block_has_try(b: v.body)
+    }
+  )
+  return Unit
+}
+
+fn site_or(o: Option[tables.AssumeSite]) -> tables.AssumeSite may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return tables.AssumeSite {
+    fn_def: -1,
+    claim_def: -1,
+    justification: "",
+    node: -1,
+    at_file: -1,
+    at_span: ast.Span { start: 0, end: 0 },
+    verify_key: None,
+    verify_block: None,
+    key: ""
+  }
+}
+
+-- `try` presence ------------------------------------------------------------------------
+-- True iff `b` contains a `try` outside any nested closure or verify block.
+pub fn block_has_try(b: ast.Block) -> Bool may alloc
+  decreases b
+{
+  for s: ast.Stmt in b.stmts {
+    if stmt_has_try(s: s) {
+      return true
+    }
+  }
+  return false
+}
+
+fn stmt_has_try(s: ast.Stmt) -> Bool may alloc
+  decreases s
+{
+  match s with
+  | ast.Let(_, _, value, _) -> return expr_has_try(e: value)
+  | ast.Var(_, _, value, _) -> return expr_has_try(e: value)
+  | ast.Assign(_, value, _) -> return expr_has_try(e: value)
+  | ast.Return(value, _) -> return expr_has_try(e: value)
+  | ast.If(cond, then_block, else_block, _) -> {
+    if expr_has_try(e: cond) or block_has_try(b: then_block) {
+      return true
+    }
+    match else_block with
+    | Some(value) -> return block_has_try(b: value)
+    | None -> return false
+  }
+  | ast.Match(scrutinee, arms, _) -> {
+    if expr_has_try(e: scrutinee) {
+      return true
+    }
+    for a: ast.Arm in arms {
+      match a.guard with
+      | Some(value) -> {
+        if expr_has_try(e: value) {
+          return true
+        }
+      }
+      | None -> skip()
+      match a.body with
+      | ast.ArmBlock(block) -> {
+        if block_has_try(b: block) {
+          return true
+        }
+      }
+      | ast.ArmStmt(stmt) -> {
+        if stmt_has_try(s: stmt) {
+          return true
+        }
+      }
+    }
+    return false
+  }
+  | ast.Loop(cond, clauses, body, _) -> {
+    if expr_has_try(e: cond) {
+      return true
+    }
+    for c: ast.LoopClause in clauses {
+      if expr_has_try(e: c.expr) {
+        return true
+      }
+    }
+    return block_has_try(b: body)
+  }
+  | ast.For(_, _, domain, body, _) -> {
+    match domain with
+    | ast.RangeDomain(lo, hi, _) -> {
+      if expr_has_try(e: lo) or expr_has_try(e: hi) {
+        return true
+      }
+    }
+    | ast.InDomain(expr, _) -> {
+      if expr_has_try(e: expr) {
+        return true
+      }
+    }
+    return block_has_try(b: body)
+  }
+  | ast.Assume(_, _, _, _) -> return false
+  | ast.ExprStmt(expr, _) -> return expr_has_try(e: expr)
+}
+
+fn exprs_have_try(es: List[ast.Expr]) -> Bool may alloc
+  decreases es
+{
+  for e: ast.Expr in es {
+    if expr_has_try(e: e) {
+      return true
+    }
+  }
+  return false
+}
+
+fn inits_have_try(fs: List[ast.FieldInit]) -> Bool may alloc
+  decreases fs
+{
+  for f: ast.FieldInit in fs {
+    if expr_has_try(e: f.value) {
+      return true
+    }
+  }
+  return false
+}
+
+fn args_have_try(args: List[ast.Arg]) -> Bool may alloc
+  decreases args
+{
+  for a: ast.Arg in args {
+    if expr_has_try(e: a.value) {
+      return true
+    }
+  }
+  return false
+}
+
+fn expr_has_try(e: ast.Expr) -> Bool may alloc
+  decreases e
+{
+  match e with
+  | ast.Try(_, _, _) -> return true
+  | ast.Ctor(_, args, fields, _) -> {
+    match args with
+    | Some(value) -> {
+      if args_have_try(args: value) {
+        return true
+      }
+    }
+    | None -> skip()
+    match fields with
+    | Some(value) -> return inits_have_try(fs: value)
+    | None -> return false
+  }
+  | ast.RecordUpdate(base, fields, _) -> return expr_has_try(e: base) or inits_have_try(fs: fields)
+  | ast.ListLit(elems, _) -> return exprs_have_try(es: elems)
+  | ast.Recover(body, _) -> return block_has_try(b: body)
+  | ast.Quantifier(_, _, _, domain, where_, body, _) -> {
+    match domain with
+    | Some(value) -> {
+      match value with
+      | ast.RangeDomain(lo, hi, _) -> {
+        if expr_has_try(e: lo) or expr_has_try(e: hi) {
+          return true
+        }
+      }
+      | ast.InDomain(expr, _) -> {
+        if expr_has_try(e: expr) {
+          return true
+        }
+      }
+    }
+    | None -> skip()
+    match where_ with
+    | Some(value) -> {
+      if expr_has_try(e: value) {
+        return true
+      }
+    }
+    | None -> skip()
+    return expr_has_try(e: body)
+  }
+  | ast.Closure(_, _, _, _, _) -> return false
+  | ast.Fake(_, fields, _) -> return inits_have_try(fs: fields)
+  | ast.FieldAccess(object, _, _) -> return expr_has_try(e: object)
+  | ast.Call(callee, _, args, _) -> return expr_has_try(e: callee) or args_have_try(args: args)
+  | ast.Unary(_, operand, _) -> return expr_has_try(e: operand)
+  | ast.Binary(_, left, right, _) -> return expr_has_try(e: left) or expr_has_try(e: right)
+  | ast.And(operands, _) -> return exprs_have_try(es: operands)
+  | ast.Or(operands, _) -> return exprs_have_try(es: operands)
+  | ast.Is(expr, _, _) -> return expr_has_try(e: expr)
+  | _ -> return false
+}

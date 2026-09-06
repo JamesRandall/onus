@@ -1,0 +1,5 @@
+module lib.stmt_b
+
+pub union Stmt =
+  | Let of name: Int where it >= 0
+  | Skip

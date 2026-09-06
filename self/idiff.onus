@@ -1,0 +1,507 @@
+module idiff
+import json
+
+-- Interface diffs (language spec §11.1, §15.1; `report/diff.ts`): two §11.1
+-- documents of the same module compared item by item. Compatibility is
+-- decided textually in v0: a `requires` clause added or an `ensures` clause
+-- removed is breaking, the reverse is compatible; a widened effect set or a
+-- changed signature is breaking; new assumptions and recover sites are
+-- listed; an obligation whose status left `proved` is listed as a
+-- regression. The module is breaking when a public item is. Both documents
+-- are JSON values, so a document read from a file and one just produced
+-- compare alike.
+pub record ContractChange {
+  kind: Text
+  text: Text
+  change: Text
+  compatibility: Text
+}
+
+pub record ObligationChange {
+  kind: Text
+  text: Text
+  from: Text
+  to: Text
+}
+
+pub record ItemRef {
+  name: Text
+  kind: Text
+  visibility: Text
+}
+
+pub record SignatureChange {
+  before_sig: Text
+  after_sig: Text
+}
+
+pub record ItemChange {
+  name: Text
+  kind: Text
+  visibility: Text
+  signature: Option[SignatureChange]
+  effects_added: List[Text]
+  effects_removed: List[Text]
+  contracts: List[ContractChange]
+  assumes_added: List[Text]
+  assumes_removed: List[Text]
+  recovers_added: Int
+  recovers_removed: Int
+  obligations: List[ObligationChange]
+  breaking: Bool
+}
+
+pub record Diff {
+  module_name: Text
+  old_hash: Text
+  new_hash: Text
+  added: List[ItemRef]
+  removed: List[ItemRef]
+  changed: List[ItemChange]
+  breaking: Bool
+}
+
+-- Values by key in first-appearance order, the last value under a repeated key winning (a JavaScript `Map`).
+record Keyed {
+  keys: List[Text]
+  map: Dict[Text, json.Json]
+}
+
+fn keyed(items: List[json.Json], by: Text) -> Keyed may alloc, mutate {
+  var keys: Builder[Text] = List.builder()
+  var map: Dict[Text, json.Json] = Map.dict()
+  for item: json.Json in items {
+    let k: Text = key_of(item: item, by: by)
+    if not Map.contains(d: map, key: k) {
+      List.push(b: inout keys, x: k)
+    }
+    Map.set(d: inout map, key: k, value: item)
+  }
+  return Keyed { keys: List.finish(b: keys), map: map }
+}
+
+-- `kind:name` for an item, `kind:text` for a contract.
+fn key_of(item: json.Json, by: Text) -> Text may alloc {
+  return json.str_at(j: item, key: "kind") ++ ":" ++ json.str_at(j: item, key: by)
+}
+
+fn value_of(k: Keyed, key: Text) -> json.Json {
+  match Map.find(d: k.map, key: key) with
+  | Some(value) -> return value
+  | None -> return json.JNull
+}
+
+fn ref_of(item: json.Json) -> ItemRef may alloc {
+  return ItemRef {
+    name: json.str_at(j: item, key: "name"),
+    kind: json.str_at(j: item, key: "kind"),
+    visibility: json.str_at(j: item, key: "visibility")
+  }
+}
+
+-- Compares two interface documents. When the module was renamed every item is reported removed and added.
+pub fn interface_diff(before: json.Json, after: json.Json) -> Diff may alloc, mutate {
+  let old_list: List[json.Json] = json.list_at(j: before, key: "items")
+  let new_list: List[json.Json] = json.list_at(j: after, key: "items")
+  let old_items: Keyed = keyed(items: old_list, by: "name")
+  let new_items: Keyed = keyed(items: new_list, by: "name")
+  var added: Builder[ItemRef] = List.builder()
+  for item: json.Json in new_list {
+    if not Map.contains(d: old_items.map, key: key_of(item: item, by: "name")) {
+      List.push(b: inout added, x: ref_of(item: item))
+    }
+  }
+  var removed: Builder[ItemRef] = List.builder()
+  for item: json.Json in old_list {
+    if not Map.contains(d: new_items.map, key: key_of(item: item, by: "name")) {
+      List.push(b: inout removed, x: ref_of(item: item))
+    }
+  }
+  var changed: Builder[ItemChange] = List.builder()
+  for k: Text in new_items.keys {
+    if Map.contains(d: old_items.map, key: k) {
+      match item_change(o: value_of(k: old_items, key: k), n: value_of(k: new_items, key: k)) with
+      | Some(value) -> List.push(b: inout changed, x: value)
+      | None -> skip()
+    }
+  }
+  let removed_list: List[ItemRef] = List.finish(b: removed)
+  let changed_list: List[ItemChange] = List.finish(b: changed)
+  var breaking: Bool = false
+  for r: ItemRef in removed_list {
+    if r.visibility == "pub" {
+      breaking = true
+    }
+  }
+  for c: ItemChange in changed_list {
+    if c.breaking and c.visibility == "pub" {
+      breaking = true
+    }
+  }
+  return Diff {
+    module_name: json.str_at(j: after, key: "module"),
+    old_hash: json.str_at(j: before, key: "hash"),
+    new_hash: json.str_at(j: after, key: "hash"),
+    added: List.finish(b: added),
+    removed: removed_list,
+    changed: changed_list,
+    breaking: breaking
+  }
+}
+
+-- The texts of `xs` that are not in `ys`, in order.
+fn missing(xs: List[Text], ys: List[Text]) -> List[Text] may alloc, mutate {
+  var out: Builder[Text] = List.builder()
+  for x: Text in xs {
+    if not List.contains(xs: ys, x: x) {
+      List.push(b: inout out, x: x)
+    }
+  }
+  return List.finish(b: out)
+}
+
+-- Assumption keys, `claim: justification`, without repeats (a JavaScript `Set`).
+fn assume_keys(items: List[json.Json]) -> List[Text] may alloc, mutate {
+  var out: Builder[Text] = List.builder()
+  var seen: Dict[Text, Bool] = Map.dict()
+  for a: json.Json in items {
+    let k: Text = json.str_at(j: a, key: "claim") ++ ": " ++ json.str_at(j: a, key: "justification")
+    if not Map.contains(d: seen, key: k) {
+      Map.set(d: inout seen, key: k, value: true)
+      List.push(b: inout out, x: k)
+    }
+  }
+  return List.finish(b: out)
+}
+
+fn item_change(o: json.Json, n: json.Json) -> Option[ItemChange] may alloc, mutate {
+  var signature: Option[SignatureChange] = None
+  let old_sig: Text = json.str_at(j: o, key: "signature")
+  let new_sig: Text = json.str_at(j: n, key: "signature")
+  if old_sig != new_sig {
+    signature = Some(value: SignatureChange { before_sig: old_sig, after_sig: new_sig })
+  }
+  let old_effects: List[Text] = json.texts_at(j: o, key: "effects")
+  let new_effects: List[Text] = json.texts_at(j: n, key: "effects")
+  let effects_added: List[Text] = missing(xs: new_effects, ys: old_effects)
+  let effects_removed: List[Text] = missing(xs: old_effects, ys: new_effects)
+  let old_c: Keyed = keyed(items: json.list_at(j: o, key: "contracts"), by: "text")
+  let new_c: Keyed = keyed(items: json.list_at(j: n, key: "contracts"), by: "text")
+  var contracts: Builder[ContractChange] = List.builder()
+  for k: Text in new_c.keys {
+    if not Map.contains(d: old_c.map, key: k) {
+      let c: json.Json = value_of(k: new_c, key: k)
+      var compatibility: Text = "compatible"
+      if json.str_at(j: c, key: "kind") == "requires" {
+        compatibility = "breaking"
+      }
+      List.push(
+        b: inout contracts,
+        x: ContractChange {
+          kind: json.str_at(j: c, key: "kind"),
+          text: json.str_at(j: c, key: "text"),
+          change: "added",
+          compatibility: compatibility
+        }
+      )
+    }
+  }
+  for k: Text in old_c.keys {
+    if not Map.contains(d: new_c.map, key: k) {
+      let c: json.Json = value_of(k: old_c, key: k)
+      var compatibility: Text = "compatible"
+      if json.str_at(j: c, key: "kind") == "ensures" {
+        compatibility = "breaking"
+      }
+      List.push(
+        b: inout contracts,
+        x: ContractChange {
+          kind: json.str_at(j: c, key: "kind"),
+          text: json.str_at(j: c, key: "text"),
+          change: "removed",
+          compatibility: compatibility
+        }
+      )
+    }
+  }
+  let old_a: List[Text] = assume_keys(items: json.list_at(j: o, key: "assumes"))
+  let new_a: List[Text] = assume_keys(items: json.list_at(j: n, key: "assumes"))
+  let assumes_added: List[Text] = missing(xs: new_a, ys: old_a)
+  let assumes_removed: List[Text] = missing(xs: old_a, ys: new_a)
+  let old_r: Int = List.len(xs: json.list_at(j: o, key: "recovers"))
+  let new_r: Int = List.len(xs: json.list_at(j: n, key: "recovers"))
+  var recovers_added: Int = 0
+  var recovers_removed: Int = 0
+  if new_r > old_r {
+    recovers_added = new_r - old_r
+  }
+  if old_r > new_r {
+    recovers_removed = old_r - new_r
+  }
+  var obligations: Builder[ObligationChange] = List.builder()
+  for k: Text in new_c.keys {
+    if Map.contains(d: old_c.map, key: k) {
+      let prev: json.Json = value_of(k: old_c, key: k)
+      let c: json.Json = value_of(k: new_c, key: k)
+      if json.str_at(j: prev, key: "status") != json.str_at(j: c, key: "status") {
+        List.push(
+          b: inout obligations,
+          x: ObligationChange {
+            kind: json.str_at(j: c, key: "kind"),
+            text: json.str_at(j: c, key: "text"),
+            from: json.str_at(j: prev, key: "status"),
+            to: json.str_at(j: c, key: "status")
+          }
+        )
+      }
+    }
+  }
+  let contract_list: List[ContractChange] = List.finish(b: contracts)
+  let obligation_list: List[ObligationChange] = List.finish(b: obligations)
+  let nothing: Bool = signature is None and List.len(xs: effects_added) == 0 and List.len(
+    xs: effects_removed
+  ) == 0 and List.len(xs: contract_list) == 0 and List.len(xs: assumes_added) == 0 and List.len(
+    xs: assumes_removed
+  ) == 0 and recovers_added == 0 and recovers_removed == 0 and List.len(xs: obligation_list) == 0
+  if nothing {
+    return None
+  }
+  var breaking: Bool = signature is Some or List.len(xs: effects_added) > 0
+  for c: ContractChange in contract_list {
+    if c.compatibility == "breaking" {
+      breaking = true
+    }
+  }
+  for x: ObligationChange in obligation_list {
+    if x.from == "proved" and x.to != "proved" {
+      breaking = true
+    }
+  }
+  return Some(
+    value: ItemChange {
+      name: json.str_at(j: n, key: "name"),
+      kind: json.str_at(j: n, key: "kind"),
+      visibility: json.str_at(j: n, key: "visibility"),
+      signature: signature,
+      effects_added: effects_added,
+      effects_removed: effects_removed,
+      contracts: contract_list,
+      assumes_added: assumes_added,
+      assumes_removed: assumes_removed,
+      recovers_added: recovers_added,
+      recovers_removed: recovers_removed,
+      obligations: obligation_list,
+      breaking: breaking
+    }
+  )
+}
+
+fn ref_json(r: ItemRef) -> json.Json may alloc {
+  return json.JObject(
+    fields: [
+      json.field(key: "name", value: json.text(t: r.name)),
+      json.field(key: "kind", value: json.text(t: r.kind)),
+      json.field(key: "visibility", value: json.text(t: r.visibility))
+    ]
+  )
+}
+
+fn refs_json(rs: List[ItemRef]) -> json.Json may alloc, mutate {
+  var out: Builder[json.Json] = List.builder()
+  for r: ItemRef in rs {
+    List.push(b: inout out, x: ref_json(r: r))
+  }
+  return json.JArray(items: List.finish(b: out))
+}
+
+fn change_json(c: ItemChange) -> json.Json may alloc, mutate {
+  var signature: json.Json = json.JNull
+  match c.signature with
+  | Some(value) -> signature = json.JObject(
+    fields: [
+      json.field(key: "old", value: json.text(t: value.before_sig)),
+      json.field(key: "new", value: json.text(t: value.after_sig))
+    ]
+  )
+  | None -> skip()
+  var contracts: Builder[json.Json] = List.builder()
+  for k: ContractChange in c.contracts {
+    List.push(
+      b: inout contracts,
+      x: json.JObject(
+        fields: [
+          json.field(key: "kind", value: json.text(t: k.kind)),
+          json.field(key: "text", value: json.text(t: k.text)),
+          json.field(key: "change", value: json.text(t: k.change)),
+          json.field(key: "compatibility", value: json.text(t: k.compatibility))
+        ]
+      )
+    )
+  }
+  var obligations: Builder[json.Json] = List.builder()
+  for x: ObligationChange in c.obligations {
+    List.push(
+      b: inout obligations,
+      x: json.JObject(
+        fields: [
+          json.field(key: "kind", value: json.text(t: x.kind)),
+          json.field(key: "text", value: json.text(t: x.text)),
+          json.field(key: "from", value: json.text(t: x.from)),
+          json.field(key: "to", value: json.text(t: x.to))
+        ]
+      )
+    )
+  }
+  return json.JObject(
+    fields: [
+      json.field(key: "name", value: json.text(t: c.name)),
+      json.field(key: "kind", value: json.text(t: c.kind)),
+      json.field(key: "visibility", value: json.text(t: c.visibility)),
+      json.field(key: "signature", value: signature),
+      json.field(
+        key: "effects",
+        value: json.JObject(
+          fields: [
+            json.field(key: "added", value: json.texts(ts: c.effects_added)),
+            json.field(key: "removed", value: json.texts(ts: c.effects_removed))
+          ]
+        )
+      ),
+      json.field(key: "contracts", value: json.JArray(items: List.finish(b: contracts))),
+      json.field(
+        key: "assumes",
+        value: json.JObject(
+          fields: [
+            json.field(key: "added", value: json.texts(ts: c.assumes_added)),
+            json.field(key: "removed", value: json.texts(ts: c.assumes_removed))
+          ]
+        )
+      ),
+      json.field(
+        key: "recovers",
+        value: json.JObject(
+          fields: [
+            json.field(key: "added", value: json.int(v: c.recovers_added)),
+            json.field(key: "removed", value: json.int(v: c.recovers_removed))
+          ]
+        )
+      ),
+      json.field(key: "obligations", value: json.JArray(items: List.finish(b: obligations))),
+      json.field(key: "breaking", value: json.bool(b: c.breaking))
+    ]
+  )
+}
+
+-- The diff as the §15.1 JSON object.
+pub fn diff_json(d: Diff) -> json.Json may alloc, mutate {
+  var changed: Builder[json.Json] = List.builder()
+  for c: ItemChange in d.changed {
+    List.push(b: inout changed, x: change_json(c: c))
+  }
+  return json.JObject(
+    fields: [
+      json.field(key: "module", value: json.text(t: d.module_name)),
+      json.field(key: "old_hash", value: json.text(t: d.old_hash)),
+      json.field(key: "new_hash", value: json.text(t: d.new_hash)),
+      json.field(key: "added", value: refs_json(rs: d.added)),
+      json.field(key: "removed", value: refs_json(rs: d.removed)),
+      json.field(key: "changed", value: json.JArray(items: List.finish(b: changed))),
+      json.field(key: "breaking", value: json.bool(b: d.breaking))
+    ]
+  )
+}
+
+-- The first `n` graphemes of a text.
+fn prefix(t: Text, n: Int where it >= 0) -> Text may alloc {
+  if Text.count(t: t) <= n {
+    return t
+  }
+  return Text.slice(t: t, from: 0, to: n)
+}
+
+fn plural(n: Int) -> Text {
+  if n == 1 {
+    return ""
+  }
+  return "s"
+}
+
+-- A terminal rendering of a diff.
+pub fn diff_text(d: Diff) -> Text may alloc, mutate {
+  var lines: Builder[Text] = List.builder()
+  var verdict: Text = "compatible"
+  if d.breaking {
+    verdict = "BREAKING"
+  }
+  List.push(
+    b: inout lines,
+    x: "interface " ++ d.module_name ++ ": " ++ verdict ++ " (" ++ prefix(
+      t: d.old_hash,
+      n: 11
+    ) ++ " → " ++ prefix(t: d.new_hash, n: 11) ++ ")"
+  )
+  for a: ItemRef in d.added {
+    List.push(b: inout lines, x: "  + " ++ a.kind ++ " " ++ a.name)
+  }
+  for r: ItemRef in d.removed {
+    var note: Text = ""
+    if r.visibility == "pub" {
+      note = " (pub: breaking)"
+    }
+    List.push(b: inout lines, x: "  - " ++ r.kind ++ " " ++ r.name ++ note)
+  }
+  for c: ItemChange in d.changed {
+    var note: Text = ""
+    if c.breaking {
+      note = " (breaking)"
+    }
+    List.push(b: inout lines, x: "  ~ " ++ c.kind ++ " " ++ c.name ++ note)
+    match c.signature with
+    | Some(value) -> {
+      List.push(b: inout lines, x: "      signature: " ++ value.before_sig)
+      List.push(b: inout lines, x: "              -> " ++ value.after_sig)
+    }
+    | None -> skip()
+    if List.len(xs: c.effects_added) > 0 {
+      List.push(
+        b: inout lines,
+        x: "      effects widened: " ++ Text.join(parts: c.effects_added, sep: ", ")
+      )
+    }
+    if List.len(xs: c.effects_removed) > 0 {
+      List.push(
+        b: inout lines,
+        x: "      effects narrowed: " ++ Text.join(parts: c.effects_removed, sep: ", ")
+      )
+    }
+    for k: ContractChange in c.contracts {
+      List.push(
+        b: inout lines,
+        x: "      " ++ k.change ++ " " ++ k.kind ++ " " ++ k.text ++ " (" ++ k.compatibility ++ ")"
+      )
+    }
+    for a: Text in c.assumes_added {
+      List.push(b: inout lines, x: "      new assumption: " ++ a)
+    }
+    for a: Text in c.assumes_removed {
+      List.push(b: inout lines, x: "      assumption removed: " ++ a)
+    }
+    if c.recovers_added > 0 {
+      List.push(
+        b: inout lines,
+        x: "      " ++ Int.to_text(x: c.recovers_added) ++ " new recover site(s)"
+      )
+    }
+    for x: ObligationChange in c.obligations {
+      List.push(
+        b: inout lines,
+        x: "      " ++ x.kind ++ " " ++ x.text ++ ": " ++ x.from ++ " -> " ++ x.to
+      )
+    }
+  }
+  return Text.join(parts: List.finish(b: lines), sep: "\n") ++ "\n"
+}
+
+fn skip() -> Unit {
+  return Unit
+}

@@ -85,6 +85,10 @@ pub record Context {
   assume_sites: Builder[tables.AssumeSite]
   -- Pass 12 (paths)
   analyses: Dict[Int, tables.PathAnalysis]
+  -- The project's ledgers (§20.3–§20.5), read by the command line; empty otherwise.
+  assumptions: Dict[Text, tables.VerificationRecord]
+  coverage: Dict[Text, Int]
+  mutations: List[tables.MutationRecord]
 }
 
 pub fn new_context(root: Option[Text], stdlib: Option[Text]) -> Context may alloc {
@@ -139,7 +143,10 @@ pub fn new_context(root: Option[Text], stdlib: Option[Text]) -> Context may allo
     claim_tiers: Map.dict(),
     carried: Map.dict(),
     assume_sites: List.builder(),
-    analyses: Map.dict()
+    analyses: Map.dict(),
+    assumptions: Map.dict(),
+    coverage: Map.dict(),
+    mutations: []
   }
 }
 

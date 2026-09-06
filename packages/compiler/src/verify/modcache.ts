@@ -24,7 +24,7 @@ import type { Obligation } from '../contracts/obligations.js';
 import type { ModuleId } from '../resolve/defs.js';
 
 /** Bumped when the entry format or the meaning of a key changes. */
-export const FORMAT = 1;
+export const FORMAT = 2;
 
 export interface CachedStatus {
   readonly status: Obligation['status'];

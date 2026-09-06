@@ -1,0 +1,3182 @@
+module native
+import ast
+import defs
+import context
+import types
+import values
+import ir
+import typecheck
+import claimcheck
+
+-- The native emitter (impl spec §6, M11; language spec §19; `codegen/native.ts`):
+-- renders the target-neutral form of `ir.onus` as LLVM IR text for `clang` to
+-- compile and link against the C runtime in `packages/runtime/native/`.
+--
+-- Representation:
+--   - `Int`/`Duration` are `i64`, `Float` is `double`, `Bool` is `i1`;
+--   - everything else is a pointer: `Text` to `{ len, bytes }`, records to an
+--     array of 64-bit slots, variants to `{ tag, slots... }`, lists and grids
+--     to runtime objects. A slot holds any value bit-for-bit, so generic code
+--     (type parameters, intrinsics) moves slots and the caller converts at the
+--     boundary;
+--   - `inout` parameters are pointers to the caller's slot;
+--   - a `proved` obligation emits nothing; a `checked` one is a branch to
+--     `onus_panic`; `Int` arithmetic uses the overflow intrinsics; `try` is a
+--     branch that returns the error from the enclosing function.
+--
+-- Programs reaching a construct outside the v0 native subset are refused with
+-- `E0800 primitive unavailable on target` (§19.1): closures and function
+-- values, interfaces, quantifiers at runtime, `fake`, `TypeInfo`, `old(...)`,
+-- structural equality on type parameters, `Map`, `Bytes`, `sql` without
+-- libpq, and `Text` operations that need grapheme tables.
+--
+-- A construct the native backend does not compile in v0, at the definition that uses it.
+pub record Unsupported {
+  def: Text
+  file: Int
+  span: ast.Span
+  what: Text
+}
+
+pub record Program {
+  ll: Text
+  unsupported: List[Unsupported]
+  -- The entry module's `main`, when it has one.
+  has_main: Bool
+  -- Example names, module-qualified, in run order.
+  examples: List[Text]
+}
+
+pub record Options {
+  -- `libpq` is available: `std.sql` compiles; otherwise it is E0800.
+  sql: Bool
+}
+
+pub const max_depth: Int = 100000
+
+-- An LLVM value: its text and its type, `i64`, `double`, `i1` or `ptr`.
+record Val {
+  v: Text
+  t: Text
+}
+
+record Local {
+  ptr: Text
+  t: Text
+  ty: types.Type
+}
+
+record ExampleFn {
+  name: Text
+  fn_name: Text
+}
+
+record Store {
+  name: Text
+  t: Text
+  ty: types.Type
+  is_inout: Bool
+}
+
+-- The emitter's state. Builders and dictionaries share their storage across
+-- copies; the scalars change through `inout`.
+record N {
+  modules: List[ir.Module]
+  entry: Option[ir.Module]
+  sql: Bool
+  -- The `std.host.js` claim: functions carrying it run only on the JavaScript host (§19.2).
+  host_js: Option[Int]
+  globals: Builder[Text]
+  strings: Dict[Text, Text]
+  string_count: Int where it >= 0
+  texts: Dict[Text, Text]
+  text_count: Int where it >= 0
+  -- Constants emitted as lazily filled slots (aggregates and computed values), by definition.
+  lazy_consts: Dict[Int, Bool]
+  -- Structural comparers generated so far, by type text (see `eq_fn_of`).
+  eq_fns: Dict[Text, Text]
+  declared: Dict[Text, Bool]
+  fns: Builder[Text]
+  unsupported: Builder[Unsupported]
+  examples: Builder[ExampleFn]
+  counter: Int where it >= 0
+  -- Per-function state.
+  lines: Builder[Text]
+  allocas: Builder[Text]
+  locals: Dict[Text, Local]
+  -- Local names in first-binding order (a `recover` environment is laid out in it).
+  local_order: Builder[Text]
+  block: Text
+  terminated: Bool
+  -- `i64`, `double`, `i1`, `ptr` or `void`.
+  fn_ret: Text
+}
+
+record Saved {
+  lines: Builder[Text]
+  allocas: Builder[Text]
+  locals: Dict[Text, Local]
+  local_order: Builder[Text]
+  block: Text
+  terminated: Bool
+  fn_ret: Text
+}
+
+fn skip() -> Unit {
+  return Unit
+}
+
+fn s(i: Int) -> Text may alloc {
+  return Int.to_text(x: i)
+}
+
+fn val(v: Text, t: Text) -> Val {
+  return Val { v: v, t: t }
+}
+
+fn new_n(
+  modules: List[ir.Module],
+  entry: Option[ir.Module],
+  sql: Bool,
+  host_js: Option[Int]
+) -> N may alloc {
+  return N {
+    modules: modules,
+    entry: entry,
+    sql: sql,
+    host_js: host_js,
+    globals: List.builder(),
+    strings: Map.dict(),
+    string_count: 0,
+    texts: Map.dict(),
+    text_count: 0,
+    lazy_consts: Map.dict(),
+    eq_fns: Map.dict(),
+    declared: Map.dict(),
+    fns: List.builder(),
+    unsupported: List.builder(),
+    examples: List.builder(),
+    counter: 0,
+    lines: List.builder(),
+    allocas: List.builder(),
+    locals: Map.dict(),
+    local_order: List.builder(),
+    block: "entry",
+    terminated: false,
+    fn_ret: "i64"
+  }
+}
+
+-- The `js` claim of `std.host`, when the program loads that module.
+fn host_js_claim(ctx: context.Context) -> Option[Int] may alloc {
+  for i: Int in 0 ..< context.def_count(ctx: ctx) {
+    let d: defs.Def = context.get_def(ctx: ctx, id: i)
+    if d.kind is defs.Claim and d.name == "js" and context.module_name(
+      ctx: ctx,
+      id: d.mod
+    ) == "std.host" {
+      return Some(value: d.id)
+    }
+  }
+  return None
+}
+
+-- -----------------------------------------------------------------------------
+-- Text helpers
+-- -----------------------------------------------------------------------------
+-- A hexadecimal digit, upper case; anything outside 0..15 prints as `0`.
+fn hex_digit(d: Int) -> Text may alloc {
+  if d >= 0 and d < 10 {
+    return Int.to_text(x: d)
+  }
+  if d >= 10 and d <= 15 {
+    return Text.of_code_point(cp: 55 + d)
+  }
+  return "0"
+}
+
+fn hex2(b: Int where 0 <= it and it <= 255) -> Text may alloc {
+  return hex_digit(d: b / 16) ++ hex_digit(d: b % 16)
+}
+
+fn push_byte(
+  out: inout Builder[Text],
+  b: Int where 0 <= it and it <= 255
+) -> Unit may mutate, alloc {
+  if b >= 32 and b < 127 and b != 34 and b != 92 {
+    List.push(b: inout out, x: Text.of_code_point(cp: b))
+  } else {
+    List.push(b: inout out, x: "\\" ++ hex2(b: b))
+  }
+  return Unit
+}
+
+-- The UTF-8 length of a text.
+fn utf8_len(x: Text) -> Int may alloc {
+  var total: Int = 0
+  for c: Int in Text.code_points(t: x) {
+    if c < 128 {
+      total = total + 1
+    } else {
+      if c < 2048 {
+        total = total + 2
+      } else {
+        if c < 65536 {
+          total = total + 3
+        } else {
+          total = total + 4
+        }
+      }
+    }
+  }
+  return total
+}
+
+-- A text's UTF-8 bytes as an LLVM `c"..."` body: printable ASCII as is, everything else `\XX`.
+fn escape_utf8(x: Text) -> Text may alloc, mutate {
+  var out: Builder[Text] = List.builder()
+  for c: Int in Text.code_points(t: x) {
+    if c < 128 {
+      push_byte(out: inout out, b: c)
+    } else {
+      if c < 2048 {
+        push_byte(out: inout out, b: 192 + c / 64)
+        push_byte(out: inout out, b: 128 + c % 64)
+      } else {
+        if c < 65536 {
+          push_byte(out: inout out, b: 224 + c / 4096)
+          push_byte(out: inout out, b: 128 + c / 64 % 64)
+          push_byte(out: inout out, b: 128 + c % 64)
+        } else {
+          push_byte(out: inout out, b: 240 + c / 262144)
+          push_byte(out: inout out, b: 128 + c / 4096 % 64)
+          push_byte(out: inout out, b: 128 + c / 64 % 64)
+          push_byte(out: inout out, b: 128 + c % 64)
+        }
+      }
+    }
+  }
+  return Text.join(parts: List.finish(b: out), sep: "")
+}
+
+-- 2^k, exactly.
+fn two_pow(k: Int where 0 <= it and it <= 1023) -> Float {
+  var p: Float = 1.0
+  for i: Int in 0 ..< k {
+    p = p * 2.0
+  }
+  return p
+}
+
+-- An exact LLVM double literal: the IEEE-754 bits in hexadecimal, found with
+-- exact operations (scaling by powers of two and halving) so that no target
+-- needs a 64-bit integer or a bit cast.
+fn double_literal(v: Float) -> Text may alloc, mutate {
+  match Float.classify(x: v) with
+  | NotANumber -> return "0x7FF8000000000000"
+  | Infinite -> {
+    if v > 0.0 {
+      return "0x7FF0000000000000"
+    }
+    return "0xFFF0000000000000"
+  }
+  | Finite -> skip()
+  var sign: Int = 0
+  var x: Float = v
+  if v < 0.0 {
+    sign = 1
+    x = 0.0 - v
+  }
+  if x == 0.0 {
+    if 1.0 / v < 0.0 {
+      return "0x8000000000000000"
+    }
+    return "0x0000000000000000"
+  }
+  -- 2^e <= x < 2^(e + 1), with inv = 2^-e while that is representable.
+  var e: Int = 0
+  var p: Float = 1.0
+  var inv: Float = 1.0
+  if x >= 1.0 {
+    loop while p * 2.0 <= x and e < 1023
+      invariant e >= 0 and e <= 1023
+      decreases 1023 - e
+    {
+      p = p * 2.0
+      inv = inv * 0.5
+      e = e + 1
+    }
+  } else {
+    loop while p > x and e > -1074
+      invariant e <= 0 and e >= -1074
+      decreases e + 1074
+    {
+      p = p * 0.5
+      inv = inv * 2.0
+      e = e - 1
+    }
+  }
+  var biased: Int = 0
+  var frac: Float = 0.0
+  if e >= -1022 {
+    biased = e + 1023
+    frac = x * inv - 1.0
+  } else {
+    -- Subnormal: the fraction is x * 2^1074 over 2^52, that is x * 2^1022, in two exact steps.
+    frac = x * two_pow(k: 537) * two_pow(k: 485)
+  }
+  let top: Int = sign * 2048 + biased
+  var out: Text = "0x" ++ hex_digit(d: top / 256) ++ hex_digit(d: top / 16 % 16) ++ hex_digit(
+    d: top % 16
+  )
+  var f: Float = frac
+  for k: Int in 0 ..< 13 {
+    var nib: Int = 0
+    for j: Int in 0 ..< 4 {
+      f = f * 2.0
+      nib = nib * 2
+      if f >= 1.0 {
+        nib = nib + 1
+        f = f - 1.0
+      }
+    }
+    out = out ++ hex_digit(d: nib)
+  }
+  return out
+}
+
+fn sort_texts(xs: List[Text]) -> List[Text] may alloc, mutate {
+  var out: List[Text] = []
+  for x: Text in xs {
+    var inserted: Bool = false
+    var b: Builder[Text] = List.builder()
+    for y: Text in out {
+      if not inserted and Text.compare(a: x, b: y) < 0 {
+        List.push(b: inout b, x: x)
+        inserted = true
+      }
+      List.push(b: inout b, x: y)
+    }
+    if not inserted {
+      List.push(b: inout b, x: x)
+    }
+    out = List.finish(b: b)
+  }
+  return out
+}
+
+fn last_segment(q: Text) -> Text may alloc {
+  let parts: List[Text] = Text.split(t: q, sep: ".")
+  if List.len(xs: parts) == 0 {
+    return q
+  }
+  return List.get(xs: parts, i: List.len(xs: parts) - 1)
+}
+
+-- -----------------------------------------------------------------------------
+-- Tables
+-- -----------------------------------------------------------------------------
+fn fields_of(ctx: context.Context, owner: Int) -> List[types.FieldInfo] may alloc {
+  match Map.find(d: ctx.fields, key: owner) with
+  | Some(value) -> return value
+  | None -> return []
+}
+
+fn variants_of(ctx: context.Context, union_def: Int) -> List[Int] may alloc {
+  match Map.find(d: ctx.variants, key: union_def) with
+  | Some(value) -> return value
+  | None -> return []
+}
+
+fn field_index(fields: List[types.FieldInfo], name: Text) -> Int {
+  for i: Int in 0 ..< List.len(xs: fields) {
+    if List.get(xs: fields, i: i).name == name {
+      return i
+    }
+  }
+  return -1
+}
+
+-- A field's slot: its index, or 0 when the field is unknown.
+fn slot_index(fields: List[types.FieldInfo], name: Text) -> Int {
+  let i: Int = field_index(fields: fields, name: name)
+  if i < 0 {
+    return 0
+  }
+  return i
+}
+
+-- The bytes of an object of `k` slots (at least one).
+fn slots_size(k: Int) -> Int {
+  if k < 1 {
+    return 8
+  }
+  return 8 * k
+}
+
+fn variant_index(ctx: context.Context, union_def: Int, variant: Int) -> Int may alloc {
+  let vs: List[Int] = variants_of(ctx: ctx, union_def: union_def)
+  for i: Int in 0 ..< List.len(xs: vs) {
+    if List.get(xs: vs, i: i) == variant {
+      return i
+    }
+  }
+  return 0
+}
+
+-- The tag of `variant` in its union, as text; 0 for a variant without a parent.
+fn variant_tag(ctx: context.Context, parent: Option[Int], variant: Int) -> Text may alloc {
+  match parent with
+  | Some(value) -> return s(i: variant_index(ctx: ctx, union_def: value, variant: variant))
+  | None -> return "0"
+}
+
+fn union_def_of(t: types.Type) -> Option[Int] {
+  match types.strip(t: t) with
+  | types.UnionT(def, _) -> return Some(value: def)
+  | _ -> return None
+}
+
+fn find_value(fields: List[values.Field], name: Text) -> Option[values.Value] {
+  for f: values.Field in fields {
+    if f.name == name {
+      return Some(value: f.value)
+    }
+  }
+  return None
+}
+
+fn fn_body(f: ir.Fn) -> List[ir.Stmt] may alloc {
+  match f.body with
+  | Some(value) -> return value
+  | None -> return []
+}
+
+fn subst_of(
+  ctx: context.Context,
+  def: Int,
+  args: List[types.TypeArg]
+) -> Dict[Int, types.TypeArg] may alloc, mutate {
+  var subst: Dict[Int, types.TypeArg] = Map.dict()
+  match Map.find(d: ctx.type_params, key: def) with
+  | Some(value) -> {
+    for i: Int in 0 ..< List.len(xs: value) {
+      if i < List.len(xs: args) {
+        Map.set(
+          d: inout subst,
+          key: types.tparam_def(p: List.get(xs: value, i: i)),
+          value: List.get(xs: args, i: i)
+        )
+      }
+    }
+  }
+  | None -> skip()
+  return subst
+}
+
+-- The LLVM type of a value of `t`. Err for what the native target does not represent.
+fn ll_of(ctx: context.Context, t: types.Type) -> Result[Text, Text] may alloc {
+  match types.strip(t: t) with
+  | types.Prim(name) -> {
+    if name == "Int" or name == "Duration" or name == "Unit" {
+      return Ok(value: "i64")
+    }
+    if name == "Float" {
+      return Ok(value: "double")
+    }
+    if name == "Bool" {
+      return Ok(value: "i1")
+    }
+    if name == "Text" or name == "TypeInfo" {
+      return Ok(value: "ptr")
+    }
+    if name == "Bytes" or name == "Spec" {
+      return Err(error: "`" ++ name ++ "` values")
+    }
+    return Ok(value: "i64")
+  }
+  | types.RecordT(_, _) -> return Ok(value: "ptr")
+  | types.UnionT(_, _) -> return Ok(value: "ptr")
+  | types.Capability(_, _, _) -> return Ok(value: "ptr")
+  | types.Opaque(def, _) -> {
+    let q: Text = context.qualified_name(ctx: ctx, id: def)
+    if q == "std.list.List" or q == "std.list.Builder" or q == "std.grid.Grid" or q == "std.sql.Select" or q == "std.sql.Param" or q == "std.sql.Statement" {
+      return Ok(value: "ptr")
+    }
+    return Err(error: "`" ++ context.get_def(ctx: ctx, id: def).name ++ "` values")
+  }
+  | types.ParamT(_) -> return Ok(value: "i64")
+  | types.FnT(_, _, _) -> return Err(error: "function values")
+  | types.TypeInfoT -> return Ok(value: "ptr")
+  | types.SpecT -> return Err(error: "`Spec` values")
+  | types.ErrorT -> return Ok(value: "i64")
+  | types.Refined(_, _, _) -> return Ok(value: "i64")
+}
+
+fn fn_name(module: Text, name: Text) -> Text may alloc {
+  return "@\"" ++ module ++ "." ++ name ++ "\""
+}
+
+fn getter_name(module: Text, name: Text) -> Text may alloc {
+  return "@\"" ++ module ++ "." ++ name ++ "$get\""
+}
+
+-- -----------------------------------------------------------------------------
+-- Emission primitives
+-- -----------------------------------------------------------------------------
+fn new_tmp(n: inout N) -> Text may mutate, alloc {
+  n = { n with counter: n.counter + 1 }
+  return "%t" ++ s(i: n.counter)
+}
+
+fn new_label(n: inout N, prefix: Text) -> Text may mutate, alloc {
+  n = { n with counter: n.counter + 1 }
+  return prefix ++ s(i: n.counter)
+}
+
+fn emit_line(n: N, line: Text) -> Unit may mutate, alloc {
+  var lines: Builder[Text] = n.lines
+  List.push(b: inout lines, x: "  " ++ line)
+  return Unit
+}
+
+fn push_global(n: N, line: Text) -> Unit may mutate, alloc {
+  var globals: Builder[Text] = n.globals
+  List.push(b: inout globals, x: line)
+  return Unit
+}
+
+fn push_fn_line(n: N, line: Text) -> Unit may mutate, alloc {
+  var fns: Builder[Text] = n.fns
+  List.push(b: inout fns, x: line)
+  return Unit
+}
+
+fn declare_sig(n: N, sig: Text) -> Unit may mutate, alloc {
+  var declared: Dict[Text, Bool] = n.declared
+  Map.set(d: inout declared, key: sig, value: true)
+  return Unit
+}
+
+fn start_block(n: inout N, name: Text) -> Unit may mutate, alloc {
+  var lines: Builder[Text] = n.lines
+  List.push(b: inout lines, x: name ++ ":")
+  n = { n with block: name, terminated: false }
+  return Unit
+}
+
+fn br(n: inout N, target: Text) -> Unit may mutate, alloc {
+  if n.terminated {
+    return Unit
+  }
+  emit_line(n: n, line: "br label %" ++ target)
+  n = { n with terminated: true }
+  return Unit
+}
+
+fn cond_br(n: inout N, cond: Text, then_l: Text, else_l: Text) -> Unit may mutate, alloc {
+  emit_line(n: n, line: "br i1 " ++ cond ++ ", label %" ++ then_l ++ ", label %" ++ else_l)
+  n = { n with terminated: true }
+  return Unit
+}
+
+fn set_local(n: N, name: Text, l: Local) -> Unit may mutate, alloc {
+  var locals: Dict[Text, Local] = n.locals
+  if not Map.contains(d: locals, key: name) {
+    var order: Builder[Text] = n.local_order
+    List.push(b: inout order, x: name)
+  }
+  Map.set(d: inout locals, key: name, value: l)
+  return Unit
+}
+
+fn alloc_local(n: inout N, name: Text, t: Text, ty: types.Type) -> Text may mutate, alloc {
+  n = { n with counter: n.counter + 1 }
+  let ptr: Text = "%\"" ++ name ++ ".addr" ++ s(i: n.counter) ++ "\""
+  var allocas: Builder[Text] = n.allocas
+  List.push(b: inout allocas, x: "  " ++ ptr ++ " = alloca " ++ t)
+  set_local(n: n, name: name, l: Local { ptr: ptr, t: t, ty: ty })
+  return ptr
+}
+
+fn c_string(n: inout N, x: Text) -> Text may mutate, alloc {
+  match Map.find(d: n.strings, key: x) with
+  | Some(value) -> return value
+  | None -> skip()
+  n = { n with string_count: n.string_count + 1 }
+  let name: Text = "@s" ++ s(i: n.string_count)
+  let bytes: Int = utf8_len(x: x)
+  push_global(
+    n: n,
+    line: name ++ " = private unnamed_addr constant [" ++ s(
+      i: bytes + 1
+    ) ++ " x i8] c\"" ++ escape_utf8(x: x) ++ "\\00\""
+  )
+  var strings: Dict[Text, Text] = n.strings
+  Map.set(d: inout strings, key: x, value: name)
+  return name
+}
+
+fn text_global(n: inout N, x: Text) -> Text may mutate, alloc {
+  match Map.find(d: n.texts, key: x) with
+  | Some(value) -> return value
+  | None -> skip()
+  n = { n with text_count: n.text_count + 1 }
+  let name: Text = "@txt" ++ s(i: n.text_count)
+  let bytes: Int = utf8_len(x: x)
+  let arr: Text = "[" ++ s(i: bytes + 1) ++ " x i8]"
+  push_global(
+    n: n,
+    line: name ++ " = private unnamed_addr constant { i64, " ++ arr ++ " } { i64 " ++ s(
+      i: bytes
+    ) ++ ", " ++ arr ++ " c\"" ++ escape_utf8(x: x) ++ "\\00\" }"
+  )
+  var texts: Dict[Text, Text] = n.texts
+  Map.set(d: inout texts, key: x, value: name)
+  return name
+}
+
+fn emit_panic(n: inout N, ob: ir.ObRef) -> Unit may mutate, alloc {
+  let k: Text = c_string(n: inout n, x: ob.kind)
+  let t: Text = c_string(n: inout n, x: ob.text)
+  let a: Text = c_string(n: inout n, x: ob.at)
+  let d: Text = c_string(n: inout n, x: ob.def)
+  emit_line(
+    n: n,
+    line: "call void @onus_panic(ptr " ++ k ++ ", ptr " ++ t ++ ", ptr " ++ a ++ ", ptr " ++ d ++ ")"
+  )
+  emit_line(n: n, line: "unreachable")
+  n = { n with terminated: true }
+  return Unit
+}
+
+-- A value as a 64-bit slot.
+fn to_slot(n: inout N, v: Val) -> Text may mutate, alloc {
+  if v.t == "i64" {
+    return v.v
+  }
+  let r: Text = new_tmp(n: inout n)
+  if v.t == "double" {
+    emit_line(n: n, line: r ++ " = bitcast double " ++ v.v ++ " to i64")
+  }
+  if v.t == "i1" {
+    emit_line(n: n, line: r ++ " = zext i1 " ++ v.v ++ " to i64")
+  }
+  if v.t == "ptr" {
+    emit_line(n: n, line: r ++ " = ptrtoint ptr " ++ v.v ++ " to i64")
+  }
+  return r
+}
+
+-- A slot read as `t`.
+fn from_slot(n: inout N, slot: Text, t: Text) -> Val may mutate, alloc {
+  if t == "i64" {
+    return val(v: slot, t: t)
+  }
+  let r: Text = new_tmp(n: inout n)
+  if t == "double" {
+    emit_line(n: n, line: r ++ " = bitcast i64 " ++ slot ++ " to double")
+  }
+  if t == "i1" {
+    emit_line(n: n, line: r ++ " = icmp ne i64 " ++ slot ++ ", 0")
+  }
+  if t == "ptr" {
+    emit_line(n: n, line: r ++ " = inttoptr i64 " ++ slot ++ " to ptr")
+  }
+  return val(v: r, t: t)
+}
+
+-- Converts a value to the representation of `to` (a slot for type parameters).
+fn coerce_to(n: inout N, v: Val, to: Text) -> Val may mutate, alloc {
+  if v.t == to {
+    return v
+  }
+  let slot: Text = to_slot(n: inout n, v: v)
+  return from_slot(n: inout n, slot: slot, t: to)
+}
+
+fn load_slot(n: inout N, obj: Text, idx: Int) -> Text may mutate, alloc {
+  let p: Text = new_tmp(n: inout n)
+  emit_line(n: n, line: p ++ " = getelementptr i64, ptr " ++ obj ++ ", i64 " ++ s(i: idx))
+  let v: Text = new_tmp(n: inout n)
+  emit_line(n: n, line: v ++ " = load i64, ptr " ++ p)
+  return v
+}
+
+fn store_slot(n: inout N, obj: Text, idx: Int, slot: Text) -> Unit may mutate, alloc {
+  let p: Text = new_tmp(n: inout n)
+  emit_line(n: n, line: p ++ " = getelementptr i64, ptr " ++ obj ++ ", i64 " ++ s(i: idx))
+  emit_line(n: n, line: "store i64 " ++ slot ++ ", ptr " ++ p)
+  return Unit
+}
+
+fn begin_fn(n: inout N) -> Unit may mutate, alloc {
+  n = { n with
+    lines: List.builder(),
+    allocas: List.builder(),
+    locals: Map.dict(),
+    local_order: List.builder(),
+    block: "entry",
+    terminated: false
+  }
+  return Unit
+}
+
+-- The entry block is labelled so that a branch or phi from the function's first statements can name it.
+fn finish_fn(n: N, header: Text) -> Unit may mutate, alloc {
+  push_fn_line(n: n, line: header)
+  push_fn_line(n: n, line: "entry:")
+  for a: Text in List.finish(b: n.allocas) {
+    push_fn_line(n: n, line: a)
+  }
+  for l: Text in List.finish(b: n.lines) {
+    push_fn_line(n: n, line: l)
+  }
+  push_fn_line(n: n, line: "")
+  push_fn_line(n: n, line: "}")
+  push_fn_line(n: n, line: "")
+  return Unit
+}
+
+fn save_fn(n: N) -> Saved {
+  return Saved {
+    lines: n.lines,
+    allocas: n.allocas,
+    locals: n.locals,
+    local_order: n.local_order,
+    block: n.block,
+    terminated: n.terminated,
+    fn_ret: n.fn_ret
+  }
+}
+
+fn restore_fn(n: inout N, sv: Saved) -> Unit may mutate {
+  n = { n with
+    lines: sv.lines,
+    allocas: sv.allocas,
+    locals: sv.locals,
+    local_order: sv.local_order,
+    block: sv.block,
+    terminated: sv.terminated,
+    fn_ret: sv.fn_ret
+  }
+  return Unit
+}
+
+-- A function carrying `host.js` runs only on the JavaScript host (§19.2); `std.sql` needs `libpq`.
+fn require_native(n: N, ctx: context.Context, def: defs.Def) -> Result[Unit, Text] may alloc {
+  match n.host_js with
+  | Some(value) -> {
+    if claimcheck.carries(ctx: ctx, fn_def: def.id, claim_def: value) {
+      return Err(
+        error: "`" ++ context.qualified_name(
+          ctx: ctx,
+          id: def.id
+        ) ++ "`, which claims `host.js` and runs only on the JavaScript host"
+      )
+    }
+  }
+  | None -> skip()
+  if not n.sql and def.is_intrinsic and Text.starts_with(
+    t: context.qualified_name(ctx: ctx, id: def.id),
+    prefix: "std.sql."
+  ) {
+    return Err(
+      error: "`" ++ context.qualified_name(
+        ctx: ctx,
+        id: def.id
+      ) ++ "`, which needs libpq, not found on this machine"
+    )
+  }
+  return Ok(value: Unit)
+}
+
+-- -----------------------------------------------------------------------------
+-- Compile-time values and constants
+-- -----------------------------------------------------------------------------
+-- A compile-time aggregate value (a `const` list, record or variant) built at the point of use.
+fn const_val(
+  fuel: Int where it >= 0,
+  n: inout N,
+  ctx: context.Context,
+  x: values.Value
+) -> Result[Val, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "out of fuel")
+  }
+  match x with
+  | values.IntV(v) -> return Ok(value: val(v: s(i: v), t: "i64"))
+  | values.DurationV(v) -> return Ok(value: val(v: s(i: v), t: "i64"))
+  | values.BoolV(v) -> return Ok(value: val(v: bool_text(b: v), t: "i1"))
+  | values.FloatV(v) -> return Ok(value: val(v: double_literal(v: v), t: "double"))
+  | values.TextV(v) -> return Ok(value: val(v: text_global(n: inout n, x: v), t: "ptr"))
+  | values.UnitV -> return Ok(value: val(v: "0", t: "i64"))
+  | values.ListV(items) -> {
+    let list: Text = new_tmp(n: inout n)
+    emit_line(
+      n: n,
+      line: list ++ " = call ptr @onus_rt_list_new(i64 " ++ s(i: List.len(xs: items)) ++ ")"
+    )
+    for i: Int in 0 ..< List.len(xs: items) {
+      let cv: Val = try const_val(
+        fuel: fuel - 1,
+        n: inout n,
+        ctx: ctx,
+        x: List.get(xs: items, i: i)
+      )
+      let slot: Text = to_slot(n: inout n, v: cv)
+      emit_line(
+        n: n,
+        line: "call void @onus_rt_list_set(ptr " ++ list ++ ", i64 " ++ s(
+          i: i
+        ) ++ ", i64 " ++ slot ++ ")"
+      )
+    }
+    return Ok(value: val(v: list, t: "ptr"))
+  }
+  | values.RecordV(def, fields) -> {
+    let fs: List[types.FieldInfo] = fields_of(ctx: ctx, owner: def)
+    let obj: Text = new_tmp(n: inout n)
+    emit_line(
+      n: n,
+      line: obj ++ " = call ptr @onus_alloc(i64 " ++ s(i: slots_size(k: List.len(xs: fs))) ++ ")"
+    )
+    for i: Int in 0 ..< List.len(xs: fs) {
+      match find_value(fields: fields, name: List.get(xs: fs, i: i).name) with
+      | Some(value) -> {
+        let cv: Val = try const_val(fuel: fuel - 1, n: inout n, ctx: ctx, x: value)
+        let slot: Text = to_slot(n: inout n, v: cv)
+        store_slot(n: inout n, obj: obj, idx: i, slot: slot)
+      }
+      | None -> skip()
+    }
+    return Ok(value: val(v: obj, t: "ptr"))
+  }
+  | values.VariantV(def, fields) -> {
+    let parent: Option[Int] = context.get_def(ctx: ctx, id: def).parent
+    let fs: List[types.FieldInfo] = fields_of(ctx: ctx, owner: def)
+    let obj: Text = new_tmp(n: inout n)
+    emit_line(
+      n: n,
+      line: obj ++ " = call ptr @onus_alloc(i64 " ++ s(i: 8 * (1 + List.len(xs: fs))) ++ ")"
+    )
+    store_slot(
+      n: inout n,
+      obj: obj,
+      idx: 0,
+      slot: variant_tag(ctx: ctx, parent: parent, variant: def)
+    )
+    for i: Int in 0 ..< List.len(xs: fs) {
+      match find_value(fields: fields, name: List.get(xs: fs, i: i).name) with
+      | Some(value) -> {
+        let cv: Val = try const_val(fuel: fuel - 1, n: inout n, ctx: ctx, x: value)
+        let slot: Text = to_slot(n: inout n, v: cv)
+        store_slot(n: inout n, obj: obj, idx: 1 + i, slot: slot)
+      }
+      | None -> skip()
+    }
+    return Ok(value: val(v: obj, t: "ptr"))
+  }
+  | values.BytesV(_) -> return Err(error: "`bytes` compile-time values")
+  | values.TypeInfoV(_) -> return Err(error: "`typeinfo` compile-time values")
+}
+
+fn literal_of(e: ir.Expr) -> Option[values.Value] {
+  match e with
+  | ir.ValueE(value) -> return Some(value: value)
+  | _ -> return None
+}
+
+fn bool_text(b: Bool) -> Text {
+  if b {
+    return "1"
+  }
+  return "0"
+}
+
+-- Whether a `const` initialiser is a scalar literal (emitted as an LLVM constant) rather than a lazily filled slot.
+fn scalar_value(e: ir.Expr) -> Bool {
+  match e with
+  | ir.ValueE(value) -> return is_scalar(x: value)
+  | _ -> return false
+}
+
+fn is_scalar(x: values.Value) -> Bool {
+  match x with
+  | values.IntV(_) -> return true
+  | values.DurationV(_) -> return true
+  | values.FloatV(_) -> return true
+  | values.BoolV(_) -> return true
+  | values.TextV(_) -> return true
+  | _ -> return false
+}
+
+-- Whether a constant will be emitted lazily: its value is not a scalar literal.
+fn aggregate_const(n: N, target_def: Int) -> Bool may alloc {
+  for m: ir.Module in n.modules {
+    for item: ir.Item in m.items {
+      match item with
+      | ir.ConstItem(def, ty, value) -> {
+        if def.id == target_def {
+          return not scalar_value(e: value)
+        }
+      }
+      | _ -> skip()
+    }
+  }
+  return false
+}
+
+-- -----------------------------------------------------------------------------
+-- Reachability
+-- -----------------------------------------------------------------------------
+fn visit_block(
+  fuel: Int where it >= 0,
+  queue: inout List[Int],
+  b: List[ir.Stmt]
+) -> Unit may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Unit
+  }
+  for st: ir.Stmt in b {
+    visit_stmt(fuel: fuel - 1, queue: inout queue, st: st)
+  }
+  return Unit
+}
+
+fn visit_stmt(
+  fuel: Int where it >= 0,
+  queue: inout List[Int],
+  st: ir.Stmt
+) -> Unit may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Unit
+  }
+  match st with
+  | ir.Let(_, _, _, value) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: value)
+  | ir.Assign(_, _, value) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: value)
+  | ir.Return(value) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: value)
+  | ir.ExprStmt(expr) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: expr)
+  | ir.If(cond, then_block, else_block) -> {
+    visit_expr(fuel: fuel - 1, queue: inout queue, e: cond)
+    visit_block(fuel: fuel - 1, queue: inout queue, b: then_block)
+    match else_block with
+    | Some(value) -> visit_block(fuel: fuel - 1, queue: inout queue, b: value)
+    | None -> skip()
+  }
+  | ir.Match(_, _, scrutinee, arms) -> {
+    visit_expr(fuel: fuel - 1, queue: inout queue, e: scrutinee)
+    for a: ir.Arm in arms {
+      match a.pattern_test with
+      | Some(value) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: value)
+      | None -> skip()
+      for bd: ir.Binding in a.bindings {
+        visit_expr(fuel: fuel - 1, queue: inout queue, e: bd.value)
+      }
+      match a.guard with
+      | Some(value) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: value)
+      | None -> skip()
+      visit_block(fuel: fuel - 1, queue: inout queue, b: a.body)
+    }
+  }
+  | ir.Loop(cond, body) -> {
+    visit_expr(fuel: fuel - 1, queue: inout queue, e: cond)
+    visit_block(fuel: fuel - 1, queue: inout queue, b: body)
+  }
+  | ir.ForRange(_, lo, hi, body) -> {
+    visit_expr(fuel: fuel - 1, queue: inout queue, e: lo)
+    visit_expr(fuel: fuel - 1, queue: inout queue, e: hi)
+    visit_block(fuel: fuel - 1, queue: inout queue, b: body)
+  }
+  | ir.ForEach(_, _, list, body) -> {
+    visit_expr(fuel: fuel - 1, queue: inout queue, e: list)
+    visit_block(fuel: fuel - 1, queue: inout queue, b: body)
+  }
+  | ir.Check(cond, _) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: cond)
+  | ir.Assert(cond) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: cond)
+  | ir.CallInout(_, call, _) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: call)
+  | ir.Unreachable -> skip()
+  | ir.Comment(_) -> skip()
+  | ir.Reject(cond, _) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: cond)
+  return Unit
+}
+
+fn visit_exprs(
+  fuel: Int where it >= 0,
+  queue: inout List[Int],
+  es: List[ir.Expr]
+) -> Unit may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Unit
+  }
+  for e: ir.Expr in es {
+    visit_expr(fuel: fuel - 1, queue: inout queue, e: e)
+  }
+  return Unit
+}
+
+fn visit_inits(
+  fuel: Int where it >= 0,
+  queue: inout List[Int],
+  fields: List[ir.FieldInit]
+) -> Unit may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Unit
+  }
+  for f: ir.FieldInit in fields {
+    visit_expr(fuel: fuel - 1, queue: inout queue, e: f.value)
+  }
+  return Unit
+}
+
+fn visit_expr(fuel: Int where it >= 0, queue: inout List[Int], e: ir.Expr) -> Unit may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Unit
+  }
+  match e with
+  | ir.Call(target, _, dicts, consts, args, _, _) -> {
+    match target with
+    | ir.FnTarget(def, _) -> queue = queue ++ [def.id]
+    | ir.DictTarget(dict, _) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: dict)
+    visit_exprs(fuel: fuel - 1, queue: inout queue, es: dicts)
+    visit_exprs(fuel: fuel - 1, queue: inout queue, es: consts)
+    visit_exprs(fuel: fuel - 1, queue: inout queue, es: args)
+  }
+  | ir.FnRef(def, _, _) -> queue = queue ++ [def.id]
+  | ir.Global(def, _) -> queue = queue ++ [def.id]
+  | ir.CallValue(callee, _, args, _) -> {
+    visit_expr(fuel: fuel - 1, queue: inout queue, e: callee)
+    visit_exprs(fuel: fuel - 1, queue: inout queue, es: args)
+  }
+  | ir.RecordE(_, _, fields) -> visit_inits(fuel: fuel - 1, queue: inout queue, fields: fields)
+  | ir.VariantE(_, _, fields) -> visit_inits(fuel: fuel - 1, queue: inout queue, fields: fields)
+  | ir.Fake(_, fields, _) -> visit_inits(fuel: fuel - 1, queue: inout queue, fields: fields)
+  | ir.Update(base, _, _, fields) -> {
+    visit_expr(fuel: fuel - 1, queue: inout queue, e: base)
+    visit_inits(fuel: fuel - 1, queue: inout queue, fields: fields)
+  }
+  | ir.FieldE(object, _, _, _) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: object)
+  | ir.Not(operand) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: operand)
+  | ir.Snapshot(value, _) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: value)
+  | ir.ListE(elems, _) -> visit_exprs(fuel: fuel - 1, queue: inout queue, es: elems)
+  | ir.And(operands) -> visit_exprs(fuel: fuel - 1, queue: inout queue, es: operands)
+  | ir.Or(operands) -> visit_exprs(fuel: fuel - 1, queue: inout queue, es: operands)
+  | ir.Concat(left, right, _, _) -> {
+    visit_expr(fuel: fuel - 1, queue: inout queue, e: left)
+    visit_expr(fuel: fuel - 1, queue: inout queue, e: right)
+  }
+  | ir.IntOp(_, left, right, _) -> {
+    visit_expr(fuel: fuel - 1, queue: inout queue, e: left)
+    visit_expr(fuel: fuel - 1, queue: inout queue, e: right)
+  }
+  | ir.FloatOp(_, left, right) -> {
+    visit_expr(fuel: fuel - 1, queue: inout queue, e: left)
+    visit_expr(fuel: fuel - 1, queue: inout queue, e: right)
+  }
+  | ir.Cmp(_, left, right, _) -> {
+    visit_expr(fuel: fuel - 1, queue: inout queue, e: left)
+    visit_expr(fuel: fuel - 1, queue: inout queue, e: right)
+  }
+  | ir.Eq(left, right, _, _, _) -> {
+    visit_expr(fuel: fuel - 1, queue: inout queue, e: left)
+    visit_expr(fuel: fuel - 1, queue: inout queue, e: right)
+  }
+  | ir.Implies(left, right) -> {
+    visit_expr(fuel: fuel - 1, queue: inout queue, e: left)
+    visit_expr(fuel: fuel - 1, queue: inout queue, e: right)
+  }
+  | ir.Neg(operand, _, _) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: operand)
+  | ir.IsVariant(subject, _, _) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: subject)
+  | ir.Try(operand, _, _, else_clause, _, _) -> {
+    visit_expr(fuel: fuel - 1, queue: inout queue, e: operand)
+    match else_clause with
+    | Some(value) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: value.value)
+    | None -> skip()
+  }
+  | ir.Recover(body, value, _) -> {
+    visit_block(fuel: fuel - 1, queue: inout queue, b: body)
+    visit_expr(fuel: fuel - 1, queue: inout queue, e: value)
+  }
+  | ir.Quantifier(_, _, _, domain, where_, body) -> {
+    match domain with
+    | ir.RangeD(lo, hi) -> {
+      visit_expr(fuel: fuel - 1, queue: inout queue, e: lo)
+      visit_expr(fuel: fuel - 1, queue: inout queue, e: hi)
+    }
+    | ir.ListD(expr) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: expr)
+    | ir.OkListD(expr) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: expr)
+    | ir.BoolsD -> skip()
+    match where_ with
+    | Some(value) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: value)
+    | None -> skip()
+    visit_expr(fuel: fuel - 1, queue: inout queue, e: body)
+  }
+  | ir.Closure(_, _, entry_checks, body, _) -> {
+    visit_block(fuel: fuel - 1, queue: inout queue, b: entry_checks)
+    visit_block(fuel: fuel - 1, queue: inout queue, b: body)
+  }
+  | ir.Checked(value, _, _, checks) -> {
+    visit_expr(fuel: fuel - 1, queue: inout queue, e: value)
+    visit_block(fuel: fuel - 1, queue: inout queue, b: checks)
+  }
+  | _ -> skip()
+  return Unit
+}
+
+-- Definitions reachable from the entry's `main` and the non-library examples, over calls, function references and constants.
+fn reachable(n: N) -> Dict[Int, Bool] may alloc, mutate {
+  var by_def: Dict[Int, ir.Fn] = Map.dict()
+  var consts: Dict[Int, ir.Expr] = Map.dict()
+  for m: ir.Module in n.modules {
+    for item: ir.Item in m.items {
+      match item with
+      | ir.FnItem(f) -> Map.set(d: inout by_def, key: f.def.id, value: f)
+      | ir.ImplItem(_, _, _, _, fns, _) -> {
+        for f: ir.Fn in fns {
+          Map.set(d: inout by_def, key: f.def.id, value: f)
+        }
+      }
+      | ir.ConstItem(def, _, value) -> Map.set(d: inout consts, key: def.id, value: value)
+      | _ -> skip()
+    }
+  }
+  var seen: Dict[Int, Bool] = Map.dict()
+  var queue: List[Int] = []
+  match n.entry with
+  | Some(value) -> {
+    if value.main is Some {
+      var found: Bool = false
+      for item: ir.Item in value.items {
+        match item with
+        | ir.FnItem(f) -> {
+          if not found and f.def.name == "main" {
+            queue = queue ++ [f.def.id]
+            found = true
+          }
+        }
+        | _ -> skip()
+      }
+    }
+  }
+  | None -> skip()
+  for m: ir.Module in n.modules {
+    match m.tests with
+    | Some(value) -> {
+      if not m.mod.is_std {
+        for ex: ir.Example in value.examples {
+          visit_block(fuel: max_depth, queue: inout queue, b: ex.body)
+        }
+      }
+    }
+    | None -> skip()
+  }
+  var steps: Int where it >= 0 = max_depth
+  loop while List.len(xs: queue) > 0 and steps > 0
+    invariant steps >= 0
+    decreases steps
+  {
+    steps = steps - 1
+    let d: Int = List.get(xs: queue, i: List.len(xs: queue) - 1)
+    queue = List.slice(xs: queue, from: 0, to: List.len(xs: queue) - 1)
+    if not Map.contains(d: seen, key: d) {
+      Map.set(d: inout seen, key: d, value: true)
+      match Map.find(d: by_def, key: d) with
+      | Some(value) -> {
+        visit_block(fuel: max_depth, queue: inout queue, b: value.entry_checks)
+        visit_block(fuel: max_depth, queue: inout queue, b: fn_body(f: value))
+      }
+      | None -> skip()
+      match Map.find(d: consts, key: d) with
+      | Some(value) -> visit_expr(fuel: max_depth, queue: inout queue, e: value)
+      | None -> skip()
+    }
+  }
+  return seen
+}
+
+-- -----------------------------------------------------------------------------
+-- Functions
+-- -----------------------------------------------------------------------------
+fn record_unsupported(
+  n: N,
+  def: Text,
+  file: Int,
+  span: ast.Span,
+  what: Text
+) -> Unit may mutate, alloc {
+  var u: Builder[Unsupported] = n.unsupported
+  List.push(b: inout u, x: Unsupported { def: def, file: file, span: span, what: what })
+  return Unit
+}
+
+fn fn_item(n: inout N, ctx: context.Context, m: ir.Module, f: ir.Fn) -> Unit may mutate, alloc {
+  match fn_item_body(n: inout n, ctx: ctx, m: m, f: f) with
+  | Ok(_) -> skip()
+  | Err(error) -> record_unsupported(
+    n: n,
+    def: context.qualified_name(ctx: ctx, id: f.def.id),
+    file: f.def.file,
+    span: f.def.span,
+    what: error
+  )
+  return Unit
+}
+
+fn fn_item_body(
+  n: inout N,
+  ctx: context.Context,
+  m: ir.Module,
+  f: ir.Fn
+) -> Result[Unit, Text] may mutate, alloc {
+  if f.intrinsic is Some or f.body is None {
+    return Ok(value: Unit)
+  }
+  let name: Text = fn_name(module: m.mod.name, name: f.name)
+  try require_native(n: n, ctx: ctx, def: f.def)
+  if List.len(xs: f.dict_params) > 0 {
+    return Err(error: "functions with interface-bounded type parameters")
+  }
+  begin_fn(n: inout n)
+  var params: Builder[Text] = List.builder()
+  var stores: Builder[Store] = List.builder()
+  for c: ir.ConstParam in f.const_params {
+    let t: Text = try ll_of(ctx: ctx, t: c.ty)
+    List.push(b: inout params, x: t ++ " %\"p." ++ c.name ++ "\"")
+    List.push(b: inout stores, x: Store { name: c.name, t: t, ty: c.ty, is_inout: false })
+  }
+  for p: ir.Param in f.params {
+    let t: Text = try ll_of(ctx: ctx, t: p.ty)
+    var shown: Text = t
+    if p.is_inout {
+      shown = "ptr"
+    }
+    List.push(b: inout params, x: shown ++ " %\"p." ++ p.name ++ "\"")
+    List.push(b: inout stores, x: Store { name: p.name, t: t, ty: p.ty, is_inout: p.is_inout })
+  }
+  let ret: Text = try ll_of(ctx: ctx, t: f.ret)
+  n = { n with fn_ret: ret }
+  for st: Store in List.finish(b: stores) {
+    if st.is_inout {
+      set_local(
+        n: n,
+        name: st.name,
+        l: Local { ptr: "%\"p." ++ st.name ++ "\"", t: st.t, ty: st.ty }
+      )
+    } else {
+      let ptr: Text = alloc_local(n: inout n, name: st.name, t: st.t, ty: st.ty)
+      emit_line(n: n, line: "store " ++ st.t ++ " %\"p." ++ st.name ++ "\", ptr " ++ ptr)
+    }
+  }
+  try block_stmts(fuel: max_depth, n: inout n, ctx: ctx, b: f.entry_checks)
+  try block_stmts(fuel: max_depth, n: inout n, ctx: ctx, b: fn_body(f: f))
+  if not n.terminated {
+    emit_line(n: n, line: default_return(ret: ret))
+  }
+  finish_fn(
+    n: n,
+    header: "define " ++ ret ++ " " ++ name ++ "(" ++ Text.join(
+      parts: List.finish(b: params),
+      sep: ", "
+    ) ++ ") {"
+  )
+  return Ok(value: Unit)
+}
+
+fn default_return(ret: Text) -> Text {
+  if ret == "i64" {
+    return "ret i64 0"
+  }
+  if ret == "double" {
+    return "ret double 0.0"
+  }
+  if ret == "i1" {
+    return "ret i1 0"
+  }
+  return "ret ptr null"
+}
+
+fn const_item(
+  n: inout N,
+  ctx: context.Context,
+  m: ir.Module,
+  def: defs.Def,
+  ty: types.Type,
+  init: ir.Expr
+) -> Unit may mutate, alloc {
+  match const_item_body(n: inout n, ctx: ctx, m: m, def: def, ty: ty, init: init) with
+  | Ok(_) -> skip()
+  | Err(error) -> record_unsupported(
+    n: n,
+    def: context.qualified_name(ctx: ctx, id: def.id),
+    file: def.file,
+    span: def.span,
+    what: error
+  )
+  return Unit
+}
+
+fn const_item_body(
+  n: inout N,
+  ctx: context.Context,
+  m: ir.Module,
+  def: defs.Def,
+  ty: types.Type,
+  init: ir.Expr
+) -> Result[Unit, Text] may mutate, alloc {
+  let name: Text = fn_name(module: m.mod.name, name: def.name)
+  let t: Text = try ll_of(ctx: ctx, t: ty)
+  let literal: Option[values.Value] = literal_of(e: init)
+  var done: Bool = false
+  match literal with
+  | Some(value) -> {
+    match value with
+    | values.IntV(v) -> {
+      push_global(n: n, line: name ++ " = constant i64 " ++ s(i: v))
+      done = true
+    }
+    | values.DurationV(v) -> {
+      push_global(n: n, line: name ++ " = constant i64 " ++ s(i: v))
+      done = true
+    }
+    | values.FloatV(v) -> {
+      push_global(n: n, line: name ++ " = constant double " ++ double_literal(v: v))
+      done = true
+    }
+    | values.BoolV(v) -> {
+      push_global(n: n, line: name ++ " = constant i1 " ++ bool_text(b: v))
+      done = true
+    }
+    | values.TextV(v) -> {
+      push_global(n: n, line: name ++ " = constant ptr " ++ text_global(n: inout n, x: v))
+      done = true
+    }
+    | _ -> skip()
+  }
+  | None -> skip()
+  if done {
+    return Ok(value: Unit)
+  }
+  -- An aggregate or computed constant: a slot filled on first use by a getter that evaluates the expression once.
+  var lazy: Dict[Int, Bool] = n.lazy_consts
+  Map.set(d: inout lazy, key: def.id, value: true)
+  push_global(n: n, line: name ++ " = global i64 0")
+  let getter: Text = getter_name(module: m.mod.name, name: def.name)
+  let saved: Saved = save_fn(n: n)
+  begin_fn(n: inout n)
+  n = { n with fn_ret: "i64" }
+  let r: Result[Unit, Text] = const_getter(
+    n: inout n,
+    ctx: ctx,
+    name: name,
+    getter: getter,
+    t: t,
+    init: init
+  )
+  restore_fn(n: inout n, sv: saved)
+  match r with
+  | Ok(_) -> skip()
+  | Err(error) -> return Err(error: error)
+  return Ok(value: Unit)
+}
+
+fn const_getter(
+  n: inout N,
+  ctx: context.Context,
+  name: Text,
+  getter: Text,
+  t: Text,
+  init: ir.Expr
+) -> Result[Unit, Text] may mutate, alloc {
+  let cur: Text = new_tmp(n: inout n)
+  emit_line(n: n, line: cur ++ " = load i64, ptr " ++ name)
+  let empty: Text = new_tmp(n: inout n)
+  emit_line(n: n, line: empty ++ " = icmp eq i64 " ++ cur ++ ", 0")
+  let init_l: Text = new_label(n: inout n, prefix: "cinit")
+  let done: Text = new_label(n: inout n, prefix: "cdone")
+  cond_br(n: inout n, cond: empty, then_l: init_l, else_l: done)
+  start_block(n: inout n, name: init_l)
+  let ev: Val = try expr_val(fuel: max_depth, n: inout n, ctx: ctx, e: init)
+  let cv: Val = coerce_to(n: inout n, v: ev, to: t)
+  let slot: Text = to_slot(n: inout n, v: cv)
+  emit_line(n: n, line: "store i64 " ++ slot ++ ", ptr " ++ name)
+  br(n: inout n, target: done)
+  start_block(n: inout n, name: done)
+  let out: Text = new_tmp(n: inout n)
+  emit_line(n: n, line: out ++ " = load i64, ptr " ++ name)
+  emit_line(n: n, line: "ret i64 " ++ out)
+  finish_fn(n: n, header: "define i64 " ++ getter ++ "() {")
+  return Ok(value: Unit)
+}
+
+fn example_fn(
+  n: inout N,
+  ctx: context.Context,
+  m: ir.Module,
+  name: Text,
+  body: List[ir.Stmt]
+) -> Unit may mutate, alloc {
+  let fn_id: Text = "@\"" ++ m.mod.name ++ ".example." ++ name ++ "\""
+  match example_body(n: inout n, ctx: ctx, fn_id: fn_id, body: body) with
+  | Ok(_) -> {
+    var examples: Builder[ExampleFn] = n.examples
+    List.push(b: inout examples, x: ExampleFn { name: m.mod.name ++ "." ++ name, fn_name: fn_id })
+  }
+  | Err(error) -> {
+    var file: Int = m.mod.file
+    var span: ast.Span = m.mod.tree.span
+    match test_def(ctx: ctx, mod_id: m.mod.id, name: name) with
+    | Some(value) -> {
+      let d: defs.Def = context.get_def(ctx: ctx, id: value)
+      file = d.file
+      span = d.span
+    }
+    | None -> skip()
+    record_unsupported(n: n, def: m.mod.name ++ "." ++ name, file: file, span: span, what: error)
+  }
+  return Unit
+}
+
+-- The definition of the example `name` in a module, when the resolver recorded it.
+fn test_def(ctx: context.Context, mod_id: Int, name: Text) -> Option[Int] {
+  match Map.find(d: ctx.members, key: mod_id) with
+  | Some(value) -> return Map.find(d: value.tests, key: name)
+  | None -> return None
+}
+
+fn example_body(
+  n: inout N,
+  ctx: context.Context,
+  fn_id: Text,
+  body: List[ir.Stmt]
+) -> Result[Unit, Text] may mutate, alloc {
+  begin_fn(n: inout n)
+  n = { n with fn_ret: "i1" }
+  try block_stmts(fuel: max_depth, n: inout n, ctx: ctx, b: body)
+  if not n.terminated {
+    emit_line(n: n, line: "ret i1 1")
+  }
+  finish_fn(n: n, header: "define i1 " ++ fn_id ++ "() {")
+  return Ok(value: Unit)
+}
+
+-- `main(argc, argv)`: the program, or every example under `--onus-examples`.
+fn main_fn(n: inout N, ctx: context.Context) -> Result[Unit, Text] may mutate, alloc {
+  begin_fn(n: inout n)
+  n = { n with fn_ret: "i64" }
+  emit_line(n: n, line: "%mode = call i32 @onus_start(i32 %argc, ptr %argv)")
+  emit_line(n: n, line: "%isExamples = icmp eq i32 %mode, 1")
+  cond_br(n: inout n, cond: "%isExamples", then_l: "examples", else_l: "program")
+  start_block(n: inout n, name: "examples")
+  for ex: ExampleFn in List.finish(b: n.examples) {
+    let ok: Text = new_tmp(n: inout n)
+    emit_line(n: n, line: ok ++ " = call i1 " ++ ex.fn_name ++ "()")
+    let label_text: Text = c_string(n: inout n, x: ex.name)
+    emit_line(
+      n: n,
+      line: "call void @onus_report_example(ptr " ++ label_text ++ ", i1 " ++ ok ++ ")"
+    )
+  }
+  emit_line(n: n, line: "%exampleCode = call i32 @onus_examples_done()")
+  emit_line(n: n, line: "ret i32 %exampleCode")
+  n = { n with terminated: true }
+  start_block(n: inout n, name: "program")
+  var emitted: Bool = false
+  match n.entry with
+  | Some(value) -> emitted = try main_call_opt(n: inout n, ctx: ctx, entry: value)
+  | None -> skip()
+  if not emitted {
+    emit_line(n: n, line: "ret i32 0")
+  }
+  n = { n with terminated: true }
+  finish_fn(n: n, header: "define i32 @main(i32 %argc, ptr %argv) {")
+  return Ok(value: Unit)
+}
+
+fn main_call_opt(
+  n: inout N,
+  ctx: context.Context,
+  entry: ir.Module
+) -> Result[Bool, Text] may mutate, alloc {
+  match entry.main with
+  | Some(value) -> return main_call(n: inout n, ctx: ctx, entry: entry, spec: value)
+  | None -> return Ok(value: false)
+}
+
+-- The call of the entry module's `main` with its roots; false when the module has no `main` function.
+fn main_call(
+  n: inout N,
+  ctx: context.Context,
+  entry: ir.Module,
+  spec: ir.MainSpec
+) -> Result[Bool, Text] may mutate, alloc {
+  var main_fn: Option[ir.Fn] = None
+  for item: ir.Item in entry.items {
+    match item with
+    | ir.FnItem(f) -> {
+      if main_fn is None and f.def.name == "main" {
+        main_fn = Some(value: f)
+      }
+    }
+    | _ -> skip()
+  }
+  match main_fn with
+  | None -> return Ok(value: false)
+  | Some(value) -> {
+    var args: Builder[Text] = List.builder()
+    for p: ir.Param in value.params {
+      if p.name == spec.args {
+        List.push(b: inout args, x: "ptr %args")
+      } else {
+        let kind: Option[Text] = root_kind(roots: spec.roots, name: p.name)
+        if kind is Some {
+          List.push(b: inout args, x: "ptr " ++ root_call(n: inout n, kind: or_empty(o: kind)))
+        } else {
+          List.push(b: inout args, x: "ptr null")
+        }
+      }
+    }
+    emit_line(n: n, line: "%args = call ptr @onus_args(i32 %argc, ptr %argv)")
+    let ret: Text = try ll_of(ctx: ctx, t: value.ret)
+    emit_line(
+      n: n,
+      line: "%result = call " ++ ret ++ " " ++ fn_name(
+        module: entry.mod.name,
+        name: value.name
+      ) ++ "(" ++ Text.join(parts: List.finish(b: args), sep: ", ") ++ ")"
+    )
+    emit_line(n: n, line: "%code = call i32 @onus_finish(ptr %result)")
+    emit_line(n: n, line: "ret i32 %code")
+    return Ok(value: true)
+  }
+}
+
+fn or_empty(o: Option[Text]) -> Text {
+  match o with
+  | Some(value) -> return value
+  | None -> return ""
+}
+
+fn root_kind(roots: List[ir.Root], name: Text) -> Option[Text] {
+  for r: ir.Root in roots {
+    if r.name == name {
+      return Some(value: r.kind)
+    }
+  }
+  return None
+}
+
+fn root_call(n: inout N, kind: Text) -> Text may mutate, alloc {
+  let r: Text = new_tmp(n: inout n)
+  let label_text: Text = c_string(n: inout n, x: kind)
+  emit_line(n: n, line: r ++ " = call ptr @onus_root(ptr " ++ label_text ++ ")")
+  return r
+}
+
+-- A row decoder as `@decode$N(ptr raw, ptr column) -> ptr`: the record, or null with the rejected column's name stored.
+fn decoder_fn(
+  fuel: Int where it >= 0,
+  n: inout N,
+  ctx: context.Context,
+  d: ir.Decoder
+) -> Result[Text, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "out of fuel")
+  }
+  n = { n with counter: n.counter + 1 }
+  let name: Text = "@\"decode$" ++ s(i: n.counter) ++ "\""
+  declare_sig(n: n, sig: "declare i64 @onus_sql_column(ptr, ptr, i64)")
+  let saved: Saved = save_fn(n: n)
+  begin_fn(n: inout n)
+  n = { n with fn_ret: "ptr" }
+  let r: Result[Unit, Text] = decoder_body(fuel: fuel - 1, n: inout n, ctx: ctx, d: d, name: name)
+  restore_fn(n: inout n, sv: saved)
+  match r with
+  | Ok(_) -> skip()
+  | Err(error) -> return Err(error: error)
+  return Ok(value: name)
+}
+
+fn decoder_body(
+  fuel: Int where it >= 0,
+  n: inout N,
+  ctx: context.Context,
+  d: ir.Decoder,
+  name: Text
+) -> Result[Unit, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "out of fuel")
+  }
+  var rec_def: Int = -1
+  match types.strip(t: d.ty) with
+  | types.RecordT(def, _) -> rec_def = def
+  | _ -> return Err(error: "a row decoder for a non-record")
+  let fs: List[types.FieldInfo] = fields_of(ctx: ctx, owner: rec_def)
+  let obj: Text = new_tmp(n: inout n)
+  emit_line(
+    n: n,
+    line: obj ++ " = call ptr @onus_alloc(i64 " ++ s(i: slots_size(k: List.len(xs: fs))) ++ ")"
+  )
+  for f: ir.DecoderField in d.fields {
+    let idx: Int = slot_index(fields: fs, name: f.name)
+    let slot: Text = new_tmp(n: inout n)
+    let column: Text = text_global(n: inout n, x: f.name)
+    emit_line(
+      n: n,
+      line: slot ++ " = call i64 @onus_sql_column(ptr %raw, ptr " ++ column ++ ", i64 " ++ s(
+        i: column_kind(kind: f.kind)
+      ) ++ ")"
+    )
+    store_slot(n: inout n, obj: obj, idx: idx, slot: slot)
+  }
+  let ptr: Text = alloc_local(n: inout n, name: d.it_name, t: "ptr", ty: d.ty)
+  emit_line(n: n, line: "store ptr " ++ obj ++ ", ptr " ++ ptr)
+  try block_stmts(fuel: fuel - 1, n: inout n, ctx: ctx, b: d.checks)
+  if not n.terminated {
+    emit_line(n: n, line: "ret ptr " ++ obj)
+  }
+  finish_fn(n: n, header: "define ptr " ++ name ++ "(ptr %raw, ptr %column) {")
+  return Ok(value: Unit)
+}
+
+fn column_kind(kind: Text) -> Int {
+  if kind == "Int" or kind == "Duration" {
+    return 0
+  }
+  if kind == "Text" {
+    return 1
+  }
+  if kind == "Float" {
+    return 2
+  }
+  if kind == "Bool" {
+    return 3
+  }
+  return 4
+}
+
+-- -----------------------------------------------------------------------------
+-- Statements
+-- -----------------------------------------------------------------------------
+fn block_stmts(
+  fuel: Int where it >= 0,
+  n: inout N,
+  ctx: context.Context,
+  b: List[ir.Stmt]
+) -> Result[Unit, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "out of fuel")
+  }
+  for st: ir.Stmt in b {
+    if not n.terminated {
+      try stmt_ir(fuel: fuel - 1, n: inout n, ctx: ctx, st: st)
+    }
+  }
+  return Ok(value: Unit)
+}
+
+fn prim_int() -> types.Type {
+  return types.Prim(name: "Int")
+}
+
+fn stmt_ir(
+  fuel: Int where it >= 0,
+  n: inout N,
+  ctx: context.Context,
+  st: ir.Stmt
+) -> Result[Unit, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "out of fuel")
+  }
+  match st with
+  | ir.Let(name, ty, _, value) -> {
+    let t: Text = try ll_of(ctx: ctx, t: ty)
+    let ev: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: value)
+    let v: Val = coerce_to(n: inout n, v: ev, to: t)
+    let ptr: Text = alloc_local(n: inout n, name: name, t: t, ty: ty)
+    emit_line(n: n, line: "store " ++ t ++ " " ++ v.v ++ ", ptr " ++ ptr)
+    return Ok(value: Unit)
+  }
+  | ir.Assign(name, _, value) -> {
+    let local: Local = try local_of(n: n, name: name)
+    let ev: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: value)
+    let v: Val = coerce_to(n: inout n, v: ev, to: local.t)
+    emit_line(n: n, line: "store " ++ local.t ++ " " ++ v.v ++ ", ptr " ++ local.ptr)
+    return Ok(value: Unit)
+  }
+  | ir.Return(value) -> {
+    if n.fn_ret == "void" {
+      emit_line(n: n, line: "ret void")
+      n = { n with terminated: true }
+      return Ok(value: Unit)
+    }
+    let ev: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: value)
+    let v: Val = coerce_to(n: inout n, v: ev, to: n.fn_ret)
+    emit_line(n: n, line: "ret " ++ v.t ++ " " ++ v.v)
+    n = { n with terminated: true }
+    return Ok(value: Unit)
+  }
+  | ir.If(cond, then_block, else_block) -> {
+    let cv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: cond)
+    let c: Val = coerce_to(n: inout n, v: cv, to: "i1")
+    let then_l: Text = new_label(n: inout n, prefix: "then")
+    let else_l: Text = new_label(n: inout n, prefix: "else")
+    let end_l: Text = new_label(n: inout n, prefix: "endif")
+    var target: Text = else_l
+    if else_block is None {
+      target = end_l
+    }
+    cond_br(n: inout n, cond: c.v, then_l: then_l, else_l: target)
+    start_block(n: inout n, name: then_l)
+    try block_stmts(fuel: fuel - 1, n: inout n, ctx: ctx, b: then_block)
+    br(n: inout n, target: end_l)
+    match else_block with
+    | Some(value) -> {
+      start_block(n: inout n, name: else_l)
+      try block_stmts(fuel: fuel - 1, n: inout n, ctx: ctx, b: value)
+      br(n: inout n, target: end_l)
+    }
+    | None -> skip()
+    start_block(n: inout n, name: end_l)
+    return Ok(value: Unit)
+  }
+  | ir.Match(tmp, ty, scrutinee, arms) -> {
+    let t: Text = try ll_of(ctx: ctx, t: ty)
+    let sv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: scrutinee)
+    let v: Val = coerce_to(n: inout n, v: sv, to: t)
+    let ptr: Text = alloc_local(n: inout n, name: tmp, t: t, ty: ty)
+    emit_line(n: n, line: "store " ++ t ++ " " ++ v.v ++ ", ptr " ++ ptr)
+    let end_l: Text = new_label(n: inout n, prefix: "endmatch")
+    for arm: ir.Arm in arms {
+      let body_l: Text = new_label(n: inout n, prefix: "arm")
+      let next_l: Text = new_label(n: inout n, prefix: "next")
+      match arm.pattern_test with
+      | Some(value) -> {
+        let tv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: value)
+        let c: Val = coerce_to(n: inout n, v: tv, to: "i1")
+        cond_br(n: inout n, cond: c.v, then_l: body_l, else_l: next_l)
+      }
+      | None -> br(n: inout n, target: body_l)
+      start_block(n: inout n, name: body_l)
+      for bd: ir.Binding in arm.bindings {
+        let bt: Text = try ll_of(ctx: ctx, t: bd.ty)
+        let bev: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: bd.value)
+        let bv: Val = coerce_to(n: inout n, v: bev, to: bt)
+        let bp: Text = alloc_local(n: inout n, name: bd.name, t: bt, ty: bd.ty)
+        emit_line(n: n, line: "store " ++ bt ++ " " ++ bv.v ++ ", ptr " ++ bp)
+      }
+      match arm.guard with
+      | Some(value) -> {
+        let gv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: value)
+        let g: Val = coerce_to(n: inout n, v: gv, to: "i1")
+        let guarded_l: Text = new_label(n: inout n, prefix: "guarded")
+        cond_br(n: inout n, cond: g.v, then_l: guarded_l, else_l: next_l)
+        start_block(n: inout n, name: guarded_l)
+      }
+      | None -> skip()
+      try block_stmts(fuel: fuel - 1, n: inout n, ctx: ctx, b: arm.body)
+      br(n: inout n, target: end_l)
+      start_block(n: inout n, name: next_l)
+    }
+    emit_line(n: n, line: "call void @onus_unreachable()")
+    emit_line(n: n, line: "unreachable")
+    n = { n with terminated: true }
+    start_block(n: inout n, name: end_l)
+    return Ok(value: Unit)
+  }
+  | ir.Loop(cond, body) -> {
+    let cond_l: Text = new_label(n: inout n, prefix: "loop")
+    let body_l: Text = new_label(n: inout n, prefix: "body")
+    let end_l: Text = new_label(n: inout n, prefix: "endloop")
+    br(n: inout n, target: cond_l)
+    start_block(n: inout n, name: cond_l)
+    let cv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: cond)
+    let c: Val = coerce_to(n: inout n, v: cv, to: "i1")
+    cond_br(n: inout n, cond: c.v, then_l: body_l, else_l: end_l)
+    start_block(n: inout n, name: body_l)
+    try block_stmts(fuel: fuel - 1, n: inout n, ctx: ctx, b: body)
+    br(n: inout n, target: cond_l)
+    start_block(n: inout n, name: end_l)
+    return Ok(value: Unit)
+  }
+  | ir.ForRange(name, lo, hi, body) -> {
+    let lov: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: lo)
+    let lo_v: Val = coerce_to(n: inout n, v: lov, to: "i64")
+    let hiv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: hi)
+    let hi_v: Val = coerce_to(n: inout n, v: hiv, to: "i64")
+    let ptr: Text = alloc_local(n: inout n, name: name, t: "i64", ty: prim_int())
+    emit_line(n: n, line: "store i64 " ++ lo_v.v ++ ", ptr " ++ ptr)
+    let cond_l: Text = new_label(n: inout n, prefix: "for")
+    let body_l: Text = new_label(n: inout n, prefix: "body")
+    let end_l: Text = new_label(n: inout n, prefix: "endfor")
+    br(n: inout n, target: cond_l)
+    start_block(n: inout n, name: cond_l)
+    let i: Text = new_tmp(n: inout n)
+    emit_line(n: n, line: i ++ " = load i64, ptr " ++ ptr)
+    let c: Text = new_tmp(n: inout n)
+    emit_line(n: n, line: c ++ " = icmp slt i64 " ++ i ++ ", " ++ hi_v.v)
+    cond_br(n: inout n, cond: c, then_l: body_l, else_l: end_l)
+    start_block(n: inout n, name: body_l)
+    try block_stmts(fuel: fuel - 1, n: inout n, ctx: ctx, b: body)
+    if not n.terminated {
+      let cur: Text = new_tmp(n: inout n)
+      emit_line(n: n, line: cur ++ " = load i64, ptr " ++ ptr)
+      let next: Text = new_tmp(n: inout n)
+      emit_line(n: n, line: next ++ " = add i64 " ++ cur ++ ", 1")
+      emit_line(n: n, line: "store i64 " ++ next ++ ", ptr " ++ ptr)
+    }
+    br(n: inout n, target: cond_l)
+    start_block(n: inout n, name: end_l)
+    return Ok(value: Unit)
+  }
+  | ir.ForEach(name, ty, list, body) -> {
+    let lv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: list)
+    let list_v: Val = coerce_to(n: inout n, v: lv, to: "ptr")
+    let len: Text = new_tmp(n: inout n)
+    emit_line(n: n, line: len ++ " = call i64 @onus_rt_list_len(ptr " ++ list_v.v ++ ")")
+    let idx: Text = alloc_local(n: inout n, name: "$idx", t: "i64", ty: prim_int())
+    emit_line(n: n, line: "store i64 0, ptr " ++ idx)
+    let et: Text = try ll_of(ctx: ctx, t: ty)
+    let elem: Text = alloc_local(n: inout n, name: name, t: et, ty: ty)
+    let cond_l: Text = new_label(n: inout n, prefix: "foreach")
+    let body_l: Text = new_label(n: inout n, prefix: "body")
+    let end_l: Text = new_label(n: inout n, prefix: "endforeach")
+    br(n: inout n, target: cond_l)
+    start_block(n: inout n, name: cond_l)
+    let i: Text = new_tmp(n: inout n)
+    emit_line(n: n, line: i ++ " = load i64, ptr " ++ idx)
+    let c: Text = new_tmp(n: inout n)
+    emit_line(n: n, line: c ++ " = icmp slt i64 " ++ i ++ ", " ++ len)
+    cond_br(n: inout n, cond: c, then_l: body_l, else_l: end_l)
+    start_block(n: inout n, name: body_l)
+    let slot: Text = new_tmp(n: inout n)
+    emit_line(
+      n: n,
+      line: slot ++ " = call i64 @onus_rt_list_get(ptr " ++ list_v.v ++ ", i64 " ++ i ++ ")"
+    )
+    let ev: Val = from_slot(n: inout n, slot: slot, t: et)
+    emit_line(n: n, line: "store " ++ et ++ " " ++ ev.v ++ ", ptr " ++ elem)
+    let next: Text = new_tmp(n: inout n)
+    emit_line(n: n, line: next ++ " = add i64 " ++ i ++ ", 1")
+    emit_line(n: n, line: "store i64 " ++ next ++ ", ptr " ++ idx)
+    try block_stmts(fuel: fuel - 1, n: inout n, ctx: ctx, b: body)
+    br(n: inout n, target: cond_l)
+    start_block(n: inout n, name: end_l)
+    return Ok(value: Unit)
+  }
+  | ir.Check(cond, ob) -> {
+    let cv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: cond)
+    let c: Val = coerce_to(n: inout n, v: cv, to: "i1")
+    let ok_l: Text = new_label(n: inout n, prefix: "ok")
+    let fail_l: Text = new_label(n: inout n, prefix: "fail")
+    cond_br(n: inout n, cond: c.v, then_l: ok_l, else_l: fail_l)
+    start_block(n: inout n, name: fail_l)
+    emit_panic(n: inout n, ob: ob)
+    start_block(n: inout n, name: ok_l)
+    return Ok(value: Unit)
+  }
+  | ir.Assert(cond) -> {
+    let cv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: cond)
+    let c: Val = coerce_to(n: inout n, v: cv, to: "i1")
+    let ok_l: Text = new_label(n: inout n, prefix: "ok")
+    let fail_l: Text = new_label(n: inout n, prefix: "fail")
+    cond_br(n: inout n, cond: c.v, then_l: ok_l, else_l: fail_l)
+    start_block(n: inout n, name: fail_l)
+    emit_line(n: n, line: "ret i1 0")
+    n = { n with terminated: true }
+    start_block(n: inout n, name: ok_l)
+    return Ok(value: Unit)
+  }
+  | ir.ExprStmt(expr) -> {
+    let ev: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: expr)
+    return Ok(value: Unit)
+  }
+  | ir.CallInout(result_target, call, _) -> {
+    let v: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: call)
+    match result_target with
+    | Some(value) -> {
+      let t: Text = try ll_of(ctx: ctx, t: value.ty)
+      let ptr: Text = alloc_local(n: inout n, name: value.name, t: t, ty: value.ty)
+      let cv: Val = coerce_to(n: inout n, v: v, to: t)
+      emit_line(n: n, line: "store " ++ t ++ " " ++ cv.v ++ ", ptr " ++ ptr)
+    }
+    | None -> skip()
+    return Ok(value: Unit)
+  }
+  | ir.Unreachable -> {
+    emit_line(n: n, line: "call void @onus_unreachable()")
+    emit_line(n: n, line: "unreachable")
+    n = { n with terminated: true }
+    return Ok(value: Unit)
+  }
+  | ir.Comment(text) -> {
+    emit_line(n: n, line: "; " ++ text)
+    return Ok(value: Unit)
+  }
+  | ir.Reject(cond, column) -> {
+    let cv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: cond)
+    let c: Val = coerce_to(n: inout n, v: cv, to: "i1")
+    let ok_l: Text = new_label(n: inout n, prefix: "accept")
+    let fail_l: Text = new_label(n: inout n, prefix: "reject")
+    cond_br(n: inout n, cond: c.v, then_l: ok_l, else_l: fail_l)
+    start_block(n: inout n, name: fail_l)
+    let col: Text = text_global(n: inout n, x: column)
+    emit_line(n: n, line: "store ptr " ++ col ++ ", ptr %column")
+    emit_line(n: n, line: "ret ptr null")
+    n = { n with terminated: true }
+    start_block(n: inout n, name: ok_l)
+    return Ok(value: Unit)
+  }
+}
+
+fn local_of(n: N, name: Text) -> Result[Local, Text] may alloc {
+  match Map.find(d: n.locals, key: name) with
+  | Some(value) -> return Ok(value: value)
+  | None -> return Err(error: "unknown local " ++ name)
+}
+
+-- -----------------------------------------------------------------------------
+-- Expressions
+-- -----------------------------------------------------------------------------
+fn expr_val(
+  fuel: Int where it >= 0,
+  n: inout N,
+  ctx: context.Context,
+  e: ir.Expr
+) -> Result[Val, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "out of fuel")
+  }
+  match e with
+  | ir.IntE(v) -> return Ok(value: val(v: s(i: v), t: "i64"))
+  | ir.FloatE(v) -> return Ok(value: val(v: double_literal(v: v), t: "double"))
+  | ir.TextE(v) -> return Ok(value: val(v: text_global(n: inout n, x: v), t: "ptr"))
+  | ir.BoolE(v) -> return Ok(value: val(v: bool_text(b: v), t: "i1"))
+  | ir.UnitE -> return Ok(value: val(v: "0", t: "i64"))
+  | ir.Local(name, _) -> {
+    let local: Local = try local_of(n: n, name: name)
+    let r: Text = new_tmp(n: inout n)
+    emit_line(n: n, line: r ++ " = load " ++ local.t ++ ", ptr " ++ local.ptr)
+    return Ok(value: val(v: r, t: local.t))
+  }
+  | ir.Global(def, ty) -> {
+    let t: Text = try ll_of(ctx: ctx, t: ty)
+    let module: Text = context.module_name(ctx: ctx, id: def.mod)
+    if Map.contains(d: n.lazy_consts, key: def.id) or aggregate_const(n: n, target_def: def.id) {
+      let slot: Text = new_tmp(n: inout n)
+      emit_line(
+        n: n,
+        line: slot ++ " = call i64 " ++ getter_name(module: module, name: def.name) ++ "()"
+      )
+      return Ok(value: from_slot(n: inout n, slot: slot, t: t))
+    }
+    let r: Text = new_tmp(n: inout n)
+    emit_line(
+      n: n,
+      line: r ++ " = load " ++ t ++ ", ptr " ++ fn_name(module: module, name: def.name)
+    )
+    return Ok(value: val(v: r, t: t))
+  }
+  | ir.Call(target, sig, _, consts, args, ty, decoder) -> return call_val(
+    fuel: fuel - 1,
+    n: inout n,
+    ctx: ctx,
+    target: target,
+    sig: sig,
+    consts: consts,
+    args: args,
+    ty: ty,
+    decoder: decoder
+  )
+  | ir.RecordE(def, _, fields) -> {
+    let fs: List[types.FieldInfo] = fields_of(ctx: ctx, owner: def.id)
+    let obj: Text = new_tmp(n: inout n)
+    emit_line(
+      n: n,
+      line: obj ++ " = call ptr @onus_alloc(i64 " ++ s(i: slots_size(k: List.len(xs: fs))) ++ ")"
+    )
+    for f: ir.FieldInit in fields {
+      let idx: Int = slot_index(fields: fs, name: f.name)
+      let fv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: f.value)
+      let slot: Text = to_slot(n: inout n, v: fv)
+      store_slot(n: inout n, obj: obj, idx: idx, slot: slot)
+    }
+    return Ok(value: val(v: obj, t: "ptr"))
+  }
+  | ir.VariantE(def, _, fields) -> {
+    let fs: List[types.FieldInfo] = fields_of(ctx: ctx, owner: def.id)
+    let obj: Text = new_tmp(n: inout n)
+    emit_line(
+      n: n,
+      line: obj ++ " = call ptr @onus_alloc(i64 " ++ s(i: 8 * (1 + List.len(xs: fs))) ++ ")"
+    )
+    store_slot(
+      n: inout n,
+      obj: obj,
+      idx: 0,
+      slot: variant_tag(ctx: ctx, parent: def.parent, variant: def.id)
+    )
+    for f: ir.FieldInit in fields {
+      let idx: Int = slot_index(fields: fs, name: f.name)
+      let fv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: f.value)
+      let slot: Text = to_slot(n: inout n, v: fv)
+      store_slot(n: inout n, obj: obj, idx: 1 + idx, slot: slot)
+    }
+    return Ok(value: val(v: obj, t: "ptr"))
+  }
+  | ir.Update(base, def, _, fields) -> {
+    let fs: List[types.FieldInfo] = fields_of(ctx: ctx, owner: def.id)
+    let bv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: base)
+    let base_v: Val = coerce_to(n: inout n, v: bv, to: "ptr")
+    let obj: Text = new_tmp(n: inout n)
+    emit_line(
+      n: n,
+      line: obj ++ " = call ptr @onus_alloc(i64 " ++ s(i: slots_size(k: List.len(xs: fs))) ++ ")"
+    )
+    for i: Int in 0 ..< List.len(xs: fs) {
+      let slot: Text = load_slot(n: inout n, obj: base_v.v, idx: i)
+      store_slot(n: inout n, obj: obj, idx: i, slot: slot)
+    }
+    for f: ir.FieldInit in fields {
+      let idx: Int = slot_index(fields: fs, name: f.name)
+      let fv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: f.value)
+      let slot: Text = to_slot(n: inout n, v: fv)
+      store_slot(n: inout n, obj: obj, idx: idx, slot: slot)
+    }
+    return Ok(value: val(v: obj, t: "ptr"))
+  }
+  | ir.FieldE(object, name, ty, owner) -> {
+    let ov: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: object)
+    let obj: Val = coerce_to(n: inout n, v: ov, to: "ptr")
+    match owner with
+    | None -> return Err(error: "field access on a value of unknown shape")
+    | Some(value) -> {
+      let fs: List[types.FieldInfo] = fields_of(ctx: ctx, owner: value.id)
+      let idx: Int = slot_index(fields: fs, name: name)
+      var base: Int = 0
+      if value.kind is defs.Variant {
+        base = 1
+      }
+      let slot: Text = load_slot(n: inout n, obj: obj.v, idx: base + idx)
+      let t: Text = try ll_of(ctx: ctx, t: ty)
+      return Ok(value: from_slot(n: inout n, slot: slot, t: t))
+    }
+  }
+  | ir.ListE(elems, _) -> {
+    let list: Text = new_tmp(n: inout n)
+    emit_line(
+      n: n,
+      line: list ++ " = call ptr @onus_rt_list_new(i64 " ++ s(i: List.len(xs: elems)) ++ ")"
+    )
+    for i: Int in 0 ..< List.len(xs: elems) {
+      let xv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: List.get(xs: elems, i: i))
+      let slot: Text = to_slot(n: inout n, v: xv)
+      emit_line(
+        n: n,
+        line: "call void @onus_rt_list_set(ptr " ++ list ++ ", i64 " ++ s(
+          i: i
+        ) ++ ", i64 " ++ slot ++ ")"
+      )
+    }
+    return Ok(value: val(v: list, t: "ptr"))
+  }
+  | ir.Concat(left, right, is_text, _) -> {
+    let lv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: left)
+    let l: Val = coerce_to(n: inout n, v: lv, to: "ptr")
+    let rv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: right)
+    let r: Val = coerce_to(n: inout n, v: rv, to: "ptr")
+    let out: Text = new_tmp(n: inout n)
+    var fn_text: Text = "onus_rt_list_concat"
+    if is_text {
+      fn_text = "onus_rt_text_concat"
+    }
+    emit_line(
+      n: n,
+      line: out ++ " = call ptr @" ++ fn_text ++ "(ptr " ++ l.v ++ ", ptr " ++ r.v ++ ")"
+    )
+    return Ok(value: val(v: out, t: "ptr"))
+  }
+  | ir.IntOp(op, left, right, ob) -> {
+    let lv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: left)
+    let l: Val = coerce_to(n: inout n, v: lv, to: "i64")
+    let rv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: right)
+    let r: Val = coerce_to(n: inout n, v: rv, to: "i64")
+    return Ok(value: int_op(n: inout n, op: op, l: l, r: r, ob: ob))
+  }
+  | ir.FloatOp(op, left, right) -> {
+    let lv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: left)
+    let l: Val = coerce_to(n: inout n, v: lv, to: "double")
+    let rv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: right)
+    let r: Val = coerce_to(n: inout n, v: rv, to: "double")
+    let out: Text = new_tmp(n: inout n)
+    emit_line(n: n, line: out ++ " = " ++ float_op_name(op: op) ++ " double " ++ l.v ++ ", " ++ r.v)
+    return Ok(value: val(v: out, t: "double"))
+  }
+  | ir.Neg(operand, is_float, ob) -> {
+    if is_float {
+      let ov: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: operand)
+      let v: Val = coerce_to(n: inout n, v: ov, to: "double")
+      let out: Text = new_tmp(n: inout n)
+      emit_line(n: n, line: out ++ " = fneg double " ++ v.v)
+      return Ok(value: val(v: out, t: "double"))
+    }
+    let ov: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: operand)
+    let v: Val = coerce_to(n: inout n, v: ov, to: "i64")
+    return Ok(value: int_op(n: inout n, op: "-", l: val(v: "0", t: "i64"), r: v, ob: ob))
+  }
+  | ir.Cmp(op, left, right, is_float) -> {
+    let out: Text = new_tmp(n: inout n)
+    if is_float {
+      let lv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: left)
+      let l: Val = coerce_to(n: inout n, v: lv, to: "double")
+      let rv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: right)
+      let r: Val = coerce_to(n: inout n, v: rv, to: "double")
+      emit_line(
+        n: n,
+        line: out ++ " = fcmp " ++ fcmp_name(op: op) ++ " double " ++ l.v ++ ", " ++ r.v
+      )
+    } else {
+      let lv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: left)
+      let l: Val = coerce_to(n: inout n, v: lv, to: "i64")
+      let rv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: right)
+      let r: Val = coerce_to(n: inout n, v: rv, to: "i64")
+      emit_line(n: n, line: out ++ " = icmp " ++ icmp_name(op: op) ++ " i64 " ++ l.v ++ ", " ++ r.v)
+    }
+    return Ok(value: val(v: out, t: "i1"))
+  }
+  | ir.Eq(left, right, ty, _, negate) -> return eq_val(
+    fuel: fuel - 1,
+    n: inout n,
+    ctx: ctx,
+    left: left,
+    right: right,
+    ty: ty,
+    negate: negate
+  )
+  | ir.Not(operand) -> {
+    let ov: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: operand)
+    let v: Val = coerce_to(n: inout n, v: ov, to: "i1")
+    let out: Text = new_tmp(n: inout n)
+    emit_line(n: n, line: out ++ " = xor i1 " ++ v.v ++ ", 1")
+    return Ok(value: val(v: out, t: "i1"))
+  }
+  | ir.And(operands) -> return short_circuit(
+    fuel: fuel - 1,
+    n: inout n,
+    ctx: ctx,
+    operands: operands,
+    is_and: true
+  )
+  | ir.Or(operands) -> return short_circuit(
+    fuel: fuel - 1,
+    n: inout n,
+    ctx: ctx,
+    operands: operands,
+    is_and: false
+  )
+  | ir.Implies(left, right) -> return short_circuit(
+    fuel: fuel - 1,
+    n: inout n,
+    ctx: ctx,
+    operands: [ir.Not(operand: left), right],
+    is_and: false
+  )
+  | ir.IsVariant(subject, variant, ty) -> {
+    let sv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: subject)
+    let subject_v: Val = coerce_to(n: inout n, v: sv, to: "ptr")
+    var parent: Option[Int] = union_def_of(t: ty)
+    if parent is None {
+      parent = variant.parent
+    }
+    let tag: Text = load_slot(n: inout n, obj: subject_v.v, idx: 0)
+    let out: Text = new_tmp(n: inout n)
+    emit_line(
+      n: n,
+      line: out ++ " = icmp eq i64 " ++ tag ++ ", " ++ variant_tag(
+        ctx: ctx,
+        parent: parent,
+        variant: variant.id
+      )
+    )
+    return Ok(value: val(v: out, t: "i1"))
+  }
+  | ir.Try(operand, option, outer_option, else_clause, raw, ty) -> return try_val(
+    fuel: fuel - 1,
+    n: inout n,
+    ctx: ctx,
+    operand: operand,
+    option: option,
+    outer_option: outer_option,
+    else_clause: else_clause,
+    raw: raw,
+    ty: ty
+  )
+  | ir.Checked(value, it_name, ty, checks) -> {
+    let t: Text = try ll_of(ctx: ctx, t: ty)
+    let cv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: value)
+    let v: Val = coerce_to(n: inout n, v: cv, to: t)
+    let ptr: Text = alloc_local(n: inout n, name: it_name, t: t, ty: ty)
+    emit_line(n: n, line: "store " ++ t ++ " " ++ v.v ++ ", ptr " ++ ptr)
+    try block_stmts(fuel: fuel - 1, n: inout n, ctx: ctx, b: checks)
+    return Ok(value: v)
+  }
+  | ir.ConstE(value) -> return const_arg(n: inout n, ctx: ctx, c: value)
+  | ir.ValueE(value) -> {
+    match value with
+    | values.IntV(v) -> return Ok(value: val(v: s(i: v), t: "i64"))
+    | values.DurationV(v) -> return Ok(value: val(v: s(i: v), t: "i64"))
+    | values.BoolV(v) -> return Ok(value: val(v: bool_text(b: v), t: "i1"))
+    | values.FloatV(v) -> return Ok(value: val(v: double_literal(v: v), t: "double"))
+    | values.TextV(v) -> return Ok(value: val(v: text_global(n: inout n, x: v), t: "ptr"))
+    | _ -> return const_val(fuel: fuel - 1, n: inout n, ctx: ctx, x: value)
+  }
+  | ir.FnRef(_, _, _) -> return Err(error: "function values and closures")
+  | ir.CallValue(_, _, _, _) -> return Err(error: "function values and closures")
+  | ir.Closure(_, _, _, _, _) -> return Err(error: "function values and closures")
+  | ir.DictE(_, _, _, _) -> return Err(error: "interfaces")
+  | ir.DictParamE(_) -> return Err(error: "interfaces")
+  | ir.Quantifier(_, _, _, _, _, _) -> return Err(error: "quantifiers evaluated at runtime")
+  | ir.Recover(body, value, _) -> return recover_val(
+    fuel: fuel - 1,
+    n: inout n,
+    ctx: ctx,
+    body: body,
+    result_expr: value
+  )
+  | ir.Fake(_, _, _) -> return Err(error: "`fake`")
+  | ir.TypeInfoE(_, _) -> return Ok(value: val(v: "null", t: "ptr"))
+  | ir.Snapshot(_, _) -> return Err(error: "`old(...)` in a checked postcondition")
+}
+
+fn float_op_name(op: Text) -> Text {
+  if op == "+" {
+    return "fadd"
+  }
+  if op == "-" {
+    return "fsub"
+  }
+  if op == "*" {
+    return "fmul"
+  }
+  if op == "/" {
+    return "fdiv"
+  }
+  return "frem"
+}
+
+fn fcmp_name(op: Text) -> Text {
+  if op == "<" {
+    return "olt"
+  }
+  if op == "<=" {
+    return "ole"
+  }
+  if op == ">" {
+    return "ogt"
+  }
+  return "oge"
+}
+
+fn icmp_name(op: Text) -> Text {
+  if op == "<" {
+    return "slt"
+  }
+  if op == "<=" {
+    return "sle"
+  }
+  if op == ">" {
+    return "sgt"
+  }
+  return "sge"
+}
+
+-- A compile-time constant passed as a `const` type argument.
+fn const_arg(
+  n: inout N,
+  ctx: context.Context,
+  c: types.ConstValue
+) -> Result[Val, Text] may mutate, alloc {
+  match c with
+  | types.IntV(v) -> return Ok(value: val(v: s(i: v), t: "i64"))
+  | types.DurationV(v) -> return Ok(value: val(v: s(i: v), t: "i64"))
+  | types.BoolV(v) -> return Ok(value: val(v: bool_text(b: v), t: "i1"))
+  | types.FloatV(v) -> return Ok(value: val(v: double_literal(v: v), t: "double"))
+  | types.TextV(v) -> return Ok(value: val(v: text_global(n: inout n, x: v), t: "ptr"))
+  | types.VariantV(def) -> {
+    -- A constant variant (`ReadOnly` as a `const mode: DbMode`): a value of the union carrying its tag.
+    let parent: Option[Int] = context.get_def(ctx: ctx, id: def).parent
+    let obj: Text = new_tmp(n: inout n)
+    emit_line(n: n, line: obj ++ " = call ptr @onus_alloc(i64 8)")
+    store_slot(
+      n: inout n,
+      obj: obj,
+      idx: 0,
+      slot: variant_tag(ctx: ctx, parent: parent, variant: def)
+    )
+    return Ok(value: val(v: obj, t: "ptr"))
+  }
+  | types.UnitV -> return Err(error: "unit type arguments")
+  | types.SymV(_) -> return Err(error: "sym type arguments")
+  | types.ErrorV -> return Err(error: "error type arguments")
+}
+
+fn eq_val(
+  fuel: Int where it >= 0,
+  n: inout N,
+  ctx: context.Context,
+  left: ir.Expr,
+  right: ir.Expr,
+  ty: types.Type,
+  negate: Bool
+) -> Result[Val, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "out of fuel")
+  }
+  let st: types.Type = types.strip(t: ty)
+  if st is types.ParamT {
+    return Err(error: "equality on a value of a type parameter")
+  }
+  if not st is types.Prim {
+    -- Structural equality (§19.1): a comparer generated per type, over slots.
+    let cmp: Text = try eq_fn_of(fuel: fuel - 1, n: inout n, ctx: ctx, ty: st)
+    let lv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: left)
+    let l: Text = to_slot(n: inout n, v: lv)
+    let rv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: right)
+    let r: Text = to_slot(n: inout n, v: rv)
+    let same: Text = new_tmp(n: inout n)
+    emit_line(n: n, line: same ++ " = call i1 " ++ cmp ++ "(i64 " ++ l ++ ", i64 " ++ r ++ ")")
+    if not negate {
+      return Ok(value: val(v: same, t: "i1"))
+    }
+    let out: Text = new_tmp(n: inout n)
+    emit_line(n: n, line: out ++ " = xor i1 " ++ same ++ ", true")
+    return Ok(value: val(v: out, t: "i1"))
+  }
+  let name: Text = types.prim_name(t: st)
+  let out: Text = new_tmp(n: inout n)
+  if name == "Float" {
+    let lv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: left)
+    let l: Val = coerce_to(n: inout n, v: lv, to: "double")
+    let rv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: right)
+    let r: Val = coerce_to(n: inout n, v: rv, to: "double")
+    var pred: Text = "oeq"
+    if negate {
+      pred = "une"
+    }
+    emit_line(n: n, line: out ++ " = fcmp " ++ pred ++ " double " ++ l.v ++ ", " ++ r.v)
+    return Ok(value: val(v: out, t: "i1"))
+  }
+  if name == "Text" {
+    let lv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: left)
+    let l: Val = coerce_to(n: inout n, v: lv, to: "ptr")
+    let rv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: right)
+    let r: Val = coerce_to(n: inout n, v: rv, to: "ptr")
+    let eq: Text = new_tmp(n: inout n)
+    emit_line(n: n, line: eq ++ " = call i1 @onus_rt_text_eq(ptr " ++ l.v ++ ", ptr " ++ r.v ++ ")")
+    if negate {
+      emit_line(n: n, line: out ++ " = xor i1 " ++ eq ++ ", 1")
+    } else {
+      emit_line(n: n, line: out ++ " = and i1 " ++ eq ++ ", 1")
+    }
+    return Ok(value: val(v: out, t: "i1"))
+  }
+  let lv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: left)
+  let l: Text = to_slot(n: inout n, v: lv)
+  let rv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: right)
+  let r: Text = to_slot(n: inout n, v: rv)
+  var pred: Text = "eq"
+  if negate {
+    pred = "ne"
+  }
+  emit_line(n: n, line: out ++ " = icmp " ++ pred ++ " i64 " ++ l ++ ", " ++ r)
+  return Ok(value: val(v: out, t: "i1"))
+}
+
+-- `recover { ... }` (§10.2): the body becomes a function over the enclosing
+-- locals, passed as an array of their addresses; the runtime runs it under
+-- `setjmp`, and a panic inside `longjmp`s back to become `Err(Panicked)`.
+fn recover_val(
+  fuel: Int where it >= 0,
+  n: inout N,
+  ctx: context.Context,
+  body: List[ir.Stmt],
+  result_expr: ir.Expr
+) -> Result[Val, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "out of fuel")
+  }
+  let names: List[Text] = List.finish(b: n.local_order)
+  var captured: Builder[Local] = List.builder()
+  for name: Text in names {
+    match Map.find(d: n.locals, key: name) with
+    | Some(value) -> List.push(b: inout captured, x: value)
+    | None -> skip()
+  }
+  let infos: List[Local] = List.finish(b: captured)
+  n = { n with counter: n.counter + 1 }
+  let name: Text = "@\"recover$" ++ s(i: n.counter) ++ "\""
+  declare_sig(n: n, sig: "declare ptr @onus_recover(ptr, ptr)")
+  let saved: Saved = save_fn(n: n)
+  begin_fn(n: inout n)
+  n = { n with fn_ret: "i64" }
+  let r: Result[Unit, Text] = recover_body(
+    fuel: fuel - 1,
+    n: inout n,
+    ctx: ctx,
+    names: names,
+    infos: infos,
+    body: body,
+    result_expr: result_expr,
+    name: name
+  )
+  restore_fn(n: inout n, sv: saved)
+  match r with
+  | Ok(_) -> skip()
+  | Err(error) -> return Err(error: error)
+  let env: Text = new_tmp(n: inout n)
+  emit_line(
+    n: n,
+    line: env ++ " = call ptr @onus_alloc(i64 " ++ s(i: slots_size(k: List.len(xs: infos))) ++ ")"
+  )
+  for i: Int in 0 ..< List.len(xs: infos) {
+    let p: Text = new_tmp(n: inout n)
+    emit_line(n: n, line: p ++ " = getelementptr ptr, ptr " ++ env ++ ", i64 " ++ s(i: i))
+    emit_line(n: n, line: "store ptr " ++ List.get(xs: infos, i: i).ptr ++ ", ptr " ++ p)
+  }
+  let out: Text = new_tmp(n: inout n)
+  emit_line(n: n, line: out ++ " = call ptr @onus_recover(ptr " ++ name ++ ", ptr " ++ env ++ ")")
+  return Ok(value: val(v: out, t: "ptr"))
+}
+
+fn recover_body(
+  fuel: Int where it >= 0,
+  n: inout N,
+  ctx: context.Context,
+  names: List[Text],
+  infos: List[Local],
+  body: List[ir.Stmt],
+  result_expr: ir.Expr,
+  name: Text
+) -> Result[Unit, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "out of fuel")
+  }
+  for i: Int in 0 ..< List.len(xs: infos) {
+    let p: Text = new_tmp(n: inout n)
+    emit_line(n: n, line: p ++ " = getelementptr ptr, ptr %env, i64 " ++ s(i: i))
+    let ptr: Text = new_tmp(n: inout n)
+    emit_line(n: n, line: ptr ++ " = load ptr, ptr " ++ p)
+    let info: Local = List.get(xs: infos, i: i)
+    if i < List.len(xs: names) {
+      set_local(
+        n: n,
+        name: List.get(xs: names, i: i),
+        l: Local { ptr: ptr, t: info.t, ty: info.ty }
+      )
+    }
+  }
+  try block_stmts(fuel: fuel - 1, n: inout n, ctx: ctx, b: body)
+  if not n.terminated {
+    let rv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: result_expr)
+    let v: Text = to_slot(n: inout n, v: rv)
+    emit_line(n: n, line: "ret i64 " ++ v)
+  }
+  finish_fn(n: n, header: "define i64 " ++ name ++ "(ptr %env) {")
+  return Ok(value: Unit)
+}
+
+-- The comparer `@eq$N(i64, i64) -> i1` for a type: prims by value, `Text` by
+-- the runtime, records field by field, unions by tag then the variant's
+-- fields, lists element by element through the runtime with the element
+-- comparer. Generated once per type; recursive types refer to their own name.
+fn eq_fn_of(
+  fuel: Int where it >= 0,
+  n: inout N,
+  ctx: context.Context,
+  ty: types.Type
+) -> Result[Text, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "out of fuel")
+  }
+  let st: types.Type = types.strip(t: ty)
+  let key: Text = typecheck.show(ctx: ctx, t: st)
+  match Map.find(d: n.eq_fns, key: key) with
+  | Some(value) -> return Ok(value: value)
+  | None -> skip()
+  n = { n with counter: n.counter + 1 }
+  let name: Text = "@\"eq$" ++ s(i: n.counter) ++ "\""
+  var eq_fns: Dict[Text, Text] = n.eq_fns
+  Map.set(d: inout eq_fns, key: key, value: name)
+  let saved: Saved = save_fn(n: n)
+  begin_fn(n: inout n)
+  n = { n with fn_ret: "i1" }
+  let r: Result[Text, Text] = eq_slots(
+    fuel: fuel - 1,
+    n: inout n,
+    ctx: ctx,
+    ty: st,
+    a: "%a",
+    b: "%b"
+  )
+  if r is Ok {
+    emit_line(n: n, line: "ret i1 " ++ ok_text(r: r))
+    finish_fn(n: n, header: "define i1 " ++ name ++ "(i64 %a, i64 %b) {")
+  }
+  restore_fn(n: inout n, sv: saved)
+  match r with
+  | Ok(_) -> skip()
+  | Err(error) -> return Err(error: error)
+  return Ok(value: name)
+}
+
+fn ok_text(r: Result[Text, Text]) -> Text {
+  match r with
+  | Ok(value) -> return value
+  | Err(_) -> return ""
+}
+
+-- Whether two slots holding values of `ty` are equal, as an i1 in the current block.
+fn eq_slots(
+  fuel: Int where it >= 0,
+  n: inout N,
+  ctx: context.Context,
+  ty: types.Type,
+  a: Text,
+  b: Text
+) -> Result[Text, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "out of fuel")
+  }
+  let st: types.Type = types.strip(t: ty)
+  let out: Text = new_tmp(n: inout n)
+  match st with
+  | types.Prim(name) -> {
+    if name == "Float" {
+      let fa: Val = from_slot(n: inout n, slot: a, t: "double")
+      let fb: Val = from_slot(n: inout n, slot: b, t: "double")
+      emit_line(n: n, line: out ++ " = fcmp oeq double " ++ fa.v ++ ", " ++ fb.v)
+      return Ok(value: out)
+    }
+    if name == "Text" {
+      let pa: Val = from_slot(n: inout n, slot: a, t: "ptr")
+      let pb: Val = from_slot(n: inout n, slot: b, t: "ptr")
+      emit_line(
+        n: n,
+        line: out ++ " = call i1 @onus_rt_text_eq(ptr " ++ pa.v ++ ", ptr " ++ pb.v ++ ")"
+      )
+      return Ok(value: out)
+    }
+    if name == "Int" or name == "Duration" or name == "Unit" or name == "Bool" {
+      emit_line(n: n, line: out ++ " = icmp eq i64 " ++ a ++ ", " ++ b)
+      return Ok(value: out)
+    }
+    return Err(error: "equality on `" ++ name ++ "` values")
+  }
+  | types.RecordT(def, args) -> {
+    let subst: Dict[Int, types.TypeArg] = subst_of(ctx: ctx, def: def, args: args)
+    let pa: Val = from_slot(n: inout n, slot: a, t: "ptr")
+    let pb: Val = from_slot(n: inout n, slot: b, t: "ptr")
+    var acc: Option[Text] = None
+    let fs: List[types.FieldInfo] = fields_of(ctx: ctx, owner: def)
+    for i: Int in 0 ..< List.len(xs: fs) {
+      let ft: types.Type = types.substitute(t: List.get(xs: fs, i: i).ty, subst: subst)
+      let sa: Text = load_slot(n: inout n, obj: pa.v, idx: i)
+      let sb: Text = load_slot(n: inout n, obj: pb.v, idx: i)
+      let e: Text = try eq_field(fuel: fuel - 1, n: inout n, ctx: ctx, ty: ft, a: sa, b: sb)
+      acc = Some(value: conj(n: inout n, acc: acc, e: e))
+    }
+    match acc with
+    | Some(value) -> emit_line(n: n, line: out ++ " = and i1 " ++ value ++ ", true")
+    | None -> emit_line(n: n, line: out ++ " = icmp eq i1 true, true")
+    return Ok(value: out)
+  }
+  | types.UnionT(def, args) -> {
+    let subst: Dict[Int, types.TypeArg] = subst_of(ctx: ctx, def: def, args: args)
+    let pa: Val = from_slot(n: inout n, slot: a, t: "ptr")
+    let pb: Val = from_slot(n: inout n, slot: b, t: "ptr")
+    let ta: Text = load_slot(n: inout n, obj: pa.v, idx: 0)
+    let tb: Text = load_slot(n: inout n, obj: pb.v, idx: 0)
+    let same_tag: Text = new_tmp(n: inout n)
+    emit_line(n: n, line: same_tag ++ " = icmp eq i64 " ++ ta ++ ", " ++ tb)
+    let dispatch: Text = new_label(n: inout n, prefix: "eqsw")
+    let differ: Text = new_label(n: inout n, prefix: "eqno")
+    let done: Text = new_label(n: inout n, prefix: "eqdone")
+    cond_br(n: inout n, cond: same_tag, then_l: dispatch, else_l: differ)
+    start_block(n: inout n, name: dispatch)
+    let vs: List[Int] = variants_of(ctx: ctx, union_def: def)
+    var labels: Builder[Text] = List.builder()
+    for v: Int in vs {
+      List.push(b: inout labels, x: new_label(n: inout n, prefix: "eqv"))
+    }
+    let label_list: List[Text] = List.finish(b: labels)
+    var cases: Text = ""
+    for i: Int in 0 ..< List.len(xs: vs) {
+      cases = cases ++ " i64 " ++ s(
+        i: variant_index(ctx: ctx, union_def: def, variant: List.get(xs: vs, i: i))
+      ) ++ ", label %" ++ label_at(labels: label_list, i: i, fallback: differ)
+    }
+    emit_line(n: n, line: "switch i64 " ++ ta ++ ", label %" ++ differ ++ " [" ++ cases ++ " ]")
+    n = { n with terminated: true }
+    var incoming: Builder[Text] = List.builder()
+    for i: Int in 0 ..< List.len(xs: vs) {
+      start_block(n: inout n, name: label_at(labels: label_list, i: i, fallback: differ))
+      var acc: Option[Text] = None
+      let fs: List[types.FieldInfo] = fields_of(ctx: ctx, owner: List.get(xs: vs, i: i))
+      for j: Int in 0 ..< List.len(xs: fs) {
+        let ft: types.Type = types.substitute(t: List.get(xs: fs, i: j).ty, subst: subst)
+        let sa: Text = load_slot(n: inout n, obj: pa.v, idx: 1 + j)
+        let sb: Text = load_slot(n: inout n, obj: pb.v, idx: 1 + j)
+        let e: Text = try eq_field(fuel: fuel - 1, n: inout n, ctx: ctx, ty: ft, a: sa, b: sb)
+        acc = Some(value: conj(n: inout n, acc: acc, e: e))
+      }
+      List.push(b: inout incoming, x: "[ " ++ or_true(o: acc) ++ ", %" ++ n.block ++ " ]")
+      br(n: inout n, target: done)
+    }
+    start_block(n: inout n, name: differ)
+    List.push(b: inout incoming, x: "[ false, %" ++ n.block ++ " ]")
+    br(n: inout n, target: done)
+    start_block(n: inout n, name: done)
+    emit_line(
+      n: n,
+      line: out ++ " = phi i1 " ++ Text.join(parts: List.finish(b: incoming), sep: ", ")
+    )
+    return Ok(value: out)
+  }
+  | types.Opaque(def, args) -> {
+    let q: Text = context.qualified_name(ctx: ctx, id: def)
+    var elem: Option[types.Type] = None
+    if List.len(xs: args) > 0 {
+      elem = type_arg_type(a: List.get(xs: args, i: 0))
+    }
+    if q != "std.list.List" or elem is None {
+      return Err(error: "equality on `" ++ context.get_def(ctx: ctx, id: def).name ++ "` values")
+    }
+    declare_sig(n: n, sig: "declare i1 @onus_rt_list_eq(ptr, ptr, ptr)")
+    let cmp: Text = try eq_fn_of(fuel: fuel - 1, n: inout n, ctx: ctx, ty: or_int_type(o: elem))
+    let pa: Val = from_slot(n: inout n, slot: a, t: "ptr")
+    let pb: Val = from_slot(n: inout n, slot: b, t: "ptr")
+    emit_line(
+      n: n,
+      line: out ++ " = call i1 @onus_rt_list_eq(ptr " ++ pa.v ++ ", ptr " ++ pb.v ++ ", ptr " ++ cmp ++ ")"
+    )
+    return Ok(value: out)
+  }
+  | types.ParamT(_) -> return Err(error: "equality on a value of a type parameter")
+  | _ -> return Err(error: "equality on `" ++ typecheck.show(ctx: ctx, t: st) ++ "` values")
+}
+
+-- Whether two field slots of `ty` are equal: primitives inline, everything else
+-- through the type's comparer, so that a recursive type's comparer refers to
+-- itself instead of unfolding without end.
+fn eq_field(
+  fuel: Int where it >= 0,
+  n: inout N,
+  ctx: context.Context,
+  ty: types.Type,
+  a: Text,
+  b: Text
+) -> Result[Text, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "out of fuel")
+  }
+  let st: types.Type = types.strip(t: ty)
+  if st is types.Prim {
+    return eq_slots(fuel: fuel - 1, n: inout n, ctx: ctx, ty: st, a: a, b: b)
+  }
+  let cmp: Text = try eq_fn_of(fuel: fuel - 1, n: inout n, ctx: ctx, ty: st)
+  let out: Text = new_tmp(n: inout n)
+  emit_line(n: n, line: out ++ " = call i1 " ++ cmp ++ "(i64 " ++ a ++ ", i64 " ++ b ++ ")")
+  return Ok(value: out)
+}
+
+fn type_arg_type(a: types.TypeArg) -> Option[types.Type] {
+  match a with
+  | types.TypeA(ty) -> return Some(value: ty)
+  | _ -> return None
+}
+
+-- The label of variant `i`, or `fallback` (the mismatch block) beyond the list, as `labels[i] ?? differ`.
+fn label_at(labels: List[Text], i: Int, fallback: Text) -> Text {
+  if i >= 0 and i < List.len(xs: labels) {
+    return List.get(xs: labels, i: i)
+  }
+  return fallback
+}
+
+fn or_int_type(o: Option[types.Type]) -> types.Type {
+  match o with
+  | Some(value) -> return value
+  | None -> return types.Prim(name: "Int")
+}
+
+fn or_true(o: Option[Text]) -> Text {
+  match o with
+  | Some(value) -> return value
+  | None -> return "true"
+}
+
+-- `acc and e`, or `e` when nothing has been compared yet.
+fn conj(n: inout N, acc: Option[Text], e: Text) -> Text may mutate, alloc {
+  match acc with
+  | None -> return e
+  | Some(value) -> {
+    let both: Text = new_tmp(n: inout n)
+    emit_line(n: n, line: both ++ " = and i1 " ++ value ++ ", " ++ e)
+    return both
+  }
+}
+
+fn short_circuit(
+  fuel: Int where it >= 0,
+  n: inout N,
+  ctx: context.Context,
+  operands: List[ir.Expr],
+  is_and: Bool
+) -> Result[Val, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "out of fuel")
+  }
+  let end_l: Text = new_label(n: inout n, prefix: "sc")
+  var incoming: Builder[Text] = List.builder()
+  let count: Int = List.len(xs: operands)
+  for i: Int in 0 ..< count {
+    let ov: Val = try expr_val(
+      fuel: fuel - 1,
+      n: inout n,
+      ctx: ctx,
+      e: List.get(xs: operands, i: i)
+    )
+    let v: Val = coerce_to(n: inout n, v: ov, to: "i1")
+    if i == count - 1 {
+      List.push(b: inout incoming, x: "[ " ++ v.v ++ ", %" ++ n.block ++ " ]")
+      br(n: inout n, target: end_l)
+    } else {
+      let next_l: Text = new_label(n: inout n, prefix: "scnext")
+      var short: Text = "1"
+      if is_and {
+        short = "0"
+      }
+      List.push(b: inout incoming, x: "[ " ++ short ++ ", %" ++ n.block ++ " ]")
+      if is_and {
+        cond_br(n: inout n, cond: v.v, then_l: next_l, else_l: end_l)
+      } else {
+        cond_br(n: inout n, cond: v.v, then_l: end_l, else_l: next_l)
+      }
+      start_block(n: inout n, name: next_l)
+    }
+  }
+  start_block(n: inout n, name: end_l)
+  let out: Text = new_tmp(n: inout n)
+  emit_line(
+    n: n,
+    line: out ++ " = phi i1 " ++ Text.join(parts: List.finish(b: incoming), sep: ", ")
+  )
+  return Ok(value: val(v: out, t: "i1"))
+}
+
+fn int_op(n: inout N, op: Text, l: Val, r: Val, ob: Option[ir.ObRef]) -> Val may mutate, alloc {
+  let out: Text = new_tmp(n: inout n)
+  if op == "/" or op == "%" {
+    match ob with
+    | Some(value) -> {
+      let zero: Text = new_tmp(n: inout n)
+      emit_line(n: n, line: zero ++ " = icmp eq i64 " ++ r.v ++ ", 0")
+      let ok_l: Text = new_label(n: inout n, prefix: "divok")
+      let fail_l: Text = new_label(n: inout n, prefix: "divfail")
+      cond_br(n: inout n, cond: zero, then_l: fail_l, else_l: ok_l)
+      start_block(n: inout n, name: fail_l)
+      emit_panic(n: inout n, ob: value)
+      start_block(n: inout n, name: ok_l)
+    }
+    | None -> skip()
+    var inst: Text = "srem"
+    if op == "/" {
+      inst = "sdiv"
+    }
+    emit_line(n: n, line: out ++ " = " ++ inst ++ " i64 " ++ l.v ++ ", " ++ r.v)
+    return val(v: out, t: "i64")
+  }
+  match ob with
+  | None -> {
+    emit_line(n: n, line: out ++ " = " ++ plain_op(op: op) ++ " i64 " ++ l.v ++ ", " ++ r.v)
+    return val(v: out, t: "i64")
+  }
+  | Some(value) -> {
+    let pair: Text = new_tmp(n: inout n)
+    emit_line(
+      n: n,
+      line: pair ++ " = call { i64, i1 } @llvm." ++ overflow_op(
+        op: op
+      ) ++ ".with.overflow.i64(i64 " ++ l.v ++ ", i64 " ++ r.v ++ ")"
+    )
+    emit_line(n: n, line: out ++ " = extractvalue { i64, i1 } " ++ pair ++ ", 0")
+    let overflow: Text = new_tmp(n: inout n)
+    emit_line(n: n, line: overflow ++ " = extractvalue { i64, i1 } " ++ pair ++ ", 1")
+    let ok_l: Text = new_label(n: inout n, prefix: "arith")
+    let fail_l: Text = new_label(n: inout n, prefix: "overflow")
+    cond_br(n: inout n, cond: overflow, then_l: fail_l, else_l: ok_l)
+    start_block(n: inout n, name: fail_l)
+    emit_panic(n: inout n, ob: value)
+    start_block(n: inout n, name: ok_l)
+    return val(v: out, t: "i64")
+  }
+}
+
+fn plain_op(op: Text) -> Text {
+  if op == "+" {
+    return "add"
+  }
+  if op == "-" {
+    return "sub"
+  }
+  return "mul"
+}
+
+fn overflow_op(op: Text) -> Text {
+  if op == "+" {
+    return "sadd"
+  }
+  if op == "-" {
+    return "ssub"
+  }
+  return "smul"
+}
+
+fn call_val(
+  fuel: Int where it >= 0,
+  n: inout N,
+  ctx: context.Context,
+  target: ir.CallTarget,
+  sig: types.Signature,
+  consts: List[ir.Expr],
+  args: List[ir.Expr],
+  ty: types.Type,
+  decoder: Option[ir.Decoder]
+) -> Result[Val, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "out of fuel")
+  }
+  match target with
+  | ir.DictTarget(_, _) -> return Err(error: "interface dispatch through a dictionary")
+  | ir.FnTarget(def, name) -> {
+    try require_native(n: n, ctx: ctx, def: def)
+    let ret_ll: Text = try ll_of(ctx: ctx, t: ty)
+    var call_args: Builder[Text] = List.builder()
+    if def.is_intrinsic {
+      -- Runtime primitives take and return 64-bit slots; `inout` parameters are pointers to slots.
+      let q: Text = context.qualified_name(ctx: ctx, id: def.id)
+      let parts: List[Text] = Text.split(t: q, sep: ".")
+      let cname: Text = "@onus_" ++ Text.join(
+        parts: List.slice(xs: parts, from: 1, to: List.len(xs: parts)),
+        sep: "_"
+      )
+      var param_types: Builder[Text] = List.builder()
+      for c: ir.Expr in consts {
+        let cv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: c)
+        let slot: Text = to_slot(n: inout n, v: cv)
+        List.push(b: inout call_args, x: "i64 " ++ slot)
+        List.push(b: inout param_types, x: "i64")
+      }
+      for i: Int in 0 ..< List.len(xs: sig.params) {
+        if i < List.len(xs: args) {
+          let p: types.FnParam = List.get(xs: sig.params, i: i)
+          let a: ir.Expr = List.get(xs: args, i: i)
+          if p.is_inout {
+            let addr: Text = try address_of(n: n, a: a)
+            List.push(b: inout call_args, x: "ptr " ++ addr)
+            List.push(b: inout param_types, x: "ptr")
+          } else {
+            let av: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: a)
+            let slot: Text = to_slot(n: inout n, v: av)
+            List.push(b: inout call_args, x: "i64 " ++ slot)
+            List.push(b: inout param_types, x: "i64")
+          }
+        }
+      }
+      match decoder with
+      | Some(value) -> {
+        let dfn: Text = try decoder_fn(fuel: fuel - 1, n: inout n, ctx: ctx, d: value)
+        let slot: Text = new_tmp(n: inout n)
+        emit_line(n: n, line: slot ++ " = ptrtoint ptr " ++ dfn ++ " to i64")
+        List.push(b: inout call_args, x: "i64 " ++ slot)
+        List.push(b: inout param_types, x: "i64")
+      }
+      | None -> skip()
+      declare_sig(
+        n: n,
+        sig: "declare i64 " ++ cname ++ "(" ++ Text.join(
+          parts: List.finish(b: param_types),
+          sep: ", "
+        ) ++ ")"
+      )
+      let out: Text = new_tmp(n: inout n)
+      emit_line(
+        n: n,
+        line: out ++ " = call i64 " ++ cname ++ "(" ++ Text.join(
+          parts: List.finish(b: call_args),
+          sep: ", "
+        ) ++ ")"
+      )
+      return Ok(value: from_slot(n: inout n, slot: out, t: ret_ll))
+    }
+    let module: Text = context.module_name(ctx: ctx, id: def.mod)
+    for c: ir.Expr in consts {
+      let cv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: c)
+      List.push(b: inout call_args, x: cv.t ++ " " ++ cv.v)
+    }
+    for i: Int in 0 ..< List.len(xs: sig.params) {
+      if i < List.len(xs: args) {
+        let p: types.FnParam = List.get(xs: sig.params, i: i)
+        let a: ir.Expr = List.get(xs: args, i: i)
+        if p.is_inout {
+          let addr: Text = try address_of(n: n, a: a)
+          List.push(b: inout call_args, x: "ptr " ++ addr)
+        } else {
+          let av: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: a)
+          let pt: Text = try ll_of(ctx: ctx, t: p.ty)
+          let v: Val = coerce_to(n: inout n, v: av, to: pt)
+          List.push(b: inout call_args, x: v.t ++ " " ++ v.v)
+        }
+      }
+    }
+    let callee_ret: Text = try ll_of(ctx: ctx, t: sig.ret)
+    let out: Text = new_tmp(n: inout n)
+    emit_line(
+      n: n,
+      line: out ++ " = call " ++ callee_ret ++ " " ++ fn_name(
+        module: module,
+        name: name
+      ) ++ "(" ++ Text.join(parts: List.finish(b: call_args), sep: ", ") ++ ")"
+    )
+    return Ok(value: coerce_to(n: inout n, v: val(v: out, t: callee_ret), to: ret_ll))
+  }
+}
+
+-- The address of an `inout` argument's slot: the local's storage, whose element type must be the slot type.
+fn address_of(n: N, a: ir.Expr) -> Result[Text, Text] may alloc {
+  match a with
+  | ir.Local(name, _) -> {
+    let local: Local = try local_of(n: n, name: name)
+    if local.t != "i64" and local.t != "ptr" {
+      return Err(error: "`inout` arguments of type " ++ local.t)
+    }
+    return Ok(value: local.ptr)
+  }
+  | _ -> return Err(error: "an `inout` argument that is not a variable")
+}
+
+fn try_val(
+  fuel: Int where it >= 0,
+  n: inout N,
+  ctx: context.Context,
+  operand: ir.Expr,
+  option: Bool,
+  outer_option: Bool,
+  else_clause: Option[ir.ElseClause],
+  raw: Bool,
+  ty: types.Type
+) -> Result[Val, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "out of fuel")
+  }
+  let ov: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: operand)
+  let operand_v: Val = coerce_to(n: inout n, v: ov, to: "ptr")
+  let tag: Text = load_slot(n: inout n, obj: operand_v.v, idx: 0)
+  let is_ok: Text = new_tmp(n: inout n)
+  emit_line(n: n, line: is_ok ++ " = icmp eq i64 " ++ tag ++ ", 0")
+  let ok_l: Text = new_label(n: inout n, prefix: "tryok")
+  let fail_l: Text = new_label(n: inout n, prefix: "tryfail")
+  cond_br(n: inout n, cond: is_ok, then_l: ok_l, else_l: fail_l)
+  start_block(n: inout n, name: fail_l)
+  if raw {
+    var else_value: ir.Expr = ir.BoolE(v: false)
+    match else_clause with
+    | Some(value) -> else_value = value.value
+    | None -> skip()
+    let ev: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: else_value)
+    let v: Val = coerce_to(n: inout n, v: ev, to: "i1")
+    emit_line(n: n, line: "ret i1 " ++ v.v)
+  } else {
+    match else_clause with
+    | None -> {
+      if option and not outer_option {
+        return Err(error: "`try` on an Option inside a function returning Result without an `else`")
+      }
+      -- The same error (or `None`) is the function's result.
+      emit_line(n: n, line: "ret ptr " ++ operand_v.v)
+    }
+    | Some(value) -> {
+      if value.name is Some {
+        let et: Text = try ll_of(ctx: ctx, t: value.error_type)
+        let err_slot: Text = load_slot(n: inout n, obj: operand_v.v, idx: 1)
+        let err: Val = from_slot(n: inout n, slot: err_slot, t: et)
+        let ptr: Text = alloc_local(
+          n: inout n,
+          name: or_empty(o: value.name),
+          t: et,
+          ty: value.error_type
+        )
+        emit_line(n: n, line: "store " ++ et ++ " " ++ err.v ++ ", ptr " ++ ptr)
+      }
+      let cv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: value.value)
+      let converted: Text = to_slot(n: inout n, v: cv)
+      let res: Text = new_tmp(n: inout n)
+      emit_line(n: n, line: res ++ " = call ptr @onus_alloc(i64 16)")
+      store_slot(n: inout n, obj: res, idx: 0, slot: "1")
+      store_slot(n: inout n, obj: res, idx: 1, slot: converted)
+      emit_line(n: n, line: "ret ptr " ++ res)
+    }
+  }
+  n = { n with terminated: true }
+  start_block(n: inout n, name: ok_l)
+  let payload: Text = load_slot(n: inout n, obj: operand_v.v, idx: 1)
+  let t: Text = try ll_of(ctx: ctx, t: ty)
+  return Ok(value: from_slot(n: inout n, slot: payload, t: t))
+}
+
+-- -----------------------------------------------------------------------------
+-- The program
+-- -----------------------------------------------------------------------------
+-- Emits one program: every lowered module, an entry `main`, and an examples
+-- runner selected by `--onus-examples`. Only what the program reaches is
+-- compiled, so an unsupported construct in an unreached library function
+-- costs nothing (§19.1). Err only for a failure in `main` itself, which is a
+-- compiler bug.
+pub fn emit_native(
+  ctx: context.Context,
+  modules: List[ir.Module],
+  entry: Option[ir.Module],
+  opts: Options
+) -> Result[Program, Text] may alloc, mutate {
+  var n: N = new_n(modules: modules, entry: entry, sql: opts.sql, host_js: host_js_claim(ctx: ctx))
+  let reach: Dict[Int, Bool] = reachable(n: n)
+  for m: ir.Module in modules {
+    for item: ir.Item in m.items {
+      match item with
+      | ir.FnItem(f) -> {
+        if Map.contains(d: reach, key: f.def.id) {
+          fn_item(n: inout n, ctx: ctx, m: m, f: f)
+        }
+      }
+      | ir.ImplItem(_, _, _, _, fns, _) -> {
+        for f: ir.Fn in fns {
+          if Map.contains(d: reach, key: f.def.id) {
+            fn_item(n: inout n, ctx: ctx, m: m, f: f)
+          }
+        }
+      }
+      | ir.ConstItem(def, ty, value) -> {
+        if Map.contains(d: reach, key: def.id) {
+          const_item(n: inout n, ctx: ctx, m: m, def: def, ty: ty, init: value)
+        }
+      }
+      | _ -> skip()
+    }
+    match m.tests with
+    | Some(value) -> {
+      if not m.mod.is_std {
+        for ex: ir.Example in value.examples {
+          example_fn(n: inout n, ctx: ctx, m: m, name: ex.name, body: ex.body)
+        }
+      }
+    }
+    | None -> skip()
+  }
+  var has_main: Bool = false
+  match entry with
+  | Some(value) -> has_main = value.main is Some
+  | None -> skip()
+  try main_fn(n: inout n, ctx: ctx)
+  var head: Builder[Text] = List.builder()
+  List.push(b: inout head, x: "; Generated by onus (native target). Do not edit.")
+  for g: Text in List.finish(b: n.globals) {
+    List.push(b: inout head, x: g)
+  }
+  for d: Text in sort_texts(xs: Map.keys(d: n.declared)) {
+    List.push(b: inout head, x: d)
+  }
+  List.push(b: inout head, x: "declare void @onus_panic(ptr, ptr, ptr, ptr)")
+  List.push(b: inout head, x: "declare void @onus_unreachable()")
+  List.push(b: inout head, x: "declare ptr @onus_alloc(i64)")
+  List.push(b: inout head, x: "declare ptr @onus_rt_text_concat(ptr, ptr)")
+  List.push(b: inout head, x: "declare i1 @onus_rt_text_eq(ptr, ptr)")
+  List.push(b: inout head, x: "declare ptr @onus_rt_list_new(i64)")
+  List.push(b: inout head, x: "declare i64 @onus_rt_list_len(ptr)")
+  List.push(b: inout head, x: "declare i64 @onus_rt_list_get(ptr, i64)")
+  List.push(b: inout head, x: "declare void @onus_rt_list_set(ptr, i64, i64)")
+  List.push(b: inout head, x: "declare ptr @onus_rt_list_concat(ptr, ptr)")
+  List.push(b: inout head, x: "declare ptr @onus_args(i32, ptr)")
+  List.push(b: inout head, x: "declare i32 @onus_start(i32, ptr)")
+  List.push(b: inout head, x: "declare i32 @onus_finish(ptr)")
+  List.push(b: inout head, x: "declare void @onus_report_example(ptr, i1)")
+  List.push(b: inout head, x: "declare i32 @onus_examples_done()")
+  List.push(b: inout head, x: "declare ptr @onus_root(ptr)")
+  List.push(b: inout head, x: "declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)")
+  List.push(b: inout head, x: "declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)")
+  List.push(b: inout head, x: "declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)")
+  List.push(b: inout head, x: "")
+  var names: Builder[Text] = List.builder()
+  for ex: ExampleFn in List.finish(b: n.examples) {
+    List.push(b: inout names, x: ex.name)
+  }
+  return Ok(
+    value: Program {
+      ll: Text.join(parts: List.finish(b: head), sep: "\n") ++ "\n" ++ Text.join(
+        parts: List.finish(b: n.fns),
+        sep: "\n"
+      ),
+      unsupported: List.finish(b: n.unsupported),
+      has_main: has_main,
+      examples: List.finish(b: names)
+    }
+  )
+}
+
+-- The E0800 detail for an unsupported construct, as `codegen/native-build.ts` words it.
+pub fn unsupported_detail(u: Unsupported) -> Text may alloc {
+  return "`" ++ u.def ++ "` uses " ++ u.what ++ ", which the native target does not provide in v0 (§19.1)"
+}
+
+-- The definition name an E0800 is reported under: the last segment of the qualified name.
+pub fn unsupported_def_name(u: Unsupported) -> Text may alloc {
+  return last_segment(q: u.def)
+}

@@ -256,6 +256,7 @@ export function problemText(vc: VC, budgetMs: number): string {
   const lines: string[] = ['(set-logic ALL)', `(set-option :timeout ${budgetMs})`, '(set-option :produce-models true)'];
   for (const s of vc.lowerer.sorts) lines.push(`(declare-sort ${s} 0)`);
   for (const [name, decl] of vc.lowerer.fns) lines.push(`(declare-fun ${name} (${decl.args.map(sortText).join(' ')}) ${sortText(decl.ret)})`);
+  for (const a of vc.lowerer.sortAxioms) lines.push(`(assert ${smt(a)})`);
   const distinct = vc.lowerer.textDistinctness();
   if (distinct !== null) lines.push(`(assert ${smt(distinct)})`);
   for (const a of vc.lowerer.axioms) lines.push(`(assert ${smt(a)})`);

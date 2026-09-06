@@ -1203,6 +1203,142 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     with the module cache filling as it goes and under a minute once it
     is warm.
 
+### 2026-09-06 — verifying the compiler's own code generator
+
+161. **Sorts and projections are named by the qualified type.** Verifying
+    `self/lowerir.onus`, which imports both `ast` and `ir`, found that the
+    lowering named the SMT sort of a type by its bare name: `ast.Stmt` and
+    `ir.Stmt` both became `Stmt`, their `Let.name` projections collided
+    (`Ident` against `Text`), and z3 rejected every problem that used the
+    second as ill-sorted — 627 `E0999`s on one module, and a soundness hole
+    had the sorts agreed. `verify/lower.ts` `slug` and `self/lower.onus`
+    `slug` now use the qualified name (`ast.Stmt`, `std.list.List_ast.Arg`),
+    for constant variant arguments too. Pinned by
+    `test/verify/ok_same_name_sorts.onus` with `lib/stmt_a.onus` and
+    `lib/stmt_b.onus`. The module cache format is 2.
+162. **Type facts are asserted only where a refinement is reachable.**
+    Verifying `self/jsemit.onus` exhausted a 4 GB heap before the first z3
+    call: `typeFacts` walked every variant and field of the recursive `ir`
+    and `ast` types to depth four for each bound name, declaring millions of
+    projections whose only fact was a list length bound. The bound is now
+    an axiom of the list sort, stated once when the sort's functions are
+    declared (`forall xs. len(xs) >= 0`, printed with the declarations), and
+    `typeFacts`/`type_facts` first ask `hasFacts`/`has_facts` — memoised by
+    type and remaining depth — whether a refinement is reachable through
+    fields and elements within the depth left, and skip the walk otherwise.
+    The conditions built are identical (the emitter module: 345 conditions,
+    the same 5,218 formula nodes) in 72 ms and 92 MB instead of 217 s and
+    1.6 GB retained; the fixture suite's ledgers are unchanged.
+
+### 2026-09-06 — M15.4: the JavaScript emitter in Onus and the fixed point
+
+163. **Codegen in Onus.** `self/ir.onus` is the target-neutral form of
+    `codegen/ir.ts`, `self/irtext.onus` its text (`onus build --emit ir`),
+    `self/lowerir.onus` the lowering of `codegen/lower.ts` (obligation
+    statuses to runtime checks, entry checks, dictionary passing, `inout`
+    results, `match` compilation, measures, `old` snapshots, early returns,
+    generators for properties, `verify` blocks), `self/jsemit.onus` the
+    JavaScript emitter of `codegen/js.ts`, and `self/build.onus` the
+    `emitAll` of `codegen/build.ts` (`package.json`, the vitest config, every
+    module, every `.examples.test.js`, the launcher of `main`). `self/check.onus`
+    gained `--ir` (print the form of every non-library module) and
+    `--emit <dir> --runtime <specifier>`. Every function of the port is
+    verified: `decreases fuel` at each call of a recursive cycle, with a
+    zero-fuel guard returning the empty form, and the measures the first
+    verification found not strictly falling (68 sites passed `fuel` on
+    unchanged) now fall.
+164. **The codegen differential.** `test/self/codegen.test.ts` runs both
+    compilers to `paths` on every source in the repository that checks
+    clean, with the same budget and proof cache, and requires the printed
+    form of every non-library module and every file `onus build` writes to
+    agree byte for byte, name for name. It does, on every source.
+165. **The fixed point.** `scripts/bootstrap.sh` builds `self/` with stage0
+    (the TypeScript compiler until `bootstrap/` exists) into stage1, with
+    stage1 into stage2, with stage2 into stage3, and requires stage2 and
+    stage3 to be identical file for file; it is, and stage1 — the compiler
+    as the TypeScript compiler emits it — is identical to stage2 as well:
+    the Onus compiler compiled by itself is byte-identical to itself
+    compiled by the TypeScript compiler (M15.4's acceptance, for the
+    JavaScript target). The chain runs in about seven minutes with the
+    module cache warm. The native emitter and the remaining CLI commands
+    are not yet in Onus.
+166. **No integer above ±2^53 in the compiler's own source.** The one
+    disagreement the codegen differential found was the Onus lexer's
+    duration overflow check, `value > 9223372036854775`: the TypeScript
+    compiler prints the literal's digits, the compiler in Onus prints the
+    JavaScript number it holds (…776). This is the `Int` representation gap
+    of item 99, not a codegen bug, and the compiler's own source now avoids
+    it: `push_duration` compares the literal's digits against the limit as
+    text and reads the nanoseconds with the unit's zeros appended, so the
+    check is exact on every target and needs no multiplication. Pinned by
+    the lexer differential and the codegen differential on `self/`.
+
+167. **The native emitter in Onus.** `self/native.onus` is `codegen/native.ts`:
+    the LLVM IR text for `clang`, reachability from `main` and the
+    non-library examples, lazily filled aggregate constants, row decoders,
+    `recover` bodies as functions over the captured locals, structural
+    comparers per type, and `E0800` for what the native subset does not
+    compile (the same words, from `unsupported_detail`). Two things the
+    port could not copy: a double literal's IEEE bits are found with exact
+    operations (scaling by powers of two, halving, and thirteen nibbles
+    extracted by doubling), since the runtime has no bit cast and an `Int`
+    on the JavaScript target cannot hold them; and a text's UTF-8 bytes are
+    computed from its code points, since `Text.bytes` claims `host.js`.
+    `self/check.onus` gained `--native <dir>` (writes `<dir>/native/program.ll`
+    and reports E0800) and `--no-libpq`. The codegen differential
+    (`test/self/codegen.test.ts`) now also requires the native program and
+    the E0800 diagnostics to agree byte for byte with `emitNative`, and they
+    do on every source. Running `clang` and comparing the targets (§19.5)
+    stay with the CLI, which is the next port.
+
+168. **A recursive union's comparer no longer unfolds the type.** The
+    codegen differential over every source made the TypeScript native
+    emitter overflow its stack: `eqSlots` compared a record's or variant's
+    fields inline, so a union with a field of its own type recursed without
+    end — the memoised per-type comparer existed but was used only at the
+    top and for list elements. Both emitters now compare a nested record,
+    union or list field through the type's comparer (`eqField`,
+    `eq_field`), which refers to itself for a recursive type; primitives
+    stay inline. Pinned natively by `test/native/eq_recursive.onus`, whose
+    examples compare recursive trees on both targets.
+
+169. **The command line in Onus.** `self/cli.onus` is `onus check`, `fmt`,
+    `build`, `run`, `interface` and `path` (`cli/main.ts`), with the pieces
+    those commands needed and the reports in Onus lacked: `diagtext.onus`
+    (the text rendering of a diagnostic), a JSON reader and accessors in
+    `json.onus`, `idiff.onus` (the §15.1 interface diff over two documents as
+    JSON values, so a document read from a file and one just produced
+    compare alike), `pathtext.onus` (the path report's text, read from its
+    own JSON), and `nativebuild.onus` (`clang`, `libpq` and the WASI SDK
+    found by running them, the same flags as `native-build.ts`, E0800 and
+    E0999 as there). `test`, `review`, `loop` and `next` stay with the
+    TypeScript `onus` until M15.5. Two things wait on language changes and
+    are written into the module's header: the runtime turns a returned `Err`
+    into exit status 1, so usage and I/O failures cannot be 2 as the
+    TypeScript command line reports them, and `run` relays a program's
+    output after it finishes because `io.run` captures it — a `main` that
+    chooses its exit status, and a primitive that inherits the standard
+    streams, are the first candidates for the language-change process. The
+    standard library is `--stdlib` or `ONUS_STDLIB`, the runtime for `build`
+    and `run` is `--runtime` or `ONUS_RUNTIME`. `test/self/cli.test.ts`
+    runs both command lines on a fixed set of invocations and requires
+    identical standard output, agreement on failure, and identical files
+    written — the JavaScript build, the LLVM IR, and the image mandelbrot
+    renders on both targets. `scripts/bootstrap.sh` now builds the compiler
+    with `onus build` at every stage.
+170. **The reports in Onus read the ledgers.** `ledger.onus` reads
+    `<root>/.onus/ledger/{assumptions,coverage,mutations}.json` as
+    `report/ledger.ts` does (absent or malformed reads as empty); the
+    command line puts them in the context, and the interface and path
+    documents now carry `last_verified`, `checked_exercised`,
+    `assumptions_verified` and the mutation counts from them, in the same
+    scope as the TypeScript reports (a module's name prefix, a path's
+    reachable functions). The CLI differential found this: the mandelbrot
+    example keeps a mutation ledger from an earlier `onus test --mutate`.
+    Under `policy verified_assumptions_only` an assumption with a passing
+    record is now current; its age is not checked, because `io.Clock` has no
+    reading primitive — the third candidate for the process.
+
 ### Deferred, not changed
 
 - `Stream[T] ! e` as a type (§3.11) is not parsed: `-> Stream[T] ! e` is

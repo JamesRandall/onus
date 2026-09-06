@@ -10,6 +10,7 @@ import claimcheck
 import paths
 import interface
 import json
+import ledger
 import loc
 
 -- Path reports (spec §9.1; `report/path.ts`). `path_report` is the normative
@@ -112,8 +113,10 @@ pub fn path_report(
   a: tables.PathAnalysis
 ) -> json.Json may alloc, mutate {
   var reachable: Dict[Int, Bool] = Map.dict()
+  var reachable_names: Dict[Text, Bool] = Map.dict()
   for fn_def: Int in a.reachable {
     Map.set(d: inout reachable, key: fn_def, value: true)
+    Map.set(d: inout reachable_names, key: qualified(ctx: ctx, id: fn_def), value: true)
   }
   var obs: Builder[obligations.Obligation] = List.builder()
   var checked_at: Builder[Text] = List.builder()
@@ -206,13 +209,17 @@ pub fn path_report(
         json.field(key: "permitted_by", value: permitted),
         json.field(key: "verifiable", value: json.bool(b: pa.verify_block is Some)),
         json.field(key: "verify", value: verify_json),
-        json.field(key: "last_verified", value: json.JNull)
+        json.field(key: "last_verified", value: ledger.verified_json(ctx: ctx, key: pa.key))
       ]
     )
     List.push(b: inout assumes, x: j)
     List.push(
       b: inout assume_entries,
-      x: interface.AssumeEntry { j: j, verifiable: pa.verify_block is Some }
+      x: interface.AssumeEntry {
+        j: j,
+        verifiable: pa.verify_block is Some,
+        verified: ledger.is_verified(ctx: ctx, key: pa.key)
+      }
     )
   }
   var edges: Builder[json.Json] = List.builder()
@@ -392,7 +399,13 @@ pub fn path_report(
       json.field(key: "ledger", value: json.JArray(items: List.finish(b: ledger))),
       json.field(
         key: "obligation_coverage",
-        value: interface.coverage_json(obs: all, assumes: List.finish(b: assume_entries))
+        value: interface.coverage_json(
+          ctx: ctx,
+          tab: tab,
+          obs: all,
+          assumes: List.finish(b: assume_entries),
+          scope: ledger.Scope { prefix: None, names: reachable_names }
+        )
       ),
       json.field(key: "ok", value: json.bool(b: a.ok))
     ]

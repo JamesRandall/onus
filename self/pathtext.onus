@@ -1,0 +1,203 @@
+module pathtext
+import json
+
+-- The text rendering of a §9.1 path report (`report/path.ts` `pathText`),
+-- read from the report's JSON so that the two views share one source.
+pub fn path_text(r: json.Json) -> Text may alloc, mutate {
+  var lines: Builder[Text] = List.builder()
+  var verdict: Text = "failed"
+  if json.bool_at(j: r, key: "ok") {
+    verdict = "ok"
+  }
+  List.push(b: inout lines, x: "path " ++ json.str_at(j: r, key: "path") ++ " (" ++ verdict ++ ")")
+  List.push(b: inout lines, x: "  entry " ++ json.str_at(j: r, key: "entry"))
+  let reachable: List[Text] = json.texts_at(j: r, key: "reachable")
+  List.push(
+    b: inout lines,
+    x: "  reachable (" ++ Int.to_text(x: List.len(xs: reachable)) ++ "): " ++ Text.join(
+      parts: reachable,
+      sep: ", "
+    )
+  )
+  let effects: json.Json = json.at(j: r, key: "effects")
+  var effect_line: Text = "  effects: { " ++ Text.join(
+    parts: json.texts_at(j: effects, key: "actual"),
+    sep: ", "
+  ) ++ " }"
+  if not json.is_null(j: json.at(j: effects, key: "bound")) {
+    effect_line = effect_line ++ " within { " ++ Text.join(
+      parts: json.texts_at(j: effects, key: "bound"),
+      sep: ", "
+    ) ++ " }"
+  }
+  let forbid: List[Text] = json.texts_at(j: effects, key: "forbid")
+  if List.len(xs: forbid) > 0 {
+    effect_line = effect_line ++ ", forbidding { " ++ Text.join(parts: forbid, sep: ", ") ++ " }"
+  }
+  List.push(b: inout lines, x: effect_line)
+  let claim_info: json.Json = json.at(j: r, key: "claims")
+  let required: List[Text] = json.texts_at(j: claim_info, key: "required")
+  if List.len(xs: required) > 0 {
+    var satisfied: Text = "NOT satisfied"
+    if json.bool_at(j: claim_info, key: "satisfied") {
+      satisfied = "satisfied"
+    }
+    List.push(
+      b: inout lines,
+      x: "  claims: { " ++ Text.join(parts: required, sep: ", ") ++ " } " ++ satisfied
+    )
+  }
+  let assumes: List[json.Json] = json.list_at(j: r, key: "assumes")
+  if List.len(xs: assumes) == 0 {
+    List.push(b: inout lines, x: "  assumes: none")
+  } else {
+    List.push(b: inout lines, x: "  assumes:")
+  }
+  for a: json.Json in assumes {
+    var permitted: Text = ""
+    if not json.is_null(j: json.at(j: a, key: "permitted_by")) {
+      permitted = " (permitted by " ++ json.str_at(j: a, key: "permitted_by") ++ ")"
+    }
+    List.push(
+      b: inout lines,
+      x: "    " ++ json.str_at(j: a, key: "at") ++ ": " ++ json.str_at(
+        j: a,
+        key: "claim"
+      ) ++ " \"" ++ json.str_at(
+        j: a,
+        key: "justification"
+      ) ++ "\"" ++ permitted ++ " — " ++ verified_text(a: a)
+    )
+    if not json.is_null(j: json.at(j: a, key: "verify")) {
+      for l: Text in Text.split(t: json.str_at(j: a, key: "verify"), sep: "\n") {
+        List.push(b: inout lines, x: "      " ++ l)
+      }
+    }
+  }
+  let o: json.Json = json.at(j: r, key: "obligations")
+  var failed: Text = ""
+  if json.int_at(j: o, key: "failed") > 0 {
+    failed = ", " ++ Int.to_text(x: json.int_at(j: o, key: "failed")) ++ " failed"
+  }
+  List.push(
+    b: inout lines,
+    x: "  obligations: " ++ Int.to_text(
+      x: json.int_at(j: o, key: "proved")
+    ) ++ " proved, " ++ Int.to_text(
+      x: json.int_at(j: o, key: "checked")
+    ) ++ " checked, " ++ Int.to_text(x: json.int_at(j: o, key: "assumed")) ++ " assumed" ++ failed
+  )
+  for c: Text in json.texts_at(j: o, key: "checked_at") {
+    List.push(b: inout lines, x: "    checked at " ++ c)
+  }
+  List.push(
+    b: inout lines,
+    x: "  coverage: " ++ coverage_text(c: json.at(j: r, key: "obligation_coverage"))
+  )
+  let unresolvable: List[json.Json] = json.list_at(j: r, key: "unresolvable_calls")
+  if List.len(xs: unresolvable) == 0 {
+    List.push(b: inout lines, x: "  unresolvable calls: none")
+  } else {
+    List.push(b: inout lines, x: "  unresolvable calls:")
+  }
+  for u: json.Json in unresolvable {
+    List.push(
+      b: inout lines,
+      x: "    " ++ json.str_at(j: u, key: "at") ++ ": " ++ json.str_at(j: u, key: "reason")
+    )
+  }
+  let capabilities: List[json.Json] = json.list_at(j: r, key: "capabilities")
+  if List.len(xs: capabilities) == 0 {
+    List.push(b: inout lines, x: "  capabilities: none")
+  } else {
+    List.push(b: inout lines, x: "  capabilities:")
+  }
+  for c: json.Json in capabilities {
+    List.push(
+      b: inout lines,
+      x: "    " ++ json.str_at(j: c, key: "type") ++ " at " ++ json.str_at(
+        j: c,
+        key: "constructed_at"
+      )
+    )
+  }
+  for g: json.Json in json.list_at(j: r, key: "gates") {
+    List.push(
+      b: inout lines,
+      x: "  gate: " ++ json.str_at(j: g, key: "evidence") ++ " from " ++ Text.join(
+        parts: json.texts_at(j: g, key: "producers"),
+        sep: ", "
+      ) ++ " guards " ++ Text.join(parts: json.texts_at(j: g, key: "guarded"), sep: ", ")
+    )
+  }
+  let graph: json.Json = json.at(j: r, key: "graph")
+  List.push(
+    b: inout lines,
+    x: "  graph: " ++ Int.to_text(
+      x: List.len(xs: json.list_at(j: graph, key: "nodes"))
+    ) ++ " nodes, " ++ Int.to_text(
+      x: List.len(xs: json.list_at(j: graph, key: "edges"))
+    ) ++ " edges"
+  )
+  return Text.join(parts: List.finish(b: lines), sep: "\n") ++ "\n"
+}
+
+-- What an assumption's ledger record says (`verifiedText`).
+fn verified_text(a: json.Json) -> Text may alloc {
+  let last: json.Json = json.at(j: a, key: "last_verified")
+  if not json.is_null(j: last) {
+    var outcome: Text = "verification failed"
+    if json.str_at(j: last, key: "result") == "passed" {
+      outcome = "verified"
+    }
+    return outcome ++ " " ++ json.str_at(j: last, key: "at") ++ " against " ++ json.str_at(
+      j: last,
+      key: "target"
+    )
+  }
+  if json.bool_at(j: a, key: "verifiable") {
+    return "verifiable, not yet verified"
+  }
+  return "unverifiable"
+}
+
+fn plural(n: Int) -> Text {
+  if n == 1 {
+    return ""
+  }
+  return "s"
+}
+
+-- The one-line coverage summary (`coverageText`, §20.5).
+pub fn coverage_text(c: json.Json) -> Text may alloc, mutate {
+  var parts: Builder[Text] = List.builder()
+  List.push(b: inout parts, x: Int.to_text(x: json.int_at(j: c, key: "proved")) ++ " proved")
+  List.push(
+    b: inout parts,
+    x: Int.to_text(x: json.int_at(j: c, key: "checked")) ++ " checked (" ++ Int.to_text(
+      x: json.int_at(j: c, key: "checked_exercised")
+    ) ++ " exercised by tests)"
+  )
+  let assumptions: Int = json.int_at(j: c, key: "assumptions")
+  List.push(
+    b: inout parts,
+    x: Int.to_text(x: assumptions) ++ " assumption" ++ plural(
+      n: assumptions
+    ) ++ " (" ++ Int.to_text(
+      x: json.int_at(j: c, key: "assumptions_verifiable")
+    ) ++ " verifiable, " ++ Int.to_text(
+      x: json.int_at(j: c, key: "assumptions_verified")
+    ) ++ " verified)"
+  )
+  let detected: Int = json.int_at(j: c, key: "mutations_detected")
+  let surviving: Int = json.int_at(j: c, key: "mutations_surviving")
+  if detected + surviving > 0 {
+    List.push(
+      b: inout parts,
+      x: "mutations: " ++ Int.to_text(x: detected) ++ " detected, " ++ Int.to_text(
+        x: surviving
+      ) ++ " surviving"
+    )
+  }
+  return Text.join(parts: List.finish(b: parts), sep: ", ")
+}

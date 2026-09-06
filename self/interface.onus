@@ -13,6 +13,7 @@ import walk
 import tables
 import json
 import loc
+import ledger
 
 -- Interface documents (spec §11, §11.1; impl spec §3.6; `report/interface.ts`).
 --
@@ -45,6 +46,8 @@ record Counts {
 pub record AssumeEntry {
   j: json.Json
   verifiable: Bool
+  -- The ledger holds a passing verification of it.
+  verified: Bool
 }
 
 record Ctx {
@@ -127,14 +130,18 @@ pub fn status_of(obs: List[obligations.Obligation]) -> Text {
   return "proved"
 }
 
--- Obligation coverage (§20.5; `report/coverage.ts`): the driver in Onus reads no test coverage table and no
--- mutation records, so exercised checks, verified assumptions and mutations are zero.
+-- Obligation coverage (§20.5; `report/coverage.ts`): the checks a test run exercised come from the coverage
+-- ledger, verified assumptions from the assumption ledger, and mutations from the mutation ledger, within `scope`.
 pub fn coverage_json(
+  ctx: context.Context,
+  tab: Dict[Int, loc.LineTable],
   obs: List[obligations.Obligation],
-  assumes: List[AssumeEntry]
+  assumes: List[AssumeEntry],
+  scope: ledger.Scope
 ) -> json.Json may alloc, mutate {
   var n_proved: Int where it >= 0 = 0
   var n_checked: Int where it >= 0 = 0
+  var n_exercised: Int where it >= 0 = 0
   for o: obligations.Obligation in obs {
     if is_check(k: o.kind) {
       if o.status is obligations.Proved {
@@ -142,27 +149,52 @@ pub fn coverage_json(
       }
       if o.status is obligations.Checked {
         n_checked = n_checked + 1
+        if hits(ctx: ctx, site: ledger.check_site(ctx: ctx, tab: tab, o: o)) > 0 {
+          n_exercised = n_exercised + 1
+        }
       }
     }
   }
   var verifiable: Int where it >= 0 = 0
+  var verified: Int where it >= 0 = 0
   for a: AssumeEntry in assumes {
     if a.verifiable {
       verifiable = verifiable + 1
+    }
+    if a.verified {
+      verified = verified + 1
+    }
+  }
+  var detected: Int where it >= 0 = 0
+  var surviving: Int where it >= 0 = 0
+  for m: tables.MutationRecord in ctx.mutations {
+    if ledger.in_scope(scope: scope, def: m.def) {
+      if m.detected {
+        detected = detected + 1
+      } else {
+        surviving = surviving + 1
+      }
     }
   }
   return json.JObject(
     fields: [
       json.field(key: "proved", value: json.int(v: n_proved)),
       json.field(key: "checked", value: json.int(v: n_checked)),
-      json.field(key: "checked_exercised", value: json.int(v: 0)),
+      json.field(key: "checked_exercised", value: json.int(v: n_exercised)),
       json.field(key: "assumptions", value: json.int(v: List.len(xs: assumes))),
       json.field(key: "assumptions_verifiable", value: json.int(v: verifiable)),
-      json.field(key: "assumptions_verified", value: json.int(v: 0)),
-      json.field(key: "mutations_detected", value: json.int(v: 0)),
-      json.field(key: "mutations_surviving", value: json.int(v: 0))
+      json.field(key: "assumptions_verified", value: json.int(v: verified)),
+      json.field(key: "mutations_detected", value: json.int(v: detected)),
+      json.field(key: "mutations_surviving", value: json.int(v: surviving))
     ]
   )
+}
+
+-- The coverage ledger's count for a check site; 0 when unrecorded.
+fn hits(ctx: context.Context, site: Text) -> Int {
+  match Map.find(d: ctx.coverage, key: site) with
+  | Some(value) -> return value
+  | None -> return 0
 }
 
 pub fn effect_name(ctx: context.Context, e: defs.Effect) -> Text {
@@ -310,7 +342,16 @@ fn build(ctx: context.Context, rec: defs.ModuleRecord) -> json.Json may alloc, m
       json.field(key: "test_module", value: json.bool(b: m.is_test)),
       json.field(key: "obligations", value: counts_json(obs: c.own)),
       json.field(key: "ledger", value: json.JArray(items: List.finish(b: ledger))),
-      json.field(key: "obligation_coverage", value: coverage_json(obs: c.own, assumes: assume_list))
+      json.field(
+        key: "obligation_coverage",
+        value: coverage_json(
+          ctx: ctx,
+          tab: c.tables,
+          obs: c.own,
+          assumes: assume_list,
+          scope: ledger.Scope { prefix: Some(value: rec.name ++ "."), names: Map.dict() }
+        )
+      )
     ]
   )
 }
@@ -719,6 +760,10 @@ fn assumes_in(ctx: context.Context, c: Ctx, item: ast.Item) -> List[AssumeEntry]
           match verify_block with
           | Some(value) -> verify_json = json.text(t: printer.print_verify(v: value))
           | None -> skip()
+          let site_key: Text = ledger.site_key_at(
+            ctx: ctx,
+            node: defs.node_key(file: c.file, tag: defs.tag_stmt, span: span)
+          )
           List.push(
             b: inout out,
             x: AssumeEntry {
@@ -736,10 +781,14 @@ fn assumes_in(ctx: context.Context, c: Ctx, item: ast.Item) -> List[AssumeEntry]
                   ),
                   json.field(key: "verifiable", value: json.bool(b: verify_block is Some)),
                   json.field(key: "verify", value: verify_json),
-                  json.field(key: "last_verified", value: json.JNull)
+                  json.field(
+                    key: "last_verified",
+                    value: ledger.verified_json(ctx: ctx, key: site_key)
+                  )
                 ]
               ),
-              verifiable: verify_block is Some
+              verifiable: verify_block is Some,
+              verified: ledger.is_verified(ctx: ctx, key: site_key)
             }
           )
         }

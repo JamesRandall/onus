@@ -585,6 +585,9 @@ pub fn problem_text(v: vc.VC, budget_ms: Int) -> Text may alloc, mutate {
     }
     | None -> skip()
   }
+  for a: formula.Formula in List.finish(b: v.lw.sort_axioms) {
+    List.push(b: inout lines, x: "(assert " ++ formula.smt(f: a) ++ ")")
+  }
   match lower.text_distinctness(lw: v.lw) with
   | Some(value) -> List.push(b: inout lines, x: "(assert " ++ formula.smt(f: value) ++ ")")
   | None -> skip()

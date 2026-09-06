@@ -1,4 +1,4 @@
-# CLAUDE.md — Onus
+# AGENTS.md — Onus
 
 Onus is a programming language in which a model writes function bodies, a human reviews contracts, and the compiler is the only checker. This repository is the v0 compiler, runtime, standard library and review tool.
 
@@ -44,8 +44,6 @@ The spec will be wrong in places; the grammar in §2.3 is explicitly provisional
 4. Say so in the summary you return, so the human reviews the spec change, not just the code.
 
 Prefer the smallest change that resolves the problem. Do not "improve" the language while implementing it.
-
-The full process for a language change — spec text, fixtures, contracts in `self/` before bodies, the bootstrap chain to a fixed point, acceptance under the new compiler, promotion — is the `language-change` skill in `.claude/skills/language-change/SKILL.md`. Follow it for every change to the spec, the grammar, a diagnostic code, a runtime primitive or a stdlib contract. The compiler's own source uses only what the previous fixed-point compiler accepts; a feature is implemented in `self/` in one change and used there only in a later one.
 
 ## Repository map
 

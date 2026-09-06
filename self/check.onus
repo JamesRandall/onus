@@ -19,6 +19,11 @@ import loc
 import diagjson
 import interface
 import pathreport
+import lowerir
+import irtext
+import build
+import native
+import ir
 
 -- `onus check` in Onus (impl spec M15.2): runs the passes implemented so
 -- far over an entry file and prints every diagnostic as one line:
@@ -26,6 +31,7 @@ import pathreport
 --
 --   check <entry.onus> [--root <dir>] [--stdlib <dir>] [--to <pass>]
 --         [--z3 <path>] [--budget <ms>] [--cache <dir>] [--ledger]
+--         [--ir] [--emit <dir>] [--runtime <specifier>]
 record Options {
   entry: Text
   root: Option[Text]
@@ -39,6 +45,16 @@ record Options {
   interface_json: Bool
   path_json: Bool
   dump: Option[Text]
+  -- Print the target-neutral form of every non-library module (`onus build --emit ir`).
+  ir: Bool
+  -- Emit JavaScript into this directory (`onus build`).
+  emit: Option[Text]
+  -- Module specifier of the runtime package in emitted code.
+  runtime: Text
+  -- Emit LLVM IR for the native target into `<dir>/native/program.ll` (`onus build --target native`), reporting E0800 for what it cannot compile.
+  native_dir: Option[Text]
+  -- `libpq` is absent: `std.sql` is E0800 on the native target.
+  no_libpq: Bool
 }
 
 fn parse_args(args: List[Text]) -> Result[Options, io.Error] may alloc {
@@ -54,13 +70,18 @@ fn parse_args(args: List[Text]) -> Result[Options, io.Error] may alloc {
   var interface_json: Bool = false
   var path_json: Bool = false
   var dump: Option[Text] = None
+  var ir: Bool = false
+  var emit: Option[Text] = None
+  var runtime: Text = "@onus/runtime"
+  var native_dir: Option[Text] = None
+  var no_libpq: Bool = false
   var i: Int = 0
   loop while i < List.len(xs: args)
     invariant i >= 0
     decreases List.len(xs: args) - i
   {
     let a: Text = List.get(xs: args, i: i)
-    if (a == "--root" or a == "--stdlib" or a == "--to" or a == "--z3" or a == "--budget" or a == "--cache" or a == "--dump") and i + 1 < List.len(
+    if (a == "--root" or a == "--stdlib" or a == "--to" or a == "--z3" or a == "--budget" or a == "--cache" or a == "--dump" or a == "--emit" or a == "--runtime" or a == "--native") and i + 1 < List.len(
       xs: args
     ) {
       let v: Text = List.get(xs: args, i: i + 1)
@@ -91,9 +112,18 @@ fn parse_args(args: List[Text]) -> Result[Options, io.Error] may alloc {
       if a == "--dump" {
         dump = Some(value: v)
       }
+      if a == "--emit" {
+        emit = Some(value: v)
+      }
+      if a == "--runtime" {
+        runtime = v
+      }
+      if a == "--native" {
+        native_dir = Some(value: v)
+      }
       i = i + 2
     } else {
-      if a == "--ledger" or a == "--diag-json" or a == "--interface-json" or a == "--path-json" {
+      if a == "--ledger" or a == "--diag-json" or a == "--interface-json" or a == "--path-json" or a == "--ir" or a == "--no-libpq" {
         if a == "--ledger" {
           ledger = true
         }
@@ -105,6 +135,12 @@ fn parse_args(args: List[Text]) -> Result[Options, io.Error] may alloc {
         }
         if a == "--path-json" {
           path_json = true
+        }
+        if a == "--ir" {
+          ir = true
+        }
+        if a == "--no-libpq" {
+          no_libpq = true
         }
         i = i + 1
       } else {
@@ -133,12 +169,17 @@ fn parse_args(args: List[Text]) -> Result[Options, io.Error] may alloc {
       diag_json: diag_json,
       interface_json: interface_json,
       path_json: path_json,
-      dump: dump
+      dump: dump,
+      ir: ir,
+      emit: emit,
+      runtime: runtime,
+      native_dir: native_dir,
+      no_libpq: no_libpq
     }
   )
 }
 
-fn pass_index(name: Text) -> Int {
+pub fn pass_index(name: Text) -> Int {
   if name == "parse" {
     return 0
   }
@@ -184,19 +225,16 @@ fn def_text(d: Option[Text]) -> Text {
   | None -> return "-"
 }
 
-pub fn main(
-  args: List[Text],
+-- Runs the passes up to index `to` (see `pass_index`) over a context holding
+-- its entry file, stopping at the first pass that reports a diagnostic.
+pub fn run_passes(
+  ctx: inout context.Context,
+  to: Int,
   files: io.Files,
   console: io.Console,
-  process: io.Process
-) -> Result[Unit, io.Error] may io.file, nondet, alloc, mutate {
-  let opts: Options = try parse_args(args: args)
-  let to: Int = pass_index(name: opts.to)
-  var ctx: context.Context = context.new_context(root: opts.root, stdlib: opts.stdlib)
-  let text: Text = try io.read(files: files, path: opts.entry)
-  if loader.add_file(ctx: inout ctx, path: opts.entry, text: text) is None {
-    return Err(error: Other(detail: "the entry file is too long"))
-  }
+  process: io.Process,
+  vopts: verifier.Options
+) -> Unit may io.file, nondet, alloc, mutate {
   if to >= 1 {
     loader.canonical(ctx: inout ctx, file: 0)
   }
@@ -233,18 +271,139 @@ pub fn main(
       process: process,
       files: files,
       console: console,
-      opts: verifier.Options {
-        z3_path: opts.z3,
-        budget_ms: opts.budget,
-        cache_dir: opts.cache,
-        dump_dir: opts.dump
-      }
+      opts: vopts
     )
   }
   if to >= 11 and context.clean(ctx: ctx) {
     paths.paths_pass(ctx: inout ctx)
   }
+  return Unit
+}
+
+pub fn main(
+  args: List[Text],
+  files: io.Files,
+  console: io.Console,
+  process: io.Process
+) -> Result[Unit, io.Error] may io.file, nondet, alloc, mutate {
+  let opts: Options = try parse_args(args: args)
+  let to: Int = pass_index(name: opts.to)
+  var ctx: context.Context = context.new_context(root: opts.root, stdlib: opts.stdlib)
+  let text: Text = try io.read(files: files, path: opts.entry)
+  if loader.add_file(ctx: inout ctx, path: opts.entry, text: text) is None {
+    return Err(error: Other(detail: "the entry file is too long"))
+  }
+  run_passes(
+    ctx: inout ctx,
+    to: to,
+    files: files,
+    console: console,
+    process: process,
+    vopts: verifier.Options {
+      z3_path: opts.z3,
+      budget_ms: opts.budget,
+      cache_dir: opts.cache,
+      dump_dir: opts.dump
+    }
+  )
   let tab: Dict[Int, loc.LineTable] = loc.line_tables(ctx: ctx)
+  if context.clean(ctx: ctx) and opts.ir {
+    for mid: Int in 0 ..< ctx.module_count {
+      match Map.find(d: ctx.modules, key: mid) with
+      | Some(value) -> {
+        if not value.is_std {
+          io.print(
+            console: console,
+            text: irtext.print_ir(
+              ctx: ctx,
+              m: lowerir.lower_module(
+                ctx: ctx,
+                m: value,
+                tables: tab,
+                opts: lowerir.Options { verify_all: false, negate_guard: None }
+              )
+            )
+          )
+        }
+      }
+      | None -> skip_unit()
+    }
+  }
+  if context.clean(ctx: ctx) {
+    match opts.emit with
+    | Some(value) -> {
+      let built: build.Built = try build.emit_all(
+        ctx: ctx,
+        files: files,
+        opts: build.Options {
+          out_dir: value,
+          runtime: opts.runtime,
+          verify_all: false,
+          negate_guard: None
+        }
+      )
+      if built.launcher is Some {
+        io.eprint(
+          console: console,
+          text: "check: wrote " ++ text_or_dash(o: built.launcher) ++ "\n"
+        )
+      }
+    }
+    | None -> skip_unit()
+  }
+  if context.clean(ctx: ctx) and opts.native_dir is Some {
+    var lowered: Builder[ir.Module] = List.builder()
+    var entry_ir: Option[ir.Module] = None
+    for mid: Int in 0 ..< ctx.module_count {
+      match Map.find(d: ctx.modules, key: mid) with
+      | Some(value) -> {
+        let m_ir: ir.Module = lowerir.lower_module(
+          ctx: ctx,
+          m: value,
+          tables: tab,
+          opts: lowerir.Options { verify_all: false, negate_guard: None }
+        )
+        List.push(b: inout lowered, x: m_ir)
+        if value.file == 0 {
+          entry_ir = Some(value: m_ir)
+        }
+      }
+      | None -> skip_unit()
+    }
+    let dir: Text = text_or_dash(o: opts.native_dir) ++ "/native"
+    match native.emit_native(
+      ctx: ctx,
+      modules: List.finish(b: lowered),
+      entry: entry_ir,
+      opts: native.Options { sql: not opts.no_libpq }
+    ) with
+    | Ok(value) -> {
+      try io.mkdir(files: files, path: dir)
+      try build.write_file(files: files, path: dir ++ "/program.ll", text: value.ll)
+      for u: native.Unsupported in value.unsupported {
+        context.report(
+          ctx: inout ctx,
+          d: report.diagnostic(
+            code: "E0800",
+            file: u.file,
+            span: u.span,
+            def_name: Some(value: native.unsupported_def_name(u: u)),
+            detail: native.unsupported_detail(u: u)
+          )
+        )
+      }
+    }
+    | Err(error) -> context.report(
+      ctx: inout ctx,
+      d: report.diagnostic(
+        code: "E0999",
+        file: 0,
+        span: ast.Span { start: 0, end: 0 },
+        def_name: None,
+        detail: error
+      )
+    )
+  }
   for d: report.Diagnostic in List.finish(b: ctx.diagnostics) {
     if opts.diag_json {
       io.print(
