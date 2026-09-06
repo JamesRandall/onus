@@ -1658,6 +1658,20 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     it. When the specification moves to a newer Unicode, the tables, the
     guard and the pin move together.
 
+182. **A Homebrew tap.** `brew install JamesRandall/onus/compiler` installs
+    `onus` on macOS (Apple Silicon) and Linux (x86_64, arm64) from the
+    release archives, with `z3` as a dependency, so a Mac user is never
+    asked by Gatekeeper about an unsigned download; the formula is named
+    `compiler` in the tap `JamesRandall/onus` (repository `homebrew-onus`),
+    as decided 2026-09-06. `scripts/brew-formula.sh <version> <archives>`
+    renders `Formula/compiler.rb` from the archives' checksums, and the
+    release workflow's last job pushes it to the tap when the secret
+    `HOMEBREW_TAP_TOKEN` (a fine-grained token with write access to the tap)
+    is present, otherwise attaches it to the run for a manual update. The
+    formula's test checks the version and checks a small program. Signing and
+    notarising the macOS binary would need an Apple developer account and is
+    not done; Windows, once ported, gets no Homebrew route.
+
 ### Deferred, not changed
 
 - Decided 2026-09-06, to apply in M15.5: generics compile natively by

@@ -18,7 +18,18 @@ Read-only access to one schema, a caller who has already passed authentication (
 
 ## Getting started
 
-You need Node 22 or later, pnpm (`corepack enable` installs the pinned version), and `z3` on `PATH` for verification (`brew install z3` or `apt install z3`; without it every obligation is checked at runtime instead of proved). The native target additionally needs `clang`.
+To use the compiler, install it; nothing else is needed but `clang` for native output:
+
+```
+brew install JamesRandall/onus/compiler      # macOS on Apple Silicon, Linux on x86_64 and arm64; installs z3 too
+onus --version
+onus check mandelbrot.onus                   # proves the obligations, or checks them at run time without z3
+onus build mandelbrot.onus --target native   # writes out/native/mandelbrot with clang
+```
+
+The same binaries are on the [releases page](https://github.com/JamesRandall/onus/releases) as one archive per platform. The compiler carries the standard library and both runtimes, so it works from any directory.
+
+To work on the compiler itself, you need Node 22 or later, pnpm (`corepack enable` installs the pinned version), and `z3` on `PATH` for verification (`brew install z3` or `apt install z3`; without it every obligation is checked at runtime instead of proved). The native target additionally needs `clang`.
 
 ```
 git clone https://github.com/JamesRandall/onus.git
