@@ -1173,6 +1173,16 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     instantiation of each frame and resolves a nested call's type
     arguments through it, so the two agree and the example passes at
     check time.
+159. **One differential for the verifier and the reports.**
+    `packages/compiler/test/self/verifier.test.ts` now compares, for every
+    source, the §13 diagnostics, the obligation ledger and the interface
+    and path documents from one run of `self/check.onus` (`--diag-json
+    --ledger --interface-json --path-json`), running the compiler in Onus
+    on several sources at a time; the earlier separate reports test is
+    folded in. It is slow (each `self/` module verifies most of the
+    compiler again, twice) and carries a four-hour timeout; the follow-ups
+    are a per-module verification cache, cached timeouts and a faster body
+    walker in Onus.
 
 ### Deferred, not changed
 
