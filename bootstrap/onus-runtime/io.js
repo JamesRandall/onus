@@ -121,6 +121,18 @@ export function write(file, text) {
     }
 }
 /** Creates `path` and any missing parents; Ok when it already exists. */
+/** `io.exec`: the program on this process's own standard streams; its exit status, -1 for a signal (docs/CHANGES.md item 184). */
+export function exec(process, program, args) {
+    void process;
+    const r = spawnSync(program, args, { stdio: 'inherit' });
+    if (r.error !== undefined) {
+        const code = 'code' in r.error && typeof r.error.code === 'string' ? r.error.code : '';
+        if (code === 'ENOENT')
+            return { tag: 'Err', error: { tag: 'NotFound', path: program } };
+        return { tag: 'Err', error: { tag: 'Other', detail: r.error.message } };
+    }
+    return { tag: 'Ok', value: r.status ?? -1 };
+}
 export function mkdir(files, path) {
     void files;
     try {

@@ -459,6 +459,37 @@ onus_slot onus_io_run(onus_slot process, onus_slot program, onus_slot args, onus
 
 #endif
 
+#ifdef __wasi__
+onus_slot onus_io_exec(onus_slot process, onus_slot program, onus_slot args) {
+  (void)process; (void)program; (void)args;
+  return onus_err(other_error("processes are not available on this target"));
+}
+#else
+/* `io.exec`: the program on this process's own standard streams; its exit status, -1 for a signal (docs/CHANGES.md item 184). */
+onus_slot onus_io_exec(onus_slot process, onus_slot program, onus_slot args) {
+  (void)process;
+  onus_text *prog = onus_slot_ptr(program);
+  onus_list *xs = onus_slot_ptr(args);
+  char **argv = onus_alloc((int64_t)sizeof(char *) * (xs->len + 2));
+  argv[0] = prog->bytes;
+  for (int64_t i = 0; i < xs->len; i++) argv[i + 1] = ((onus_text *)onus_slot_ptr(xs->slots[i]))->bytes;
+  argv[xs->len + 1] = NULL;
+  /* What this process buffered goes out before the child writes to the same streams. */
+  fflush(stdout);
+  fflush(stderr);
+  pid_t pid;
+  int rc = posix_spawnp(&pid, prog->bytes, NULL, NULL, argv, environ);
+  if (rc != 0) {
+    errno = rc;
+    if (rc == ENOENT) return onus_err(onus_io_error_for(prog->bytes));
+    return onus_err(other_error(strerror(rc)));
+  }
+  int st = 0;
+  waitpid(pid, &st, 0);
+  return onus_ok(WIFEXITED(st) ? WEXITSTATUS(st) : -1);
+}
+#endif
+
 /* `io.mkdir`: creates the directory and any missing parents; Ok when it already exists. */
 onus_slot onus_io_mkdir(onus_slot files, onus_slot path) {
   (void)files;

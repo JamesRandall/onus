@@ -32,6 +32,10 @@ export function run({ process, program, args, stdin, timeout_ms }) {
   return $rt.io.run(process, program, args, stdin, timeout_ms);
 }
 
+export function exec({ process, program, args }) {
+  return $rt.io.exec(process, program, args);
+}
+
 export function mkdir({ files, path }) {
   return $rt.io.mkdir(files, path);
 }

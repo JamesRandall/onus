@@ -103,6 +103,25 @@ describe.skipIf(clang === null)('native target (§19)', () => {
     expect(r.status).toBe(0);
   }, 120000);
 
+  it('`io.exec` hands the child the standard streams on both targets', () => {
+    const out = fresh('exec');
+    const entry = join(repoRoot, 'packages', 'compiler', 'test', 'native', 'exec_native.onus');
+    const ctx = checked(entry);
+    const js = emitAll(ctx, { outDir: out, ts: false });
+    if (js.launcher === null) throw new Error('js build failed');
+    const expected = 'from child\nstatus 3\nmissing: not found onus-no-such-program\n';
+    const jsRun = spawnSync(process.execPath, [js.launcher], { encoding: 'utf8' });
+    expect(jsRun.stdout).toBe(expected);
+    expect(jsRun.status).toBe(0);
+    const native = buildNative(ctx, { outDir: out });
+    expect(ctx.sink.all().map((d) => toText(ctx, d))).toEqual([]);
+    if (native.exe === null) throw new Error('native build failed');
+    const r = spawnSync(native.exe, [], { encoding: 'utf8' });
+    expect(r.stderr).toBe('');
+    expect(r.stdout).toBe(expected);
+    expect(r.status).toBe(0);
+  }, 120000);
+
   it('every example passes on both targets', () => {
     for (const rel of ['examples/mandelbrot/mandelbrot.onus', 'packages/compiler/test/native/primitives.onus', 'packages/compiler/test/native/eq_recursive.onus', 'packages/compiler/test/native/dict.onus', 'packages/compiler/test/native/generics.onus', 'packages/compiler/test/native/text_native.onus', 'packages/compiler/test/native/function_values.onus', 'packages/compiler/test/native/old_native.onus', 'packages/compiler/test/codegen/features.onus', 'packages/compiler/test/stdlib/list_generic.onus', 'packages/compiler/test/verify/ok_interface_calls.onus']) {
       const out = fresh(`examples-${rel.split('/').pop() ?? 'x'}`);

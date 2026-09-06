@@ -1,0 +1,29 @@
+module exec_native
+import std.io
+
+-- `io.exec` on both targets (docs/CHANGES.md item 184): the child writes to
+-- this process's own standard output, its exit status comes back, and a
+-- program that cannot start is `NotFound`; the output is the same on both.
+fn describe(e: io.Error) -> Text may alloc {
+  match e with
+  | NotFound(path) -> return "not found " ++ path
+  | Denied(path) -> return "denied " ++ path
+  | Other(detail) -> return "other " ++ detail
+}
+
+pub fn main(
+  args: List[Text],
+  console: io.Console,
+  process: io.Process
+) -> Result[Unit, io.Error] may io.file, nondet, alloc {
+  let status: Int = try io.exec(
+    process: process,
+    program: "sh",
+    args: ["-c", "echo from child; exit 3"]
+  )
+  io.print(console: console, text: "status " ++ Int.to_text(x: status) ++ "\n")
+  match io.exec(process: process, program: "onus-no-such-program", args: []) with
+  | Ok(_) -> io.print(console: console, text: "missing started\n")
+  | Err(error) -> io.print(console: console, text: "missing: " ++ describe(e: error) ++ "\n")
+  return Ok(value: Unit)
+}

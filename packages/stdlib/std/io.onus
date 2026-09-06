@@ -63,5 +63,14 @@ pub intrinsic fn run(
   timeout_ms: Int where it >= 0
 ) -> Result[Output, Error] may io.file, nondet, alloc
 
+-- Runs `program` with `args` on this process's own standard streams — what it
+-- reads and writes is the user's terminal, not captured — and returns its exit
+-- status (-1 when a signal ended it); Err when it cannot start.
+pub intrinsic fn exec(
+  process: Process,
+  program: Text,
+  args: List[Text]
+) -> Result[Int, Error] may io.file, nondet, alloc
+
 -- Creates a directory and any missing parents; Ok when it already exists.
 pub intrinsic fn mkdir(files: Files, path: Text) -> Result[Unit, Error] may io.file

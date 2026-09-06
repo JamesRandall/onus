@@ -1693,6 +1693,25 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     `self/bundle.onus` regenerated so the compiler carries the new runtime;
     `self/` does not use `io.now` in this change.
 
+184. **A process on the standard streams: `io.exec` (§19.1; the second
+    M15.6 language change).** `io.exec(process: io.Process, program: Text,
+    args: List[Text]) -> Result[Int, Error] may io.file, nondet, alloc` runs
+    the program with this process's own standard streams inherited — what
+    it reads and writes is the user's terminal, not captured — and returns
+    its exit status, -1 when a signal ended it; a program that cannot start
+    is `NotFound`, any other failure `Other`, and under WebAssembly every
+    call is `Other`. The JavaScript runtime spawns with the streams
+    inherited; the C runtime flushes its own buffers and spawns without file
+    actions. This is what `onus run` needs to hand a program the terminal
+    instead of relaying its captured output after it finishes (item 169);
+    the command line takes it up in a later change, since `self/` may not
+    use a primitive in the change that introduces it. Neither compiler
+    changes. Fixture: `test/native/exec_native.onus`, a `main` whose child
+    writes to the shared output and exits 3 and whose second program does
+    not exist, the same output on both targets. Process: through the skill
+    with the native stage and the native differentials; `self/bundle.onus`
+    regenerated.
+
 ### Deferred, not changed
 
 - Decided 2026-09-06, to apply in M15.5: generics compile natively by
