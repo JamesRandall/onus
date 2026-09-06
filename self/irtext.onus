@@ -186,11 +186,18 @@ pub fn print_ir(ctx: context.Context, m: ir.Module) -> Text may alloc, mutate {
       x: "main roots { " ++ Text.join(
         parts: List.finish(b: roots),
         sep: ", "
-      ) ++ " } args " ++ value.args
+      ) ++ " } args " ++ value.args ++ status_text(status: value.status)
     )
   }
   | None -> skip()
   return Text.join(parts: List.finish(b: out), sep: "\n") ++ "\n"
+}
+
+fn status_text(status: Bool) -> Text {
+  if status {
+    return " status"
+  }
+  return ""
 }
 
 fn block(ctx: context.Context, b: List[ir.Stmt], indent: Text) -> List[Text] may alloc, mutate

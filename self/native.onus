@@ -1765,10 +1765,20 @@ fn main_call(
         name: value.name
       ) ++ "(" ++ Text.join(parts: List.finish(b: args), sep: ", ") ++ ")"
     )
-    emit_line(n: n, line: "%code = call i32 @onus_finish(ptr %result)")
+    emit_line(
+      n: n,
+      line: "%code = call i32 @onus_finish(ptr %result, i1 " ++ bool_flag(b: spec.status) ++ ")"
+    )
     emit_line(n: n, line: "ret i32 %code")
     return Ok(value: true)
   }
+}
+
+fn bool_flag(b: Bool) -> Text {
+  if b {
+    return "1"
+  }
+  return "0"
 }
 
 fn or_empty(o: Option[Text]) -> Text {
@@ -4813,7 +4823,7 @@ pub fn emit_native(
   List.push(b: inout head, x: "declare ptr @onus_rt_list_concat(ptr, ptr)")
   List.push(b: inout head, x: "declare ptr @onus_args(i32, ptr)")
   List.push(b: inout head, x: "declare i32 @onus_start(i32, ptr)")
-  List.push(b: inout head, x: "declare i32 @onus_finish(ptr)")
+  List.push(b: inout head, x: "declare i32 @onus_finish(ptr, i1)")
   List.push(b: inout head, x: "declare void @onus_report_example(ptr, i1)")
   List.push(b: inout head, x: "declare i32 @onus_examples_done()")
   List.push(b: inout head, x: "declare ptr @onus_root(ptr)")

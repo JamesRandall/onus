@@ -472,7 +472,8 @@ void *onus_root(const char *kind) {
 void onus_sql_close_all(void);
 #endif
 
-int onus_finish(void *result) {
+/* `main` returned: Err is status 1; with `has_status` the Ok value is the status (§8.3), else 0. */
+int onus_finish(void *result, bool has_status) {
   onus_slot *r = result;
   close_all();
 #ifndef ONUS_NO_SQL
@@ -482,6 +483,7 @@ int onus_finish(void *result) {
     fprintf(stderr, "main returned Err\n");
     return 1;
   }
+  if (has_status && r != NULL) return (int)r[1];
   return 0;
 }
 

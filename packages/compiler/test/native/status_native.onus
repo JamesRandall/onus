@@ -1,0 +1,10 @@
+module status_native
+import std.io
+
+-- A `main` that chooses its exit status (§8.3; docs/CHANGES.md item 185):
+-- `Ok(3)` ends the process with status 3 on both targets, with nothing on
+-- standard error.
+pub fn main(args: List[Text], console: io.Console) -> Result[Int, io.Error] may io.file {
+  io.print(console: console, text: "exiting with 3\n")
+  return Ok(value: 3)
+}

@@ -35,7 +35,8 @@ export interface IrModule {
   readonly items: readonly IrItem[];
   readonly tests: IrTests | null;
   readonly verifies: readonly IrVerify[];
-  readonly main: { readonly roots: Readonly<Record<string, string>>; readonly args: string } | null;
+  /** `status`: `main` returns `Result[Int, E]`, and the `Ok` value is the exit status (§8.3). */
+  readonly main: { readonly roots: Readonly<Record<string, string>>; readonly args: string; readonly status: boolean } | null;
 }
 
 export type IrItem = IrFn | IrConst | IrTypeAlias | IrIntrinsicType | IrRecord | IrUnion | IrInterface | IrImpl | IrCapability;

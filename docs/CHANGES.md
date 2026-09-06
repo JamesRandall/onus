@@ -1712,6 +1712,49 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     with the native stage and the native differentials; `self/bundle.onus`
     regenerated.
 
+185. **`main` chooses its exit status (§8.3; the third M15.6 language
+    change).** `main` returns `Result[Unit, E]` or `Result[Int, E]`:
+    `Ok(Unit)` ends the process with status 0, `Ok(n)` with status `n` as the
+    platform takes it, `Err(e)` writes the error to standard error and ends
+    with 1, a panic with 2; any other return type is `E0604`, new in both
+    checkers' capabilities pass (`mainStatus`, `main_status`), which before
+    accepted any return type while both runtimes reported every `Ok` as 0.
+    The lowering's description of `main` gains `status`, printed as
+    ` status` in the target-neutral form and written into the launcher's
+    JSON; the JavaScript runtime returns the `Ok` value as the exit code
+    when the description says so; the native emitters pass the flag to
+    `onus_finish(ptr, i1)`, which reads the `Ok` slot. Fixtures:
+    `test/checker/e0604_main_return.onus` (a `main` returning `Int`) and
+    `test/native/status_native.onus` (a `main` returning `Ok(3)`, exit
+    status 3 on both targets with nothing on standard error). This is what
+    the command line in Onus needs to report usage and I/O failures as 2, as
+    the TypeScript one does (item 169); it takes the feature up in a later
+    change, with `io.exec` for `run`. Review artefacts, under
+    `.onus/changes/185/` (item 186): the interface diffs
+    of `self/` are `MainSpec` gaining `status` (`ir`), and one private
+    function each in `lowerir`, `irtext` and `native`, plus the public
+    `main_status` in `capabilities`, which the lowering shares; ledger deltas
+    are +2 in `capabilities` (one proved, one checked representation
+    obligation on the looked-up definition), the other six unchanged. Fixed
+    point reached, native stage agrees, promoted; `self/bundle.onus`
+    regenerated.
+
+186. **Review artefacts under `.onus/changes/<item>/`.** Until now the
+    interface diff and the ledger delta the process makes the human review
+    were computed in passing and paraphrased in the `CHANGES.md` item, with
+    the before-snapshots in an ignored directory and the after-documents
+    nowhere. `scripts/change-review.mjs begin <item> <module>...` snapshots
+    the interface documents before a change, and `finish <item>` writes,
+    under `.onus/changes/<item>/` (ignored by git, as the loop's proposals
+    are; decided 2026-09-06), each module's §15.1 interface diff, its
+    interface after the change as JSON and as canonical text with bodies
+    elided, and `ledger.md`: every obligation added, removed or changed in
+    status, per module, keyed by definition, kind and text. The documents
+    come from the compiler under `bootstrap/`. The skill's steps 3, 6 and 7
+    name the script and the directory. Change 185's artefacts were produced
+    from its snapshots after the fact; items 183 and 184 touched no module
+    of `self/` but the generated bundle.
+
 ### Deferred, not changed
 
 - Decided 2026-09-06, to apply in M15.5: generics compile natively by

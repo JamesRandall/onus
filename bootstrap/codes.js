@@ -223,6 +223,9 @@ export function title({ code }) {
   if (code === "E0603") {
     return "no environment source for a verify parameter";
   }
+  if (code === "E0604") {
+    return "main returns a type the runtime cannot report";
+  }
   if (code === "E0700") {
     return "library check failed";
   }

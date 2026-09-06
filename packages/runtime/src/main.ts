@@ -14,6 +14,8 @@ export interface MainSpec {
   readonly roots: Readonly<Record<string, RootKind>>;
   /** The name of the `List[Text]` arguments parameter. */
   readonly args: string;
+  /** `main` returns `Result[Int, E]`: the `Ok` value is the exit status (§8.3). */
+  readonly status: boolean;
 }
 
 function root(kind: RootKind): io.Files | io.Env | io.Net | io.Clock | io.Console | io.Process {
@@ -42,6 +44,7 @@ export function runMain(main: (params: Record<string, unknown>) => Result<unknow
       process.stderr.write(`main returned Err: ${JSON.stringify(r.error)}\n`);
       return 1;
     }
+    if (spec.status === true && typeof r.value === 'number') return r.value;
     return 0;
   } catch (e) {
     if (e instanceof Panic) {

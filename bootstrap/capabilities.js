@@ -7,16 +7,19 @@ import * as $defs from "./defs.js";
 import * as $types from "./types.js";
 import * as $std_text from "./std/text.js";
 import * as $std_list from "./std/list.js";
+import * as $comments from "./comments.js";
+import * as $typecheck from "./typecheck.js";
 
-const $ob1 = { kind: "overflow", text: "-1 within Int", at: "self/capabilities.onus:26:20", def: "or_neg" };
-const $ob2 = { kind: "overflow", text: "i + 1 within Int", at: "self/capabilities.onus:181:11", def: "check_main" };
-const $ob3 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/capabilities.onus:196:67", def: "mentions_capability" };
-const $ob4 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/capabilities.onus:197:57", def: "mentions_capability" };
-const $ob5 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/capabilities.onus:198:56", def: "mentions_capability" };
-const $ob6 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/capabilities.onus:199:56", def: "mentions_capability" };
-const $ob7 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/capabilities.onus:202:36", def: "mentions_capability" };
-const $ob8 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/capabilities.onus:206:38", def: "mentions_capability" };
-const $ob9 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/capabilities.onus:220:36", def: "args_mention" };
+const $ob1 = { kind: "overflow", text: "-1 within Int", at: "self/capabilities.onus:29:20", def: "or_neg" };
+const $ob2 = { kind: "overflow", text: "i + 1 within Int", at: "self/capabilities.onus:184:11", def: "check_main" };
+const $ob3 = { kind: "overflow", text: "-1 within Int", at: "self/capabilities.onus:207:25", def: "main_status" };
+const $ob4 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/capabilities.onus:246:67", def: "mentions_capability" };
+const $ob5 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/capabilities.onus:247:57", def: "mentions_capability" };
+const $ob6 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/capabilities.onus:248:56", def: "mentions_capability" };
+const $ob7 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/capabilities.onus:249:56", def: "mentions_capability" };
+const $ob8 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/capabilities.onus:252:36", def: "mentions_capability" };
+const $ob9 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/capabilities.onus:256:38", def: "mentions_capability" };
+const $ob10 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/capabilities.onus:270:36", def: "args_mention" };
 export function skip($args) {
   return undefined;
 }
@@ -261,6 +264,12 @@ export function check_main({ ctx, m, decl }) {
         }
         i = $rt.int.add(i, 1, $ob2);
       }
+      const [$r27, ctx$8] = main_status({ ctx: ctx, ret: value.ret });
+      ctx = ctx$8;
+      if ($r27.tag === "None") {
+        const [, ctx$9] = rep({ ctx: ctx, code: "E0604", file: m.file, at: $comments.type_span({ t: decl.ret }), def_name: { tag: "Some", value: decl.name.text }, detail: "`main` returns `" + $typecheck.show({ ctx: ctx, t: value.ret }) + "`; the runtime reports a `Result[Unit, E]` as status 0 or a `Result[Int, E]` as the status (§8.3)" });
+        ctx = ctx$9;
+      }
       break $m24$match;
     }
     $rt.unreachable();
@@ -269,50 +278,116 @@ export function check_main({ ctx, m, decl }) {
   return [undefined, ctx];
 }
 
+export function main_status({ ctx, ret }) {
+  let result_def = $rt.int.neg(1, $ob3);
+  const $m29 = $std_map.find({ d: ctx.by_name, key: "std.results" });
+  $m29$match: {
+    if ($m29.tag === "Some") {
+      const value = $m29.value;
+      const [$r30, ctx$10] = $context.members_of({ ctx: ctx, module: value });
+      ctx = ctx$10;
+      result_def = or_neg({ o: $std_map.find({ d: $r30.types, key: "Result" }) });
+      break $m29$match;
+    }
+    if ($m29.tag === "None") {
+      skip({  });
+      break $m29$match;
+    }
+    $rt.unreachable();
+  }
+  const $m31 = $types.strip({ t: ret });
+  $m31$match: {
+    if ($m31.tag === "UnionT") {
+      const def = $m31.def;
+      const args = $m31.args;
+      if (def < 0 || def !== result_def || $std_list.len({ xs: args }) < 1) {
+        return [{ tag: "None" }, ctx];
+      }
+      const $m33 = $std_list.get({ xs: args, i: 0 });
+      $m33$match: {
+        if ($m33.tag === "TypeA") {
+          const ty = $m33.ty;
+          const $m34 = $types.strip({ t: ty });
+          $m34$match: {
+            if ($m34.tag === "Prim") {
+              const name = $m34.name;
+              if (name === "Unit") {
+                return [{ tag: "Some", value: false }, ctx];
+              }
+              if (name === "Int") {
+                return [{ tag: "Some", value: true }, ctx];
+              }
+              return [{ tag: "None" }, ctx];
+              break $m34$match;
+            }
+            if (true) {
+              return [{ tag: "None" }, ctx];
+              break $m34$match;
+            }
+            $rt.unreachable();
+          }
+          break $m33$match;
+        }
+        if (true) {
+          return [{ tag: "None" }, ctx];
+          break $m33$match;
+        }
+        $rt.unreachable();
+      }
+      break $m31$match;
+    }
+    if (true) {
+      return [{ tag: "None" }, ctx];
+      break $m31$match;
+    }
+    $rt.unreachable();
+  }
+}
+
 export function mentions_capability({ fuel, t }) {
   if (fuel === 0) {
     return false;
   }
-  const $m27 = t;
-  $m27$match: {
-    if ($m27.tag === "Capability") {
+  const $m41 = t;
+  $m41$match: {
+    if ($m41.tag === "Capability") {
       return true;
-      break $m27$match;
+      break $m41$match;
     }
-    if ($m27.tag === "Refined") {
-      const base = $m27.base;
-      return mentions_capability({ fuel: $rt.int.sub(fuel, 1, $ob3), t: base });
-      break $m27$match;
+    if ($m41.tag === "Refined") {
+      const base = $m41.base;
+      return mentions_capability({ fuel: $rt.int.sub(fuel, 1, $ob4), t: base });
+      break $m41$match;
     }
-    if ($m27.tag === "RecordT") {
-      const args = $m27.args;
-      return args_mention({ fuel: $rt.int.sub(fuel, 1, $ob4), args: args });
-      break $m27$match;
-    }
-    if ($m27.tag === "UnionT") {
-      const args = $m27.args;
+    if ($m41.tag === "RecordT") {
+      const args = $m41.args;
       return args_mention({ fuel: $rt.int.sub(fuel, 1, $ob5), args: args });
-      break $m27$match;
+      break $m41$match;
     }
-    if ($m27.tag === "Opaque") {
-      const args = $m27.args;
+    if ($m41.tag === "UnionT") {
+      const args = $m41.args;
       return args_mention({ fuel: $rt.int.sub(fuel, 1, $ob6), args: args });
-      break $m27$match;
+      break $m41$match;
     }
-    if ($m27.tag === "FnT") {
-      const params = $m27.params;
-      const ret = $m27.ret;
+    if ($m41.tag === "Opaque") {
+      const args = $m41.args;
+      return args_mention({ fuel: $rt.int.sub(fuel, 1, $ob7), args: args });
+      break $m41$match;
+    }
+    if ($m41.tag === "FnT") {
+      const params = $m41.params;
+      const ret = $m41.ret;
       for (const p of params) {
-        if (mentions_capability({ fuel: $rt.int.sub(fuel, 1, $ob7), t: p.ty })) {
+        if (mentions_capability({ fuel: $rt.int.sub(fuel, 1, $ob8), t: p.ty })) {
           return true;
         }
       }
-      return mentions_capability({ fuel: $rt.int.sub(fuel, 1, $ob8), t: ret });
-      break $m27$match;
+      return mentions_capability({ fuel: $rt.int.sub(fuel, 1, $ob9), t: ret });
+      break $m41$match;
     }
     if (true) {
       return false;
-      break $m27$match;
+      break $m41$match;
     }
     $rt.unreachable();
   }
@@ -323,18 +398,18 @@ export function args_mention({ fuel, args }) {
     return false;
   }
   for (const a of args) {
-    const $m28 = a;
-    $m28$match: {
-      if ($m28.tag === "TypeA") {
-        const ty = $m28.ty;
-        if (mentions_capability({ fuel: $rt.int.sub(fuel, 1, $ob9), t: ty })) {
+    const $m42 = a;
+    $m42$match: {
+      if ($m42.tag === "TypeA") {
+        const ty = $m42.ty;
+        if (mentions_capability({ fuel: $rt.int.sub(fuel, 1, $ob10), t: ty })) {
           return true;
         }
-        break $m28$match;
+        break $m42$match;
       }
       if (true) {
         skip({  });
-        break $m28$match;
+        break $m42$match;
       }
       $rt.unreachable();
     }

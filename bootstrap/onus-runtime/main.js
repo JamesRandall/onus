@@ -32,6 +32,8 @@ export function runMain(main, spec, argv) {
             process.stderr.write(`main returned Err: ${JSON.stringify(r.error)}\n`);
             return 1;
         }
+        if (spec.status === true && typeof r.value === 'number')
+            return r.value;
         return 0;
     }
     catch (e) {

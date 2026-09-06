@@ -663,7 +663,9 @@ Root capabilities are constructed by the runtime, not by code. `main` is the onl
 pub fn main(args: List[Text], env: io.Env, files: io.Files, net: io.Net) -> Result[Unit, AppError] may io.env, io.file, io.net, alloc
 ```
 
-A program whose `main` does not name `io.Net` cannot, anywhere, open a socket — there is no other source of a `Net` capability. The runtime closes every root capability's underlying resources when `main` returns. <!-- changed: M8, docs/CHANGES.md item 77 — a `main` parameter of a non-root capability type is `E0602`, since nothing could supply it --> Library functions that produce capabilities (`sql.connect`) take a root capability as an argument (`net: io.Net`) so the derivation is visible; the `sql` example in §18.2 shows this.
+A program whose `main` does not name `io.Net` cannot, anywhere, open a socket — there is no other source of a `Net` capability. The runtime closes every root capability's underlying resources when `main` returns.
+
+`main` returns `Result[Unit, E]` or `Result[Int, E]` for any `E`. `Ok(Unit)` ends the process with status 0 and `Ok(n)` with status `n` as the platform takes it (the low eight bits on POSIX); `Err(e)` writes the error to standard error and ends with status 1; a panic ends with status 2. Any other return type is `E0604`. <!-- changed: 2026-09-06, docs/CHANGES.md item 185 — the third M15.6 change; before it any return type was accepted and every `Ok` was status 0 --> <!-- changed: M8, docs/CHANGES.md item 77 — a `main` parameter of a non-root capability type is `E0602`, since nothing could supply it --> Library functions that produce capabilities (`sql.connect`) take a root capability as an argument (`net: io.Net`) so the derivation is visible; the `sql` example in §18.2 shows this.
 
 ### 8.4 Test doubles
 

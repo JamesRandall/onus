@@ -52,7 +52,7 @@ export function printIr(ir: IrModule, t: ResolveTables): string {
     for (const p of ir.tests.properties) out.push(`${p.label}(${p.params.map((x) => x.name).join(', ')}):`, ...block(p.body, '  '));
   }
   for (const v of ir.verifies) out.push(`verify ${v.name} for ${v.def} (${v.params.map((p) => p.name).join(', ')}):`, ...block(v.body, '  '));
-  if (ir.main !== null) out.push(`main roots { ${Object.entries(ir.main.roots).map(([k, v]) => `${k}: ${v}`).join(', ')} } args ${ir.main.args}`);
+  if (ir.main !== null) out.push(`main roots { ${Object.entries(ir.main.roots).map(([k, v]) => `${k}: ${v}`).join(', ')} } args ${ir.main.args}${ir.main.status ? ' status' : ''}`);
   return `${out.join('\n')}\n`;
 
   function block(b: IrBlock, indent: string): string[] {

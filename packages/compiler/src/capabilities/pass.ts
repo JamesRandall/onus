@@ -5,6 +5,7 @@
  * checks the structural rules:
  *   - E0600: a module that is not a `test module` imports one;
  *   - E0601: a record field of capability type (capabilities are threaded, never stored);
+ *   - E0604: `main` returns a type the runtime cannot report as an exit status (§8.3);
  *   - E0602: `main` receives a capability that is not a root (`std.io.*`), for
  *     which no source exists (§8.3).
  * `fake` outside a `test module` is a syntax error (E0012, §8.4); closure
@@ -14,12 +15,13 @@ import type { Context } from '../context.js';
 import { diagnostic } from '../report/diagnostic.js';
 import type { Code } from '../report/codes.js';
 import type { Span } from '../source.js';
-import { stripRefinements, type Type } from '../types/type.js';
+import { stripRefinements, typeToString, type Type } from '../types/type.js';
+import type { ResolveTables } from '../resolve/defs.js';
 
 /**
  * Pass 10: capabilities.
  * Preconditions: the claims pass ran without diagnostics.
- * Effects: reports E0600–E0602.
+ * Effects: reports E0600–E0602 and E0604.
  */
 export function capabilitiesPass(ctx: Context): void {
   const t = ctx.resolve;
@@ -53,9 +55,28 @@ export function capabilitiesPass(ctx: Context): void {
           if (s.k !== 'capability' || t.qualifiedName(s.def).startsWith('std.io.')) return;
           report('E0602', item.params[i]?.span ?? item.name.span, `\`main\` receives \`${p.name}\` of capability type \`${t.qualifiedName(s.def)}\`, but the runtime supplies only root capabilities (\`io.Files\`, \`io.Env\`, \`io.Net\`, \`io.Clock\`; §8.3)`);
         });
+        // The runtime reports `Ok(Unit)` as status 0 and `Ok(n)` as status n; nothing else is an exit status (§8.3).
+        if (sig !== undefined && mainStatus(t, sig.ret) === null) report('E0604', item.ret.span, `\`main\` returns \`${typeToString(sig.ret, t)}\`; the runtime reports a \`Result[Unit, E]\` as status 0 or a \`Result[Int, E]\` as the status (§8.3)`);
       }
     }
   }
+}
+
+/**
+ * How a `main` returning `ret` reports its status: false for `Result[Unit, E]` (always 0), true for
+ * `Result[Int, E]` (the `Ok` value), null for a type the runtime cannot report (§8.3). Effects: none.
+ */
+export function mainStatus(t: ResolveTables, ret: Type): boolean | null {
+  const s = stripRefinements(ret);
+  const results = t.byName.get('std.results');
+  const resultDef = results === undefined ? null : (t.membersOf(results).types.get('Result') ?? null);
+  const a0 = s.k === 'union' ? s.args[0] : undefined;
+  if (s.k !== 'union' || s.def !== resultDef || a0 === undefined || a0.k !== 'type') return null;
+  const payload = stripRefinements(a0.type);
+  if (payload.k !== 'prim') return null;
+  if (payload.name === 'Unit') return false;
+  if (payload.name === 'Int') return true;
+  return null;
 }
 
 /** True iff a value of `t` contains a capability. Effects: none. */

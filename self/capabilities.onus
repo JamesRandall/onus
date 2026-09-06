@@ -4,6 +4,8 @@ import defs
 import context
 import types
 import report
+import comments
+import typecheck
 
 -- The capabilities pass (impl spec §4, pass 10; spec §8, §8.3, §8.4;
 -- `capabilities/pass.ts`).
@@ -12,6 +14,7 @@ import report
 -- checks the structural rules:
 --   - E0600: a module that is not a `test module` imports one;
 --   - E0601: a record field of capability type (capabilities are threaded, never stored);
+--   - E0604: `main` returns a type the runtime cannot report as an exit status (§8.3);
 --   - E0602: `main` receives a capability that is not a root (`std.io.*`), for
 --     which no source exists (§8.3).
 -- `fake` outside a `test module` is a syntax error (E0012, §8.4); closure
@@ -68,7 +71,7 @@ fn item_name(item: ast.Item) -> Option[Text] {
 
 -- Pass 10: capabilities.
 -- Preconditions: the claims pass ran without diagnostics.
--- Effects: reports E0600–E0602.
+-- Effects: reports E0600–E0602 and E0604.
 pub fn capabilities_pass(ctx: inout context.Context) -> Unit may mutate, alloc {
   for mid: Int in 0 ..< ctx.module_count {
     match Map.find(d: ctx.modules, key: mid) with
@@ -180,8 +183,55 @@ fn check_main(
       | _ -> skip()
       i = i + 1
     }
+    -- The runtime reports `Ok(Unit)` as status 0 and `Ok(n)` as status n; nothing else is an exit status (§8.3).
+    if main_status(ctx: inout ctx, ret: value.ret) is None {
+      rep(
+        ctx: inout ctx,
+        code: "E0604",
+        file: m.file,
+        at: comments.type_span(t: decl.ret),
+        def_name: Some(value: decl.name.text),
+        detail: "`main` returns `" ++ typecheck.show(
+          ctx: ctx,
+          t: value.ret
+        ) ++ "`; the runtime reports a `Result[Unit, E]` as status 0 or a `Result[Int, E]` as the status (§8.3)"
+      )
+    }
   }
   return Unit
+}
+
+-- How a `main` returning `ret` reports its status: false for `Result[Unit, E]` (always 0), true for
+-- `Result[Int, E]` (the `Ok` value), None for a type the runtime cannot report (§8.3).
+pub fn main_status(ctx: inout context.Context, ret: types.Type) -> Option[Bool] may mutate, alloc {
+  var result_def: Int = -1
+  match Map.find(d: ctx.by_name, key: "std.results") with
+  | Some(value) -> result_def = or_neg(
+    o: Map.find(d: context.members_of(ctx: inout ctx, module: value).types, key: "Result")
+  )
+  | None -> skip()
+  match types.strip(t: ret) with
+  | types.UnionT(def, args) -> {
+    if def < 0 or def != result_def or List.len(xs: args) < 1 {
+      return None
+    }
+    match List.get(xs: args, i: 0) with
+    | types.TypeA(ty) -> {
+      match types.strip(t: ty) with
+      | types.Prim(name) -> {
+        if name == "Unit" {
+          return Some(value: false)
+        }
+        if name == "Int" {
+          return Some(value: true)
+        }
+        return None
+      }
+      | _ -> return None
+    }
+    | _ -> return None
+  }
+  | _ -> return None
 }
 
 -- True iff a value of `t` contains a capability.

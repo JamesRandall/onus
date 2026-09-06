@@ -310,6 +310,8 @@ pub record Root {
 pub record MainSpec {
   roots: List[Root]
   args: Text
+  -- `main` returns `Result[Int, E]`, and the `Ok` value is the exit status (§8.3).
+  status: Bool
 }
 
 pub record Module {

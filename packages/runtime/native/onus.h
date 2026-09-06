@@ -61,7 +61,7 @@ bool onus_rt_list_eq(onus_list *a, onus_list *b, bool (*eq)(onus_slot, onus_slot
 
 onus_list *onus_args(int argc, char **argv);
 int onus_start(int argc, char **argv);
-int onus_finish(void *result);
+int onus_finish(void *result, bool has_status);
 void onus_report_example(const char *name, bool ok);
 int onus_examples_done(void);
 void *onus_root(const char *kind);

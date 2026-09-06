@@ -242,7 +242,7 @@ class NativeEmitter {
       'declare ptr @onus_rt_list_concat(ptr, ptr)',
       'declare ptr @onus_args(i32, ptr)',
       'declare i32 @onus_start(i32, ptr)',
-      'declare i32 @onus_finish(ptr)',
+      'declare i32 @onus_finish(ptr, i1)',
       'declare void @onus_report_example(ptr, i1)',
       'declare i32 @onus_examples_done()',
       'declare ptr @onus_root(ptr)',
@@ -1259,7 +1259,7 @@ class NativeEmitter {
         this.emit('%args = call ptr @onus_args(i32 %argc, ptr %argv)');
         // Root calls were emitted by rootCall in order; assemble the call.
         this.emit(`%result = call ${this.ll(mainFn.ret)} ${this.fnName(entry.module.name, mainFn.name)}(${args.join(', ')})`);
-        this.emit('%code = call i32 @onus_finish(ptr %result)');
+        this.emit(`%code = call i32 @onus_finish(ptr %result, i1 ${entry.main.status ? 1 : 0})`);
         this.emit('ret i32 %code');
       }
     }

@@ -103,6 +103,7 @@ fn main_json(spec: ir.MainSpec) -> Text may alloc, mutate {
     x: json.Field { key: "roots", value: json.JObject(fields: List.finish(b: roots)) }
   )
   List.push(b: inout fields, x: json.Field { key: "args", value: json.JString(value: spec.args) })
+  List.push(b: inout fields, x: json.Field { key: "status", value: json.JBool(value: spec.status) })
   return json.compact(j: json.JObject(fields: List.finish(b: fields)))
 }
 

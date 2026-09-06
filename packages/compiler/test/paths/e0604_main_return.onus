@@ -1,0 +1,6 @@
+module e0604_main_return
+
+-- `main` returns a type the runtime cannot report as an exit status (§8.3).
+pub fn main(args: List[Text]) -> Int {
+  return 0
+}

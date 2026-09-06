@@ -20,6 +20,7 @@
 import { isIntLike } from '../contracts/pass.js';
 import { calleeOf } from '../claims/calls.js';
 import type { Context } from '../context.js';
+import { mainStatus } from '../capabilities/pass.js';
 import type { Obligation } from '../contracts/obligations.js';
 import type { Def, DefId, ModuleRecord, ResolveTables } from '../resolve/defs.js';
 import { lineColOf, type Span } from '../source.js';
@@ -398,7 +399,7 @@ class Lowerer {
         args = p.name;
       }
     }
-    return { roots, args };
+    return { roots, args, status: mainStatus(this.t, sig.ret) === true };
   }
 
   // -------------------------------------------------------------------------

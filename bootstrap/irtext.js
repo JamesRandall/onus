@@ -246,7 +246,7 @@ export function print_ir({ ctx, m }) {
         const [, roots$34] = $std_list.push({ b: roots, x: r.name + ": " + r.kind });
         roots = roots$34;
       }
-      const [, out$35] = $std_list.push({ b: out, x: "main roots { " + $std_text.join({ parts: $std_list.finish({ b: roots }), sep: ", " }) + " } args " + value.args });
+      const [, out$35] = $std_list.push({ b: out, x: "main roots { " + $std_text.join({ parts: $std_list.finish({ b: roots }), sep: ", " }) + " } args " + value.args + status_text({ status: value.status }) });
       out = out$35;
       break $m5$match;
     }
@@ -257,6 +257,13 @@ export function print_ir({ ctx, m }) {
     $rt.unreachable();
   }
   return $std_text.join({ parts: $std_list.finish({ b: out }), sep: "\n" }) + "\n";
+}
+
+export function status_text({ status }) {
+  if (status) {
+    return " status";
+  }
+  return "";
 }
 
 export function block({ ctx, b, indent }) {

@@ -92,6 +92,7 @@ export const CODES = {
   E0601: 'capability stored in a record',
   E0602: 'main receives a non-root capability',
   E0603: 'no environment source for a verify parameter',
+  E0604: 'main returns a type the runtime cannot report',
   E0700: 'library check failed',
   E0701: 'const evaluation failed',
   E0702: 'example failed',

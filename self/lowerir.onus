@@ -14,6 +14,7 @@ import ir
 import json
 import loc
 import tables
+import capabilities
 
 -- Lowering (impl spec §6; spec §19; `codegen/lower.ts`): the checked tree
 -- plus obligation statuses become the target-neutral form of `ir.onus`. This
@@ -1134,8 +1135,22 @@ fn main_spec(l: L, ctx: context.Context, f: ast.FnDecl) -> Option[ir.MainSpec] m
       | types.Opaque(_, _) -> args = p.name
       | _ -> skip()
     }
-    return Some(value: ir.MainSpec { roots: List.finish(b: roots), args: args })
+    return Some(
+      value: ir.MainSpec {
+        roots: List.finish(b: roots),
+        args: args,
+        status: main_reports_status(ctx: ctx, ret: value.ret)
+      }
+    )
   }
+}
+
+-- Whether `main`'s `Ok` value is its exit status: a `Result[Int, E]` return type (§8.3).
+fn main_reports_status(ctx: context.Context, ret: types.Type) -> Bool may alloc, mutate {
+  var probe: context.Context = ctx
+  match capabilities.main_status(ctx: inout probe, ret: ret) with
+  | Some(value) -> return value
+  | None -> return false
 }
 
 -- Statements -----------------------------------------------------------------------------

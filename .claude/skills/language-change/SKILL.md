@@ -52,14 +52,15 @@ the change is small.
 
 ### 3. Contracts in `self/` before bodies
 
-- Save the interface of every module the change will touch — bodies included,
-  since the document carries the module's ledger and step 6 diffs it:
-  `pnpm onus interface self/<m>.onus --json --root self > .onus/before/<m>.json`.
+- Save the interface of every module the change will touch:
+  `node scripts/change-review.mjs begin <item> <module>...`, which writes
+  `.onus/changes/<item>/before/<module>.json` from the compiler under
+  `bootstrap/`.
 - Change signatures and contracts first: types, `requires`, `ensures`,
   effects, claims, `decreases`. Do not edit bodies yet.
-- Produce the interface diff:
-  `pnpm onus interface self/<m>.onus --json --diff .onus/before/<m>.json --root self`.
-  This diff is what the human reviews. Bodies are not reviewed.
+- The interface diff is what the human reviews; bodies are not reviewed.
+  Step 6 produces it, and `pnpm onus interface self/<m>.onus --json --diff
+  .onus/changes/<item>/before/<m>.json --root self` shows it while iterating.
 
 ### 4. Bodies in `self/`, under the self-application rule
 
@@ -101,10 +102,16 @@ the change is small.
   `onus build --target native` and compares its lexing, parsing, printing,
   checking, verification, reports, code generation and command line against
   the TypeScript compiler on every source.
-- `self/` verifies clean under stage2, and the ledger of `self/` is diffed
-  against its pre-change ledger: obligations added, removed, and every status
-  change. A regression from `proved` to `checked` in `self/` needs its reason
-  in the `CHANGES.md` item; nothing pinned is re-pinned silently.
+- `self/` verifies clean under stage2, and the review artefacts are
+  written: `node scripts/change-review.mjs finish <item>` puts under
+  `.onus/changes/<item>/` the interface diff of every snapshotted module
+  (`<module>.diff.json`), the interface after the change as JSON and as
+  canonical text with bodies elided (`after/`), and `ledger.md`, the ledger
+  of `self/` diffed against its pre-change ledger: obligations added,
+  removed, and every status change. A regression from `proved` to
+  `checked` in `self/` needs its reason in the `CHANGES.md` item; nothing
+  pinned is re-pinned silently. The `CHANGES.md` item names the directory;
+  the summary quotes its counts, not a paraphrase of the diff.
 - The three examples build under stage2 and their emitted JavaScript agrees
   with stage0's, except for differences the change intends, which the
   `CHANGES.md` item lists.
@@ -113,8 +120,9 @@ the change is small.
 ### 7. Promote
 
 - stage2 becomes `bootstrap/` (the next change's stage0). The human commits;
-  the summary lists files changed, spec sections, the `CHANGES.md` item, the
-  interface diff, the ledger delta and anything left `checked` and why.
+  the summary lists files changed, spec sections, the `CHANGES.md` item,
+  where the review artefacts are (`.onus/changes/<item>/`), and anything
+  left `checked` and why.
 
 ## While the TypeScript compiler exists
 
