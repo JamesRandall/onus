@@ -8,6 +8,7 @@ import ir
 import lowerir
 import native
 import build
+import bundle
 
 -- `onus build --target native` (impl spec M11; language spec §19;
 -- `codegen/native-build.ts`): lowers every module, emits one LLVM IR file,
@@ -313,16 +314,21 @@ fn build_with(
     }
     return Ok(value: none)
   }
-  if runtime_dir is None {
-    report_e0999(
-      ctx: inout ctx,
-      lines: [
-        "the runtime location is unknown: pass --runtime <path to packages/runtime/dist/index.js> or set ONUS_RUNTIME"
-      ]
-    )
-    return Ok(value: none)
+  var rt: Text = ""
+  match runtime_dir with
+  | Some(value) -> rt = value
+  | None -> {
+    -- No runtime location: the C runtime the compiler carries, written beside the program (docs/CHANGES.md item 180).
+    rt = dir ++ "/runtime"
+    try io.mkdir(files: files, path: rt ++ "/blake3")
+    for e: bundle.Entry in bundle.under(prefix: "native/") {
+      try build.write_file(
+        files: files,
+        path: rt ++ "/" ++ Text.replace(t: e.path, from: "native/", to: ""),
+        text: e.text
+      )
+    }
   }
-  let rt: Text = or_empty(o: runtime_dir)
   var args: Builder[Text] = List.builder()
   List.push(b: inout args, x: "-O1")
   List.push(b: inout args, x: "-Wno-override-module")

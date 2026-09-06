@@ -20,6 +20,7 @@ import build
 import nativebuild
 import obligations
 import ledger
+import bundle
 
 -- The `onus` command line in Onus (impl spec §2, M15.4; `cli/main.ts`):
 -- `check`, `fmt`, `build`, `run`, `interface` and `path`. `test`, `review`,
@@ -29,7 +30,7 @@ import ledger
 -- usage error returns `Err`, which the runtime turns into status 1. The
 -- TypeScript command line distinguishes usage and I/O failures as 2; a
 -- `main` that chooses its exit status needs a language change.
-pub const usage: Text = "usage:\n  onus check <file.onus>... [--json] [--root <dir>] [--stdlib <dir>] [--to <pass>] [--budget <ms>] [--ledger] [--no-cache]\n      report every diagnostic; exit 1 if any. Passes: parse, canonical, load, resolve, types, consteval, effects, contracts, claims, capabilities, verify, paths\n  onus fmt <file.onus>... [--stdout]\n      rewrite files in canonical form\n  onus build <entry.onus> [--out <dir>] [--emit js|ir] [--target js|native|wasm] [--root <dir>] [--stdlib <dir>] [--runtime <path>]\n      check, then emit JavaScript for every module into <dir> (default: <entry dir>/out); --target native compiles\n      an executable with clang into <dir>/native (§19); --emit ir prints the target-neutral form\n  onus run <entry.onus> [--out <dir>] [--target js|native|wasm] [-- args...]\n      build, then run the entry module's main\n  onus interface <file.onus> [--json] [--diff <old-interface.json>] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]\n      check, then print the entry module's interface: canonical source with bodies elided, or the §11.1 JSON;\n      with --diff, the changes since a previous interface document (§11.1, §15.1)\n  onus path <file.onus> [<name>] [--json] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]\n      check, then print the §9.1 report of the entry module's paths (or of the named one)\n  test, review, loop and next: run the TypeScript `onus` until M15.5\nThe standard library is --stdlib or ONUS_STDLIB; the runtime for build and run is --runtime or ONUS_RUNTIME.\n"
+pub const usage: Text = "usage:\n  onus check <file.onus>... [--json] [--root <dir>] [--stdlib <dir>] [--to <pass>] [--budget <ms>] [--ledger] [--no-cache]\n      report every diagnostic; exit 1 if any. Passes: parse, canonical, load, resolve, types, consteval, effects, contracts, claims, capabilities, verify, paths\n  onus fmt <file.onus>... [--stdout]\n      rewrite files in canonical form\n  onus build <entry.onus> [--out <dir>] [--emit js|ir] [--target js|native|wasm] [--root <dir>] [--stdlib <dir>] [--runtime <path>]\n      check, then emit JavaScript for every module into <dir> (default: <entry dir>/out); --target native compiles\n      an executable with clang into <dir>/native (§19); --emit ir prints the target-neutral form\n  onus run <entry.onus> [--out <dir>] [--target js|native|wasm] [-- args...]\n      build, then run the entry module's main\n  onus interface <file.onus> [--json] [--diff <old-interface.json>] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]\n      check, then print the entry module's interface: canonical source with bodies elided, or the §11.1 JSON;\n      with --diff, the changes since a previous interface document (§11.1, §15.1)\n  onus path <file.onus> [<name>] [--json] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]\n      check, then print the §9.1 report of the entry module's paths (or of the named one)\n  onus --version\n      print the compiler's version\n  test, review, loop and next: run the TypeScript `onus` until M15.5\nThe standard library is --stdlib or ONUS_STDLIB, else the one the compiler carries; the runtime for build and run is --runtime or ONUS_RUNTIME, else the one the compiler carries, written beside the program.\n"
 
 pub const passes: List[Text] = [
   "parse",
@@ -465,11 +466,21 @@ fn build_command(
     name: "out",
     fallback: nativebuild.dir_of(path: entry) ++ "/out"
   )
-  var runtime: Text = "@onus/runtime"
-  match io.get_env(env: env, name: "ONUS_RUNTIME") with
-  | Some(value) -> runtime = value
+  -- The runtime: --runtime, else ONUS_RUNTIME, else the one the compiler carries, written beside the program (docs/CHANGES.md item 180).
+  var runtime_opt: Option[Text] = io.get_env(env: env, name: "ONUS_RUNTIME")
+  match value(args: args, name: "runtime") with
+  | Some(value) -> runtime_opt = Some(value: value)
   | None -> skip()
-  runtime = value_or(args: args, name: "runtime", fallback: runtime)
+  var runtime: Text = "./onus-runtime/index.js"
+  var runtime_dir: Option[Text] = None
+  var bundled_runtime: Bool = true
+  match runtime_opt with
+  | Some(value) -> {
+    runtime = value
+    runtime_dir = runtime_dir_of(runtime: value)
+    bundled_runtime = false
+  }
+  | None -> skip()
   check.run_passes(
     ctx: inout ctx,
     to: 11,
@@ -519,7 +530,7 @@ fn build_command(
       env: env,
       tab: tab,
       out_dir: out_dir,
-      runtime_dir: runtime_dir_of(runtime: runtime),
+      runtime_dir: runtime_dir,
       target: target
     )
     emit_diagnostics(ctx: ctx, console: console, tab: tab, as_json: as_json)
@@ -548,6 +559,9 @@ fn build_command(
   if not context.clean(ctx: ctx) {
     emit_diagnostics(ctx: ctx, console: console, tab: tab, as_json: as_json)
     return Err(error: Other(detail: "diagnostics"))
+  }
+  if bundled_runtime {
+    try build.write_bundled_runtime(files: files, out_dir: out_dir)
   }
   let built_js: build.Built = try build.emit_all(
     ctx: ctx,
@@ -728,6 +742,10 @@ pub fn main(
   env: io.Env
 ) -> Result[Unit, io.Error] may io.file, io.env, nondet, alloc, mutate {
   let a: Args = parse_args(argv: args)
+  if flag(args: a, name: "version") {
+    io.print(console: console, text: "onus " ++ bundle.version ++ "\n")
+    return Ok(value: Unit)
+  }
   match a.command with
   | None -> return usage_error(console: console)
   | Some(value) -> {

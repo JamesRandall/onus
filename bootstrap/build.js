@@ -3,18 +3,49 @@ import * as $rt from "/Users/jamesrandall/code/onus/packages/runtime/dist/index.
 import * as $std_io from "./std/io.js";
 import * as $std_text from "./std/text.js";
 import * as $std_list from "./std/list.js";
+import * as $bundle from "./bundle.js";
 import * as $json from "./json.js";
 import * as $lowerir from "./lowerir.js";
 import * as $jsemit from "./jsemit.js";
 import * as $loc from "./loc.js";
 import * as $std_map from "./std/map.js";
 
-const $ob1 = { kind: "overflow", text: "List.len(xs: parts) - 1 within Int", at: "/Users/jamesrandall/code/onus/self/build.onus:51:23", def: "parent_dir" };
-const $ob2 = { kind: "overflow", text: "-1 within Int", at: "/Users/jamesrandall/code/onus/self/build.onus:164:23", def: "emit_all" };
+const $ob1 = { kind: "overflow", text: "List.len(xs: Text.split(t: module_name, sep: \".\")) - 1 within Int", at: "/Users/jamesrandall/code/onus/self/build.onus:49:20", def: "runtime_for" };
+const $ob2 = { kind: "overflow", text: "List.len(xs: parts) - 1 within Int", at: "/Users/jamesrandall/code/onus/self/build.onus:87:23", def: "parent_dir" };
+const $ob3 = { kind: "overflow", text: "-1 within Int", at: "/Users/jamesrandall/code/onus/self/build.onus:200:23", def: "emit_all" };
 export function write_file({ files, path, text }) {
   try {
     const f = $rt.unwrap($std_io.create({ files: files, path: path }));
     $rt.unwrap($std_io.write({ file: f, text: text }));
+    return { tag: "Ok", value: undefined };
+  } catch ($e) {
+    if ($e instanceof $rt.EarlyReturn) return $e.value;
+    throw $e;
+  }
+}
+
+export function runtime_for({ module_name, runtime }) {
+  if (!$std_text.starts_with({ t: runtime, prefix: "./" })) {
+    return runtime;
+  }
+  const depth = $rt.int.sub($std_list.len({ xs: $std_text.split({ t: module_name, sep: "." }) }), 1, $ob1);
+  if (depth <= 0) {
+    return runtime;
+  }
+  let up = "";
+  for (let i = 0; i < depth; i++) {
+    up = up + "../";
+  }
+  return $std_text.replace({ t: runtime, from: "./", to: up });
+}
+
+export function write_bundled_runtime({ files, out_dir }) {
+  try {
+    const dir = out_dir + "/onus-runtime";
+    $rt.unwrap($std_io.mkdir({ files: files, path: dir }));
+    for (const e of $bundle.under({ prefix: "runtime/" })) {
+      $rt.unwrap(write_file({ files: files, path: dir + "/" + $std_text.replace({ t: e.path, from: "runtime/", to: "" }), text: e.text }));
+    }
     return { tag: "Ok", value: undefined };
   } catch ($e) {
     if ($e instanceof $rt.EarlyReturn) return $e.value;
@@ -29,8 +60,8 @@ export function module_path({ out_dir, name }) {
 export function parent_dir({ path }) {
   const parts = $std_text.split({ t: path, sep: "/" });
   let out = $std_list.builder({  });
-  const $hi2 = $rt.int.sub($std_list.len({ xs: parts }), 1, $ob1);
-  for (let i = 0; i < $hi2; i++) {
+  const $hi3 = $rt.int.sub($std_list.len({ xs: parts }), 1, $ob2);
+  for (let i = 0; i < $hi3; i++) {
     const [, out$1] = $std_list.push({ b: out, x: $std_list.get({ xs: parts, i: i }) });
     out = out$1;
   }
@@ -54,7 +85,7 @@ export function main_json({ spec }) {
 export function emit_one({ ctx, files, opts, tables, m, entry_std, entry_id, emitted, launcher }) {
   try {
     const lowered = $lowerir.lower_module({ ctx: ctx, m: m, tables: tables, opts: { verify_all: opts.verify_all, negate_guard: opts.negate_guard } });
-    const raw = $jsemit.emit_js({ ctx: ctx, m: lowered, opts: { runtime: opts.runtime } });
+    const raw = $jsemit.emit_js({ ctx: ctx, m: lowered, opts: { runtime: runtime_for({ module_name: m.name, runtime: opts.runtime }) } });
     let out = raw;
     if (m.is_std && !entry_std) {
       out = { ...raw, tests: { tag: "None" } };
@@ -64,33 +95,33 @@ export function emit_one({ ctx, files, opts, tables, m, entry_std, entry_id, emi
     const base = module_path({ out_dir: opts.out_dir, name: m.name });
     $rt.unwrap($std_io.mkdir({ files: files, path: parent_dir({ path: base }) }));
     $rt.unwrap(write_file({ files: files, path: base + ".js", text: out.code }));
-    const $m14 = out.tests;
-    $m14$match: {
-      if ($m14.tag === "Some") {
-        const value = $m14.value;
+    const $m15 = out.tests;
+    $m15$match: {
+      if ($m15.tag === "Some") {
+        const value = $m15.value;
         $rt.unwrap(write_file({ files: files, path: base + ".examples.test.js", text: value }));
-        break $m14$match;
+        break $m15$match;
       }
-      if ($m14.tag === "None") {
+      if ($m15.tag === "None") {
         skip({  });
-        break $m14$match;
+        break $m15$match;
       }
       $rt.unreachable();
     }
     if (m.id === entry_id) {
-      const $m15 = out.main;
-      $m15$match: {
-        if ($m15.tag === "Some") {
-          const value = $m15.value;
+      const $m16 = out.main;
+      $m16$match: {
+        if ($m16.tag === "Some") {
+          const value = $m16.value;
           const path = opts.out_dir + "/run_" + $std_text.replace({ t: m.name, from: ".", to: "_" }) + ".js";
           const rel = "./" + $std_text.join({ parts: $std_text.split({ t: m.name, sep: "." }), sep: "/" }) + ".js";
           $rt.unwrap(write_file({ files: files, path: path, text: "// Generated by onus: launches " + m.name + ".main.\nimport * as $rt from " + $json.quote({ t: opts.runtime }) + ";\nimport { main } from " + $json.quote({ t: rel }) + ";\nprocess.exitCode = $rt.runMain(main, " + main_json({ spec: value }) + ", process.argv.slice(2));\n" }));
           launcher = { tag: "Some", value: path };
-          break $m15$match;
+          break $m16$match;
         }
-        if ($m15.tag === "None") {
+        if ($m16.tag === "None") {
           skip({  });
-          break $m15$match;
+          break $m16$match;
         }
         $rt.unreachable();
       }
@@ -115,36 +146,36 @@ export function emit_all({ ctx, files, opts }) {
     let emitted = $std_list.builder({  });
     let launcher = { tag: "None" };
     let entry_std = true;
-    let entry_id = $rt.int.neg(1, $ob2);
-    const $m19 = $std_map.find({ d: ctx.modules, key: 0 });
-    $m19$match: {
-      if ($m19.tag === "Some") {
-        const value = $m19.value;
+    let entry_id = $rt.int.neg(1, $ob3);
+    const $m20 = $std_map.find({ d: ctx.modules, key: 0 });
+    $m20$match: {
+      if ($m20.tag === "Some") {
+        const value = $m20.value;
         entry_std = value.is_std;
         entry_id = value.id;
-        break $m19$match;
+        break $m20$match;
       }
-      if ($m19.tag === "None") {
+      if ($m20.tag === "None") {
         skip({  });
-        break $m19$match;
+        break $m20$match;
       }
       $rt.unreachable();
     }
-    const $hi20 = ctx.module_count;
-    for (let mid = 0; mid < $hi20; mid++) {
-      const $m21 = $std_map.find({ d: ctx.modules, key: mid });
-      $m21$match: {
-        if ($m21.tag === "Some") {
-          const value = $m21.value;
-          const [$r22, emitted$6, launcher$6] = emit_one({ ctx: ctx, files: files, opts: opts, tables: tables, m: value, entry_std: entry_std, entry_id: entry_id, emitted: emitted, launcher: launcher });
+    const $hi21 = ctx.module_count;
+    for (let mid = 0; mid < $hi21; mid++) {
+      const $m22 = $std_map.find({ d: ctx.modules, key: mid });
+      $m22$match: {
+        if ($m22.tag === "Some") {
+          const value = $m22.value;
+          const [$r23, emitted$6, launcher$6] = emit_one({ ctx: ctx, files: files, opts: opts, tables: tables, m: value, entry_std: entry_std, entry_id: entry_id, emitted: emitted, launcher: launcher });
           emitted = emitted$6;
           launcher = launcher$6;
-          $rt.unwrap($r22);
-          break $m21$match;
+          $rt.unwrap($r23);
+          break $m22$match;
         }
-        if ($m21.tag === "None") {
+        if ($m22.tag === "None") {
           skip({  });
-          break $m21$match;
+          break $m22$match;
         }
         $rt.unreachable();
       }

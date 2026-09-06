@@ -14,8 +14,7 @@
     "test": "node -e \"process.exit(0)\""
   },
   "dependencies": {
-    "pg": "^8.23.0",
-    "@noble/hashes": "^2.0.0"
+    "pg": "^8.23.0"
   },
   "devDependencies": {
     "@types/pg": "^8.23.1"

@@ -9,6 +9,7 @@ import printer
 import report
 import defs
 import context
+import bundle
 
 -- Module loading (impl spec §4, pass 3, first half; `resolve/loader.ts`).
 -- Maps module names to files (`a.b.c` is `<root>/a/b/c.onus`, or
@@ -62,9 +63,10 @@ fn or_empty(o: Option[Text]) -> Text {
   | None -> return ""
 }
 
+-- Whether `path` is a standard-library file: under the configured library, or a bundled one (`onus:std/…`, docs/CHANGES.md item 180).
 fn under_stdlib(ctx: context.Context, path: Text) -> Bool may alloc {
   match ctx.stdlib with
-  | None -> return false
+  | None -> return Text.starts_with(t: path, prefix: "onus:std/")
   | Some(value) -> return Text.starts_with(t: path, prefix: value ++ "/")
 }
 
@@ -240,6 +242,10 @@ fn last_segment(name: Text) -> Text may alloc {
 fn root_for(path: Text, suffix: Text, root: Option[Text]) -> Option[Text] may alloc {
   match root with
   | None -> {
+    -- A bare file name (`onus check main.onus`) lives in the working directory (docs/CHANGES.md item 180).
+    if "/" ++ path == suffix {
+      return Some(value: ".")
+    }
     if Text.ends_with(t: path, suffix: suffix) and Text.count(t: suffix) <= Text.count(t: path) {
       return Some(
         value: Text.slice(t: path, from: 0, to: Text.count(t: path) - Text.count(t: suffix))
@@ -329,20 +335,19 @@ fn register(
       }
     )
   }
-  if ctx.stdlib is Some {
-    for pre: Text in prelude_modules {
-      if pre != name {
-        List.push(
-          b: inout pending,
-          x: PendingImport {
-            from: id,
-            from_file: p.file,
-            name: pre,
-            span: p.tree.name.span,
-            implicit: true
-          }
-        )
-      }
+  -- The prelude is always available: from the configured library, or from the bundle the compiler carries (item 180).
+  for pre: Text in prelude_modules {
+    if pre != name {
+      List.push(
+        b: inout pending,
+        x: PendingImport {
+          from: id,
+          from_file: p.file,
+          name: pre,
+          span: p.tree.name.span,
+          implicit: true
+        }
+      )
     }
   }
   return Some(value: id)
@@ -394,19 +399,30 @@ fn load_module(
   if is_std {
     base = ctx.stdlib
   }
-  if base is None {
-    var why: Text = "no project root is known"
-    if is_std {
-      why = "no standard library is configured"
+  var path: Text = ""
+  var text: Option[Text] = None
+  if is_std and ctx.stdlib is None {
+    -- No library configured: the standard module comes from the bundle the compiler carries (docs/CHANGES.md item 180).
+    let key: Text = Text.replace(t: name, from: ".", to: "/") ++ ".onus"
+    path = "onus:" ++ key
+    text = bundle.find(path: key)
+  } else {
+    if base is None {
+      context.report(
+        ctx: inout ctx,
+        d: report.diagnostic(
+          code: "E0103",
+          file: at_file,
+          span: at,
+          def_name: None,
+          detail: "no project root is known"
+        )
+      )
+      return None
     }
-    context.report(
-      ctx: inout ctx,
-      d: report.diagnostic(code: "E0103", file: at_file, span: at, def_name: None, detail: why)
-    )
-    return None
+    path = path_for(root: or_empty(o: base), name: name)
+    text = read_or_none(files: files, path: path)
   }
-  let path: Text = path_for(root: or_empty(o: base), name: name)
-  let text: Option[Text] = read_or_none(files: files, path: path)
   if text is None {
     context.report(
       ctx: inout ctx,

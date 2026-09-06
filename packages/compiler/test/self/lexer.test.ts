@@ -104,7 +104,7 @@ describe('the lexer in Onus (M15.1)', () => {
     const disagreements: string[] = [];
     for (const path of files) {
       const text = readFileSync(path, 'utf8');
-      const r = runDriver(driver, [path], { encoding: 'utf8' });
+      const r = runDriver(driver, [path], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
       if (r.status !== 0) {
         disagreements.push(`${path}: lexdump exited ${r.status}: ${r.stderr}`);
         continue;

@@ -7,6 +7,7 @@ import loc
 import lowerir
 import jsemit
 import json
+import bundle
 
 -- `onus build` in Onus (impl spec §6, M15.4; `codegen/build.ts` `emitAll`):
 -- lowers and emits every loaded module into an output directory as
@@ -36,6 +37,41 @@ pub fn write_file(
 ) -> Result[Unit, io.Error] may io.file, alloc {
   let f: io.File = try io.create(files: files, path: path)
   try io.write(file: f, text: text)
+  return Ok(value: Unit)
+}
+
+-- The runtime specifier as the module written at `<out>/<a>/<b>.js` imports it: a relative one
+-- (`./onus-runtime/index.js`, the runtime the compiler carries) climbs out of the module's directories.
+fn runtime_for(module_name: Text, runtime: Text) -> Text may alloc, mutate {
+  if not Text.starts_with(t: runtime, prefix: "./") {
+    return runtime
+  }
+  let depth: Int = List.len(xs: Text.split(t: module_name, sep: ".")) - 1
+  if depth <= 0 {
+    return runtime
+  }
+  var up: Text = ""
+  for i: Int in 0 ..< depth {
+    up = up ++ "../"
+  }
+  return Text.replace(t: runtime, from: "./", to: up)
+}
+
+-- Writes the JavaScript runtime the compiler carries to `<out_dir>/onus-runtime/`, where
+-- `./onus-runtime/index.js` finds it (docs/CHANGES.md item 180).
+pub fn write_bundled_runtime(
+  files: io.Files,
+  out_dir: Text
+) -> Result[Unit, io.Error] may io.file, alloc, mutate {
+  let dir: Text = out_dir ++ "/onus-runtime"
+  try io.mkdir(files: files, path: dir)
+  for e: bundle.Entry in bundle.under(prefix: "runtime/") {
+    try write_file(
+      files: files,
+      path: dir ++ "/" ++ Text.replace(t: e.path, from: "runtime/", to: ""),
+      text: e.text
+    )
+  }
   return Ok(value: Unit)
 }
 
@@ -92,7 +128,7 @@ fn emit_one(
   let raw: jsemit.Emitted = jsemit.emit_js(
     ctx: ctx,
     m: lowered,
-    opts: jsemit.Options { runtime: opts.runtime }
+    opts: jsemit.Options { runtime: runtime_for(module_name: m.name, runtime: opts.runtime) }
   )
   var out: jsemit.Emitted = raw
   -- A program's test run is its own examples: the standard library's run with the library, not with every program.

@@ -16,7 +16,8 @@ import { fileURLToPath } from 'node:url';
 import { Context } from '../../src/context.js';
 import { runtimeEntry } from '../../src/codegen/build.js';
 import { selfDriver } from './driver.js';
-import { findClang } from '../../src/codegen/native-build.js';
+import { buildNative, findClang } from '../../src/codegen/native-build.js';
+import { findZ3 } from '../../src/verify/z3.js';
 import { runPipeline } from '../../src/driver.js';
 import { toText } from '../../src/report/diagnostic.js';
 import { STDLIB_ROOT } from '../harness.js';
@@ -188,5 +189,43 @@ describe('the command line in Onus (M15.4)', () => {
     expect(r.onus.stderr).toContain('onus build: wrote');
     expect(readFileSync(join(onusRun, 'out', 'native', 'program.ll'), 'utf8')).toBe(readFileSync(join(tsRun, 'out', 'native', 'program.ll'), 'utf8'));
     expect(readFileSync(join(onusRun, 'mandelbrot.pgm'), 'utf8')).toBe(readFileSync(join(tsRun, 'mandelbrot.pgm'), 'utf8'));
+  }, 600000);
+
+  it.skipIf(clang === null)('the released compiler needs no repository: no --stdlib, no --runtime, no node on the path (item 180)', () => {
+    const native = buildNative(ctx, { outDir: fresh('release-build') });
+    const diags = ctx.sink.all().map((d) => toText(ctx, d));
+    expect(native.exe, diags.join('\n')).not.toBeNull();
+    if (native.exe === null) return;
+    const home = fresh('release-home');
+    writeFileSync(join(home, 'mandelbrot.onus'), readFileSync(join(repoRoot, 'examples/mandelbrot/mandelbrot.onus'), 'utf8'));
+    // A path without node: clang and z3's directories, and the system's.
+    const dirs = [clang, findZ3()?.path ?? null].filter((p): p is string => p !== null).map((p) => dirname(spawnSync('sh', ['-c', `command -v ${p}`], { encoding: 'utf8' }).stdout.trim() || p));
+    const env: NodeJS.ProcessEnv = { ...process.env, PATH: [...dirs, '/usr/bin', '/bin'].join(':') };
+    delete env['ONUS_STDLIB'];
+    delete env['ONUS_RUNTIME'];
+    const run = (args: string[], cwd: string): { stdout: string; stderr: string; status: number | null } => {
+      const r = spawnSync(native.exe ?? '', args, { encoding: 'utf8', cwd, env });
+      return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', status: r.status };
+    };
+    expect(spawnSync('sh', ['-c', 'command -v node'], { encoding: 'utf8', env }).status).not.toBe(0);
+    const version = run(['--version'], home);
+    expect(version.status).toBe(0);
+    expect(version.stdout).toMatch(/^onus \d+\.\d+\.\d+\n$/);
+    const check = run(['check', 'mandelbrot.onus'], home);
+    expect(check.status, check.stdout + check.stderr).toBe(0);
+    const js = run(['build', 'mandelbrot.onus', '--out', 'out'], home);
+    expect(js.status, js.stdout + js.stderr).toBe(0);
+    expect(existsSync(join(home, 'out', 'onus-runtime', 'index.js'))).toBe(true);
+    expect(readFileSync(join(home, 'out', 'mandelbrot.js'), 'utf8')).toContain('from "./onus-runtime/index.js"');
+    expect(readFileSync(join(home, 'out', 'std', 'int.js'), 'utf8')).toContain('from "../onus-runtime/index.js"');
+    const jsRun = fresh('release-js-run');
+    expect(spawnSync(process.execPath, [join(home, 'out', 'run_mandelbrot.js')], { encoding: 'utf8', cwd: jsRun }).status).toBe(0);
+    const nat = run(['build', 'mandelbrot.onus', '--out', 'out', '--target', 'native'], home);
+    expect(nat.status, nat.stdout + nat.stderr).toBe(0);
+    expect(existsSync(join(home, 'out', 'native', 'runtime', 'onus.c'))).toBe(true);
+    expect(existsSync(join(home, 'out', 'native', 'runtime', 'blake3', 'blake3.c'))).toBe(true);
+    const natRun = fresh('release-native-run');
+    expect(spawnSync(join(home, 'out', 'native', 'mandelbrot'), [], { encoding: 'utf8', cwd: natRun }).status).toBe(0);
+    expect(readFileSync(join(natRun, 'mandelbrot.pgm'), 'utf8')).toBe(readFileSync(join(jsRun, 'mandelbrot.pgm'), 'utf8'));
   }, 600000);
 });
