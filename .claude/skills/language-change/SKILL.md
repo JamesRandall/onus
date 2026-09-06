@@ -17,7 +17,7 @@ the change is small.
 
 - **stage0** — the last compiler that reached the fixed point, as the
   JavaScript it emitted for itself (`self/cli.onus` built with `onus build`),
-  under `bootstrap/`. Until `bootstrap/` exists, stage0 is the TypeScript
+  under `bootstrap/`, with the runtime it carries beside it. Until `bootstrap/` exists, stage0 is the TypeScript
   compiler (`pnpm onus`).
 - **stage1** — `self/` after the change, compiled by stage0.
 - **stage2** — `self/` compiled by stage1. **stage3** — `self/` compiled by stage2.

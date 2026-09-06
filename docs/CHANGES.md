@@ -1626,6 +1626,27 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     other three unchanged. Fixed point reached from `bootstrap/`, the native
     stage agrees; promoted.
 
+181. **A self-contained `bootstrap/`, and the build on GitHub (impl spec
+    M15.5, release).** The chain no longer passes `--runtime`: every stage
+    after the first is built by the compiler in Onus, which carries its
+    runtime (item 180), so a stage holds `onus-runtime/` and imports it
+    relatively, and the chain runs from the repository root with relative
+    paths, so nothing it emits names a machine. `bootstrap/` therefore builds
+    the compiler wherever node runs, which the workflows rely on.
+    `.github/workflows/ci.yml` runs the gates on every push and pull request
+    on Linux: the packages build, the whole suite, the chain with its native
+    stage, and the self differentials against the native compiler, with
+    `clang` and `z3` installed and the proof caches kept between runs under a
+    key of the sources they were computed from. `.github/workflows/release.yml`
+    runs on a tag `v*` (and by hand): Linux x86_64, Linux arm64 and macOS
+    arm64 each build `onus` from `bootstrap/` with node and `clang` as
+    build-time dependencies only, refuse a tag that does not name the root
+    package's version, smoke-test the binary from a bare directory with no
+    node on its path, and package `onus`, the licences and the README as
+    `onus-<version>-<target>.tar.gz`; a final job creates the GitHub Release
+    with one archive per platform. macOS on Intel is not built (decided
+    2026-09-06); Windows waits on the C runtime's port and is the next item.
+
 ### Deferred, not changed
 
 - Decided 2026-09-06, to apply in M15.5: generics compile natively by
