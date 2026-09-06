@@ -18,7 +18,7 @@
 import { diagnostic } from '../report/diagnostic.js';
 import type { Context } from '../context.js';
 import type { Obligation, ObligationId } from '../contracts/obligations.js';
-import type { Def, DefId, ResolveTables } from '../resolve/defs.js';
+import type { Def, DefId, ModuleId, ResolveTables } from '../resolve/defs.js';
 import type * as A from '../syntax/ast.js';
 import { children, isExpr, walk } from '../syntax/walk.js';
 import type { TypeTables } from '../types/tables.js';
@@ -55,11 +55,13 @@ export type Mutation =
   | { readonly k: 'widen-return'; readonly fn: DefId }
   | { readonly k: 'widen-field'; readonly record: DefId; readonly field: string };
 
-export function buildVCs(ctx: Context, mutation: Mutation | null = null): VCs {
+export function buildVCs(ctx: Context, mutation: Mutation | null = null, skipModules: ReadonlySet<ModuleId> = new Set()): VCs {
   const out: VCs = { built: new Map(), skipped: new Map() };
   const byDef = new Map<DefId, Obligation[]>();
   for (const o of ctx.contracts.obligations) {
     if (o.kind === 'law' || o.kind === 'property') continue;
+    // A module the verification cache answered for (impl spec §7.3) gets no conditions.
+    if (skipModules.has(ctx.resolve.def(o.def).module)) continue;
     const list = byDef.get(o.def) ?? [];
     list.push(o);
     byDef.set(o.def, list);

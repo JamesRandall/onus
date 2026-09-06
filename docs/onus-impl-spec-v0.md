@@ -270,6 +270,8 @@ Two points of the walk that produces the knowledge (`verify/vc.ts`, `self/vc.onu
 
 Key: BLAKE3 of (canonical text of the enclosing def, canonical text of every def referenced by the formula, solver name and version, budget). Value: status and model. Stored in `.onus/cache/`. Never cache `E0501`.
 
+Above the proof cache sits a module cache (`verify/modcache.ts`, `self/modcache.onus`; docs/CHANGES.md item 160). Key: BLAKE3 of the module's canonical text, the keys of the modules it imports (so a change anywhere below invalidates), the compiler that verified it (`ts` or `self`, so the two compilers never replay each other), the solver version, the budget and a format number. Value: the final status and provenance of each of the module's obligations, in creation order, stored only when verifying the module reported no diagnostic. On a hit the verifier assigns the stored statuses and builds no conditions for the module; the panic and const-fn rules still run and, being deterministic on statuses, report nothing again. Stored beside the proof cache; `--no-cache` disables both. <!-- changed: 2026-09-06 — docs/CHANGES.md item 160 -->
+
 ### 7.4 Running z3
 
 `child_process.spawn('z3', ['-in', '-smt2'])`, write, read, kill on timeout. Run obligations in parallel up to `os.cpus().length`. If `z3` is not on `PATH`, `onus check` degrades to every obligation *checked* and emits a single informational line to stderr — not a diagnostic, because the program is still valid.

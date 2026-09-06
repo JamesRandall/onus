@@ -1,0 +1,253 @@
+module modcache
+import std.io
+import std.hash
+import defs
+import context
+import obligations
+
+-- The module verification cache (impl spec §7.3; `verify/modcache.ts`).
+--
+-- Verifying a module means building and discharging a condition for each
+-- of its obligations, and the answers depend only on the module's canonical
+-- text, the modules it imports (transitively), the solver and the budget.
+-- So a module whose key was verified before, by this compiler, without a
+-- diagnostic, need not be verified again: its obligations take the statuses
+-- stored then. The key names the compiler (`self` here, `ts` for the
+-- TypeScript one), so the two never replay each other's results.
+--
+-- An entry holds, in creation order, the final status and provenance of
+-- every obligation of the module: a header line, the count, then one
+-- `status<TAB>by` line each (`-` for no provenance).
+pub const format: Int = 1
+
+pub record CachedStatus {
+  status: obligations.Status
+  by: Option[Text]
+}
+
+fn skip() -> Unit {
+  return Unit
+}
+
+-- The cache key of every loaded module, computed bottom-up over the import
+-- graph (a cycle is E0101, so the recursion ends). A module whose canonical
+-- text is unknown (a syntax error) gets no key and is never cached.
+pub fn module_keys(
+  ctx: context.Context,
+  compiler: Text,
+  solver_version: Text,
+  budget_ms: Int
+) -> Dict[Int, Text] may alloc, mutate {
+  var keys: Dict[Int, Text] = Map.dict()
+  var visiting: Dict[Int, Bool] = Map.dict()
+  for mid: Int in 0 ..< ctx.module_count {
+    let k: Option[Text] = key_of(
+      fuel: ctx.module_count + 1,
+      ctx: ctx,
+      id: mid,
+      compiler: compiler,
+      solver_version: solver_version,
+      budget_ms: budget_ms,
+      keys: inout keys,
+      visiting: inout visiting
+    )
+  }
+  return keys
+}
+
+fn key_of(
+  fuel: Int where it >= 0,
+  ctx: context.Context,
+  id: Int,
+  compiler: Text,
+  solver_version: Text,
+  budget_ms: Int,
+  keys: inout Dict[Int, Text],
+  visiting: inout Dict[Int, Bool]
+) -> Option[Text] may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return None
+  }
+  match Map.find(d: keys, key: id) with
+  | Some(value) -> return Some(value: value)
+  | None -> skip()
+  if Map.contains(d: visiting, key: id) {
+    return None
+  }
+  Map.set(d: inout visiting, key: id, value: true)
+  match Map.find(d: ctx.modules, key: id) with
+  | None -> return None
+  | Some(value) -> {
+    let text: Option[Text] = Map.find(d: ctx.canonical, key: value.file)
+    if text is None {
+      return None
+    }
+    var parts: Builder[Text] = List.builder()
+    List.push(b: inout parts, x: "onus-modcache " ++ Int.to_text(x: format))
+    List.push(b: inout parts, x: compiler)
+    List.push(b: inout parts, x: solver_version)
+    List.push(b: inout parts, x: Int.to_text(x: budget_ms))
+    List.push(b: inout parts, x: value.name)
+    for imp: defs.ImportRecord in value.imports {
+      let k: Option[Text] = key_of(
+        fuel: fuel - 1,
+        ctx: ctx,
+        id: imp.mod,
+        compiler: compiler,
+        solver_version: solver_version,
+        budget_ms: budget_ms,
+        keys: inout keys,
+        visiting: inout visiting
+      )
+      if k is None {
+        return None
+      }
+      List.push(
+        b: inout parts,
+        x: module_name(ctx: ctx, mod: imp.mod) ++ " " ++ text_or_empty(o: k)
+      )
+    }
+    List.push(b: inout parts, x: text_or_empty(o: text))
+    let key: Text = hash.blake3_hex(t: Text.join(parts: List.finish(b: parts), sep: "\n"))
+    Map.set(d: inout keys, key: id, value: key)
+    return Some(value: key)
+  }
+}
+
+fn module_name(ctx: context.Context, mod: Int) -> Text {
+  match Map.find(d: ctx.modules, key: mod) with
+  | Some(value) -> return value.name
+  | None -> return ""
+}
+
+fn text_or_empty(o: Option[Text]) -> Text {
+  match o with
+  | Some(value) -> return value
+  | None -> return ""
+}
+
+fn entry_path(dir: Text, key: Text) -> Text may alloc {
+  return dir ++ "/" ++ key ++ ".module.txt"
+}
+
+fn status_of_text(t: Text) -> Option[obligations.Status] {
+  if t == "proved" {
+    return Some(value: obligations.Proved)
+  }
+  if t == "checked" {
+    return Some(value: obligations.Checked)
+  }
+  if t == "assumed" {
+    return Some(value: obligations.Assumed)
+  }
+  if t == "failed" {
+    return Some(value: obligations.Failed)
+  }
+  if t == "pending" {
+    return Some(value: obligations.Pending)
+  }
+  return None
+}
+
+-- The stored statuses for `key`, or nothing when there is no entry, the directory is disabled, or the entry is unreadable.
+pub fn get(
+  files: io.Files,
+  dir: Option[Text],
+  key: Text
+) -> Option[List[CachedStatus]] may io.file, alloc, mutate {
+  if dir is None {
+    return None
+  }
+  match io.read(files: files, path: entry_path(dir: text_or_empty(o: dir), key: key)) with
+  | Err(_) -> return None
+  | Ok(value) -> return parse_entry(text: value)
+}
+
+fn parse_entry(text: Text) -> Option[List[CachedStatus]] may alloc, mutate {
+  let lines: List[Text] = Text.split(t: text, sep: "\n")
+  if List.len(xs: lines) < 2 {
+    return None
+  }
+  if List.get(xs: lines, i: 0) != "onus-modcache " ++ Int.to_text(x: format) {
+    return None
+  }
+  var count: Int = -1
+  match Int.parse(t: List.get(xs: lines, i: 1)) with
+  | Some(value) -> count = value
+  | None -> return None
+  var out: Builder[CachedStatus] = List.builder()
+  var i: Int where it >= 0 = 0
+  for line: Text in lines {
+    if i >= 2 and List.built(b: out) < count {
+      let parts: List[Text] = Text.split(t: line, sep: "\t")
+      if List.len(xs: parts) != 2 {
+        return None
+      }
+      var by: Option[Text] = None
+      var status: Option[obligations.Status] = None
+      var second: Text = ""
+      var j: Int where it >= 0 = 0
+      for p: Text in parts {
+        if j == 0 {
+          status = status_of_text(t: p)
+        }
+        if j == 1 {
+          second = p
+        }
+        j = j + 1
+      }
+      match status with
+      | None -> return None
+      | Some(value) -> {
+        if second != "-" {
+          by = Some(value: second)
+        }
+        List.push(b: inout out, x: CachedStatus { status: value, by: by })
+      }
+    }
+    i = i + 1
+  }
+  if List.built(b: out) != count {
+    return None
+  }
+  return Some(value: List.finish(b: out))
+}
+
+-- Stores the statuses of a module's obligations, in the order given.
+pub fn set(
+  files: io.Files,
+  dir: Option[Text],
+  key: Text,
+  obs: List[obligations.Obligation]
+) -> Unit may io.file, alloc, mutate {
+  if dir is None {
+    return Unit
+  }
+  let d: Text = text_or_empty(o: dir)
+  let made: Result[Unit, io.Error] = io.mkdir(files: files, path: d)
+  var lines: Builder[Text] = List.builder()
+  List.push(b: inout lines, x: "onus-modcache " ++ Int.to_text(x: format))
+  List.push(b: inout lines, x: Int.to_text(x: List.len(xs: obs)))
+  for o: obligations.Obligation in obs {
+    var by: Text = "-"
+    match o.by with
+    | Some(value) -> by = Text.replace(
+      t: Text.replace(t: value, from: "\n", to: " "),
+      from: "\t",
+      to: " "
+    )
+    | None -> skip()
+    List.push(b: inout lines, x: obligations.status_text(s: o.status) ++ "\t" ++ by)
+  }
+  match io.create(files: files, path: entry_path(dir: d, key: key)) with
+  | Err(_) -> return Unit
+  | Ok(value) -> {
+    let written: Result[Unit, io.Error] = io.write(
+      file: value,
+      text: Text.join(parts: List.finish(b: lines), sep: "\n")
+    )
+    return Unit
+  }
+}

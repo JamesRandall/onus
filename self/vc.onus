@@ -212,13 +212,20 @@ pub fn measure_text(t: Text) -> Text may alloc {
 -- Builds a condition for every lowerable obligation of `ctx`.
 -- Preconditions: the contracts pass ran.
 -- Effects: settles structural `decreases` obligations and reports E0344; otherwise none beyond the returned structure.
-pub fn build_vcs(ctx: inout context.Context) -> VCs may mutate, alloc {
+pub fn build_vcs(
+  ctx: inout context.Context,
+  skip_modules: Dict[Int, Bool]
+) -> VCs may mutate, alloc {
   let out: VCs = VCs { built: Map.dict(), skipped: Map.dict() }
   var by_def: Dict[Int, List[Int]] = Map.dict()
   var order: Builder[Int] = List.builder()
   for i: Int in 0 ..< ctx.obligation_count {
     let o: obligations.Obligation = context.get_obligation(ctx: ctx, id: i)
-    if not o.kind is obligations.Law and not o.kind is obligations.Property {
+    -- A module the verification cache answered for (impl spec §7.3) gets no conditions.
+    if not o.kind is obligations.Law and not o.kind is obligations.Property and not Map.contains(
+      d: skip_modules,
+      key: context.get_def(ctx: ctx, id: o.def).mod
+    ) {
       match Map.find(d: by_def, key: o.def) with
       | Some(value) -> Map.set(d: inout by_def, key: o.def, value: List.append(xs: value, x: i))
       | None -> {

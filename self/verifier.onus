@@ -12,6 +12,7 @@ import vc
 import constant
 import z3
 import report
+import modcache
 
 -- The verification pass (impl spec §4, pass 11; spec §12; `verify/pass.ts`).
 --
@@ -102,7 +103,22 @@ pub fn verify_pass(
   opts: Options
 ) -> Unit may io.file, nondet, alloc, mutate {
   let solver: Option[z3.Solver] = z3.find_z3(process: process, explicit: opts.z3_path)
-  let vcs: vc.VCs = vc.build_vcs(ctx: inout ctx)
+  -- Modules verified before with the same text, imports, solver and budget (impl spec §7.3) replay their statuses.
+  var keys: Dict[Int, Text] = Map.dict()
+  var replayed: Dict[Int, Bool] = Map.dict()
+  match solver with
+  | Some(value) -> {
+    keys = modcache.module_keys(
+      ctx: ctx,
+      compiler: "self",
+      solver_version: value.version,
+      budget_ms: opts.budget_ms
+    )
+    replay(ctx: inout ctx, files: files, dir: opts.cache_dir, keys: keys, replayed: inout replayed)
+  }
+  | None -> skip()
+  let reported: Int = List.built(b: ctx.diagnostics)
+  let vcs: vc.VCs = vc.build_vcs(ctx: inout ctx, skip_modules: replayed)
   equal_measure_calls(ctx: inout ctx)
   match solver with
   | None -> {
@@ -123,9 +139,112 @@ pub fn verify_pass(
     files: files,
     vcs: vcs,
     solver: value,
-    opts: opts
+    opts: opts,
+    replayed: replayed
   )
   rules(ctx: inout ctx)
+  -- Store every module verified this run that reported nothing, so the next check of an unchanged module is a replay.
+  if solver is Some {
+    store(
+      ctx: ctx,
+      files: files,
+      dir: opts.cache_dir,
+      keys: keys,
+      replayed: replayed,
+      reported: reported
+    )
+  }
+  return Unit
+}
+
+-- The ids of a module's obligations, in creation order.
+fn module_obligations(ctx: context.Context, mod: Int) -> List[Int] may alloc, mutate {
+  var out: Builder[Int] = List.builder()
+  for i: Int in 0 ..< ctx.obligation_count {
+    let o: obligations.Obligation = context.get_obligation(ctx: ctx, id: i)
+    if context.get_def(ctx: ctx, id: o.def).mod == mod {
+      List.push(b: inout out, x: i)
+    }
+  }
+  return List.finish(b: out)
+}
+
+-- Gives the obligations of every cached module their stored statuses.
+fn replay(
+  ctx: inout context.Context,
+  files: io.Files,
+  dir: Option[Text],
+  keys: Dict[Int, Text],
+  replayed: inout Dict[Int, Bool]
+) -> Unit may io.file, alloc, mutate {
+  for mid: Int in Map.keys(d: keys) {
+    let entry: Option[List[modcache.CachedStatus]] = modcache.get(
+      files: files,
+      dir: dir,
+      key: text_or(o: Map.find(d: keys, key: mid), dflt: "")
+    )
+    if entry is Some {
+      let statuses: List[modcache.CachedStatus] = statuses_or(o: entry)
+      let own: List[Int] = module_obligations(ctx: ctx, mod: mid)
+      if List.len(xs: statuses) == List.len(xs: own) {
+        for i: Int in 0 ..< List.len(xs: own) {
+          let o: obligations.Obligation = context.get_obligation(
+            ctx: ctx,
+            id: List.get(xs: own, i: i)
+          )
+          let c: modcache.CachedStatus = List.get(xs: statuses, i: i)
+          context.set_obligation(ctx: inout ctx, o: { o with status: c.status, by: c.by })
+        }
+        Map.set(d: inout replayed, key: mid, value: true)
+      }
+    }
+  }
+  return Unit
+}
+
+fn statuses_or(o: Option[List[modcache.CachedStatus]]) -> List[modcache.CachedStatus] may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return []
+}
+
+-- Stores the modules verified this run whose files got no diagnostic.
+fn store(
+  ctx: context.Context,
+  files: io.Files,
+  dir: Option[Text],
+  keys: Dict[Int, Text],
+  replayed: Dict[Int, Bool],
+  reported: Int
+) -> Unit may io.file, alloc, mutate {
+  var noisy: Dict[Int, Bool] = Map.dict()
+  var i: Int where it >= 0 = 0
+  for d: report.Diagnostic in List.finish(b: ctx.diagnostics) {
+    if i >= reported {
+      Map.set(d: inout noisy, key: d.file, value: true)
+    }
+    i = i + 1
+  }
+  for mid: Int in Map.keys(d: keys) {
+    if not Map.contains(d: replayed, key: mid) {
+      match Map.find(d: ctx.modules, key: mid) with
+      | None -> skip()
+      | Some(value) -> {
+        if not Map.contains(d: noisy, key: value.file) {
+          var obs: Builder[obligations.Obligation] = List.builder()
+          for id: Int in module_obligations(ctx: ctx, mod: mid) {
+            List.push(b: inout obs, x: context.get_obligation(ctx: ctx, id: id))
+          }
+          modcache.set(
+            files: files,
+            dir: dir,
+            key: text_or(o: Map.find(d: keys, key: mid), dflt: ""),
+            obs: List.finish(b: obs)
+          )
+        }
+      }
+    }
+  }
   return Unit
 }
 
@@ -135,11 +254,15 @@ fn run_all(
   files: io.Files,
   vcs: vc.VCs,
   solver: z3.Solver,
-  opts: Options
+  opts: Options,
+  replayed: Dict[Int, Bool]
 ) -> Unit may io.file, nondet, alloc, mutate {
   for i: Int in 0 ..< ctx.obligation_count {
     let o: obligations.Obligation = context.get_obligation(ctx: ctx, id: i)
-    if o.status is obligations.Checked and not is_test_kind(k: o.kind) {
+    if o.status is obligations.Checked and not is_test_kind(k: o.kind) and not Map.contains(
+      d: replayed,
+      key: context.get_def(ctx: ctx, id: o.def).mod
+    ) {
       match Map.find(d: vcs.built, key: i) with
       | None -> {
         -- No solver condition (floats, closures): a closed predicate over constants can still be evaluated.

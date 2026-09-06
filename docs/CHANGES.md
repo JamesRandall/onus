@@ -1184,6 +1184,25 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     are a per-module verification cache, cached timeouts and a faster body
     walker in Onus.
 
+### 2026-09-06 — the module verification cache
+
+160. **A module verified once is replayed.** `verify/modcache.ts` and
+    `self/modcache.onus` (impl spec §7.3): a module's key is the BLAKE3 of
+    its canonical text, its imports' keys, the compiler (`ts` or `self`),
+    the z3 version, the budget and a format number; the entry is the final
+    status and provenance of each of its obligations in creation order,
+    written only when verifying the module reported no diagnostic. On a
+    hit the verifier assigns the stored statuses, builds no conditions for
+    the module and discharges nothing of it; the rules run as before and
+    report nothing, being deterministic on statuses. The two compilers
+    keep separate entries, so the differential still verifies everything
+    on both sides once. Pinned by `test/verify/modcache.test.ts`: a replay
+    yields the same ledger and no new entry, a changed module a new entry,
+    a module with a diagnostic no entry. The differential over every
+    source, which took 37 minutes with only the proof cache warm, takes 9
+    with the module cache filling as it goes and under a minute once it
+    is warm.
+
 ### Deferred, not changed
 
 - `Stream[T] ! e` as a type (§3.11) is not parsed: `-> Stream[T] ! e` is

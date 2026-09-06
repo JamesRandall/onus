@@ -27,6 +27,8 @@ import { isNonlinear, smt, sortText, type Formula } from './formula.js';
 import { buildVCs, type VC } from './vc.js';
 import { constDischarge } from './constant.js';
 import { findZ3, ProofCache, runZ3, type SolverResult } from './z3.js';
+import { ModuleCache, moduleKeys } from './modcache.js';
+import type { ModuleId } from '../resolve/defs.js';
 
 export const DEFAULT_BUDGET_MS = 500;
 
@@ -51,7 +53,25 @@ class Verifier {
   run(): void {
     const opts = this.ctx.options.verify;
     const z3 = findZ3(opts.z3Path);
-    const vcs = buildVCs(this.ctx);
+    // Modules verified before with the same text, imports, solver and budget (impl spec §7.3) replay their statuses.
+    const modules = new ModuleCache(z3 === null ? null : opts.cacheDir);
+    const keys = z3 === null ? new Map<ModuleId, string>() : moduleKeys(this.ctx, 'ts', z3.version, opts.budgetMs);
+    const replayed = new Set<ModuleId>();
+    for (const [id, key] of keys) {
+      const entry = modules.get(key);
+      if (entry === null) continue;
+      const own = this.ctx.contracts.obligations.filter((o) => this.ctx.resolve.def(o.def).module === id);
+      if (own.length !== entry.obligations.length) continue;
+      own.forEach((o, i) => {
+        const c = entry.obligations[i];
+        if (c === undefined) return;
+        o.status = c.status;
+        o.by = c.by;
+      });
+      replayed.add(id);
+    }
+    const reported = this.ctx.sink.count;
+    const vcs = buildVCs(this.ctx, null, replayed);
     this.equalMeasureCalls();
     if (z3 === null) {
       this.ctx.log('onus: z3 not found on PATH; every obligation is checked at runtime');
@@ -60,6 +80,7 @@ class Verifier {
       const cache = new ProofCache(opts.cacheDir);
       for (const o of this.ctx.contracts.obligations) {
         if (o.status !== 'checked' || o.kind === 'law' || o.kind === 'property') continue;
+        if (replayed.has(this.ctx.resolve.def(o.def).module)) continue;
         const vc = vcs.built.get(o.id);
         if (vc === undefined) {
           // No solver condition (floats, closures): a closed predicate over constants can still be evaluated.
@@ -81,6 +102,14 @@ class Verifier {
       }
     }
     this.rules();
+    // Store every module verified this run that reported nothing, so the next check of an unchanged module is a replay.
+    if (z3 !== null) {
+      const noisy = new Set(this.ctx.sink.all().slice(reported).map((d) => d.span.file));
+      for (const [id, key] of keys) {
+        if (replayed.has(id) || noisy.has(this.ctx.resolve.moduleOf(id).file)) continue;
+        modules.set(key, this.ctx.contracts.obligations.filter((o) => this.ctx.resolve.def(o.def).module === id));
+      }
+    }
   }
 
   /**
