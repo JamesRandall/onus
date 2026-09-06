@@ -2,8 +2,7 @@
  * Milestone 11 acceptance (impl spec §9): Mandelbrot builds natively and
  * writes an identical PGM to the JavaScript build; every example passes on
  * both targets; E0801 fires on a deliberately broken runtime primitive; a
- * program outside the native subset is E0800. Skipped when `clang` is not
- * on PATH.
+ * `Dict` keyed by a record is E0800. Skipped when `clang` is not on PATH.
  */
 import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
@@ -87,7 +86,7 @@ describe.skipIf(clang === null)('native target (§19)', () => {
   }, 120000);
 
   it('every example passes on both targets', () => {
-    for (const rel of ['examples/mandelbrot/mandelbrot.onus', 'packages/compiler/test/native/primitives.onus', 'packages/compiler/test/native/eq_recursive.onus', 'packages/compiler/test/native/dict.onus', 'packages/compiler/test/native/generics.onus', 'packages/compiler/test/native/text_native.onus']) {
+    for (const rel of ['examples/mandelbrot/mandelbrot.onus', 'packages/compiler/test/native/primitives.onus', 'packages/compiler/test/native/eq_recursive.onus', 'packages/compiler/test/native/dict.onus', 'packages/compiler/test/native/generics.onus', 'packages/compiler/test/native/text_native.onus', 'packages/compiler/test/native/function_values.onus', 'packages/compiler/test/native/old_native.onus', 'packages/compiler/test/codegen/features.onus', 'packages/compiler/test/stdlib/list_generic.onus', 'packages/compiler/test/verify/ok_interface_calls.onus']) {
       const out = fresh(`examples-${rel.split('/').pop() ?? 'x'}`);
       const ctx = checked(join(repoRoot, rel));
       const js = emitAll(ctx, { outDir: out, ts: false });
@@ -120,17 +119,6 @@ describe.skipIf(clang === null)('native target (§19)', () => {
     expect(codes).toContain('E0801');
     expect(ctx.sink.all()[0]?.context[0]).toContain('primitives.text_and_ints');
   }, 180000);
-
-  it('a program outside the native subset is E0800', () => {
-    const out = fresh('unsupported');
-    const ctx = checked(join(here, 'unsupported.onus'));
-    const native = buildNative(ctx, { outDir: out });
-    expect(native.exe).toBeNull();
-    const diags = ctx.sink.all();
-    expect(diags.length).toBeGreaterThan(0);
-    expect(diags.every((d) => d.code === 'E0800')).toBe(true);
-    expect(diags[0]?.context[0]).toContain('function values');
-  }, 60000);
 
   it('a Dict keyed by a record is E0800 on the native target (§19.1)', () => {
     const out = fresh('dict-key');

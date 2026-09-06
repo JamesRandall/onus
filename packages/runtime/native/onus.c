@@ -340,6 +340,15 @@ onus_slot onus_grid_filled(onus_slot value, onus_slot width, onus_slot height) {
   return ptr_slot(g);
 }
 
+/* A grid's copy for `old(...)` (§4.1). */
+onus_slot onus_grid_copy(onus_slot grid) {
+  onus_grid *g = slot_ptr(grid);
+  int64_t size = (int64_t)sizeof(onus_grid) + 8 * g->width * g->height;
+  onus_grid *out = onus_alloc(size);
+  memcpy(out, g, (size_t)size);
+  return ptr_slot(out);
+}
+
 static void grid_bounds(onus_grid *g, int64_t x, int64_t y) {
   if (x < 0 || x >= g->width || y < 0 || y >= g->height) onus_panic("requires", "0 <= x and x < w and 0 <= y and y < h", "std.grid", "Grid");
 }
@@ -731,6 +740,20 @@ onus_slot onus_list_push(onus_slot *b, onus_slot x) {
   return 0;
 }
 
+/* A builder's copy for `old(...)` (§4.1): the same elements, its own storage. */
+onus_slot onus_list_builder_copy(onus_slot b) {
+  onus_builder *src = slot_ptr(b);
+  onus_builder *out = onus_alloc((int64_t)sizeof(onus_builder));
+  out->len = src->len;
+  out->cap = src->len;
+  out->data = NULL;
+  if (src->len > 0) {
+    out->data = malloc(sizeof(onus_slot) * (size_t)src->len);
+    memcpy(out->data, src->data, sizeof(onus_slot) * (size_t)src->len);
+  }
+  return ptr_slot(out);
+}
+
 onus_slot onus_list_finish(onus_slot b) {
   onus_builder *bb = slot_ptr(b);
   onus_list *out = onus_rt_list_new(bb->len);
@@ -933,6 +956,8 @@ static onus_map *map_copy(onus_map *m) {
   return out;
 }
 
+/* A map's copy for `old(...)` (§4.1). */
+onus_slot onus_map_clone(onus_slot m) { return ptr_slot(map_copy(slot_ptr(m))); }
 onus_slot onus_map_dict(void) { return ptr_slot(map_new()); }
 onus_slot onus_map_empty(void) { return ptr_slot(map_new()); }
 onus_slot onus_map_count(onus_slot d) { return ((onus_map *)slot_ptr(d))->live; }

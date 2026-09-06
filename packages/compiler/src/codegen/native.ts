@@ -15,21 +15,29 @@
  *     `onus_panic`; `Int` arithmetic uses the overflow intrinsics; `try` is
  *     a branch that returns the error from the enclosing function.
  *
- * Programs reaching a construct outside the v0 native subset are refused
- * with `E0800 primitive unavailable on target` (§19.1): closures and
- * function values, interfaces, quantifiers at runtime, `fake`, `old(...)`,
- * `Spec` values, and `sql` without libpq. `Text`, `Bytes`, `TypeInfo`, `Map`
- * and `Dict` are complete: the runtime carries the Unicode 16.0 tables
- * (docs/CHANGES.md item 175).
+ * Function values (docs/CHANGES.md item 178): a value of a function type is
+ * a pointer to a closure object, slot 0 the code address and the rest the
+ * captured values; its code takes the object and one slot per parameter
+ * (`ptr` for `inout`) and returns a slot. A declared function used as a value
+ * gets an adapter and a constant object; a closure is lifted to a function
+ * over its captures, taken by value. An interface dictionary is a constant
+ * table of such objects, one per method in interface order, and a bounded
+ * type parameter's dictionary is a hidden `ptr` parameter. A runtime
+ * quantifier is a loop; `fake` is an object of its behaviours; `old(...)` is
+ * a copy that is deep where a value can be mutated in place.
+ *
+ * Programs reaching a construct outside the native subset are refused with
+ * `E0800 primitive unavailable on target` (§19.1): `Spec` values, a generic
+ * function used as a value, and `sql` without libpq.
  */
 import type { ClaimTables } from '../claims/tables.js';
 import type { Value } from '../consteval/values.js';
 import type { Context } from '../context.js';
 import type { Def, DefId, ResolveTables } from '../resolve/defs.js';
 import type { Span } from '../source.js';
-import type { TypeTables } from '../types/tables.js';
+import type { Signature, TypeTables } from '../types/tables.js';
 import { stripRefinements, substitute, typeToString, type Type, type TypeArg } from '../types/type.js';
-import type { IrBlock, IrDecoder, IrExpr, IrFn, IrModule, IrStmt, ObRef } from './ir.js';
+import type { IrBlock, IrCallTarget, IrDecoder, IrExpr, IrFn, IrImpl, IrModule, IrStmt, ObRef } from './ir.js';
 import { typeSlug } from './js.js';
 import { specialise } from './specialise.js';
 
@@ -146,6 +154,18 @@ class NativeEmitter {
 
   /** Constants emitted as lazily filled slots (aggregates and computed values), by definition. */
   private readonly lazyConsts = new Set<DefId>();
+  /** Function-value objects emitted so far (`fnValue`), by the target's emitted name. */
+  private readonly fnVals = new Map<string, string>();
+  /** Closures lifted so far, for naming. */
+  private closureCount = 0;
+  /** The current function's dictionary parameters: name → interface. */
+  private dictParamIfaces = new Map<string, DefId>();
+  /** Copiers generated so far (`copyFn`), by type text. */
+  private readonly copyFns = new Map<string, string>();
+  /** Whether a type's values can be mutated in place (`needsCopy`), by type text. */
+  private readonly mutableShape = new Map<string, boolean>();
+  /** Impls by their dictionary's emitted name. */
+  private readonly impls = new Map<string, { readonly m: IrModule; readonly impl: IrImpl }>();
   /** Whether a constant will be emitted lazily: its value is not a scalar literal. */
   private aggregateConst(def: DefId): boolean {
     for (const m of this.modules) {
@@ -186,6 +206,7 @@ class NativeEmitter {
   }
 
   run(): NativeProgram {
+    for (const m of this.modules) for (const item of m.items) if (item.k === 'impl') this.impls.set(this.fnName(m.module.name, item.dictName), { m, impl: item });
     // Only what the program reaches is compiled, so an unsupported construct in an unreached library function costs nothing (§19.1).
     const reachable = this.reachable();
     for (const m of this.modules) {
@@ -202,6 +223,7 @@ class NativeEmitter {
         for (const ex of m.tests.examples) this.exampleFn(m, ex.name, ex.body);
       }
     }
+    for (const [name, { m, impl }] of this.impls) if (reachable.has(name)) this.dictGlobal(m, impl);
     const hasMain = this.entry !== null && this.entry.main !== null;
     this.mainFn();
     const head = [
@@ -373,6 +395,17 @@ class NativeEmitter {
           visitExpr(e.value);
           visitBlock(e.checks);
           return;
+        case 'dict': {
+          // A dictionary reaches every method of its impl.
+          const name = this.fnName(this.t.moduleOf(e.module).name, e.name);
+          queue.push(name);
+          const found = this.impls.get(name);
+          if (found !== undefined) for (const f of found.impl.fns) queue.push(this.fnName(found.m.module.name, f.name));
+          return;
+        }
+        case 'snapshot':
+          visitExpr(e.value);
+          return;
         default:
           return;
       }
@@ -503,7 +536,7 @@ class NativeEmitter {
       case 'param':
         return 'i64';
       case 'fn':
-        throw new UnsupportedError('function values');
+        return 'ptr';
       case 'typeinfo':
         return 'ptr';
       case 'spec':
@@ -613,6 +646,421 @@ class NativeEmitter {
     return { v: obj, t: 'ptr' };
   }
 
+  /** `ret` of a value as the current function's return type: a lifted closure and an adapter return slots. */
+  private retVal(v: Val): void {
+    const c = this.coerce(v, this.fnRetLl === 'void' ? 'i64' : this.fnRetLl);
+    this.emit(`ret ${c.t} ${c.v}`);
+  }
+
+  /**
+   * A declared function as a value (item 178): a constant closure object
+   * whose code is an adapter from the slot convention to the function's
+   * signature, emitted once per function. Effects: emits a global and a function.
+   */
+  private fnValue(ref: { readonly def: Def; readonly name: string; readonly sig: Signature }): string {
+    const module = this.t.moduleOf(ref.def.module).name;
+    const target = this.fnName(module, ref.name);
+    const existing = this.fnVals.get(target);
+    if (existing !== undefined) return existing;
+    if (ref.sig.tparams.length > 0) throw new UnsupportedError('a generic function used as a value');
+    this.requireNative(ref.def);
+    const adapter = `${target.slice(0, -1)}$fn"`;
+    const val = `${target.slice(0, -1)}$val"`;
+    this.fnVals.set(target, val);
+    this.globals.push(`${val} = private constant [1 x i64] [i64 ptrtoint (ptr ${adapter} to i64)]`);
+    this.nested(() => {
+      this.fnRetLl = 'i64';
+      const params = ['ptr %env'];
+      const args: string[] = [];
+      const slotTypes: string[] = [];
+      ref.sig.params.forEach((p, i) => {
+        if (p.inout) {
+          params.push(`ptr %"a${i}"`);
+          args.push(`ptr %"a${i}"`);
+          slotTypes.push('ptr');
+        } else {
+          params.push(`i64 %"a${i}"`);
+          slotTypes.push('i64');
+          if (ref.def.intrinsic) args.push(`i64 %"a${i}"`);
+          else {
+            const v = this.fromSlot(`%"a${i}"`, this.ll(p.type));
+            args.push(`${v.t} ${v.v}`);
+          }
+        }
+      });
+      const out = this.tmp();
+      if (ref.def.intrinsic) {
+        const cname = `@onus_${this.t.qualifiedName(ref.def.id).split('.').slice(1).join('_')}`;
+        this.declare(`declare i64 ${cname}(${slotTypes.join(', ')})`);
+        this.emit(`${out} = call i64 ${cname}(${args.join(', ')})`);
+        this.emit(`ret i64 ${out}`);
+      } else {
+        const ret = this.ll(ref.sig.ret);
+        this.emit(`${out} = call ${ret} ${target}(${args.join(', ')})`);
+        this.emit(`ret i64 ${this.toSlot({ v: out, t: ret })}`);
+      }
+      this.finishFn(`define i64 ${adapter}(${params.join(', ')}) {`, '');
+    });
+    return val;
+  }
+
+  /**
+   * A closure (item 178): lifted to `@closure$N` over its captured locals,
+   * which it reads from the object on entry, and built as an object of the
+   * code address and the captured values. Effects: emits a function.
+   */
+  private closureValue(e: Extract<IrExpr, { k: 'closure' }>): Val {
+    const captures = freeLocals(e).map((name) => {
+      const local = this.locals.get(name);
+      if (local === undefined) throw new Error(`unknown local ${name}`);
+      return { name, ...local };
+    });
+    this.closureCount += 1;
+    const name = `@"closure$${this.closureCount}"`;
+    this.nested(() => {
+      this.fnRetLl = 'i64';
+      const params = ['ptr %env'];
+      for (const p of e.params) {
+        const t = this.ll(p.type);
+        if (p.inout) {
+          params.push(`ptr %"p.${p.name}"`);
+          this.locals.set(p.name, { ptr: `%"p.${p.name}"`, t, type: p.type });
+        } else {
+          params.push(`i64 %"p.${p.name}"`);
+          const v = this.fromSlot(`%"p.${p.name}"`, t);
+          const ptr = this.alloca(p.name, t, p.type);
+          this.emit(`store ${t} ${v.v}, ptr ${ptr}`);
+        }
+      }
+      captures.forEach((c, i) => {
+        const v = this.fromSlot(this.loadSlot('%env', 1 + i), c.t);
+        const ptr = this.alloca(c.name, c.t, c.type);
+        this.emit(`store ${c.t} ${v.v}, ptr ${ptr}`);
+      });
+      this.blockStmts(e.entry);
+      this.blockStmts(e.body);
+      if (!this.terminated) this.emit('ret i64 0');
+      this.finishFn(`define i64 ${name}(${params.join(', ')}) {`, '');
+    });
+    const obj = this.tmp();
+    this.emit(`${obj} = call ptr @onus_alloc(i64 ${8 * (1 + captures.length)})`);
+    const code = this.tmp();
+    this.emit(`${code} = ptrtoint ptr ${name} to i64`);
+    this.storeSlot(obj, 0, code);
+    captures.forEach((c, i) => {
+      const cur = this.tmp();
+      this.emit(`${cur} = load ${c.t}, ptr ${c.ptr}`);
+      this.storeSlot(obj, 1 + i, this.toSlot({ v: cur, t: c.t }));
+    });
+    return { v: obj, t: 'ptr' };
+  }
+
+  /** A call through a closure object: its code takes the object and one slot (or `inout` address) per parameter and returns a slot. */
+  private callClosure(clo: string, params: readonly { readonly inout: boolean }[], args: readonly IrExpr[], retLl: LlType): Val {
+    const code = this.fromSlot(this.loadSlot(clo, 0), 'ptr');
+    const argv = [`ptr ${clo}`];
+    params.forEach((p, i) => {
+      const a = args[i];
+      if (a === undefined) return;
+      if (p.inout) argv.push(`ptr ${this.addressOf(a)}`);
+      else argv.push(`i64 ${this.toSlot(this.expr(a))}`);
+    });
+    const out = this.tmp();
+    this.emit(`${out} = call i64 ${code.v}(${argv.join(', ')})`);
+    return this.fromSlot(out, retLl);
+  }
+
+  /** The names of an interface's functions in declaration order: a dictionary's layout. */
+  private ifaceMethods(iface: DefId): readonly string[] {
+    for (const m of this.modules) {
+      for (const item of m.items) if (item.k === 'interface' && item.def.id === iface) return item.fns.map((f) => f.def.name);
+    }
+    throw new UnsupportedError(`dispatch on \`${this.t.def(iface).name}\`, whose interface is not in the program`);
+  }
+
+  /** A call through a dictionary (item 178): the method's object is the dictionary's slot at the method's index. */
+  private dictCall(e: Extract<IrExpr, { k: 'call' }>, target: Extract<IrCallTarget, { k: 'dict' }>): Val {
+    const d = target.dict;
+    let iface: DefId | undefined;
+    if (d.k === 'dict') iface = d.iface.id;
+    else if (d.k === 'dict-param') iface = this.dictParamIfaces.get(d.name);
+    if (iface === undefined) throw new UnsupportedError('interface dispatch with no known target');
+    const idx = this.ifaceMethods(iface).indexOf(target.name);
+    if (idx < 0) throw new UnsupportedError(`dispatch on \`${target.name}\`, which its interface does not declare`);
+    const dict = this.coerce(this.expr(d), 'ptr');
+    const clo = this.fromSlot(this.loadSlot(dict.v, idx), 'ptr');
+    return this.callClosure(clo.v, e.sig.params, e.args, this.ll(e.type));
+  }
+
+  /** An impl's dictionary (item 178): a constant table of its methods' objects in interface order. Effects: emits globals and functions. */
+  private dictGlobal(m: IrModule, impl: IrImpl): void {
+    try {
+      const slots = this.ifaceMethods(impl.iface.id).map((name) => {
+        const entry = impl.entries.find((x) => x.name === name);
+        if (entry === undefined) throw new UnsupportedError(`an impl without \`${name}\``);
+        return `i64 ptrtoint (ptr ${this.fnValue({ def: entry.fn.def, name: entry.fn.name, sig: entry.fn.sig })} to i64)`;
+      });
+      this.globals.push(`${this.fnName(m.module.name, impl.dictName)} = private constant [${Math.max(1, slots.length)} x i64] [${slots.length === 0 ? 'i64 0' : slots.join(', ')}]`);
+    } catch (err) {
+      if (!(err instanceof UnsupportedError)) throw err;
+      this.unsupported.push({ def: this.t.qualifiedName(impl.def.id), span: impl.def.span, what: err.what });
+    }
+  }
+
+  /**
+   * A quantifier evaluated at runtime (§5.3; item 178): a loop over the
+   * domain that stops at the first counterexample (`forall`) or witness
+   * (`exists`); an `Ok`/`Some` domain ranges over its list and an `Err`/`None`
+   * over nothing.
+   */
+  private quantifierVal(e: Extract<IrExpr, { k: 'quantifier' }>): Val {
+    const forall = e.quant === 'forall';
+    const acc = this.alloca('$q', 'i1', BOOL_TYPE);
+    this.emit(`store i1 ${forall ? 1 : 0}, ptr ${acc}`);
+    const idx = this.alloca('$qi', 'i64', INT_TYPE);
+    const condL = this.label('q');
+    const bodyL = this.label('qbody');
+    const nextL = this.label('qnext');
+    const stopL = this.label('qstop');
+    const endL = this.label('qend');
+    let hi: string;
+    let list: string | null = null;
+    const bt = this.ll(e.binder);
+    const binder = this.alloca(e.name, bt, e.binder);
+    switch (e.domain.k) {
+      case 'range': {
+        const lo = this.coerce(this.expr(e.domain.lo), 'i64');
+        hi = this.coerce(this.expr(e.domain.hi), 'i64').v;
+        this.emit(`store i64 ${lo.v}, ptr ${idx}`);
+        break;
+      }
+      case 'bools':
+        hi = '2';
+        this.emit(`store i64 0, ptr ${idx}`);
+        break;
+      case 'list':
+      case 'oklist': {
+        const v = this.coerce(this.expr(e.domain.expr), 'ptr');
+        const lp = this.alloca('$ql', 'ptr', UNIT_TYPE);
+        if (e.domain.k === 'oklist') {
+          // `Ok`/`Some` carry the list in slot 1; `Err`/`None` range over nothing.
+          this.emit(`store ptr null, ptr ${lp}`);
+          const tag = this.loadSlot(v.v, 0);
+          const isOk = this.tmp();
+          this.emit(`${isOk} = icmp eq i64 ${tag}, 0`);
+          const okL = this.label('qok');
+          const noneL = this.label('qnone');
+          this.condBr(isOk, okL, noneL);
+          this.startBlock(okL);
+          const inner = this.fromSlot(this.loadSlot(v.v, 1), 'ptr');
+          this.emit(`store ptr ${inner.v}, ptr ${lp}`);
+          this.br(noneL);
+          this.startBlock(noneL);
+        } else this.emit(`store ptr ${v.v}, ptr ${lp}`);
+        list = this.tmp();
+        this.emit(`${list} = load ptr, ptr ${lp}`);
+        const isNull = this.tmp();
+        this.emit(`${isNull} = icmp eq ptr ${list}, null`);
+        const lenL = this.label('qlen');
+        const skipL = this.label('qskip');
+        this.condBr(isNull, skipL, lenL);
+        this.startBlock(skipL);
+        this.emit(`store i64 0, ptr ${idx}`);
+        this.br(endL);
+        this.startBlock(lenL);
+        hi = this.tmp();
+        this.emit(`${hi} = call i64 @onus_rt_list_len(ptr ${list})`);
+        this.emit(`store i64 0, ptr ${idx}`);
+        break;
+      }
+    }
+    this.br(condL);
+    this.startBlock(condL);
+    const i = this.tmp();
+    this.emit(`${i} = load i64, ptr ${idx}`);
+    const more = this.tmp();
+    this.emit(`${more} = icmp slt i64 ${i}, ${hi}`);
+    this.condBr(more, bodyL, endL);
+    this.startBlock(bodyL);
+    if (e.domain.k === 'bools') {
+      const b = this.tmp();
+      this.emit(`${b} = icmp eq i64 ${i}, 0`);
+      this.emit(`store i1 ${b}, ptr ${binder}`);
+    } else if (list === null) this.emit(`store i64 ${i}, ptr ${binder}`);
+    else {
+      const slot = this.tmp();
+      this.emit(`${slot} = call i64 @onus_rt_list_get(ptr ${list}, i64 ${i})`);
+      const v = this.fromSlot(slot, bt);
+      this.emit(`store ${bt} ${v.v}, ptr ${binder}`);
+    }
+    if (e.where !== null) {
+      const w = this.coerce(this.expr(e.where), 'i1');
+      const testL = this.label('qtest');
+      this.condBr(w.v, testL, nextL);
+      this.startBlock(testL);
+    }
+    const body = this.coerce(this.expr(e.body), 'i1');
+    if (forall) this.condBr(body.v, nextL, stopL);
+    else this.condBr(body.v, stopL, nextL);
+    this.startBlock(stopL);
+    this.emit(`store i1 ${forall ? 0 : 1}, ptr ${acc}`);
+    this.br(endL);
+    this.startBlock(nextL);
+    const next = this.tmp();
+    this.emit(`${next} = add i64 ${i}, 1`);
+    this.emit(`store i64 ${next}, ptr ${idx}`);
+    this.br(condL);
+    this.startBlock(endL);
+    const out = this.tmp();
+    this.emit(`${out} = load i1, ptr ${acc}`);
+    return { v: out, t: 'i1' };
+  }
+
+  /** Whether values of `type` can be mutated in place natively (builders, grids, maps, or anything holding one), so that `old(...)` must copy them. */
+  private needsCopy(type: Type): boolean {
+    const s = stripRefinements(type);
+    switch (s.k) {
+      case 'opaque': {
+        const q = this.t.qualifiedName(s.def);
+        if (q === 'std.list.Builder' || q === 'std.grid.Grid' || q === 'std.map.Map' || q === 'std.map.Dict') return true;
+        const elem = s.args[0];
+        return q === 'std.list.List' && elem !== undefined && elem.k === 'type' && this.needsCopy(elem.type);
+      }
+      case 'record':
+      case 'union': {
+        const key = typeToString(s, this.t);
+        const known = this.mutableShape.get(key);
+        if (known !== undefined) return known;
+        this.mutableShape.set(key, false);
+        const subst = this.substOf(s.def, s.args);
+        const owners = s.k === 'record' ? [s.def] : (this.ty.variants.get(s.def) ?? []);
+        const result = owners.some((o) => (this.ty.fields.get(o) ?? []).some((f) => this.needsCopy(substitute(f.type, subst))));
+        this.mutableShape.set(key, result);
+        return result;
+      }
+      default:
+        return false;
+    }
+  }
+
+  /** A copy of the slot's value for `old(...)` (§4.1): the slot itself unless the type can be mutated in place. */
+  private copySlot(type: Type, slot: string): string {
+    const s = stripRefinements(type);
+    if (!this.needsCopy(s)) return slot;
+    if (s.k === 'opaque') {
+      const q = this.t.qualifiedName(s.def);
+      const elem = s.args[s.args.length - 1];
+      if (q === 'std.list.List') {
+        const out = this.tmp();
+        this.emit(`${out} = call i64 ${this.copyFn(s)}(i64 ${slot})`);
+        return out;
+      }
+      if (elem !== undefined && elem.k === 'type' && this.needsCopy(elem.type)) throw new UnsupportedError(`\`old(...)\` of a \`${this.t.def(s.def).name}\` holding values that can be mutated in place`);
+      const prim = q === 'std.list.Builder' ? '@onus_list_builder_copy' : q === 'std.grid.Grid' ? '@onus_grid_copy' : '@onus_map_clone';
+      this.declare(`declare i64 ${prim}(i64)`);
+      const out = this.tmp();
+      this.emit(`${out} = call i64 ${prim}(i64 ${slot})`);
+      return out;
+    }
+    const out = this.tmp();
+    this.emit(`${out} = call i64 ${this.copyFn(s)}(i64 ${slot})`);
+    return out;
+  }
+
+  /** The copier `@copy$N(i64) -> i64` for a list, record or union whose values can be mutated in place; generated once per type. Effects: emits a function. */
+  private copyFn(type: Type): string {
+    const s = stripRefinements(type);
+    const key = typeToString(s, this.t);
+    const existing = this.copyFns.get(key);
+    if (existing !== undefined) return existing;
+    const name = `@"copy$${(this.counter += 1)}"`;
+    this.copyFns.set(key, name);
+    this.nested(() => {
+      this.fnRetLl = 'i64';
+      const r = this.copySlots(s, '%a');
+      this.emit(`ret i64 ${r}`);
+      this.finishFn(`define i64 ${name}(i64 %a) {`, '');
+    });
+    return name;
+  }
+
+  /** The body of a copier: a new object of the same shape whose mutable parts are copied. */
+  private copySlots(s: Type, a: string): string {
+    switch (s.k) {
+      case 'opaque': {
+        const elem = s.args[0];
+        if (elem === undefined || elem.k !== 'type') throw new UnsupportedError('a copy of an unknown list');
+        const pa = this.fromSlot(a, 'ptr');
+        const len = this.tmp();
+        this.emit(`${len} = call i64 @onus_rt_list_len(ptr ${pa.v})`);
+        const out = this.tmp();
+        this.emit(`${out} = call ptr @onus_rt_list_new(i64 ${len})`);
+        const idx = this.alloca('$ci', 'i64', INT_TYPE);
+        this.emit(`store i64 0, ptr ${idx}`);
+        const condL = this.label('copy');
+        const bodyL = this.label('copybody');
+        const endL = this.label('copydone');
+        this.br(condL);
+        this.startBlock(condL);
+        const i = this.tmp();
+        this.emit(`${i} = load i64, ptr ${idx}`);
+        const more = this.tmp();
+        this.emit(`${more} = icmp slt i64 ${i}, ${len}`);
+        this.condBr(more, bodyL, endL);
+        this.startBlock(bodyL);
+        const x = this.tmp();
+        this.emit(`${x} = call i64 @onus_rt_list_get(ptr ${pa.v}, i64 ${i})`);
+        this.emit(`call void @onus_rt_list_set(ptr ${out}, i64 ${i}, i64 ${this.copySlot(elem.type, x)})`);
+        const next = this.tmp();
+        this.emit(`${next} = add i64 ${i}, 1`);
+        this.emit(`store i64 ${next}, ptr ${idx}`);
+        this.br(condL);
+        this.startBlock(endL);
+        return this.toSlot({ v: out, t: 'ptr' });
+      }
+      case 'record': {
+        const subst = this.substOf(s.def, s.args);
+        const fields = this.ty.fields.get(s.def) ?? [];
+        const pa = this.fromSlot(a, 'ptr');
+        const obj = this.tmp();
+        this.emit(`${obj} = call ptr @onus_alloc(i64 ${8 * Math.max(1, fields.length)})`);
+        fields.forEach((f, i) => this.storeSlot(obj, i, this.copySlot(substitute(f.type, subst), this.loadSlot(pa.v, i))));
+        return this.toSlot({ v: obj, t: 'ptr' });
+      }
+      case 'union': {
+        const subst = this.substOf(s.def, s.args);
+        const pa = this.fromSlot(a, 'ptr');
+        const tag = this.loadSlot(pa.v, 0);
+        const variants = this.ty.variants.get(s.def) ?? [];
+        const labels = variants.map(() => this.label('copyv'));
+        const same = this.label('copysame');
+        const done = this.label('copyend');
+        this.emit(`switch i64 ${tag}, label %${same} [${variants.map((v, i) => ` i64 ${this.variantIndex(s.def, v)}, label %${labels[i] ?? same}`).join('')} ]`);
+        this.terminated = true;
+        const incoming: string[] = [];
+        variants.forEach((v, i) => {
+          this.startBlock(labels[i] ?? same);
+          const fields = this.ty.fields.get(v) ?? [];
+          const obj = this.tmp();
+          this.emit(`${obj} = call ptr @onus_alloc(i64 ${8 * (1 + fields.length)})`);
+          this.storeSlot(obj, 0, tag);
+          fields.forEach((f, j) => this.storeSlot(obj, 1 + j, this.copySlot(substitute(f.type, subst), this.loadSlot(pa.v, 1 + j))));
+          incoming.push(`[ ${this.toSlot({ v: obj, t: 'ptr' })}, %${this.block} ]`);
+          this.br(done);
+        });
+        this.startBlock(same);
+        incoming.push(`[ ${a}, %${this.block} ]`);
+        this.br(done);
+        this.startBlock(done);
+        const out = this.tmp();
+        this.emit(`${out} = phi i64 ${incoming.join(', ')}`);
+        return out;
+      }
+      default:
+        throw new UnsupportedError(`a copy of \`${typeToString(s, this.t)}\` values`);
+    }
+  }
+
   private declare(sig: string): void {
     this.declared.add(sig);
   }
@@ -683,10 +1131,15 @@ class NativeEmitter {
     const name = this.fnName(m.module.name, f.name);
     try {
       this.requireNative(f.def);
-      if (f.dictParams.length > 0) throw new UnsupportedError('functions with interface-bounded type parameters');
       this.beginFn();
       const params: string[] = [];
       const stores: { name: string; t: LlType; type: Type; inout: boolean }[] = [];
+      // A bounded type parameter's dictionary comes first, as a pointer to its table (item 178).
+      this.dictParamIfaces = new Map(f.dictParams.map((d) => [d.name, d.iface]));
+      for (const d of f.dictParams) {
+        params.push(`ptr %"p.${d.name}"`);
+        stores.push({ name: d.name, t: 'ptr', type: UNIT_TYPE, inout: false });
+      }
       for (const c of f.constParams) {
         const t = this.ll(c.type);
         params.push(`${t} %"p.${c.name}"`);
@@ -1253,22 +1706,40 @@ class NativeEmitter {
         return this.constValue(e.value);
       }
       case 'fnref':
-      case 'call-value':
+        return { v: this.fnValue(e), t: 'ptr' };
+      case 'call-value': {
+        const clo = this.coerce(this.expr(e.callee), 'ptr');
+        return this.callClosure(clo.v, e.fnType.params, e.args, this.ll(e.type));
+      }
       case 'closure':
-        throw new UnsupportedError('function values and closures');
+        return this.closureValue(e);
       case 'dict':
-      case 'dict-param':
-        throw new UnsupportedError('interfaces');
+        return { v: this.fnName(this.t.moduleOf(e.module).name, e.name), t: 'ptr' };
+      case 'dict-param': {
+        const local = this.locals.get(e.name);
+        if (local === undefined) throw new Error(`unknown dictionary ${e.name}`);
+        const r = this.tmp();
+        this.emit(`${r} = load ptr, ptr ${local.ptr}`);
+        return { v: r, t: 'ptr' };
+      }
       case 'quantifier':
-        throw new UnsupportedError('quantifiers evaluated at runtime');
+        return this.quantifierVal(e);
       case 'recover':
         return this.recover(e);
-      case 'fake':
-        throw new UnsupportedError('`fake`');
+      case 'fake': {
+        // A test double is inert natively: an object of its behaviours, which no primitive reads (§8.4).
+        const obj = this.tmp();
+        this.emit(`${obj} = call ptr @onus_alloc(i64 ${8 * Math.max(1, e.fields.length)})`);
+        e.fields.forEach((f, i) => this.storeSlot(obj, i, this.toSlot(this.expr(f.value))));
+        return { v: obj, t: 'ptr' };
+      }
       case 'typeinfo':
         return this.typeInfoObject(e.name, e.fields);
-      case 'snapshot':
-        throw new UnsupportedError('`old(...)` in a checked postcondition');
+      case 'snapshot': {
+        const t = this.ll(e.type);
+        const slot = this.toSlot(this.expr(e.value));
+        return this.fromSlot(this.copySlot(e.type, slot), t);
+      }
     }
   }
 
@@ -1533,7 +2004,7 @@ class NativeEmitter {
   }
 
   private call(e: Extract<IrExpr, { k: 'call' }>): Val {
-    if (e.target.k !== 'fn') throw new UnsupportedError('interface dispatch through a dictionary');
+    if (e.target.k !== 'fn') return this.dictCall(e, e.target);
     const def = e.target.def;
     this.requireNative(def);
     const sig = e.sig;
@@ -1579,6 +2050,7 @@ class NativeEmitter {
       return this.fromSlot(out, retLl);
     }
     const module = this.t.moduleOf(def.module).name;
+    for (const d of e.dicts) args.push(`ptr ${this.coerce(this.expr(d), 'ptr').v}`);
     for (const c of e.consts) {
       const v = this.expr(c);
       args.push(`${v.t} ${v.v}`);
@@ -1627,12 +2099,11 @@ class NativeEmitter {
     this.condBr(isOk, okL, failL);
     this.startBlock(failL);
     if (e.raw) {
-      const v = this.coerce(this.expr(e.else?.value ?? { k: 'bool', v: false }), 'i1');
-      this.emit(`ret i1 ${v.v}`);
+      this.retVal(this.coerce(this.expr(e.else?.value ?? { k: 'bool', v: false }), 'i1'));
     } else if (e.else === null) {
       if (e.option && !e.outerOption) throw new UnsupportedError('`try` on an Option inside a function returning Result without an `else`');
       // The same error (or `None`) is the function's result.
-      this.emit(`ret ptr ${operand.v}`);
+      this.retVal(operand);
     } else {
       if (e.else.name !== null) {
         const et = this.ll(e.else.errorType);
@@ -1645,7 +2116,7 @@ class NativeEmitter {
       this.emit(`${result} = call ptr @onus_alloc(i64 16)`);
       this.storeSlot(result, 0, '1');
       this.storeSlot(result, 1, converted);
-      this.emit(`ret ptr ${result}`);
+      this.retVal({ v: result, t: 'ptr' });
     }
     this.terminated = true;
     this.startBlock(okL);
@@ -1655,6 +2126,168 @@ class NativeEmitter {
     return this.fromSlot(this.loadSlot(operand.v, 1), this.ll(e.type));
   }
 }
+
+/** The locals a closure reads that it does not bind itself, in first-use order: what it captures (§3.7). Effects: none. */
+function freeLocals(e: Extract<IrExpr, { k: 'closure' }>): string[] {
+  const bound = new Set<string>(e.params.map((p) => p.name));
+  const refs: string[] = [];
+  const visitBlock = (b: IrBlock): void => {
+    for (const s of b) visitStmt(s);
+  };
+  const visitStmt = (s: IrStmt): void => {
+    switch (s.k) {
+      case 'let':
+        bound.add(s.name);
+        visitExpr(s.value);
+        return;
+      case 'assign':
+        visitExpr(s.value);
+        return;
+      case 'return':
+      case 'expr':
+        visitExpr(s.k === 'return' ? s.value : s.expr);
+        return;
+      case 'if':
+        visitExpr(s.cond);
+        visitBlock(s.then);
+        if (s.else !== null) visitBlock(s.else);
+        return;
+      case 'match':
+        bound.add(s.tmp);
+        visitExpr(s.scrutinee);
+        for (const a of s.arms) {
+          if (a.test !== null) visitExpr(a.test);
+          for (const b of a.bindings) {
+            bound.add(b.name);
+            visitExpr(b.value);
+          }
+          if (a.guard !== null) visitExpr(a.guard);
+          visitBlock(a.body);
+        }
+        return;
+      case 'loop':
+        visitExpr(s.cond);
+        visitBlock(s.body);
+        return;
+      case 'for-range':
+        bound.add(s.name);
+        visitExpr(s.lo);
+        visitExpr(s.hi);
+        visitBlock(s.body);
+        return;
+      case 'for-each':
+        bound.add(s.name);
+        visitExpr(s.list);
+        visitBlock(s.body);
+        return;
+      case 'check':
+      case 'assert':
+      case 'reject':
+        visitExpr(s.cond);
+        return;
+      case 'call-inout':
+        if (s.result !== null) bound.add(s.result.name);
+        visitExpr(s.call);
+        return;
+      case 'unreachable':
+      case 'comment':
+        return;
+    }
+  };
+  const visitExpr = (x: IrExpr): void => {
+    switch (x.k) {
+      case 'local':
+        if (!refs.includes(x.name)) refs.push(x.name);
+        return;
+      case 'call':
+        if (x.target.k === 'dict') visitExpr(x.target.dict);
+        for (const y of [...x.dicts, ...x.consts, ...x.args]) visitExpr(y);
+        return;
+      case 'call-value':
+        visitExpr(x.callee);
+        for (const y of x.args) visitExpr(y);
+        return;
+      case 'record':
+      case 'variant':
+      case 'fake':
+        for (const f of x.fields) visitExpr(f.value);
+        return;
+      case 'update':
+        visitExpr(x.base);
+        for (const f of x.fields) visitExpr(f.value);
+        return;
+      case 'field':
+        visitExpr(x.object);
+        return;
+      case 'list':
+      case 'and':
+      case 'or':
+        for (const y of x.k === 'list' ? x.elems : x.operands) visitExpr(y);
+        return;
+      case 'concat':
+      case 'intop':
+      case 'floatop':
+      case 'cmp':
+      case 'eq':
+      case 'implies':
+        visitExpr(x.left);
+        visitExpr(x.right);
+        return;
+      case 'neg':
+      case 'not':
+        visitExpr(x.operand);
+        return;
+      case 'is-variant':
+        visitExpr(x.subject);
+        return;
+      case 'try':
+        visitExpr(x.operand);
+        if (x.else !== null) {
+          if (x.else.name !== null) bound.add(x.else.name);
+          visitExpr(x.else.value);
+        }
+        return;
+      case 'recover':
+        visitBlock(x.body);
+        visitExpr(x.value);
+        return;
+      case 'quantifier':
+        bound.add(x.name);
+        if (x.domain.k === 'range') {
+          visitExpr(x.domain.lo);
+          visitExpr(x.domain.hi);
+        } else if (x.domain.k !== 'bools') visitExpr(x.domain.expr);
+        if (x.where !== null) visitExpr(x.where);
+        visitExpr(x.body);
+        return;
+      case 'closure':
+        for (const p of x.params) bound.add(p.name);
+        visitBlock(x.entry);
+        visitBlock(x.body);
+        return;
+      case 'checked':
+        bound.add(x.it);
+        visitExpr(x.value);
+        visitBlock(x.checks);
+        return;
+      case 'snapshot':
+        visitExpr(x.value);
+        return;
+      case 'dict-param':
+        if (!refs.includes(x.name)) refs.push(x.name);
+        return;
+      default:
+        return;
+    }
+  };
+  visitBlock(e.entry);
+  visitBlock(e.body);
+  return refs.filter((r) => !bound.has(r));
+}
+
+const UNIT_TYPE: Type = { k: 'prim', name: 'Unit' };
+const INT_TYPE: Type = { k: 'prim', name: 'Int' };
+const BOOL_TYPE: Type = { k: 'prim', name: 'Bool' };
 
 function escapeBytes(bytes: Uint8Array): string {
   let out = '';

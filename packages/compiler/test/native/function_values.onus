@@ -1,0 +1,170 @@
+module function_values
+import std.io
+
+-- Function values, closures and interfaces on the native target
+-- (docs/CHANGES.md item 178): a closure is a code pointer with its captured
+-- values, a declared function used as a value gets an adapter, and an
+-- interface dictionary is a table of function values. Every example runs
+-- on both targets and must agree (§19.5).
+interface Shape[T] {
+  fn area(s: T) -> Int
+
+  fn name(s: T) -> Text may alloc
+}
+
+record Square {
+  side: Int
+}
+
+record Rect {
+  w: Int
+  h: Int
+}
+
+impl Shape[Square] {
+  fn area(s: Square) -> Int {
+    return s.side * s.side
+  }
+
+  fn name(s: Square) -> Text may alloc {
+    return "square"
+  }
+}
+
+impl Shape[Rect] {
+  fn area(s: Rect) -> Int {
+    return s.w * s.h
+  }
+
+  fn name(s: Rect) -> Text may alloc {
+    return "rect"
+  }
+}
+
+fn describe[T: Shape](s: T) -> Text may alloc {
+  return Shape.name(s: s) ++ " " ++ Int.to_text(x: Shape.area(s: s))
+}
+
+fn total_area[T: Shape](xs: List[T]) -> Int {
+  var total: Int = 0
+  for x: T in xs {
+    total = total + Shape.area(s: x)
+  }
+  return total
+}
+
+fn twice(n: Int) -> Int {
+  return n * 2
+}
+
+fn apply(f: fn(v: Int) -> Int, x: Int) -> Int {
+  return f(v: x)
+}
+
+type IntFn = fn(v: Int) -> Int
+
+fn adder(k: Int) -> IntFn may alloc {
+  return fn(v: Int) -> Int {
+    return v + k
+  }
+}
+
+fn compose(f: IntFn, g: IntFn) -> IntFn may alloc {
+  return fn(v: Int) -> Int {
+    return g(v: f(v: v))
+  }
+}
+
+fn label(prefix: Text, xs: List[Int]) -> List[Text] may alloc {
+  return List.map(
+    xs: xs,
+    f: fn(x: Int) -> Text may alloc {
+      return prefix ++ Int.to_text(x: x)
+    }
+  )
+}
+
+record Op {
+  name: Text
+  run: fn(v: Int) -> Int
+}
+
+fn run_all(ops: List[Op], x: Int) -> Int {
+  var acc: Int = x
+  for op: Op in ops {
+    acc = op.run(v: acc)
+  }
+  return acc
+}
+
+fn push_all(
+  b: inout Builder[Int],
+  f: fn(v: Int) -> Int,
+  n: Int where it >= 0
+) -> Unit may mutate, alloc {
+  for i: Int in 0 ..< n {
+    List.push(b: inout b, x: f(v: i))
+  }
+  return Unit
+}
+
+fn all_small(xs: List[Int], limit: Int) -> Bool {
+  return forall x: Int in xs: x < limit
+}
+
+fn has_zero(r: Result[List[Int], Text]) -> Bool {
+  return exists x: Int in r: x == 0
+}
+
+fn both_ways(p: Bool) -> Bool {
+  return forall b: Bool: b == p or b != p
+}
+
+example declared_functions_as_values {
+  apply(f: twice, x: 21) == 42
+  apply(f: Int.abs, x: -3) == 3
+}
+
+example closures_capture_by_value {
+  adder(k: 5)(v: 1) == 6
+  compose(f: twice, g: adder(k: 1))(v: 4) == 9
+  label(prefix: "n", xs: [1, 2]) == ["n1", "n2"]
+  apply(
+    f: fn(v: Int) -> Int {
+      return v - 1
+    },
+    x: 1
+  ) == 0
+}
+
+example function_values_in_data {
+  run_all(ops: [Op { name: "double", run: twice }, Op { name: "inc", run: adder(k: 1) }], x: 3) == 7
+}
+
+fn pushed(f: fn(v: Int) -> Int, n: Int where it >= 0) -> List[Int] may mutate, alloc {
+  var b: Builder[Int] = List.builder()
+  push_all(b: inout b, f: f, n: n)
+  return List.finish(b: b)
+}
+
+example closures_with_inout {
+  pushed(f: twice, n: 3) == [0, 2, 4]
+  pushed(f: adder(k: 10), n: 2) == [10, 11]
+}
+
+example interfaces {
+  describe(s: Square { side: 3 }) == "square 9"
+  describe(s: Rect { w: 2, h: 5 }) == "rect 10"
+  total_area(xs: [Square { side: 1 }, Square { side: 2 }]) == 5
+  Shape.area(s: Rect { w: 3, h: 3 }) == 9
+}
+
+example quantifiers_at_runtime {
+  all_small(xs: [1, 2, 3], limit: 4)
+  not all_small(xs: [1, 5], limit: 4)
+  has_zero(r: Ok(value: [3, 0]))
+  not has_zero(r: Err(error: "none"))
+  both_ways(p: true)
+  forall i: Int in 0 ..< 3: i < 3
+  exists i: Int in 0 ..< 3 where i > 1: i == 2
+}

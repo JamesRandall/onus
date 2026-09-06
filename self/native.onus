@@ -26,12 +26,20 @@ import lowerir
 --     `onus_panic`; `Int` arithmetic uses the overflow intrinsics; `try` is a
 --     branch that returns the error from the enclosing function.
 --
--- Programs reaching a construct outside the v0 native subset are refused with
--- `E0800 primitive unavailable on target` (§19.1): closures and function
--- values, interfaces, quantifiers at runtime, `fake`, `old(...)`, `Spec`
--- values, and `sql` without libpq. `Text`, `Bytes`, `TypeInfo`, `Map` and
--- `Dict` are complete: the runtime carries the Unicode 16.0 tables
--- (docs/CHANGES.md item 175).
+-- Function values (docs/CHANGES.md item 178): a value of a function type is
+-- a pointer to a closure object, slot 0 the code address and the rest the
+-- captured values; its code takes the object and one slot per parameter
+-- (`ptr` for `inout`) and returns a slot. A declared function used as a value
+-- gets an adapter and a constant object; a closure is lifted to a function
+-- over its captures, taken by value. An interface dictionary is a constant
+-- table of such objects, one per method in interface order, and a bounded
+-- type parameter's dictionary is a hidden `ptr` parameter. A runtime
+-- quantifier is a loop; `fake` is an object of its behaviours; `old(...)` is
+-- a copy that is deep where a value can be mutated in place.
+--
+-- Programs reaching a construct outside the native subset are refused with
+-- `E0800 primitive unavailable on target` (§19.1): `Spec` values, a generic
+-- function used as a value, and `sql` without libpq.
 --
 -- A construct the native backend does not compile in v0, at the definition that uses it.
 pub record Unsupported {
@@ -74,6 +82,23 @@ record ExampleFn {
   fn_name: Text
 }
 
+-- A local a closure captures: where the enclosing function keeps it, and its types.
+record Capture {
+  name: Text
+  ptr: Text
+  t: Text
+  ty: types.Type
+}
+
+-- An impl, by its dictionary's emitted name.
+record ImplRef {
+  module_name: Text
+  def: defs.Def
+  iface: defs.Def
+  dict_name: Text
+  entries: List[ir.Entry]
+}
+
 record Store {
   name: Text
   t: Text
@@ -98,6 +123,18 @@ record N {
   lazy_consts: Dict[Int, Bool]
   -- Structural comparers generated so far, by type text (see `eq_fn_of`).
   eq_fns: Dict[Text, Text]
+  -- Function-value objects emitted so far (`fn_value`), by the target's emitted name.
+  fn_vals: Dict[Text, Text]
+  -- Closures lifted so far, for naming.
+  closure_count: Int where it >= 0
+  -- The current function's dictionary parameters: name → interface.
+  dict_param_ifaces: Dict[Text, Int]
+  -- Copiers generated so far (`copy_fn_of`), by type text.
+  copy_fns: Dict[Text, Text]
+  -- Whether a type's values can be mutated in place (`needs_copy`), by type text.
+  mutable_shape: Dict[Text, Bool]
+  -- Impls by their dictionary's emitted name.
+  impls: Dict[Text, ImplRef]
   declared: Dict[Text, Bool]
   fns: Builder[Text]
   unsupported: Builder[Unsupported]
@@ -155,6 +192,12 @@ fn new_n(
     text_count: 0,
     lazy_consts: Map.dict(),
     eq_fns: Map.dict(),
+    fn_vals: Map.dict(),
+    closure_count: 0,
+    dict_param_ifaces: Map.dict(),
+    copy_fns: Map.dict(),
+    mutable_shape: Map.dict(),
+    impls: Map.dict(),
     declared: Map.dict(),
     fns: List.builder(),
     unsupported: List.builder(),
@@ -512,7 +555,7 @@ fn ll_of(ctx: context.Context, t: types.Type) -> Result[Text, Text] may alloc {
     return Err(error: "`" ++ context.get_def(ctx: ctx, id: def).name ++ "` values")
   }
   | types.ParamT(_) -> return Ok(value: "i64")
-  | types.FnT(_, _, _) -> return Err(error: "function values")
+  | types.FnT(_, _, _) -> return Ok(value: "ptr")
   | types.TypeInfoT -> return Ok(value: "ptr")
   | types.SpecT -> return Err(error: "`Spec` values")
   | types.ErrorT -> return Ok(value: "i64")
@@ -1265,6 +1308,10 @@ fn visit_expr(
     visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: value)
     visit_block(fuel: fuel - 1, ctx: ctx, queue: inout queue, b: checks)
   }
+  -- A dictionary reaches every method of its impl (`reachable` queues them when its name is taken).
+  | ir.DictE(_, _, mod, name) -> queue = queue ++ [
+    fn_name(module: context.module_name(ctx: ctx, id: mod), name: name)
+  ]
   | _ -> skip()
   return Unit
 }
@@ -1273,6 +1320,8 @@ fn visit_expr(
 fn reachable(n: N, ctx: context.Context) -> Dict[Text, Bool] may alloc, mutate {
   var by_name: Dict[Text, ir.Fn] = Map.dict()
   var consts: Dict[Text, ir.Expr] = Map.dict()
+  -- An impl's methods, by its dictionary's name: reached together with the dictionary.
+  var impl_fns: Dict[Text, List[Text]] = Map.dict()
   for m: ir.Module in n.modules {
     for item: ir.Item in m.items {
       match item with
@@ -1281,10 +1330,17 @@ fn reachable(n: N, ctx: context.Context) -> Dict[Text, Bool] may alloc, mutate {
         key: fn_name(module: m.mod.name, name: f.name),
         value: f
       )
-      | ir.ImplItem(_, _, _, _, fns, _) -> {
+      | ir.ImplItem(_, _, _, dict_name, fns, _) -> {
+        var names: Builder[Text] = List.builder()
         for f: ir.Fn in fns {
           Map.set(d: inout by_name, key: fn_name(module: m.mod.name, name: f.name), value: f)
+          List.push(b: inout names, x: fn_name(module: m.mod.name, name: f.name))
         }
+        Map.set(
+          d: inout impl_fns,
+          key: fn_name(module: m.mod.name, name: dict_name),
+          value: List.finish(b: names)
+        )
       }
       | ir.ConstItem(def, _, value) -> Map.set(
         d: inout consts,
@@ -1343,6 +1399,9 @@ fn reachable(n: N, ctx: context.Context) -> Dict[Text, Bool] may alloc, mutate {
       match Map.find(d: consts, key: d) with
       | Some(value) -> visit_expr(fuel: max_depth, ctx: ctx, queue: inout queue, e: value)
       | None -> skip()
+      match Map.find(d: impl_fns, key: d) with
+      | Some(value) -> queue = queue ++ value
+      | None -> skip()
     }
   }
   return seen
@@ -1387,12 +1446,20 @@ fn fn_item_body(
   }
   let name: Text = fn_name(module: m.mod.name, name: f.name)
   try require_native(n: n, ctx: ctx, def: f.def)
-  if List.len(xs: f.dict_params) > 0 {
-    return Err(error: "functions with interface-bounded type parameters")
-  }
   begin_fn(n: inout n)
   var params: Builder[Text] = List.builder()
   var stores: Builder[Store] = List.builder()
+  -- A bounded type parameter's dictionary comes first, as a pointer to its table (item 178).
+  var dict_ifaces: Dict[Text, Int] = Map.dict()
+  for d: ir.DictParam in f.dict_params {
+    Map.set(d: inout dict_ifaces, key: d.name, value: d.iface)
+    List.push(b: inout params, x: "ptr %\"p." ++ d.name ++ "\"")
+    List.push(
+      b: inout stores,
+      x: Store { name: d.name, t: "ptr", ty: prim_unit(), is_inout: false }
+    )
+  }
+  n = { n with dict_param_ifaces: dict_ifaces }
   for c: ir.ConstParam in f.const_params {
     let t: Text = try ll_of(ctx: ctx, t: c.ty)
     List.push(b: inout params, x: t ++ " %\"p." ++ c.name ++ "\"")
@@ -1838,6 +1905,14 @@ fn prim_int() -> types.Type {
   return types.Prim(name: "Int")
 }
 
+fn prim_unit() -> types.Type {
+  return types.Prim(name: "Unit")
+}
+
+fn prim_bool() -> types.Type {
+  return types.Prim(name: "Bool")
+}
+
 fn stmt_ir(
   fuel: Int where it >= 0,
   n: inout N,
@@ -2140,12 +2215,13 @@ fn expr_val(
     )
     return Ok(value: val(v: r, t: t))
   }
-  | ir.Call(target, sig, _, consts, args, ty, decoder, targs) -> return call_val(
+  | ir.Call(target, sig, dicts, consts, args, ty, decoder, targs) -> return call_val(
     fuel: fuel - 1,
     n: inout n,
     ctx: ctx,
     target: target,
     sig: sig,
+    dicts: dicts,
     consts: consts,
     args: args,
     ty: ty,
@@ -2394,12 +2470,54 @@ fn expr_val(
     | values.TextV(v) -> return Ok(value: val(v: text_global(n: inout n, x: v), t: "ptr"))
     | _ -> return const_val(fuel: fuel - 1, n: inout n, ctx: ctx, x: value)
   }
-  | ir.FnRef(_, _, _) -> return Err(error: "function values and closures")
-  | ir.CallValue(_, _, _, _) -> return Err(error: "function values and closures")
-  | ir.Closure(_, _, _, _, _) -> return Err(error: "function values and closures")
-  | ir.DictE(_, _, _, _) -> return Err(error: "interfaces")
-  | ir.DictParamE(_) -> return Err(error: "interfaces")
-  | ir.Quantifier(_, _, _, _, _, _) -> return Err(error: "quantifiers evaluated at runtime")
+  | ir.FnRef(def, name, sig) -> {
+    let v: Text = try fn_value(fuel: fuel - 1, n: inout n, ctx: ctx, def: def, name: name, sig: sig)
+    return Ok(value: val(v: v, t: "ptr"))
+  }
+  | ir.CallValue(callee, fn_type, args, ty) -> {
+    let cv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: callee)
+    let clo: Val = coerce_to(n: inout n, v: cv, to: "ptr")
+    let ret_ll: Text = try ll_of(ctx: ctx, t: ty)
+    match types.strip(t: fn_type) with
+    | types.FnT(params, _, _) -> return call_closure(
+      fuel: fuel - 1,
+      n: inout n,
+      ctx: ctx,
+      clo: clo.v,
+      params: params,
+      args: args,
+      ret_ll: ret_ll
+    )
+    | _ -> return Err(error: "a call through a value of unknown function type")
+  }
+  | ir.Closure(params, _, entry_checks, body, _) -> return closure_value(
+    fuel: fuel - 1,
+    n: inout n,
+    ctx: ctx,
+    params: params,
+    entry_checks: entry_checks,
+    body: body
+  )
+  | ir.DictE(_, _, mod, name) -> return Ok(
+    value: val(v: fn_name(module: context.module_name(ctx: ctx, id: mod), name: name), t: "ptr")
+  )
+  | ir.DictParamE(name) -> {
+    let l: Local = try local_of(n: n, name: name)
+    let r: Text = new_tmp(n: inout n)
+    emit_line(n: n, line: r ++ " = load ptr, ptr " ++ l.ptr)
+    return Ok(value: val(v: r, t: "ptr"))
+  }
+  | ir.Quantifier(quant, name, binder, domain, where_, body) -> return quantifier_val(
+    fuel: fuel - 1,
+    n: inout n,
+    ctx: ctx,
+    is_forall: quant == "forall",
+    name: name,
+    binder: binder,
+    domain: domain,
+    where_: where_,
+    body: body
+  )
   | ir.Recover(body, value, _) -> return recover_val(
     fuel: fuel - 1,
     n: inout n,
@@ -2407,11 +2525,37 @@ fn expr_val(
     body: body,
     result_expr: value
   )
-  | ir.Fake(_, _, _) -> return Err(error: "`fake`")
+  | ir.Fake(_, fields, _) -> {
+    -- A test double is inert natively: an object of its behaviours, which no primitive reads (§8.4).
+    let obj: Text = new_tmp(n: inout n)
+    emit_line(
+      n: n,
+      line: obj ++ " = call ptr @onus_alloc(i64 " ++ s(
+        i: slots_size(k: List.len(xs: fields))
+      ) ++ ")"
+    )
+    for i: Int in 0 ..< List.len(xs: fields) {
+      let fv: Val = try expr_val(
+        fuel: fuel - 1,
+        n: inout n,
+        ctx: ctx,
+        e: List.get(xs: fields, i: i).value
+      )
+      let slot: Text = to_slot(n: inout n, v: fv)
+      store_slot(n: inout n, obj: obj, idx: i, slot: slot)
+    }
+    return Ok(value: val(v: obj, t: "ptr"))
+  }
   | ir.TypeInfoE(name, fields) -> return Ok(
     value: typeinfo_obj(n: inout n, name: name, fields: fields)
   )
-  | ir.Snapshot(_, _) -> return Err(error: "`old(...)` in a checked postcondition")
+  | ir.Snapshot(value, ty) -> {
+    let t: Text = try ll_of(ctx: ctx, t: ty)
+    let sv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: value)
+    let slot: Text = to_slot(n: inout n, v: sv)
+    let copied: Text = try copy_slot(fuel: fuel - 1, n: inout n, ctx: ctx, ty: ty, slot: slot)
+    return Ok(value: from_slot(n: inout n, slot: copied, t: t))
+  }
 }
 
 fn float_op_name(op: Text) -> Text {
@@ -3028,6 +3172,7 @@ fn call_val(
   ctx: context.Context,
   target: ir.CallTarget,
   sig: types.Signature,
+  dicts: List[ir.Expr],
   consts: List[ir.Expr],
   args: List[ir.Expr],
   ty: types.Type,
@@ -3040,7 +3185,16 @@ fn call_val(
     return Err(error: "out of fuel")
   }
   match target with
-  | ir.DictTarget(_, _) -> return Err(error: "interface dispatch through a dictionary")
+  | ir.DictTarget(dict, name) -> return dict_call(
+    fuel: fuel - 1,
+    n: inout n,
+    ctx: ctx,
+    dict: dict,
+    method: name,
+    sig: sig,
+    args: args,
+    ty: ty
+  )
   | ir.FnTarget(def, name) -> {
     try require_native(n: n, ctx: ctx, def: def)
     let ret_ll: Text = try ll_of(ctx: ctx, t: ty)
@@ -3109,6 +3263,11 @@ fn call_val(
       return Ok(value: from_slot(n: inout n, slot: out, t: ret_ll))
     }
     let module: Text = context.module_name(ctx: ctx, id: def.mod)
+    for d: ir.Expr in dicts {
+      let dv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: d)
+      let dp: Val = coerce_to(n: inout n, v: dv, to: "ptr")
+      List.push(b: inout call_args, x: "ptr " ++ dp.v)
+    }
     for c: ir.Expr in consts {
       let cv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: c)
       List.push(b: inout call_args, x: cv.t ++ " " ++ cv.v)
@@ -3139,6 +3298,1287 @@ fn call_val(
     )
     return Ok(value: coerce_to(n: inout n, v: val(v: out, t: callee_ret), to: ret_ll))
   }
+}
+
+-- `ret` of a value as the current function's return type: a lifted closure and an adapter return slots.
+fn ret_val(n: inout N, v: Val) -> Unit may mutate, alloc {
+  var to: Text = n.fn_ret
+  if to == "void" {
+    to = "i64"
+  }
+  let c: Val = coerce_to(n: inout n, v: v, to: to)
+  emit_line(n: n, line: "ret " ++ c.t ++ " " ++ c.v)
+  return Unit
+}
+
+-- A declared function as a value (item 178): a constant closure object whose
+-- code is an adapter from the slot convention to the function's signature,
+-- emitted once per function.
+fn fn_value(
+  fuel: Int where it >= 0,
+  n: inout N,
+  ctx: context.Context,
+  def: defs.Def,
+  name: Text,
+  sig: types.Signature
+) -> Result[Text, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "out of fuel")
+  }
+  let module: Text = context.module_name(ctx: ctx, id: def.mod)
+  let target: Text = fn_name(module: module, name: name)
+  match Map.find(d: n.fn_vals, key: target) with
+  | Some(value) -> return Ok(value: value)
+  | None -> skip()
+  if List.len(xs: sig.tparams) > 0 {
+    return Err(error: "a generic function used as a value")
+  }
+  try require_native(n: n, ctx: ctx, def: def)
+  let base: Text = Text.slice(t: target, from: 0, to: Text.count(t: target) - 1)
+  let adapter: Text = base ++ "$fn\""
+  let v: Text = base ++ "$val\""
+  var fn_vals: Dict[Text, Text] = n.fn_vals
+  Map.set(d: inout fn_vals, key: target, value: v)
+  push_global(
+    n: n,
+    line: v ++ " = private constant [1 x i64] [i64 ptrtoint (ptr " ++ adapter ++ " to i64)]"
+  )
+  let saved: Saved = save_fn(n: n)
+  begin_fn(n: inout n)
+  n = { n with fn_ret: "i64" }
+  let r: Result[Unit, Text] = fn_value_body(
+    fuel: fuel - 1,
+    n: inout n,
+    ctx: ctx,
+    def: def,
+    target: target,
+    adapter: adapter,
+    sig: sig
+  )
+  restore_fn(n: inout n, sv: saved)
+  match r with
+  | Ok(_) -> skip()
+  | Err(error) -> return Err(error: error)
+  return Ok(value: v)
+}
+
+fn fn_value_body(
+  fuel: Int where it >= 0,
+  n: inout N,
+  ctx: context.Context,
+  def: defs.Def,
+  target: Text,
+  adapter: Text,
+  sig: types.Signature
+) -> Result[Unit, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "out of fuel")
+  }
+  var params: Builder[Text] = List.builder()
+  List.push(b: inout params, x: "ptr %env")
+  var call_args: Builder[Text] = List.builder()
+  var slot_types: Builder[Text] = List.builder()
+  for i: Int in 0 ..< List.len(xs: sig.params) {
+    let p: types.FnParam = List.get(xs: sig.params, i: i)
+    let arg: Text = "%\"a" ++ s(i: i) ++ "\""
+    if p.is_inout {
+      List.push(b: inout params, x: "ptr " ++ arg)
+      List.push(b: inout call_args, x: "ptr " ++ arg)
+      List.push(b: inout slot_types, x: "ptr")
+    } else {
+      List.push(b: inout params, x: "i64 " ++ arg)
+      List.push(b: inout slot_types, x: "i64")
+      if def.is_intrinsic {
+        List.push(b: inout call_args, x: "i64 " ++ arg)
+      } else {
+        let pt: Text = try ll_of(ctx: ctx, t: p.ty)
+        let v: Val = from_slot(n: inout n, slot: arg, t: pt)
+        List.push(b: inout call_args, x: v.t ++ " " ++ v.v)
+      }
+    }
+  }
+  let out: Text = new_tmp(n: inout n)
+  if def.is_intrinsic {
+    let q: Text = context.qualified_name(ctx: ctx, id: def.id)
+    let parts: List[Text] = Text.split(t: q, sep: ".")
+    let cname: Text = "@onus_" ++ Text.join(
+      parts: List.slice(xs: parts, from: 1, to: List.len(xs: parts)),
+      sep: "_"
+    )
+    declare_sig(
+      n: n,
+      sig: "declare i64 " ++ cname ++ "(" ++ Text.join(
+        parts: List.finish(b: slot_types),
+        sep: ", "
+      ) ++ ")"
+    )
+    emit_line(
+      n: n,
+      line: out ++ " = call i64 " ++ cname ++ "(" ++ Text.join(
+        parts: List.finish(b: call_args),
+        sep: ", "
+      ) ++ ")"
+    )
+    emit_line(n: n, line: "ret i64 " ++ out)
+  } else {
+    let ret: Text = try ll_of(ctx: ctx, t: sig.ret)
+    emit_line(
+      n: n,
+      line: out ++ " = call " ++ ret ++ " " ++ target ++ "(" ++ Text.join(
+        parts: List.finish(b: call_args),
+        sep: ", "
+      ) ++ ")"
+    )
+    let slot: Text = to_slot(n: inout n, v: val(v: out, t: ret))
+    emit_line(n: n, line: "ret i64 " ++ slot)
+  }
+  finish_fn(
+    n: n,
+    header: "define i64 " ++ adapter ++ "(" ++ Text.join(
+      parts: List.finish(b: params),
+      sep: ", "
+    ) ++ ") {"
+  )
+  return Ok(value: Unit)
+}
+
+-- The locals a closure reads that it does not bind itself, in first-use order: what it captures (§3.7).
+fn free_locals(
+  fuel: Int where it >= 0,
+  params: List[ir.Param],
+  entry_checks: List[ir.Stmt],
+  body: List[ir.Stmt]
+) -> List[Text] may mutate, alloc {
+  var bound: Dict[Text, Bool] = Map.dict()
+  for p: ir.Param in params {
+    Map.set(d: inout bound, key: p.name, value: true)
+  }
+  var refs: List[Text] = []
+  free_block(fuel: fuel, b: entry_checks, bound: inout bound, refs: inout refs)
+  free_block(fuel: fuel, b: body, bound: inout bound, refs: inout refs)
+  var out: Builder[Text] = List.builder()
+  for r: Text in refs {
+    if not Map.contains(d: bound, key: r) {
+      List.push(b: inout out, x: r)
+    }
+  }
+  return List.finish(b: out)
+}
+
+fn free_block(
+  fuel: Int where it >= 0,
+  b: List[ir.Stmt],
+  bound: inout Dict[Text, Bool],
+  refs: inout List[Text]
+) -> Unit may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Unit
+  }
+  for st: ir.Stmt in b {
+    free_stmt(fuel: fuel - 1, st: st, bound: inout bound, refs: inout refs)
+  }
+  return Unit
+}
+
+fn free_exprs(
+  fuel: Int where it >= 0,
+  es: List[ir.Expr],
+  bound: inout Dict[Text, Bool],
+  refs: inout List[Text]
+) -> Unit may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Unit
+  }
+  for e: ir.Expr in es {
+    free_expr(fuel: fuel - 1, e: e, bound: inout bound, refs: inout refs)
+  }
+  return Unit
+}
+
+fn free_inits(
+  fuel: Int where it >= 0,
+  fields: List[ir.FieldInit],
+  bound: inout Dict[Text, Bool],
+  refs: inout List[Text]
+) -> Unit may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Unit
+  }
+  for f: ir.FieldInit in fields {
+    free_expr(fuel: fuel - 1, e: f.value, bound: inout bound, refs: inout refs)
+  }
+  return Unit
+}
+
+fn free_stmt(
+  fuel: Int where it >= 0,
+  st: ir.Stmt,
+  bound: inout Dict[Text, Bool],
+  refs: inout List[Text]
+) -> Unit may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Unit
+  }
+  match st with
+  | ir.Let(name, _, _, value) -> {
+    Map.set(d: inout bound, key: name, value: true)
+    free_expr(fuel: fuel - 1, e: value, bound: inout bound, refs: inout refs)
+  }
+  | ir.Assign(_, _, value) -> free_expr(
+    fuel: fuel - 1,
+    e: value,
+    bound: inout bound,
+    refs: inout refs
+  )
+  | ir.Return(value) -> free_expr(fuel: fuel - 1, e: value, bound: inout bound, refs: inout refs)
+  | ir.ExprStmt(expr) -> free_expr(fuel: fuel - 1, e: expr, bound: inout bound, refs: inout refs)
+  | ir.If(cond, then_block, else_block) -> {
+    free_expr(fuel: fuel - 1, e: cond, bound: inout bound, refs: inout refs)
+    free_block(fuel: fuel - 1, b: then_block, bound: inout bound, refs: inout refs)
+    match else_block with
+    | Some(value) -> free_block(fuel: fuel - 1, b: value, bound: inout bound, refs: inout refs)
+    | None -> skip()
+  }
+  | ir.Match(tmp, _, scrutinee, arms) -> {
+    Map.set(d: inout bound, key: tmp, value: true)
+    free_expr(fuel: fuel - 1, e: scrutinee, bound: inout bound, refs: inout refs)
+    for a: ir.Arm in arms {
+      match a.pattern_test with
+      | Some(value) -> free_expr(fuel: fuel - 1, e: value, bound: inout bound, refs: inout refs)
+      | None -> skip()
+      for bd: ir.Binding in a.bindings {
+        Map.set(d: inout bound, key: bd.name, value: true)
+        free_expr(fuel: fuel - 1, e: bd.value, bound: inout bound, refs: inout refs)
+      }
+      match a.guard with
+      | Some(value) -> free_expr(fuel: fuel - 1, e: value, bound: inout bound, refs: inout refs)
+      | None -> skip()
+      free_block(fuel: fuel - 1, b: a.body, bound: inout bound, refs: inout refs)
+    }
+  }
+  | ir.Loop(cond, body) -> {
+    free_expr(fuel: fuel - 1, e: cond, bound: inout bound, refs: inout refs)
+    free_block(fuel: fuel - 1, b: body, bound: inout bound, refs: inout refs)
+  }
+  | ir.ForRange(name, lo, hi, body) -> {
+    Map.set(d: inout bound, key: name, value: true)
+    free_expr(fuel: fuel - 1, e: lo, bound: inout bound, refs: inout refs)
+    free_expr(fuel: fuel - 1, e: hi, bound: inout bound, refs: inout refs)
+    free_block(fuel: fuel - 1, b: body, bound: inout bound, refs: inout refs)
+  }
+  | ir.ForEach(name, _, list, body) -> {
+    Map.set(d: inout bound, key: name, value: true)
+    free_expr(fuel: fuel - 1, e: list, bound: inout bound, refs: inout refs)
+    free_block(fuel: fuel - 1, b: body, bound: inout bound, refs: inout refs)
+  }
+  | ir.Check(cond, _) -> free_expr(fuel: fuel - 1, e: cond, bound: inout bound, refs: inout refs)
+  | ir.Assert(cond) -> free_expr(fuel: fuel - 1, e: cond, bound: inout bound, refs: inout refs)
+  | ir.Reject(cond, _) -> free_expr(fuel: fuel - 1, e: cond, bound: inout bound, refs: inout refs)
+  | ir.CallInout(result_target, call, _) -> {
+    match result_target with
+    | Some(value) -> Map.set(d: inout bound, key: value.name, value: true)
+    | None -> skip()
+    free_expr(fuel: fuel - 1, e: call, bound: inout bound, refs: inout refs)
+  }
+  | ir.Unreachable -> skip()
+  | ir.Comment(_) -> skip()
+  return Unit
+}
+
+-- A `try ... else name: expr`: the name is bound for the expression.
+fn free_else(
+  fuel: Int where it >= 0,
+  ec: ir.ElseClause,
+  bound: inout Dict[Text, Bool],
+  refs: inout List[Text]
+) -> Unit may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Unit
+  }
+  match ec.name with
+  | Some(value) -> Map.set(d: inout bound, key: value, value: true)
+  | None -> skip()
+  free_expr(fuel: fuel - 1, e: ec.value, bound: inout bound, refs: inout refs)
+  return Unit
+}
+
+fn note_ref(refs: inout List[Text], name: Text) -> Unit may mutate, alloc {
+  if not List.contains(xs: refs, x: name) {
+    refs = refs ++ [name]
+  }
+  return Unit
+}
+
+fn free_expr(
+  fuel: Int where it >= 0,
+  e: ir.Expr,
+  bound: inout Dict[Text, Bool],
+  refs: inout List[Text]
+) -> Unit may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Unit
+  }
+  match e with
+  | ir.Local(name, _) -> note_ref(refs: inout refs, name: name)
+  | ir.DictParamE(name) -> note_ref(refs: inout refs, name: name)
+  | ir.Call(target, _, dicts, consts, args, _, _, _) -> {
+    match target with
+    | ir.DictTarget(dict, _) -> free_expr(
+      fuel: fuel - 1,
+      e: dict,
+      bound: inout bound,
+      refs: inout refs
+    )
+    | ir.FnTarget(_, _) -> skip()
+    free_exprs(fuel: fuel - 1, es: dicts, bound: inout bound, refs: inout refs)
+    free_exprs(fuel: fuel - 1, es: consts, bound: inout bound, refs: inout refs)
+    free_exprs(fuel: fuel - 1, es: args, bound: inout bound, refs: inout refs)
+  }
+  | ir.CallValue(callee, _, args, _) -> {
+    free_expr(fuel: fuel - 1, e: callee, bound: inout bound, refs: inout refs)
+    free_exprs(fuel: fuel - 1, es: args, bound: inout bound, refs: inout refs)
+  }
+  | ir.RecordE(_, _, fields) -> free_inits(
+    fuel: fuel - 1,
+    fields: fields,
+    bound: inout bound,
+    refs: inout refs
+  )
+  | ir.VariantE(_, _, fields) -> free_inits(
+    fuel: fuel - 1,
+    fields: fields,
+    bound: inout bound,
+    refs: inout refs
+  )
+  | ir.Fake(_, fields, _) -> free_inits(
+    fuel: fuel - 1,
+    fields: fields,
+    bound: inout bound,
+    refs: inout refs
+  )
+  | ir.Update(base, _, _, fields) -> {
+    free_expr(fuel: fuel - 1, e: base, bound: inout bound, refs: inout refs)
+    free_inits(fuel: fuel - 1, fields: fields, bound: inout bound, refs: inout refs)
+  }
+  | ir.FieldE(object, _, _, _) -> free_expr(
+    fuel: fuel - 1,
+    e: object,
+    bound: inout bound,
+    refs: inout refs
+  )
+  | ir.ListE(elems, _) -> free_exprs(
+    fuel: fuel - 1,
+    es: elems,
+    bound: inout bound,
+    refs: inout refs
+  )
+  | ir.And(operands) -> free_exprs(
+    fuel: fuel - 1,
+    es: operands,
+    bound: inout bound,
+    refs: inout refs
+  )
+  | ir.Or(operands) -> free_exprs(
+    fuel: fuel - 1,
+    es: operands,
+    bound: inout bound,
+    refs: inout refs
+  )
+  | ir.Concat(left, right, _, _) -> {
+    free_expr(fuel: fuel - 1, e: left, bound: inout bound, refs: inout refs)
+    free_expr(fuel: fuel - 1, e: right, bound: inout bound, refs: inout refs)
+  }
+  | ir.IntOp(_, left, right, _) -> {
+    free_expr(fuel: fuel - 1, e: left, bound: inout bound, refs: inout refs)
+    free_expr(fuel: fuel - 1, e: right, bound: inout bound, refs: inout refs)
+  }
+  | ir.FloatOp(_, left, right) -> {
+    free_expr(fuel: fuel - 1, e: left, bound: inout bound, refs: inout refs)
+    free_expr(fuel: fuel - 1, e: right, bound: inout bound, refs: inout refs)
+  }
+  | ir.Cmp(_, left, right, _) -> {
+    free_expr(fuel: fuel - 1, e: left, bound: inout bound, refs: inout refs)
+    free_expr(fuel: fuel - 1, e: right, bound: inout bound, refs: inout refs)
+  }
+  | ir.Eq(left, right, _, _, _) -> {
+    free_expr(fuel: fuel - 1, e: left, bound: inout bound, refs: inout refs)
+    free_expr(fuel: fuel - 1, e: right, bound: inout bound, refs: inout refs)
+  }
+  | ir.Implies(left, right) -> {
+    free_expr(fuel: fuel - 1, e: left, bound: inout bound, refs: inout refs)
+    free_expr(fuel: fuel - 1, e: right, bound: inout bound, refs: inout refs)
+  }
+  | ir.Neg(operand, _, _) -> free_expr(
+    fuel: fuel - 1,
+    e: operand,
+    bound: inout bound,
+    refs: inout refs
+  )
+  | ir.Not(operand) -> free_expr(fuel: fuel - 1, e: operand, bound: inout bound, refs: inout refs)
+  | ir.IsVariant(subject, _, _) -> free_expr(
+    fuel: fuel - 1,
+    e: subject,
+    bound: inout bound,
+    refs: inout refs
+  )
+  | ir.Try(operand, _, _, else_clause, _, _) -> {
+    free_expr(fuel: fuel - 1, e: operand, bound: inout bound, refs: inout refs)
+    match else_clause with
+    | Some(value) -> free_else(fuel: fuel - 1, ec: value, bound: inout bound, refs: inout refs)
+    | None -> skip()
+  }
+  | ir.Recover(body, value, _) -> {
+    free_block(fuel: fuel - 1, b: body, bound: inout bound, refs: inout refs)
+    free_expr(fuel: fuel - 1, e: value, bound: inout bound, refs: inout refs)
+  }
+  | ir.Quantifier(_, name, _, domain, where_, body) -> {
+    Map.set(d: inout bound, key: name, value: true)
+    match domain with
+    | ir.RangeD(lo, hi) -> {
+      free_expr(fuel: fuel - 1, e: lo, bound: inout bound, refs: inout refs)
+      free_expr(fuel: fuel - 1, e: hi, bound: inout bound, refs: inout refs)
+    }
+    | ir.ListD(expr) -> free_expr(fuel: fuel - 1, e: expr, bound: inout bound, refs: inout refs)
+    | ir.OkListD(expr) -> free_expr(fuel: fuel - 1, e: expr, bound: inout bound, refs: inout refs)
+    | ir.BoolsD -> skip()
+    match where_ with
+    | Some(value) -> free_expr(fuel: fuel - 1, e: value, bound: inout bound, refs: inout refs)
+    | None -> skip()
+    free_expr(fuel: fuel - 1, e: body, bound: inout bound, refs: inout refs)
+  }
+  | ir.Closure(params, _, entry_checks, body, _) -> {
+    for p: ir.Param in params {
+      Map.set(d: inout bound, key: p.name, value: true)
+    }
+    free_block(fuel: fuel - 1, b: entry_checks, bound: inout bound, refs: inout refs)
+    free_block(fuel: fuel - 1, b: body, bound: inout bound, refs: inout refs)
+  }
+  | ir.Checked(value, it_name, _, checks) -> {
+    Map.set(d: inout bound, key: it_name, value: true)
+    free_expr(fuel: fuel - 1, e: value, bound: inout bound, refs: inout refs)
+    free_block(fuel: fuel - 1, b: checks, bound: inout bound, refs: inout refs)
+  }
+  | ir.Snapshot(value, _) -> free_expr(
+    fuel: fuel - 1,
+    e: value,
+    bound: inout bound,
+    refs: inout refs
+  )
+  | _ -> skip()
+  return Unit
+}
+
+-- A closure (item 178): lifted to `@closure$N` over its captured locals, which
+-- it reads from the object on entry, and built as an object of the code
+-- address and the captured values.
+fn closure_value(
+  fuel: Int where it >= 0,
+  n: inout N,
+  ctx: context.Context,
+  params: List[ir.Param],
+  entry_checks: List[ir.Stmt],
+  body: List[ir.Stmt]
+) -> Result[Val, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "out of fuel")
+  }
+  var caps: Builder[Capture] = List.builder()
+  for name: Text in free_locals(
+    fuel: max_depth,
+    params: params,
+    entry_checks: entry_checks,
+    body: body
+  ) {
+    let l: Local = try local_of(n: n, name: name)
+    List.push(b: inout caps, x: Capture { name: name, ptr: l.ptr, t: l.t, ty: l.ty })
+  }
+  let cap_list: List[Capture] = List.finish(b: caps)
+  n = { n with closure_count: n.closure_count + 1 }
+  let name: Text = "@\"closure$" ++ s(i: n.closure_count) ++ "\""
+  let saved: Saved = save_fn(n: n)
+  begin_fn(n: inout n)
+  n = { n with fn_ret: "i64" }
+  let r: Result[Unit, Text] = closure_body(
+    fuel: fuel - 1,
+    n: inout n,
+    ctx: ctx,
+    name: name,
+    params: params,
+    caps: cap_list,
+    entry_checks: entry_checks,
+    body: body
+  )
+  restore_fn(n: inout n, sv: saved)
+  match r with
+  | Ok(_) -> skip()
+  | Err(error) -> return Err(error: error)
+  let obj: Text = new_tmp(n: inout n)
+  emit_line(
+    n: n,
+    line: obj ++ " = call ptr @onus_alloc(i64 " ++ s(i: 8 * (1 + List.len(xs: cap_list))) ++ ")"
+  )
+  let code: Text = new_tmp(n: inout n)
+  emit_line(n: n, line: code ++ " = ptrtoint ptr " ++ name ++ " to i64")
+  store_slot(n: inout n, obj: obj, idx: 0, slot: code)
+  for i: Int in 0 ..< List.len(xs: cap_list) {
+    let c: Capture = List.get(xs: cap_list, i: i)
+    let cur: Text = new_tmp(n: inout n)
+    emit_line(n: n, line: cur ++ " = load " ++ c.t ++ ", ptr " ++ c.ptr)
+    let slot: Text = to_slot(n: inout n, v: val(v: cur, t: c.t))
+    store_slot(n: inout n, obj: obj, idx: 1 + i, slot: slot)
+  }
+  return Ok(value: val(v: obj, t: "ptr"))
+}
+
+fn closure_body(
+  fuel: Int where it >= 0,
+  n: inout N,
+  ctx: context.Context,
+  name: Text,
+  params: List[ir.Param],
+  caps: List[Capture],
+  entry_checks: List[ir.Stmt],
+  body: List[ir.Stmt]
+) -> Result[Unit, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "out of fuel")
+  }
+  var shown: Builder[Text] = List.builder()
+  List.push(b: inout shown, x: "ptr %env")
+  for p: ir.Param in params {
+    let t: Text = try ll_of(ctx: ctx, t: p.ty)
+    let arg: Text = "%\"p." ++ p.name ++ "\""
+    if p.is_inout {
+      List.push(b: inout shown, x: "ptr " ++ arg)
+      set_local(n: n, name: p.name, l: Local { ptr: arg, t: t, ty: p.ty })
+    } else {
+      List.push(b: inout shown, x: "i64 " ++ arg)
+      let v: Val = from_slot(n: inout n, slot: arg, t: t)
+      let ptr: Text = alloc_local(n: inout n, name: p.name, t: t, ty: p.ty)
+      emit_line(n: n, line: "store " ++ t ++ " " ++ v.v ++ ", ptr " ++ ptr)
+    }
+  }
+  for i: Int in 0 ..< List.len(xs: caps) {
+    let c: Capture = List.get(xs: caps, i: i)
+    let slot: Text = load_slot(n: inout n, obj: "%env", idx: 1 + i)
+    let v: Val = from_slot(n: inout n, slot: slot, t: c.t)
+    let ptr: Text = alloc_local(n: inout n, name: c.name, t: c.t, ty: c.ty)
+    emit_line(n: n, line: "store " ++ c.t ++ " " ++ v.v ++ ", ptr " ++ ptr)
+  }
+  try block_stmts(fuel: fuel - 1, n: inout n, ctx: ctx, b: entry_checks)
+  try block_stmts(fuel: fuel - 1, n: inout n, ctx: ctx, b: body)
+  if not n.terminated {
+    emit_line(n: n, line: "ret i64 0")
+  }
+  finish_fn(
+    n: n,
+    header: "define i64 " ++ name ++ "(" ++ Text.join(
+      parts: List.finish(b: shown),
+      sep: ", "
+    ) ++ ") {"
+  )
+  return Ok(value: Unit)
+}
+
+-- A call through a closure object: its code takes the object and one slot (or `inout` address) per parameter and returns a slot.
+fn call_closure(
+  fuel: Int where it >= 0,
+  n: inout N,
+  ctx: context.Context,
+  clo: Text,
+  params: List[types.FnParam],
+  args: List[ir.Expr],
+  ret_ll: Text
+) -> Result[Val, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "out of fuel")
+  }
+  let code_slot: Text = load_slot(n: inout n, obj: clo, idx: 0)
+  let code: Val = from_slot(n: inout n, slot: code_slot, t: "ptr")
+  var argv: Builder[Text] = List.builder()
+  List.push(b: inout argv, x: "ptr " ++ clo)
+  for i: Int in 0 ..< List.len(xs: params) {
+    if i < List.len(xs: args) {
+      let p: types.FnParam = List.get(xs: params, i: i)
+      let a: ir.Expr = List.get(xs: args, i: i)
+      if p.is_inout {
+        let addr: Text = try address_of(n: n, a: a)
+        List.push(b: inout argv, x: "ptr " ++ addr)
+      } else {
+        let av: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: a)
+        let slot: Text = to_slot(n: inout n, v: av)
+        List.push(b: inout argv, x: "i64 " ++ slot)
+      }
+    }
+  }
+  let out: Text = new_tmp(n: inout n)
+  emit_line(
+    n: n,
+    line: out ++ " = call i64 " ++ code.v ++ "(" ++ Text.join(
+      parts: List.finish(b: argv),
+      sep: ", "
+    ) ++ ")"
+  )
+  return Ok(value: from_slot(n: inout n, slot: out, t: ret_ll))
+}
+
+-- The names of an interface's functions in declaration order: a dictionary's layout.
+fn iface_methods(
+  n: N,
+  ctx: context.Context,
+  iface: Int
+) -> Result[List[Text], Text] may alloc, mutate {
+  for m: ir.Module in n.modules {
+    for item: ir.Item in m.items {
+      match item with
+      | ir.InterfaceItem(def, _, fns) -> {
+        if def.id == iface {
+          var names: Builder[Text] = List.builder()
+          for f: ir.IfaceFn in fns {
+            List.push(b: inout names, x: f.def.name)
+          }
+          return Ok(value: List.finish(b: names))
+        }
+      }
+      | _ -> skip()
+    }
+  }
+  return Err(
+    error: "dispatch on `" ++ context.get_def(
+      ctx: ctx,
+      id: iface
+    ).name ++ "`, whose interface is not in the program"
+  )
+}
+
+-- A call through a dictionary (item 178): the method's object is the dictionary's slot at the method's index.
+fn dict_call(
+  fuel: Int where it >= 0,
+  n: inout N,
+  ctx: context.Context,
+  dict: ir.Expr,
+  method: Text,
+  sig: types.Signature,
+  args: List[ir.Expr],
+  ty: types.Type
+) -> Result[Val, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "out of fuel")
+  }
+  var iface_id: Int = -1
+  match dict with
+  | ir.DictE(iface, _, _, _) -> iface_id = iface.id
+  | ir.DictParamE(name) -> {
+    match Map.find(d: n.dict_param_ifaces, key: name) with
+    | Some(value) -> iface_id = value
+    | None -> skip()
+  }
+  | _ -> skip()
+  if iface_id < 0 {
+    return Err(error: "interface dispatch with no known target")
+  }
+  let methods: List[Text] = try iface_methods(n: n, ctx: ctx, iface: iface_id)
+  var idx: Int = -1
+  match List.index_of(xs: methods, x: method) with
+  | Some(value) -> idx = value
+  | None -> return Err(
+    error: "dispatch on `" ++ method ++ "`, which its interface does not declare"
+  )
+  let dv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: dict)
+  let d: Val = coerce_to(n: inout n, v: dv, to: "ptr")
+  let slot: Text = load_slot(n: inout n, obj: d.v, idx: idx)
+  let clo: Val = from_slot(n: inout n, slot: slot, t: "ptr")
+  let ret_ll: Text = try ll_of(ctx: ctx, t: ty)
+  return call_closure(
+    fuel: fuel - 1,
+    n: inout n,
+    ctx: ctx,
+    clo: clo.v,
+    params: sig.params,
+    args: args,
+    ret_ll: ret_ll
+  )
+}
+
+-- An impl's dictionary (item 178): a constant table of its methods' objects in interface order.
+fn dict_global(
+  fuel: Int where it >= 0,
+  n: inout N,
+  ctx: context.Context,
+  impl: ImplRef
+) -> Unit may mutate, alloc {
+  match dict_global_body(fuel: fuel, n: inout n, ctx: ctx, impl: impl) with
+  | Ok(_) -> skip()
+  | Err(error) -> record_unsupported(
+    n: n,
+    def: context.qualified_name(ctx: ctx, id: impl.def.id),
+    file: impl.def.file,
+    span: impl.def.span,
+    what: error
+  )
+  return Unit
+}
+
+fn dict_global_body(
+  fuel: Int where it >= 0,
+  n: inout N,
+  ctx: context.Context,
+  impl: ImplRef
+) -> Result[Unit, Text] may mutate, alloc {
+  let methods: List[Text] = try iface_methods(n: n, ctx: ctx, iface: impl.iface.id)
+  var slots: Builder[Text] = List.builder()
+  for mname: Text in methods {
+    var found: Option[ir.Entry] = None
+    for e: ir.Entry in impl.entries {
+      if e.name == mname {
+        found = Some(value: e)
+      }
+    }
+    match found with
+    | None -> return Err(error: "an impl without `" ++ mname ++ "`")
+    | Some(value) -> {
+      let v: Text = try fn_value(
+        fuel: fuel,
+        n: inout n,
+        ctx: ctx,
+        def: value.fn_ir.def,
+        name: value.fn_ir.name,
+        sig: value.fn_ir.sig
+      )
+      List.push(b: inout slots, x: "i64 ptrtoint (ptr " ++ v ++ " to i64)")
+    }
+  }
+  let slot_list: List[Text] = List.finish(b: slots)
+  var body: Text = "i64 0"
+  var count: Int = List.len(xs: slot_list)
+  if count > 0 {
+    body = Text.join(parts: slot_list, sep: ", ")
+  } else {
+    count = 1
+  }
+  push_global(
+    n: n,
+    line: fn_name(module: impl.module_name, name: impl.dict_name) ++ " = private constant [" ++ s(
+      i: count
+    ) ++ " x i64] [" ++ body ++ "]"
+  )
+  return Ok(value: Unit)
+}
+
+-- A quantifier evaluated at runtime (§5.3; item 178): a loop over the domain
+-- that stops at the first counterexample (`forall`) or witness (`exists`); an
+-- `Ok`/`Some` domain ranges over its list and an `Err`/`None` over nothing.
+fn quantifier_val(
+  fuel: Int where it >= 0,
+  n: inout N,
+  ctx: context.Context,
+  is_forall: Bool,
+  name: Text,
+  binder: types.Type,
+  domain: ir.Domain,
+  where_: Option[ir.Expr],
+  body: ir.Expr
+) -> Result[Val, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "out of fuel")
+  }
+  let acc: Text = alloc_local(n: inout n, name: "$q", t: "i1", ty: prim_bool())
+  var init: Text = "0"
+  if is_forall {
+    init = "1"
+  }
+  emit_line(n: n, line: "store i1 " ++ init ++ ", ptr " ++ acc)
+  let idx: Text = alloc_local(n: inout n, name: "$qi", t: "i64", ty: prim_int())
+  let cond_l: Text = new_label(n: inout n, prefix: "q")
+  let body_l: Text = new_label(n: inout n, prefix: "qbody")
+  let next_l: Text = new_label(n: inout n, prefix: "qnext")
+  let stop_l: Text = new_label(n: inout n, prefix: "qstop")
+  let end_l: Text = new_label(n: inout n, prefix: "qend")
+  var hi_text: Text = ""
+  var list: Option[Text] = None
+  let bt: Text = try ll_of(ctx: ctx, t: binder)
+  let binder_ptr: Text = alloc_local(n: inout n, name: name, t: bt, ty: binder)
+  match domain with
+  | ir.RangeD(lo, hi) -> {
+    let lov: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: lo)
+    let lo_v: Val = coerce_to(n: inout n, v: lov, to: "i64")
+    let hiv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: hi)
+    let hi_v: Val = coerce_to(n: inout n, v: hiv, to: "i64")
+    hi_text = hi_v.v
+    emit_line(n: n, line: "store i64 " ++ lo_v.v ++ ", ptr " ++ idx)
+  }
+  | ir.BoolsD -> {
+    hi_text = "2"
+    emit_line(n: n, line: "store i64 0, ptr " ++ idx)
+  }
+  | ir.ListD(expr) -> {
+    hi_text = try quantifier_list(
+      fuel: fuel - 1,
+      n: inout n,
+      ctx: ctx,
+      expr: expr,
+      ok_list: false,
+      idx: idx,
+      end_l: end_l,
+      list: inout list
+    )
+  }
+  | ir.OkListD(expr) -> {
+    hi_text = try quantifier_list(
+      fuel: fuel - 1,
+      n: inout n,
+      ctx: ctx,
+      expr: expr,
+      ok_list: true,
+      idx: idx,
+      end_l: end_l,
+      list: inout list
+    )
+  }
+  br(n: inout n, target: cond_l)
+  start_block(n: inout n, name: cond_l)
+  let i: Text = new_tmp(n: inout n)
+  emit_line(n: n, line: i ++ " = load i64, ptr " ++ idx)
+  let more: Text = new_tmp(n: inout n)
+  emit_line(n: n, line: more ++ " = icmp slt i64 " ++ i ++ ", " ++ hi_text)
+  cond_br(n: inout n, cond: more, then_l: body_l, else_l: end_l)
+  start_block(n: inout n, name: body_l)
+  match domain with
+  | ir.BoolsD -> {
+    let b: Text = new_tmp(n: inout n)
+    emit_line(n: n, line: b ++ " = icmp eq i64 " ++ i ++ ", 0")
+    emit_line(n: n, line: "store i1 " ++ b ++ ", ptr " ++ binder_ptr)
+  }
+  | _ -> {
+    match list with
+    | None -> emit_line(n: n, line: "store i64 " ++ i ++ ", ptr " ++ binder_ptr)
+    | Some(value) -> {
+      let slot: Text = new_tmp(n: inout n)
+      emit_line(
+        n: n,
+        line: slot ++ " = call i64 @onus_rt_list_get(ptr " ++ value ++ ", i64 " ++ i ++ ")"
+      )
+      let v: Val = from_slot(n: inout n, slot: slot, t: bt)
+      emit_line(n: n, line: "store " ++ bt ++ " " ++ v.v ++ ", ptr " ++ binder_ptr)
+    }
+  }
+  match where_ with
+  | Some(value) -> {
+    let wv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: value)
+    let w: Val = coerce_to(n: inout n, v: wv, to: "i1")
+    let test_l: Text = new_label(n: inout n, prefix: "qtest")
+    cond_br(n: inout n, cond: w.v, then_l: test_l, else_l: next_l)
+    start_block(n: inout n, name: test_l)
+  }
+  | None -> skip()
+  let bv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: body)
+  let bodyv: Val = coerce_to(n: inout n, v: bv, to: "i1")
+  if is_forall {
+    cond_br(n: inout n, cond: bodyv.v, then_l: next_l, else_l: stop_l)
+  } else {
+    cond_br(n: inout n, cond: bodyv.v, then_l: stop_l, else_l: next_l)
+  }
+  start_block(n: inout n, name: stop_l)
+  var stopped: Text = "1"
+  if is_forall {
+    stopped = "0"
+  }
+  emit_line(n: n, line: "store i1 " ++ stopped ++ ", ptr " ++ acc)
+  br(n: inout n, target: end_l)
+  start_block(n: inout n, name: next_l)
+  let next: Text = new_tmp(n: inout n)
+  emit_line(n: n, line: next ++ " = add i64 " ++ i ++ ", 1")
+  emit_line(n: n, line: "store i64 " ++ next ++ ", ptr " ++ idx)
+  br(n: inout n, target: cond_l)
+  start_block(n: inout n, name: end_l)
+  let out: Text = new_tmp(n: inout n)
+  emit_line(n: n, line: out ++ " = load i1, ptr " ++ acc)
+  return Ok(value: val(v: out, t: "i1"))
+}
+
+-- The list domain of a quantifier: the list itself, or the one inside an `Ok`/`Some`; returns the length temporary.
+fn quantifier_list(
+  fuel: Int where it >= 0,
+  n: inout N,
+  ctx: context.Context,
+  expr: ir.Expr,
+  ok_list: Bool,
+  idx: Text,
+  end_l: Text,
+  list: inout Option[Text]
+) -> Result[Text, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "out of fuel")
+  }
+  let dv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: expr)
+  let v: Val = coerce_to(n: inout n, v: dv, to: "ptr")
+  let lp: Text = alloc_local(n: inout n, name: "$ql", t: "ptr", ty: prim_unit())
+  if ok_list {
+    -- `Ok`/`Some` carry the list in slot 1; `Err`/`None` range over nothing.
+    emit_line(n: n, line: "store ptr null, ptr " ++ lp)
+    let tag: Text = load_slot(n: inout n, obj: v.v, idx: 0)
+    let is_ok: Text = new_tmp(n: inout n)
+    emit_line(n: n, line: is_ok ++ " = icmp eq i64 " ++ tag ++ ", 0")
+    let ok_l: Text = new_label(n: inout n, prefix: "qok")
+    let none_l: Text = new_label(n: inout n, prefix: "qnone")
+    cond_br(n: inout n, cond: is_ok, then_l: ok_l, else_l: none_l)
+    start_block(n: inout n, name: ok_l)
+    let inner_slot: Text = load_slot(n: inout n, obj: v.v, idx: 1)
+    let inner: Val = from_slot(n: inout n, slot: inner_slot, t: "ptr")
+    emit_line(n: n, line: "store ptr " ++ inner.v ++ ", ptr " ++ lp)
+    br(n: inout n, target: none_l)
+    start_block(n: inout n, name: none_l)
+  } else {
+    emit_line(n: n, line: "store ptr " ++ v.v ++ ", ptr " ++ lp)
+  }
+  let l: Text = new_tmp(n: inout n)
+  emit_line(n: n, line: l ++ " = load ptr, ptr " ++ lp)
+  list = Some(value: l)
+  let is_null: Text = new_tmp(n: inout n)
+  emit_line(n: n, line: is_null ++ " = icmp eq ptr " ++ l ++ ", null")
+  let len_l: Text = new_label(n: inout n, prefix: "qlen")
+  let skip_l: Text = new_label(n: inout n, prefix: "qskip")
+  cond_br(n: inout n, cond: is_null, then_l: skip_l, else_l: len_l)
+  start_block(n: inout n, name: skip_l)
+  emit_line(n: n, line: "store i64 0, ptr " ++ idx)
+  br(n: inout n, target: end_l)
+  start_block(n: inout n, name: len_l)
+  let hi: Text = new_tmp(n: inout n)
+  emit_line(n: n, line: hi ++ " = call i64 @onus_rt_list_len(ptr " ++ l ++ ")")
+  emit_line(n: n, line: "store i64 0, ptr " ++ idx)
+  return Ok(value: hi)
+}
+
+-- Whether values of `ty` can be mutated in place natively (builders, grids, maps, or anything holding one), so that `old(...)` must copy them.
+fn needs_copy(
+  fuel: Int where it >= 0,
+  n: N,
+  ctx: context.Context,
+  ty: types.Type
+) -> Bool may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return false
+  }
+  let st: types.Type = types.strip(t: ty)
+  match st with
+  | types.Opaque(def, args) -> {
+    let q: Text = context.qualified_name(ctx: ctx, id: def)
+    if q == "std.list.Builder" or q == "std.grid.Grid" or q == "std.map.Map" or q == "std.map.Dict" {
+      return true
+    }
+    if q == "std.list.List" and List.len(xs: args) > 0 {
+      match type_arg_type(a: List.get(xs: args, i: 0)) with
+      | Some(value) -> return needs_copy(fuel: fuel - 1, n: n, ctx: ctx, ty: value)
+      | None -> return false
+    }
+    return false
+  }
+  | types.RecordT(def, args) -> return needs_copy_owners(
+    fuel: fuel - 1,
+    n: n,
+    ctx: ctx,
+    st: st,
+    def: def,
+    args: args,
+    owners: [def]
+  )
+  | types.UnionT(def, args) -> return needs_copy_owners(
+    fuel: fuel - 1,
+    n: n,
+    ctx: ctx,
+    st: st,
+    def: def,
+    args: args,
+    owners: variants_of(ctx: ctx, union_def: def)
+  )
+  | _ -> return false
+}
+
+fn needs_copy_owners(
+  fuel: Int where it >= 0,
+  n: N,
+  ctx: context.Context,
+  st: types.Type,
+  def: Int,
+  args: List[types.TypeArg],
+  owners: List[Int]
+) -> Bool may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return false
+  }
+  let key: Text = typecheck.show(ctx: ctx, t: st)
+  match Map.find(d: n.mutable_shape, key: key) with
+  | Some(value) -> return value
+  | None -> skip()
+  var shapes: Dict[Text, Bool] = n.mutable_shape
+  Map.set(d: inout shapes, key: key, value: false)
+  let subst: Dict[Int, types.TypeArg] = subst_of(ctx: ctx, def: def, args: args)
+  var mutable: Bool = false
+  for o: Int in owners {
+    for f: types.FieldInfo in fields_of(ctx: ctx, owner: o) {
+      if not mutable {
+        if needs_copy(fuel: fuel - 1, n: n, ctx: ctx, ty: types.substitute(t: f.ty, subst: subst)) {
+          mutable = true
+        }
+      }
+    }
+  }
+  Map.set(d: inout shapes, key: key, value: mutable)
+  return mutable
+}
+
+-- A copy of the slot's value for `old(...)` (§4.1): the slot itself unless the type can be mutated in place.
+fn copy_slot(
+  fuel: Int where it >= 0,
+  n: inout N,
+  ctx: context.Context,
+  ty: types.Type,
+  slot: Text
+) -> Result[Text, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "out of fuel")
+  }
+  let st: types.Type = types.strip(t: ty)
+  if not needs_copy(fuel: fuel - 1, n: n, ctx: ctx, ty: st) {
+    return Ok(value: slot)
+  }
+  match st with
+  | types.Opaque(def, args) -> {
+    let q: Text = context.qualified_name(ctx: ctx, id: def)
+    if q == "std.list.List" {
+      let out: Text = new_tmp(n: inout n)
+      let f: Text = try copy_fn_of(fuel: fuel - 1, n: inout n, ctx: ctx, ty: st)
+      emit_line(n: n, line: out ++ " = call i64 " ++ f ++ "(i64 " ++ slot ++ ")")
+      return Ok(value: out)
+    }
+    if List.len(xs: args) > 0 {
+      match type_arg_type(a: List.get(xs: args, i: List.len(xs: args) - 1)) with
+      | Some(value) -> {
+        if needs_copy(fuel: fuel - 1, n: n, ctx: ctx, ty: value) {
+          return Err(
+            error: "`old(...)` of a `" ++ context.get_def(
+              ctx: ctx,
+              id: def
+            ).name ++ "` holding values that can be mutated in place"
+          )
+        }
+      }
+      | None -> skip()
+    }
+    var prim: Text = "@onus_map_clone"
+    if q == "std.list.Builder" {
+      prim = "@onus_list_builder_copy"
+    }
+    if q == "std.grid.Grid" {
+      prim = "@onus_grid_copy"
+    }
+    declare_sig(n: n, sig: "declare i64 " ++ prim ++ "(i64)")
+    let out: Text = new_tmp(n: inout n)
+    emit_line(n: n, line: out ++ " = call i64 " ++ prim ++ "(i64 " ++ slot ++ ")")
+    return Ok(value: out)
+  }
+  | _ -> {
+    let out: Text = new_tmp(n: inout n)
+    let f: Text = try copy_fn_of(fuel: fuel - 1, n: inout n, ctx: ctx, ty: st)
+    emit_line(n: n, line: out ++ " = call i64 " ++ f ++ "(i64 " ++ slot ++ ")")
+    return Ok(value: out)
+  }
+}
+
+-- The copier `@copy$N(i64) -> i64` for a list, record or union whose values can be mutated in place; generated once per type.
+fn copy_fn_of(
+  fuel: Int where it >= 0,
+  n: inout N,
+  ctx: context.Context,
+  ty: types.Type
+) -> Result[Text, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "out of fuel")
+  }
+  let st: types.Type = types.strip(t: ty)
+  let key: Text = typecheck.show(ctx: ctx, t: st)
+  match Map.find(d: n.copy_fns, key: key) with
+  | Some(value) -> return Ok(value: value)
+  | None -> skip()
+  n = { n with counter: n.counter + 1 }
+  let name: Text = "@\"copy$" ++ s(i: n.counter) ++ "\""
+  var copy_fns: Dict[Text, Text] = n.copy_fns
+  Map.set(d: inout copy_fns, key: key, value: name)
+  let saved: Saved = save_fn(n: n)
+  begin_fn(n: inout n)
+  n = { n with fn_ret: "i64" }
+  let r: Result[Text, Text] = copy_slots(fuel: fuel - 1, n: inout n, ctx: ctx, st: st, a: "%a")
+  if r is Ok {
+    emit_line(n: n, line: "ret i64 " ++ ok_text(r: r))
+    finish_fn(n: n, header: "define i64 " ++ name ++ "(i64 %a) {")
+  }
+  restore_fn(n: inout n, sv: saved)
+  match r with
+  | Ok(_) -> skip()
+  | Err(error) -> return Err(error: error)
+  return Ok(value: name)
+}
+
+-- The body of a copier: a new object of the same shape whose mutable parts are copied.
+fn copy_slots(
+  fuel: Int where it >= 0,
+  n: inout N,
+  ctx: context.Context,
+  st: types.Type,
+  a: Text
+) -> Result[Text, Text] may mutate, alloc
+  decreases fuel
+{
+  if fuel == 0 {
+    return Err(error: "out of fuel")
+  }
+  match st with
+  | types.Opaque(_, args) -> {
+    var elem: Option[types.Type] = None
+    if List.len(xs: args) > 0 {
+      elem = type_arg_type(a: List.get(xs: args, i: 0))
+    }
+    if elem is None {
+      return Err(error: "a copy of an unknown list")
+    }
+    let et: types.Type = or_int_type(o: elem)
+    let pa: Val = from_slot(n: inout n, slot: a, t: "ptr")
+    let len: Text = new_tmp(n: inout n)
+    emit_line(n: n, line: len ++ " = call i64 @onus_rt_list_len(ptr " ++ pa.v ++ ")")
+    let out: Text = new_tmp(n: inout n)
+    emit_line(n: n, line: out ++ " = call ptr @onus_rt_list_new(i64 " ++ len ++ ")")
+    let idx: Text = alloc_local(n: inout n, name: "$ci", t: "i64", ty: prim_int())
+    emit_line(n: n, line: "store i64 0, ptr " ++ idx)
+    let cond_l: Text = new_label(n: inout n, prefix: "copy")
+    let body_l: Text = new_label(n: inout n, prefix: "copybody")
+    let end_l: Text = new_label(n: inout n, prefix: "copydone")
+    br(n: inout n, target: cond_l)
+    start_block(n: inout n, name: cond_l)
+    let i: Text = new_tmp(n: inout n)
+    emit_line(n: n, line: i ++ " = load i64, ptr " ++ idx)
+    let more: Text = new_tmp(n: inout n)
+    emit_line(n: n, line: more ++ " = icmp slt i64 " ++ i ++ ", " ++ len)
+    cond_br(n: inout n, cond: more, then_l: body_l, else_l: end_l)
+    start_block(n: inout n, name: body_l)
+    let x: Text = new_tmp(n: inout n)
+    emit_line(n: n, line: x ++ " = call i64 @onus_rt_list_get(ptr " ++ pa.v ++ ", i64 " ++ i ++ ")")
+    let copied: Text = try copy_slot(fuel: fuel - 1, n: inout n, ctx: ctx, ty: et, slot: x)
+    emit_line(
+      n: n,
+      line: "call void @onus_rt_list_set(ptr " ++ out ++ ", i64 " ++ i ++ ", i64 " ++ copied ++ ")"
+    )
+    let next: Text = new_tmp(n: inout n)
+    emit_line(n: n, line: next ++ " = add i64 " ++ i ++ ", 1")
+    emit_line(n: n, line: "store i64 " ++ next ++ ", ptr " ++ idx)
+    br(n: inout n, target: cond_l)
+    start_block(n: inout n, name: end_l)
+    return Ok(value: to_slot(n: inout n, v: val(v: out, t: "ptr")))
+  }
+  | types.RecordT(def, args) -> {
+    let subst: Dict[Int, types.TypeArg] = subst_of(ctx: ctx, def: def, args: args)
+    let fs: List[types.FieldInfo] = fields_of(ctx: ctx, owner: def)
+    let pa: Val = from_slot(n: inout n, slot: a, t: "ptr")
+    let obj: Text = new_tmp(n: inout n)
+    emit_line(
+      n: n,
+      line: obj ++ " = call ptr @onus_alloc(i64 " ++ s(i: slots_size(k: List.len(xs: fs))) ++ ")"
+    )
+    for i: Int in 0 ..< List.len(xs: fs) {
+      let ft: types.Type = types.substitute(t: List.get(xs: fs, i: i).ty, subst: subst)
+      let ls: Text = load_slot(n: inout n, obj: pa.v, idx: i)
+      let cs: Text = try copy_slot(fuel: fuel - 1, n: inout n, ctx: ctx, ty: ft, slot: ls)
+      store_slot(n: inout n, obj: obj, idx: i, slot: cs)
+    }
+    return Ok(value: to_slot(n: inout n, v: val(v: obj, t: "ptr")))
+  }
+  | types.UnionT(def, args) -> {
+    let subst: Dict[Int, types.TypeArg] = subst_of(ctx: ctx, def: def, args: args)
+    let pa: Val = from_slot(n: inout n, slot: a, t: "ptr")
+    let tag: Text = load_slot(n: inout n, obj: pa.v, idx: 0)
+    let vs: List[Int] = variants_of(ctx: ctx, union_def: def)
+    var labels: Builder[Text] = List.builder()
+    for v: Int in vs {
+      List.push(b: inout labels, x: new_label(n: inout n, prefix: "copyv"))
+    }
+    let label_list: List[Text] = List.finish(b: labels)
+    let same: Text = new_label(n: inout n, prefix: "copysame")
+    let done: Text = new_label(n: inout n, prefix: "copyend")
+    var cases: Text = ""
+    for i: Int in 0 ..< List.len(xs: vs) {
+      cases = cases ++ " i64 " ++ s(
+        i: variant_index(ctx: ctx, union_def: def, variant: List.get(xs: vs, i: i))
+      ) ++ ", label %" ++ label_at(labels: label_list, i: i, fallback: same)
+    }
+    emit_line(n: n, line: "switch i64 " ++ tag ++ ", label %" ++ same ++ " [" ++ cases ++ " ]")
+    n = { n with terminated: true }
+    var incoming: Builder[Text] = List.builder()
+    for i: Int in 0 ..< List.len(xs: vs) {
+      start_block(n: inout n, name: label_at(labels: label_list, i: i, fallback: same))
+      let fs: List[types.FieldInfo] = fields_of(ctx: ctx, owner: List.get(xs: vs, i: i))
+      let obj: Text = new_tmp(n: inout n)
+      emit_line(
+        n: n,
+        line: obj ++ " = call ptr @onus_alloc(i64 " ++ s(i: 8 * (1 + List.len(xs: fs))) ++ ")"
+      )
+      store_slot(n: inout n, obj: obj, idx: 0, slot: tag)
+      for j: Int in 0 ..< List.len(xs: fs) {
+        let ft: types.Type = types.substitute(t: List.get(xs: fs, i: j).ty, subst: subst)
+        let ls: Text = load_slot(n: inout n, obj: pa.v, idx: 1 + j)
+        let cs: Text = try copy_slot(fuel: fuel - 1, n: inout n, ctx: ctx, ty: ft, slot: ls)
+        store_slot(n: inout n, obj: obj, idx: 1 + j, slot: cs)
+      }
+      let sl: Text = to_slot(n: inout n, v: val(v: obj, t: "ptr"))
+      List.push(b: inout incoming, x: "[ " ++ sl ++ ", %" ++ n.block ++ " ]")
+      br(n: inout n, target: done)
+    }
+    start_block(n: inout n, name: same)
+    List.push(b: inout incoming, x: "[ " ++ a ++ ", %" ++ n.block ++ " ]")
+    br(n: inout n, target: done)
+    start_block(n: inout n, name: done)
+    let out: Text = new_tmp(n: inout n)
+    emit_line(
+      n: n,
+      line: out ++ " = phi i64 " ++ Text.join(parts: List.finish(b: incoming), sep: ", ")
+    )
+    return Ok(value: out)
+  }
+  | _ -> return Err(error: "a copy of `" ++ typecheck.show(ctx: ctx, t: st) ++ "` values")
 }
 
 -- The `std.map` operations that take a key, and so its kind.
@@ -3219,7 +4659,7 @@ fn try_val(
     | None -> skip()
     let ev: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: else_value)
     let v: Val = coerce_to(n: inout n, v: ev, to: "i1")
-    emit_line(n: n, line: "ret i1 " ++ v.v)
+    ret_val(n: inout n, v: v)
   } else {
     match else_clause with
     | None -> {
@@ -3227,7 +4667,7 @@ fn try_val(
         return Err(error: "`try` on an Option inside a function returning Result without an `else`")
       }
       -- The same error (or `None`) is the function's result.
-      emit_line(n: n, line: "ret ptr " ++ operand_v.v)
+      ret_val(n: inout n, v: operand_v)
     }
     | Some(value) -> {
       if value.name is Some {
@@ -3248,7 +4688,7 @@ fn try_val(
       emit_line(n: n, line: res ++ " = call ptr @onus_alloc(i64 16)")
       store_slot(n: inout n, obj: res, idx: 0, slot: "1")
       store_slot(n: inout n, obj: res, idx: 1, slot: converted)
-      emit_line(n: n, line: "ret ptr " ++ res)
+      ret_val(n: inout n, v: val(v: res, t: "ptr"))
     }
   }
   n = { n with terminated: true }
@@ -3290,6 +4730,24 @@ pub fn emit_native(
     sql: opts.sql,
     host_js: host_js_claim(ctx: ctx)
   )
+  var impls: Dict[Text, ImplRef] = n.impls
+  for m: ir.Module in specialised {
+    for item: ir.Item in m.items {
+      match item with
+      | ir.ImplItem(def, iface, _, dict_name, _, entries) -> Map.set(
+        d: inout impls,
+        key: fn_name(module: m.mod.name, name: dict_name),
+        value: ImplRef {
+          module_name: m.mod.name,
+          def: def,
+          iface: iface,
+          dict_name: dict_name,
+          entries: entries
+        }
+      )
+      | _ -> skip()
+    }
+  }
   let reach: Dict[Text, Bool] = reachable(n: n, ctx: ctx)
   for m: ir.Module in specialised {
     for item: ir.Item in m.items {
@@ -3322,6 +4780,13 @@ pub fn emit_native(
       }
     }
     | None -> skip()
+  }
+  for dict_key: Text in Map.keys(d: n.impls) {
+    if Map.contains(d: reach, key: dict_key) {
+      match Map.find(d: n.impls, key: dict_key) with
+      | Some(value) -> dict_global(fuel: max_depth, n: inout n, ctx: ctx, impl: value)
+      | None -> skip()
+    }
   }
   var has_main: Bool = false
   match entry with

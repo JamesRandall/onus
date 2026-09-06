@@ -1,0 +1,185 @@
+{
+  "diagnostics": [],
+  "obligations": [
+    {
+      "kind": "refinement",
+      "at": [
+        18,
+        12
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "overflow",
+      "at": [
+        18,
+        12
+      ],
+      "text": "s.w * s.h within Int",
+      "status": "checked"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        23,
+        34
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "representation",
+      "at": [
+        23,
+        3
+      ],
+      "text": "total within ±2^53 - 1",
+      "status": "checked"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        25,
+        13
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "overflow",
+      "at": [
+        25,
+        13
+      ],
+      "text": "total + Shape.area(s: x) within Int",
+      "status": "checked"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        27,
+        10
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "ensures",
+      "at": [
+        33,
+        3
+      ],
+      "text": "result >= Shape.area(s: s)",
+      "status": "proved"
+    },
+    {
+      "kind": "overflow",
+      "at": [
+        33,
+        10
+      ],
+      "text": "Shape.area(s: s) + Shape.area(s: s) within Int",
+      "status": "checked"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        37,
+        27
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        37,
+        33
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        38,
+        29
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        38,
+        35
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        38,
+        50
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        38,
+        56
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        39,
+        24
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "refinement",
+      "at": [
+        39,
+        30
+      ],
+      "text": "it >= 0",
+      "status": "proved"
+    },
+    {
+      "kind": "assertion",
+      "at": [
+        37,
+        3
+      ],
+      "text": "Shape.area(s: Rect { w: 3, h: 3 }) == 9",
+      "status": "checked"
+    },
+    {
+      "kind": "assertion",
+      "at": [
+        38,
+        3
+      ],
+      "text": "total_area(xs: [Rect { w: 1, h: 2 }, Rect { w: 2, h: 2 }]) == 6",
+      "status": "checked"
+    },
+    {
+      "kind": "assertion",
+      "at": [
+        39,
+        3
+      ],
+      "text": "doubled(s: Rect { w: 2, h: 2 }) == 8",
+      "status": "checked"
+    }
+  ]
+}

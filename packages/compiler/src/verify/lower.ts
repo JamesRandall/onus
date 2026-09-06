@@ -686,6 +686,13 @@ export class Lowerer {
       const a = targs[i];
       if (a !== undefined) subst.set(p.def, a);
     });
+    if (res.k === 'iface-fn') {
+      // The checker appends the interface's type parameter to an interface call's instantiation (docs/CHANGES.md item 177).
+      const ifaceDef = this.t.def(res.iface);
+      const ip = this.t.defs.find((x) => x.kind === 'type-param' && x.node === ifaceDef.node);
+      const last = targs[sig.tparams.length];
+      if (ip !== undefined && last !== undefined) subst.set(ip.id, last);
+    }
     // Value parameters used as indices in the callee's types denote the constants passed for them.
     for (const [pd, a] of this.ty.indexBindings.get(e.id) ?? []) subst.set(pd, this.inContextArg(a));
     // Arguments, by parameter.

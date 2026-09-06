@@ -1,0 +1,40 @@
+module ok_interface_calls
+
+-- Interface methods inside obligations (docs/CHANGES.md item 177): a call
+-- through the interface on a bounded type parameter, and on a concrete type,
+-- is one uninterpreted function per receiver sort, so arithmetic on the
+-- result and an assertion about it lower without a sort clash.
+interface Shape[T] {
+  fn area(s: T) -> Int where it >= 0
+}
+
+record Rect {
+  w: Int where it >= 0
+  h: Int where it >= 0
+}
+
+impl Shape[Rect] {
+  fn area(s: Rect) -> Int where it >= 0 {
+    return s.w * s.h
+  }
+}
+
+fn total_area[T: Shape](xs: List[T]) -> Int where it >= 0 {
+  var total: Int where it >= 0 = 0
+  for x: T in xs {
+    total = total + Shape.area(s: x)
+  }
+  return total
+}
+
+fn doubled[T: Shape](s: T) -> Int
+  ensures result >= Shape.area(s: s)
+{
+  return Shape.area(s: s) + Shape.area(s: s)
+}
+
+example concrete_receiver {
+  Shape.area(s: Rect { w: 3, h: 3 }) == 9
+  total_area(xs: [Rect { w: 1, h: 2 }, Rect { w: 2, h: 2 }]) == 6
+  doubled(s: Rect { w: 2, h: 2 }) == 8
+}

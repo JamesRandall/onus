@@ -460,6 +460,28 @@ fn res_def(res: Option[defs.Resolution]) -> Int {
   }
 }
 
+-- The interface an interface-function resolution belongs to, or -1 for any other resolution.
+fn res_iface(res: Option[defs.Resolution]) -> Int {
+  match res with
+  | None -> return -1
+  | Some(value) -> {
+    match value with
+    | defs.IfaceFnRes(iface, _) -> return iface
+    | _ -> return -1
+  }
+}
+
+-- The interface's type parameter: the `TypeParam` definition whose parent is the interface, or -1.
+fn iface_param_of(ctx: context.Context, iface: Int) -> Int {
+  for i: Int in 0 ..< context.def_count(ctx: ctx) {
+    let d: defs.Def = context.get_def(ctx: ctx, id: i)
+    if d.kind == defs.TypeParam and d.parent == Some(value: iface) {
+      return i
+    }
+  }
+  return -1
+}
+
 -- The def a name expression resolves to directly, or -1 for anything else.
 fn name_def(lw: Lw, ctx: context.Context, e: ast.Expr) -> Int {
   match e with
@@ -1774,6 +1796,18 @@ fn call(
           d: inout subst,
           key: types.tparam_def(p: List.get(xs: sig.tparams, i: i)),
           value: in_context_arg(lw: lw, a: List.get(xs: targs, i: i))
+        )
+      }
+    }
+    let iface_id: Int = res_iface(res: res)
+    if iface_id >= 0 and List.len(xs: targs) > List.len(xs: sig.tparams) {
+      -- The checker appends the interface's type parameter to an interface call's instantiation (docs/CHANGES.md item 177).
+      let ip: Int = iface_param_of(ctx: ctx, iface: iface_id)
+      if ip >= 0 {
+        Map.set(
+          d: inout subst,
+          key: ip,
+          value: in_context_arg(lw: lw, a: List.get(xs: targs, i: List.len(xs: sig.tparams)))
         )
       }
     }

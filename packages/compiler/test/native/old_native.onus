@@ -1,0 +1,51 @@
+module old_native
+
+-- `old(...)` in a checked postcondition on the native target (docs/CHANGES.md
+-- item 178): the value of an `inout` parameter at entry is a deep copy, so a
+-- builder pushed to in the body, directly or inside a record, still compares
+-- against what it held.
+-- Opaque to the verifier (no contract), so a postcondition through it is checked at run time.
+fn hidden_len(b: Builder[Int]) -> Int may alloc {
+  return List.len(xs: List.finish(b: b))
+}
+
+fn push_twice(b: inout Builder[Int], x: Int) -> Unit may mutate, alloc, panic
+  ensures hidden_len(b: b) == hidden_len(b: old(b)) + 2
+{
+  List.push(b: inout b, x: x)
+  List.push(b: inout b, x: x)
+  return Unit
+}
+
+record Tally {
+  counts: Builder[Int]
+  label: Text
+}
+
+fn bump(t: inout Tally, x: Int) -> Unit may mutate, alloc, panic
+  ensures hidden_len(b: t.counts) == hidden_len(b: old(t).counts) + 1
+{
+  var counts: Builder[Int] = t.counts
+  List.push(b: inout counts, x: x)
+  t = { t with counts: counts }
+  return Unit
+}
+
+fn pushed_twice(x: Int) -> List[Int] may mutate, alloc, panic {
+  var b: Builder[Int] = List.builder()
+  push_twice(b: inout b, x: x)
+  return List.finish(b: b)
+}
+
+fn bumped(xs: List[Int]) -> List[Int] may mutate, alloc, panic {
+  var t: Tally = Tally { counts: List.builder(), label: "t" }
+  for x: Int in xs {
+    bump(t: inout t, x: x)
+  }
+  return List.finish(b: t.counts)
+}
+
+example builders_snapshot {
+  pushed_twice(x: 7) == [7, 7]
+  bumped(xs: [1, 2]) == [1, 2]
+}

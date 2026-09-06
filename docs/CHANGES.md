@@ -1491,6 +1491,72 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     flag emoji at column 20 rather than 24. The compiler in Onus is
     unchanged.
 
+177. **Interface calls inside obligations lower per receiver sort.** The
+    first fixture that did arithmetic on an interface method's result
+    (`total + Shape.area(s: x)` with `x: T` bounded by `Shape`) was E0999 in
+    both compilers: the verifier names the uninterpreted function for a call
+    by the sorts of its instantiated parameters, but for a call through an
+    interface the checker appends the interface's own type parameter to the
+    call's instantiation (`callSignature`) and the verifier's substitution
+    stopped at the method's own type parameters, so the function was declared
+    over the interface's parameter sort and applied at the caller's. Both
+    verifiers now bind the interface's parameter to that last type argument
+    (`verify/lower.ts`, `self/lower.onus`: `res_iface`, `iface_param_of`), so
+    `Shape.area` at `Rect` and at a caller's `T` are two functions and an
+    `ensures` stated through the interface is proved. Fixture:
+    `test/verify/ok_interface_calls.onus`, 13 proved and 7 checked, no
+    diagnostic. The Onus verifier's interface gains two private functions;
+    its ledger +4 obligations, 1 proved and 3 `checked` representation
+    obligations on the new loop indices, no status change.
+
+178. **Function values, closures, interfaces, runtime quantifiers, `fake` and
+    `old(...)` compile natively (§19.1).** Both native emitters: a value of a
+    function type is a pointer to a closure object, slot 0 the code address
+    and the rest the captured values, and its code takes the object and one
+    slot per parameter (`ptr` for `inout`) and returns a slot. A declared
+    function used as a value gets an adapter `@"m.f$fn"` from that convention
+    to its signature and a constant object `@"m.f$val"`, emitted once; a
+    closure is lifted to `@"closure$N"` over its free locals (a walk of its
+    body in first-use order, less what it binds), captured by value at
+    construction as §3.7 requires, and returns slots, so `try` and `return`
+    inside it convert through the function's own return type. An impl's
+    dictionary is a constant table of its methods' objects in interface
+    order, reached with the dictionary; a bounded type parameter's dictionary
+    is a hidden leading `ptr` parameter, and a call through a dictionary
+    loads the method's slot and calls it as a closure. A quantifier evaluated
+    at runtime is a loop over its domain (range, list, the list inside an
+    `Ok`/`Some` or nothing, the two Booleans) stopping at the first
+    counterexample or witness. `fake` is an object of its behaviours, which
+    no primitive reads. `old(x)` in a checked postcondition copies `x` where
+    its type can be mutated in place — builders, grids and maps through new
+    runtime primitives (`onus_list_builder_copy`, `onus_grid_copy`,
+    `onus_map_clone`), lists, records and unions holding them through a
+    generated copier per type, everything else shared, which is
+    indistinguishable from the JavaScript host's deep copy. What E0800 still
+    refuses: `Spec` values, a generic function used as a value, and `sql`
+    without libpq. Fixtures: `test/native/function_values.onus` (declared
+    functions and intrinsics as values, closures capturing lets and
+    parameters, closures returned, composed, stored in records and lists,
+    passed with `inout`, two impls of an interface with bounded generic
+    callers, quantifiers over lists, ranges, results and `Bool`) and
+    `test/native/old_native.onus` (a builder and a record holding one, with
+    postconditions the verifier cannot prove so the copies run); both run on
+    both targets, as do `codegen/features.onus`, `stdlib/list_generic.onus`
+    and the interface fixture of item 177, which the native suite now lists.
+    `test/native/unsupported.onus` is gone with its test, since its program
+    compiles; the E0800 path is pinned by the `Dict` key fixture. Review
+    artefacts: the interface diff of `self/native.onus` is two private
+    records and 27 private functions added, `call_val` taking the call's
+    dictionaries, and the state record and module comment changed;
+    `self/lower.onus` as item 177. Ledger delta of `native`: +401
+    obligations, 254 proved and 147 checked, every checked one an overflow
+    or representation obligation on counters, indices and sizes, like the
+    rest of the module; no status change. The codegen differential
+    found one disagreement while porting — the Onus emitter generated a
+    copier before allocating the call's temporary, one counter apart from
+    the oracle — fixed in the port. Fixed point reached from `bootstrap/`;
+    promoted.
+
 ### Deferred, not changed
 
 - Decided 2026-09-06, to apply in M15.5: generics compile natively by
