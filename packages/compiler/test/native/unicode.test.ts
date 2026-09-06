@@ -4,7 +4,10 @@
  * Unicode 16.0 data: default case conversion per code point over the cased
  * blocks, `trim`, Final_Sigma and SpecialCasing over whole texts, and
  * grapheme cluster segmentation (UAX #29) over the sequences that exercise
- * every rule. Skipped when `clang` is not on PATH.
+ * every rule. Skipped when `clang` is not on PATH, and the two comparisons
+ * are skipped on a host whose Unicode version is not the pinned 16.0
+ * (`process.versions.unicode`), since a newer host assigns case mappings
+ * the tables do not have (item 181: the runner's node carried 17.0).
  */
 import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
@@ -20,6 +23,8 @@ import { STDLIB_ROOT } from '../harness.js';
 const here = dirname(fileURLToPath(import.meta.url));
 const tmpRoot = join(here, '..', '..', '.onus-tmp', 'native');
 const clang = findClang();
+/** The host's Unicode data is the version §19.1 pins, so that a comparison with it is meaningful. */
+const hostIsPinned = process.versions.unicode === '16.0';
 
 /** The cased and whitespace blocks: Latin, Greek, Cyrillic, Armenian, Georgian, Cherokee, the extended blocks, and the supplementary cased scripts. */
 const RANGES: readonly (readonly [number, number])[] = [
@@ -112,7 +117,7 @@ describe.skipIf(clang === null)('native Unicode tables (§19.1)', () => {
     expect(native.exe).not.toBeNull();
   });
 
-  it('agrees with the host on case conversion and trim for every code point of the cased blocks', () => {
+  it.skipIf(!hostIsPinned)('agrees with the host on case conversion and trim for every code point of the cased blocks', () => {
     if (native.exe === null) throw new Error('no probe');
     const mismatches: string[] = [];
     let count = 0;
@@ -134,7 +139,7 @@ describe.skipIf(clang === null)('native Unicode tables (§19.1)', () => {
     expect(mismatches.slice(0, 20)).toEqual([]);
   }, 120000);
 
-  it('agrees with the host on Final_Sigma, SpecialCasing and grapheme clusters over whole texts', () => {
+  it.skipIf(!hostIsPinned)('agrees with the host on Final_Sigma, SpecialCasing and grapheme clusters over whole texts', () => {
     if (native.exe === null) throw new Error('no probe');
     const r = spawnSync(native.exe, ['texts', ...TEXTS], { encoding: 'utf8' });
     expect(r.stderr).toBe('');

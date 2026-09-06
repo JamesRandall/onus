@@ -18,7 +18,9 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          # A node whose ICU carries Unicode 16.0, the version §19.1 pins, so the
+          # comparison of the native text tables with the host runs (item 181).
+          node-version: 22.13.0
           cache: pnpm
       - name: Install clang and z3
         run: sudo apt-get update && sudo apt-get install -y clang z3

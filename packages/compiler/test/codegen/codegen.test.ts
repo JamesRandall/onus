@@ -50,7 +50,8 @@ function tsc(project: string) {
 
 function vitest(root: string) {
   const bin = join(repoRoot, 'node_modules', 'vitest', 'vitest.mjs');
-  return spawnSync(process.execPath, [bin, 'run', '--root', root, '--config', join(root, 'vitest.config.mjs')], { encoding: 'utf8', env: { ...process.env, CI: '1' } });
+  // No colour: on GitHub the escape codes would sit between `Tests` and the count the callers match.
+  return spawnSync(process.execPath, [bin, 'run', '--root', root, '--config', join(root, 'vitest.config.mjs')], { encoding: 'utf8', env: { ...process.env, CI: '1', NO_COLOR: '1', FORCE_COLOR: '0' } });
 }
 
 describe('codegen', () => {

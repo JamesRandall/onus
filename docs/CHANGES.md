@@ -1646,6 +1646,17 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     `onus-<version>-<target>.tar.gz`; a final job creates the GitHub Release
     with one archive per platform. macOS on Intel is not built (decided
     2026-09-06); Windows waits on the C runtime's port and is the next item.
+    The first run published `v0.0.0` for the three platforms; the Linux
+    builds verified the compiler cold in 10.5 minutes and, with the proof
+    cache restored, in under a minute. The first CI run found two host
+    differences and no compiler fault: vitest colours its output on GitHub,
+    so the generated-tests check now runs it without colour; and the
+    runner's node carries Unicode 17.0 while §19.1 pins 16.0 (six Latin
+    letters given case mappings in 17.0 differed), so the comparison of the
+    native text tables with the host runs only on a host at 16.0
+    (`process.versions.unicode`) and `ci.yml` pins node 22.13.0, which has
+    it. When the specification moves to a newer Unicode, the tables, the
+    guard and the pin move together.
 
 ### Deferred, not changed
 
