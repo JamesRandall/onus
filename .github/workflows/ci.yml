@@ -1,0 +1,40 @@
+# The gates of docs/onus-impl-spec-v0.md and .claude/skills/language-change/SKILL.md
+# on every push and pull request: the packages build, the whole test suite,
+# the bootstrap chain to its fixed point with the native stage, and the self
+# differentials run against the compiler built natively. z3 is installed so
+# obligations are proved as they are locally; the proof caches are kept
+# between runs, keyed by the sources they were computed from.
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  gates:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install clang and z3
+        run: sudo apt-get update && sudo apt-get install -y clang z3
+      - name: Restore the proof caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            self/.onus/cache
+            packages/compiler/.onus-tmp/cache
+          key: proofs-${{ runner.os }}-${{ hashFiles('self/**/*.onus', 'packages/stdlib/std/*.onus', 'packages/compiler/test/**/*.onus', 'examples/**/*.onus') }}
+          restore-keys: |
+            proofs-${{ runner.os }}-
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r build
+      - run: pnpm -r test
+      - name: Bootstrap chain, fixed point and native stage
+        run: scripts/bootstrap.sh
+      - name: Self differentials against the native compiler
+        run: pnpm --filter compiler test:self-native

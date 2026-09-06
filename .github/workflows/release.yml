@@ -1,0 +1,96 @@
+# The released compiler (docs/onus-impl-spec-v0.md M15.5): on a version tag,
+# every platform builds `onus` from bootstrap/ — the compiler in Onus as
+# JavaScript, which carries its runtime — with node and clang as build-time
+# dependencies only, checks the binary against the example from a bare
+# directory with no node on its path, and the release collects one archive
+# per platform. The tag must name the root package's version. Windows waits
+# on the C runtime's port (item 181).
+name: release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: linux-x86_64
+          - os: ubuntu-24.04-arm
+            target: linux-arm64
+          - os: macos-14
+            target: macos-arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install clang and z3 (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y clang z3
+      - name: Install z3 (macOS)
+        if: runner.os == 'macOS'
+        run: brew install z3
+      - name: Restore the proof cache
+        uses: actions/cache@v4
+        with:
+          path: self/.onus/cache
+          key: proofs-${{ runner.os }}-${{ hashFiles('self/**/*.onus', 'packages/stdlib/std/*.onus', 'packages/compiler/test/**/*.onus', 'examples/**/*.onus') }}
+          restore-keys: |
+            proofs-${{ runner.os }}-
+      - name: The tag names the package's version
+        if: github.event_name == 'push'
+        run: |
+          version=$(node -p "require('./package.json').version")
+          test "v$version" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME is not v$version"; exit 1; }
+      - name: Build onus from bootstrap/
+        run: node bootstrap/run_cli.js build self/cli.onus --target native --out dist-native --root self --stdlib packages/stdlib --budget 3000
+      - name: Smoke test from a bare directory, with no node on the path
+        run: |
+          set -e
+          version=$(node -p "require('./package.json').version")
+          home=$(mktemp -d)
+          cp examples/mandelbrot/mandelbrot.onus "$home/"
+          exe=$PWD/dist-native/native/cli
+          bare=$(dirname "$(command -v clang)"):$(dirname "$(command -v z3)"):/usr/bin:/bin
+          cd "$home"
+          env PATH="$bare" sh -c 'command -v node' && { echo "node is still on the path"; exit 1; }
+          test "$(env PATH="$bare" "$exe" --version)" = "onus $version"
+          env PATH="$bare" "$exe" check mandelbrot.onus
+          env PATH="$bare" "$exe" build mandelbrot.onus --out out --target native
+          mkdir run && cd run && ../out/native/mandelbrot && test -s mandelbrot.pgm
+      - name: Package
+        run: |
+          version=$(node -p "require('./package.json').version")
+          name=onus-$version-${{ matrix.target }}
+          mkdir -p "pkg/$name"
+          cp dist-native/native/cli "pkg/$name/onus"
+          cp LICENSE README.md "pkg/$name/"
+          cp packages/runtime/native/blake3/LICENSE_A2 "pkg/$name/LICENSE-BLAKE3"
+          tar -C pkg -czf "$name.tar.gz" "$name"
+          echo "ARCHIVE=$name.tar.gz" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: onus-${{ matrix.target }}
+          path: ${{ env.ARCHIVE }}
+          if-no-files-found: error
+  release:
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Create the release with one archive per platform
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --title "onus $GITHUB_REF_NAME" --generate-notes artifacts/*.tar.gz
