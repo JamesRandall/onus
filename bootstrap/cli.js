@@ -31,9 +31,9 @@ const $ob4 = { kind: "overflow", text: "i + 1 within Int", at: "self/cli.onus:83
 const $ob5 = { kind: "overflow", text: "i + 1 within Int", at: "self/cli.onus:86:15", def: "parse_args" };
 const $ob6 = { kind: "overflow", text: "i + 1 within Int", at: "self/cli.onus:95:11", def: "parse_args" };
 const $ob7 = { kind: "overflow", text: "n - width within Int", at: "self/cli.onus:137:38", def: "pad" };
-const $ob8 = { kind: "overflow", text: "syntax_errors + 1 within Int", at: "self/cli.onus:363:23", def: "fmt_command" };
-const $ob9 = { kind: "overflow", text: "-1 within Int", at: "self/cli.onus:630:18", def: "interface_command" };
-const $ob10 = { kind: "overflow", text: "-1 within Int", at: "self/cli.onus:696:24", def: "path_command" };
+const $ob8 = { kind: "overflow", text: "syntax_errors + 1 within Int", at: "self/cli.onus:368:23", def: "fmt_command" };
+const $ob9 = { kind: "overflow", text: "-1 within Int", at: "self/cli.onus:668:18", def: "interface_command" };
+const $ob10 = { kind: "overflow", text: "-1 within Int", at: "self/cli.onus:734:24", def: "path_command" };
 export const usage = "usage:\n  onus check <file.onus>... [--json] [--root <dir>] [--stdlib <dir>] [--to <pass>] [--budget <ms>] [--ledger] [--no-cache]\n      report every diagnostic; exit 1 if any. Passes: parse, canonical, load, resolve, types, consteval, effects, contracts, claims, capabilities, verify, paths\n  onus fmt <file.onus>... [--stdout]\n      rewrite files in canonical form\n  onus build <entry.onus> [--out <dir>] [--emit js|ir] [--target js|native|wasm] [--root <dir>] [--stdlib <dir>] [--runtime <path>]\n      check, then emit JavaScript for every module into <dir> (default: <entry dir>/out); --target native compiles\n      an executable with clang into <dir>/native (§19); --emit ir prints the target-neutral form\n  onus run <entry.onus> [--out <dir>] [--target js|native|wasm] [-- args...]\n      build, then run the entry module's main\n  onus interface <file.onus> [--json] [--diff <old-interface.json>] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]\n      check, then print the entry module's interface: canonical source with bodies elided, or the §11.1 JSON;\n      with --diff, the changes since a previous interface document (§11.1, §15.1)\n  onus path <file.onus> [<name>] [--json] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]\n      check, then print the §9.1 report of the entry module's paths (or of the named one)\n  onus --version\n      print the compiler's version\n  test, review, loop and next: run the TypeScript `onus` until M15.5\nThe standard library is --stdlib or ONUS_STDLIB, else the one the compiler carries; the runtime for build and run is --runtime or ONUS_RUNTIME, else the one the compiler carries, written beside the program.\n";
 
 export const passes = ["parse", "canonical", "load", "resolve", "types", "consteval", "effects", "contracts", "claims", "capabilities", "verify", "paths"];
@@ -142,8 +142,12 @@ export function pad({ t, n }) {
 }
 
 export function usage_error({ console }) {
+  return { tag: "Err", error: usage_failure({ console: console }) };
+}
+
+export function usage_failure({ console }) {
   $std_io.eprint({ console: console, text: usage });
-  return { tag: "Err", error: { tag: "Other", detail: "usage" } };
+  return { tag: "Other", detail: "usage" };
 }
 
 export function setup({ args, files, env }) {
@@ -312,7 +316,7 @@ export function errors_result({ ctx, console, as_json }) {
   if (!as_json) {
     $std_io.print({ console: console, text: line + "\n" });
   }
-  return { tag: "Err", error: { tag: "Other", detail: line } };
+  return { tag: "Err", error: { tag: "Other", detail: "diagnostics" } };
 }
 
 export function check_command({ args, files, console, process, env }) {
@@ -371,7 +375,8 @@ export function fmt_command({ args, files, console }) {
       }
     }
     if (syntax_errors > 0) {
-      return { tag: "Err", error: { tag: "Other", detail: $std_int.to_text({ x: syntax_errors }) + " syntax error" + plural({ n: syntax_errors }) } };
+      $std_io.eprint({ console: console, text: $std_int.to_text({ x: syntax_errors }) + " syntax error" + plural({ n: syntax_errors }) + "\n" });
+      return { tag: "Err", error: { tag: "Other", detail: "diagnostics" } };
     }
     const $hi43 = $context.file_count({ ctx: ctx });
     for (let f = 0; f < $hi43; f++) {
@@ -426,23 +431,78 @@ export function io_error_text({ e }) {
 }
 
 export function run_program({ process, console, program, args }) {
-  const $m47 = $std_io.run({ process: process, program: program, args: args, stdin: "", timeout_ms: 0 });
+  const $m47 = $std_io.exec({ process: process, program: program, args: args });
   $m47$match: {
     if ($m47.tag === "Ok") {
       const value = $m47.value;
-      $std_io.print({ console: console, text: value.stdout });
-      $std_io.eprint({ console: console, text: value.stderr });
-      if (value.status !== 0) {
-        return { tag: "Err", error: { tag: "Other", detail: "exit status " + $std_int.to_text({ x: value.status }) } };
+      if (value < 0) {
+        return { tag: "Ok", value: 1 };
       }
-      return { tag: "Ok", value: undefined };
+      return { tag: "Ok", value: value };
       break $m47$match;
     }
     if ($m47.tag === "Err") {
       const error = $m47.error;
       $std_io.eprint({ console: console, text: "onus run: cannot run " + program + ": " + io_error_text({ e: error }) + "\n" });
-      return { tag: "Err", error: error };
+      return { tag: "Ok", value: 1 };
       break $m47$match;
+    }
+    $rt.unreachable();
+  }
+}
+
+export function failure_status({ console, e }) {
+  const $m51 = e;
+  $m51$match: {
+    if ($m51.tag === "Other") {
+      const detail = $m51.detail;
+      if (detail === "diagnostics" || detail === "native build failed" || detail === "breaking") {
+        return 1;
+      }
+      if (detail === "usage" || detail === "unknown pass" || detail === "--emit ts" || detail === "--emit" || detail === "--target" || detail === "no main" || detail === "not a module" || detail === "not an interface document" || detail === "no such path") {
+        return 2;
+      }
+      $std_io.eprint({ console: console, text: "onus: " + detail + "\n" });
+      return 2;
+      break $m51$match;
+    }
+    if (true) {
+      $std_io.eprint({ console: console, text: "onus: " + io_error_text({ e: e }) + "\n" });
+      return 2;
+      break $m51$match;
+    }
+    $rt.unreachable();
+  }
+}
+
+export function exit_status({ console, r }) {
+  const $m52 = r;
+  $m52$match: {
+    if ($m52.tag === "Ok") {
+      return 0;
+      break $m52$match;
+    }
+    if ($m52.tag === "Err") {
+      const error = $m52.error;
+      return failure_status({ console: console, e: error });
+      break $m52$match;
+    }
+    $rt.unreachable();
+  }
+}
+
+export function exit_status_of({ console, r }) {
+  const $m53 = r;
+  $m53$match: {
+    if ($m53.tag === "Ok") {
+      const value = $m53.value;
+      return value;
+      break $m53$match;
+    }
+    if ($m53.tag === "Err") {
+      const error = $m53.error;
+      return failure_status({ console: console, e: error });
+      break $m53$match;
     }
     $rt.unreachable();
   }
@@ -458,7 +518,7 @@ export function runtime_dir_of({ runtime }) {
 export function build_command({ args, files, console, process, env, run }) {
   try {
     if ($std_list.len({ xs: args.files }) === 0) {
-      return usage_error({ console: console });
+      return { tag: "Err", error: usage_failure({ console: console }) };
     }
     const entry = $std_list.get({ xs: args.files, i: 0 });
     const rest = $std_list.slice({ xs: args.files, from: 1, to: $std_list.len({ xs: args.files }) });
@@ -478,39 +538,39 @@ export function build_command({ args, files, console, process, env, run }) {
     }
     const s = setup({ args: args, files: files, env: env });
     let ctx = s.ctx;
-    const [$r60, ctx$9] = read_entries({ ctx: ctx, files: files, paths: [entry] });
+    const [$r63, ctx$9] = read_entries({ ctx: ctx, files: files, paths: [entry] });
     ctx = ctx$9;
-    $rt.unwrap($r60);
+    $rt.unwrap($r63);
     const out_dir = value_or({ args: args, name: "out", fallback: $nativebuild.dir_of({ path: entry }) + "/out" });
     let runtime_opt = $std_io.get_env({ env: env, name: "ONUS_RUNTIME" });
-    const $m61 = value({ args: args, name: "runtime" });
-    $m61$match: {
-      if ($m61.tag === "Some") {
-        const value = $m61.value;
+    const $m64 = value({ args: args, name: "runtime" });
+    $m64$match: {
+      if ($m64.tag === "Some") {
+        const value = $m64.value;
         runtime_opt = { tag: "Some", value: value };
-        break $m61$match;
+        break $m64$match;
       }
-      if ($m61.tag === "None") {
+      if ($m64.tag === "None") {
         skip({  });
-        break $m61$match;
+        break $m64$match;
       }
       $rt.unreachable();
     }
     let runtime = "./onus-runtime/index.js";
     let runtime_dir = { tag: "None" };
     let bundled_runtime = true;
-    const $m64 = runtime_opt;
-    $m64$match: {
-      if ($m64.tag === "Some") {
-        const value = $m64.value;
+    const $m67 = runtime_opt;
+    $m67$match: {
+      if ($m67.tag === "Some") {
+        const value = $m67.value;
         runtime = value;
         runtime_dir = runtime_dir_of({ runtime: value });
         bundled_runtime = false;
-        break $m64$match;
+        break $m67$match;
       }
-      if ($m64.tag === "None") {
+      if ($m67.tag === "None") {
         skip({  });
-        break $m64$match;
+        break $m67$match;
       }
       $rt.unreachable();
     }
@@ -523,34 +583,34 @@ export function build_command({ args, files, console, process, env, run }) {
       if (!$context.clean({ ctx: ctx })) {
         return { tag: "Err", error: { tag: "Other", detail: "diagnostics" } };
       }
-      const $hi67 = ctx.module_count;
-      for (let mid = 0; mid < $hi67; mid++) {
-        const $m68 = $std_map.find({ d: ctx.modules, key: mid });
-        $m68$match: {
-          if ($m68.tag === "Some") {
-            const value = $m68.value;
+      const $hi70 = ctx.module_count;
+      for (let mid = 0; mid < $hi70; mid++) {
+        const $m71 = $std_map.find({ d: ctx.modules, key: mid });
+        $m71$match: {
+          if ($m71.tag === "Some") {
+            const value = $m71.value;
             if (!value.is_std) {
               $std_io.print({ console: console, text: $irtext.print_ir({ ctx: ctx, m: $lowerir.lower_module({ ctx: ctx, m: value, tables: tab, opts: { verify_all: false, negate_guard: { tag: "None" } } }) }) });
             }
-            break $m68$match;
+            break $m71$match;
           }
-          if ($m68.tag === "None") {
+          if ($m71.tag === "None") {
             skip({  });
-            break $m68$match;
+            break $m71$match;
           }
           $rt.unreachable();
         }
       }
-      return { tag: "Ok", value: undefined };
+      return { tag: "Ok", value: 0 };
     }
     if (target === "native" || target === "wasm") {
       if (!$context.clean({ ctx: ctx })) {
         emit_diagnostics({ ctx: ctx, console: console, tab: tab, as_json: as_json });
         return { tag: "Err", error: { tag: "Other", detail: "diagnostics" } };
       }
-      const [$r74, ctx$11] = $nativebuild.build_native({ ctx: ctx, files: files, process: process, env: env, tab: tab, out_dir: out_dir, runtime_dir: runtime_dir, target: target });
+      const [$r77, ctx$11] = $nativebuild.build_native({ ctx: ctx, files: files, process: process, env: env, tab: tab, out_dir: out_dir, runtime_dir: runtime_dir, target: target });
       ctx = ctx$11;
-      const built = $rt.unwrap($r74);
+      const built = $rt.unwrap($r77);
       emit_diagnostics({ ctx: ctx, console: console, tab: tab, as_json: as_json });
       if (!$context.clean({ ctx: ctx }) || built.exe.tag === "None") {
         return { tag: "Err", error: { tag: "Other", detail: "native build failed" } };
@@ -558,7 +618,7 @@ export function build_command({ args, files, console, process, env, run }) {
       const exe = or_empty({ o: built.exe });
       $std_io.eprint({ console: console, text: "onus build: wrote " + exe + "\n" });
       if (!run) {
-        return { tag: "Ok", value: undefined };
+        return { tag: "Ok", value: 0 };
       }
       if (!built.has_main) {
         $std_io.eprint({ console: console, text: "onus run: " + entry + " declares no `pub fn main`\n" });
@@ -579,19 +639,19 @@ export function build_command({ args, files, console, process, env, run }) {
     const built_js = $rt.unwrap($build.emit_all({ ctx: ctx, files: files, opts: { out_dir: out_dir, runtime: runtime, verify_all: false, negate_guard: { tag: "None" } } }));
     emit_diagnostics({ ctx: ctx, console: console, tab: tab, as_json: as_json });
     if (!run) {
-      return { tag: "Ok", value: undefined };
+      return { tag: "Ok", value: 0 };
     }
-    const $m85 = built_js.launcher;
-    $m85$match: {
-      if ($m85.tag === "None") {
+    const $m88 = built_js.launcher;
+    $m88$match: {
+      if ($m88.tag === "None") {
         $std_io.eprint({ console: console, text: "onus run: " + entry + " declares no `pub fn main`\n" });
         return { tag: "Err", error: { tag: "Other", detail: "no main" } };
-        break $m85$match;
+        break $m88$match;
       }
-      if ($m85.tag === "Some") {
-        const value = $m85.value;
+      if ($m88.tag === "Some") {
+        const value = $m88.value;
         return run_program({ process: process, console: console, program: "node", args: [...[value], ...rest] });
-        break $m85$match;
+        break $m88$match;
       }
       $rt.unreachable();
     }
@@ -613,9 +673,9 @@ export function interface_command({ args, files, console, process, env }) {
     const entry = $std_list.get({ xs: args.files, i: 0 });
     const s = setup({ args: args, files: files, env: env });
     let ctx = s.ctx;
-    const [$r88, ctx$12] = read_entries({ ctx: ctx, files: files, paths: [entry] });
+    const [$r91, ctx$12] = read_entries({ ctx: ctx, files: files, paths: [entry] });
     ctx = ctx$12;
-    $rt.unwrap($r88);
+    $rt.unwrap($r91);
     const [, ctx$13] = $check.run_passes({ ctx: ctx, to: 11, files: files, console: console, process: process, vopts: s.vopts });
     ctx = ctx$13;
     const tab = $loc.line_tables({ ctx: ctx });
@@ -625,25 +685,25 @@ export function interface_command({ args, files, console, process, env }) {
       return { tag: "Err", error: { tag: "Other", detail: "diagnostics" } };
     }
     let mod = $rt.int.neg(1, $ob9);
-    const $m91 = entry_module({ ctx: ctx });
-    $m91$match: {
-      if ($m91.tag === "Some") {
-        const value = $m91.value;
+    const $m94 = entry_module({ ctx: ctx });
+    $m94$match: {
+      if ($m94.tag === "Some") {
+        const value = $m94.value;
         mod = value;
-        break $m91$match;
+        break $m94$match;
       }
-      if ($m91.tag === "None") {
+      if ($m94.tag === "None") {
         $std_io.eprint({ console: console, text: "onus interface: " + entry + " is not a module\n" });
         return { tag: "Err", error: { tag: "Other", detail: "not a module" } };
-        break $m91$match;
+        break $m94$match;
       }
       $rt.unreachable();
     }
     const doc = $interface.interface_of({ ctx: ctx, mod: mod });
-    const $m94 = value({ args: args, name: "diff" });
-    $m94$match: {
-      if ($m94.tag === "Some") {
-        const value = $m94.value;
+    const $m97 = value({ args: args, name: "diff" });
+    $m97$match: {
+      if ($m97.tag === "Some") {
+        const value = $m97.value;
         const old_text = $rt.unwrap($std_io.read({ files: files, path: value }));
         const old_doc = or_null({ o: $json.parse({ t: old_text }) });
         if (!is_interface_document({ j: old_doc })) {
@@ -660,11 +720,11 @@ export function interface_command({ args, files, console, process, env }) {
           return { tag: "Err", error: { tag: "Other", detail: "breaking" } };
         }
         return { tag: "Ok", value: undefined };
-        break $m94$match;
+        break $m97$match;
       }
-      if ($m94.tag === "None") {
+      if ($m97.tag === "None") {
         skip({  });
-        break $m94$match;
+        break $m97$match;
       }
       $rt.unreachable();
     }
@@ -692,34 +752,34 @@ export function path_command({ args, files, console, process, env }) {
     }
     const s = setup({ args: args, files: files, env: env });
     let ctx = s.ctx;
-    const [$r103, ctx$14] = read_entries({ ctx: ctx, files: files, paths: [entry] });
+    const [$r106, ctx$14] = read_entries({ ctx: ctx, files: files, paths: [entry] });
     ctx = ctx$14;
-    $rt.unwrap($r103);
+    $rt.unwrap($r106);
     const [, ctx$15] = $check.run_passes({ ctx: ctx, to: 11, files: files, console: console, process: process, vopts: s.vopts });
     ctx = ctx$15;
     const tab = $loc.line_tables({ ctx: ctx });
     const as_json = flag({ args: args, name: "json" });
     emit_diagnostics({ ctx: ctx, console: console, tab: tab, as_json: as_json });
     let entry_mod = $rt.int.neg(1, $ob10);
-    const $m104 = entry_module({ ctx: ctx });
-    $m104$match: {
-      if ($m104.tag === "Some") {
-        const value = $m104.value;
+    const $m107 = entry_module({ ctx: ctx });
+    $m107$match: {
+      if ($m107.tag === "Some") {
+        const value = $m107.value;
         entry_mod = value;
-        break $m104$match;
+        break $m107$match;
       }
-      if ($m104.tag === "None") {
+      if ($m107.tag === "None") {
         skip({  });
-        break $m104$match;
+        break $m107$match;
       }
       $rt.unreachable();
     }
     let reports = $std_list.builder({  });
     for (const k of $std_map.keys({ d: ctx.analyses })) {
-      const $m105 = $std_map.find({ d: ctx.analyses, key: k });
-      $m105$match: {
-        if ($m105.tag === "Some") {
-          const value = $m105.value;
+      const $m108 = $std_map.find({ d: ctx.analyses, key: k });
+      $m108$match: {
+        if ($m108.tag === "Some") {
+          const value = $m108.value;
           if (value.mod === entry_mod) {
             let chosen = true;
             if (wanted.tag === "Some") {
@@ -730,11 +790,11 @@ export function path_command({ args, files, console, process, env }) {
               reports = reports$16;
             }
           }
-          break $m105$match;
+          break $m108$match;
         }
-        if ($m105.tag === "None") {
+        if ($m108.tag === "None") {
           skip({  });
-          break $m105$match;
+          break $m108$match;
         }
         $rt.unreachable();
       }
@@ -765,36 +825,33 @@ export function main({ args, files, console, process, env }) {
   const a = parse_args({ argv: args });
   if (flag({ args: a, name: "version" })) {
     $std_io.print({ console: console, text: "onus " + $bundle.version + "\n" });
-    return { tag: "Ok", value: undefined };
+    return { tag: "Ok", value: 0 };
   }
-  const $m112 = a.command;
-  $m112$match: {
-    if ($m112.tag === "None") {
-      return usage_error({ console: console });
-      break $m112$match;
+  const $m115 = a.command;
+  $m115$match: {
+    if ($m115.tag === "None") {
+      return { tag: "Ok", value: exit_status({ console: console, r: usage_error({ console: console }) }) };
+      break $m115$match;
     }
-    if ($m112.tag === "Some") {
-      const value = $m112.value;
+    if ($m115.tag === "Some") {
+      const value = $m115.value;
       if (value === "check") {
-        return check_command({ args: a, files: files, console: console, process: process, env: env });
+        return { tag: "Ok", value: exit_status({ console: console, r: check_command({ args: a, files: files, console: console, process: process, env: env }) }) };
       }
       if (value === "fmt") {
-        return fmt_command({ args: a, files: files, console: console });
+        return { tag: "Ok", value: exit_status({ console: console, r: fmt_command({ args: a, files: files, console: console }) }) };
       }
-      if (value === "build") {
-        return build_command({ args: a, files: files, console: console, process: process, env: env, run: false });
-      }
-      if (value === "run") {
-        return build_command({ args: a, files: files, console: console, process: process, env: env, run: true });
+      if (value === "build" || value === "run") {
+        return { tag: "Ok", value: exit_status_of({ console: console, r: build_command({ args: a, files: files, console: console, process: process, env: env, run: value === "run" }) }) };
       }
       if (value === "interface") {
-        return interface_command({ args: a, files: files, console: console, process: process, env: env });
+        return { tag: "Ok", value: exit_status({ console: console, r: interface_command({ args: a, files: files, console: console, process: process, env: env }) }) };
       }
       if (value === "path") {
-        return path_command({ args: a, files: files, console: console, process: process, env: env });
+        return { tag: "Ok", value: exit_status({ console: console, r: path_command({ args: a, files: files, console: console, process: process, env: env }) }) };
       }
-      return usage_error({ console: console });
-      break $m112$match;
+      return { tag: "Ok", value: exit_status({ console: console, r: usage_error({ console: console }) }) };
+      break $m115$match;
     }
     $rt.unreachable();
   }

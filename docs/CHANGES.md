@@ -1755,6 +1755,31 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     from its snapshots after the fact; items 183 and 184 touched no module
     of `self/` but the generated bundle.
 
+187. **The command line reports exit statuses and hands `run` the
+    terminal.** With items 184 and 185 promoted, `self/cli.onus` uses them:
+    its `main` returns `Result[Int, io.Error]` and reports what the
+    TypeScript command line does — 0 success, 1 diagnostics (or a breaking
+    interface, or a native build that failed), 2 usage or I/O failure — by
+    mapping each command's outcome through one table of the markers the
+    commands already returned, printing `onus: <error>` for a failure no
+    command reported itself; `check` and `fmt` now return the diagnostics
+    marker after printing their counts rather than the count as the error
+    the runtime used to print. `run` starts the program through `io.exec`
+    on the user's own streams and ends with the program's status, 1 when a
+    signal ended it or it could not start, as the TypeScript one does; the
+    captured relay is gone. That closes both notes of item 169. Fixture:
+    `test/self/cli.test.ts` now requires identical exit statuses on every
+    invocation, not agreement on failure alone; it caught the two commands
+    whose markers had not been mapped. Review artefacts under
+    `.onus/changes/187/`: the interface diff of `self/cli.onus` is `main`
+    returning `Result[Int, io.Error]`, `build_command` and `run_program`
+    returning the status, the module header (the doc comment of `usage`),
+    and four private functions added (`failure_status`, `exit_status`,
+    `exit_status_of`, `usage_failure`); the ledger delta is one obligation
+    fewer, the proved refinement on `io.run`'s timeout argument that `exec`
+    does not take, no status change. Not a language change; made through
+    the process for the chain and the differentials.
+
 ### Deferred, not changed
 
 - Decided 2026-09-06, to apply in M15.5: generics compile natively by

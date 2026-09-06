@@ -43,6 +43,8 @@ interface Run {
   readonly stdout: string;
   readonly stderr: string;
   readonly ok: boolean;
+  /** The exit status: 0 success, 1 diagnostics, 2 usage or I/O failure, a run's program's own (item 187). */
+  readonly status: number | null;
 }
 
 /** Every file under `dir` by relative path, `native/` excluded (compared on its own). */
@@ -79,7 +81,7 @@ describe('the command line in Onus (M15.4)', () => {
     const common = [...args, '--stdlib', STDLIB_ROOT, '--no-cache'];
     const run = (cmd: string, argv: string[], dir: string, env: NodeJS.ProcessEnv): Run => {
       const r = spawnSync(cmd, argv, { encoding: 'utf8', cwd: dir, env });
-      return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', ok: r.status === 0 };
+      return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', ok: r.status === 0, status: r.status };
     };
     return {
       ts: run(process.execPath, [tsCli, ...common], cwd.ts, process.env),
@@ -89,7 +91,7 @@ describe('the command line in Onus (M15.4)', () => {
 
   function agree(r: { ts: Run; onus: Run }): void {
     expect(r.onus.stdout).toBe(r.ts.stdout);
-    expect(r.onus.ok).toBe(r.ts.ok);
+    expect(r.onus.status).toBe(r.ts.status);
   }
 
   it('check: the text and JSON diagnostics of a failing fixture, and the ledger of a clean one', () => {
