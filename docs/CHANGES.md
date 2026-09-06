@@ -1955,6 +1955,44 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     agrees; promoted. `test` is now whole in Onus; `review`, `next` and
     `loop` remain.
 
+193. **`onus review` in Onus (M15.6; §15).** `self/review.onus` (new;
+    `report/review.ts` and the `@onus/review` package's `render.ts` and
+    `layout.ts`) and `self/cli.onus` provide `onus review <entry> [--out
+    <dir>] [--against <interface.json>]`: after the pipeline ran to paths
+    the bundle `review.json` is collected — every user module's interface
+    document (item 92's `interface_of`) and canonical source, every path
+    report, the diagnostics as JSON, the interface diff of the entry module
+    against the given document, and the changes the regeneration loop wrote
+    under `.onus/changes/*/change.json`, narrowed as the page shows them
+    and newest first — and `index.html` renders every view of it: the path
+    view with its layered graph (breadth first from the entry, as
+    authority flows; unresolvable calls as breaks; gate regions around the
+    guarded nodes), the interface view with bodies collapsed and their
+    opening counted, the ledger view with its filters, the diff view, the
+    changes view with proposals marked as the loop's, and the diagnostics
+    view with the solver's model. The renderer reads the JSON documents
+    directly (`json.Json`), since every document is produced by a module
+    `self/` already has, and its page is byte for byte the TypeScript
+    page: the same style sheet and script, the same markup. Diagnostics
+    are reported on the terminal and the page then holds them alone; the
+    status is 1 when any was reported, 2 when `--against` does not name an
+    interface document. The run's time (`io.time`, item 190) dates the
+    bundle. Neither compiler changed. Fixtures: `test/self/cli.test.ts`
+    gains `review` on the checkout example staged with a loop change
+    written under `.onus/changes/task_test/` (the bundle and the page
+    identical but for the time; the assumed leaf, the gate, the blocked
+    change and its proposal, the collapsed body present), `--against` a
+    renamed copy of its own interface (identical; the diff view present),
+    `--against` a file that is not a document (status 2), and an invalid
+    program (identical; status 1; the page holds `E0416`). Review
+    artefacts under `.onus/changes/193/`: the interface diff of `cli` is
+    `review_command` added and the usage text changed; the ledger delta is
+    `cli` 59 → 60 (an index refinement proved) and `review` new with 123
+    obligations (26 proved, 97 checked: the representation and overflow
+    obligations of the layout arithmetic and the counters, as throughout
+    `self/`). Fixed point reached from `bootstrap/`, native stage agrees;
+    promoted. `next` and `loop` remain.
+
 ### Deferred, not changed
 
 - Decided 2026-09-06, to apply in M15.5: generics compile natively by

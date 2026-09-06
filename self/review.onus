@@ -1,0 +1,2053 @@
+module review
+import std.io
+import context
+import defs
+import report
+import json
+import loc
+import interface
+import pathreport
+import idiff
+import diagjson
+
+-- The review page (language spec §15; `report/review.ts` and `@onus/review`):
+-- the bundle `review.json` holds every module's interface document and
+-- canonical source, every path report, the diagnostics, an interface diff
+-- against a previous document when one is given, and the changes the
+-- regeneration loop wrote; `index.html` renders every view of it, pre-rendered,
+-- with an inline script that only switches views, filters the ledger and
+-- counts body expansions (§15.1). Nothing here analyses a program.
+fn skip() -> Unit {
+  return Unit
+}
+
+fn max(a: Int, b: Int) -> Int {
+  if a > b {
+    return a
+  }
+  return b
+}
+
+fn min(a: Int, b: Int) -> Int {
+  if a < b {
+    return a
+  }
+  return b
+}
+
+fn num(n: Int) -> Text may alloc {
+  return Int.to_text(x: n)
+}
+
+fn plural(n: Int, word: Text) -> Text may alloc {
+  if n == 1 {
+    return num(n: n) ++ " " ++ word
+  }
+  return num(n: n) ++ " " ++ word ++ "s"
+}
+
+-- HTML-escapes text.
+pub fn esc(s: Text) -> Text may alloc {
+  return Text.replace(
+    t: Text.replace(
+      t: Text.replace(t: Text.replace(t: s, from: "&", to: "&amp;"), from: "<", to: "&lt;"),
+      from: ">",
+      to: "&gt;"
+    ),
+    from: "\"",
+    to: "&quot;"
+  )
+}
+
+-- `verified <when> against <target>`, `verification failed …`, or `unverified` (§20.3).
+pub fn freshness(a: json.Json) -> Text may alloc {
+  let lv: json.Json = json.at(j: a, key: "last_verified")
+  if not json.is_null(j: lv) {
+    var head: Text = "verification failed"
+    if json.str_at(j: lv, key: "result") == "passed" {
+      head = "verified"
+    }
+    return head ++ " " ++ json.str_at(j: lv, key: "at") ++ " against " ++ json.str_at(
+      j: lv,
+      key: "target"
+    )
+  }
+  if json.bool_at(j: a, key: "verifiable") {
+    return "unverified (verifiable)"
+  }
+  return "unverified"
+}
+
+fn counts(o: json.Json) -> Text may alloc, mutate {
+  var parts: Builder[Text] = List.builder()
+  List.push(b: inout parts, x: num(n: json.int_at(j: o, key: "proved")) ++ " proved")
+  if json.int_at(j: o, key: "checked") > 0 {
+    List.push(b: inout parts, x: num(n: json.int_at(j: o, key: "checked")) ++ " checked")
+  }
+  if json.int_at(j: o, key: "assumed") > 0 {
+    List.push(b: inout parts, x: num(n: json.int_at(j: o, key: "assumed")) ++ " assumed")
+  }
+  if json.int_at(j: o, key: "failed") > 0 {
+    List.push(b: inout parts, x: num(n: json.int_at(j: o, key: "failed")) ++ " failed")
+  }
+  return Text.join(parts: List.finish(b: parts), sep: ", ")
+}
+
+fn last_segment(name: Text) -> Text may alloc {
+  let parts: List[Text] = Text.split(t: name, sep: ".")
+  return List.get(xs: parts, i: List.len(xs: parts) - 1)
+}
+
+fn first_segment(name: Text) -> Text may alloc {
+  return List.get(xs: Text.split(t: name, sep: ":"), i: 0)
+}
+
+-- `file:line:col` of a location object `{file, span: [[l, c], [l, c]]}`.
+fn loc_text(l: json.Json) -> Text may alloc {
+  let span: List[json.Json] = json.list_at(j: l, key: "span")
+  var start: List[json.Json] = []
+  if List.len(xs: span) > 0 {
+    start = json.list_of(j: List.get(xs: span, i: 0))
+  }
+  var line: Text = "0"
+  var col: Text = "0"
+  if List.len(xs: start) > 1 {
+    line = json_num_text(j: List.get(xs: start, i: 0))
+    col = json_num_text(j: List.get(xs: start, i: 1))
+  }
+  return json.str_at(j: l, key: "file") ++ ":" ++ line ++ ":" ++ col
+}
+
+fn json_num_text(j: json.Json) -> Text {
+  match j with
+  | json.JNumber(text) -> return text
+  | _ -> return "0"
+}
+
+fn json_int(j: json.Json) -> Int {
+  match j with
+  | json.JNumber(text) -> {
+    match Int.parse(t: text) with
+    | Some(value) -> return value
+    | None -> return 0
+  }
+  | _ -> return 0
+}
+
+-- A JSON value as JavaScript's `String(v)` prints it, for counterexample values.
+fn plain(j: json.Json) -> Text may alloc, mutate
+  decreases j
+{
+  match j with
+  | json.JNull -> return "null"
+  | json.JBool(value) -> {
+    if value {
+      return "true"
+    }
+    return "false"
+  }
+  | json.JNumber(text) -> return text
+  | json.JString(value) -> return value
+  | json.JArray(items) -> {
+    var parts: Builder[Text] = List.builder()
+    for x: json.Json in items {
+      List.push(b: inout parts, x: plain(j: x))
+    }
+    return Text.join(parts: List.finish(b: parts), sep: ",")
+  }
+  | json.JObject(_) -> return "[object Object]"
+}
+
+-- Graph layout (§15.1): layered top-down from the entry, as authority flows. ---------------------------
+pub const node_w: Int = 236
+
+pub const node_h: Int = 76
+
+const h_gap: Int = 36
+
+const v_gap: Int = 84
+
+const margin: Int = 32
+
+pub record Placed {
+  id: Text
+  layer: Int
+  x: Int
+  y: Int
+}
+
+pub record Layout {
+  placed: Dict[Text, Placed]
+  width: Int
+  height: Int
+}
+
+-- A node placed after another: the break of an unresolvable call.
+pub record Extra {
+  id: Text
+  after: Text
+}
+
+fn ids_or(o: Option[List[Text]]) -> List[Text] may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return []
+}
+
+fn int_or(o: Option[Int], dflt: Int) -> Int {
+  match o with
+  | Some(value) -> return value
+  | None -> return dflt
+}
+
+fn sorted_ints(xs: List[Int]) -> List[Int] may alloc, mutate {
+  var out: List[Int] = []
+  for x: Int in xs {
+    var placed: Bool = false
+    var next: Builder[Int] = List.builder()
+    for y: Int in out {
+      if not placed and x < y {
+        List.push(b: inout next, x: x)
+        placed = true
+      }
+      List.push(b: inout next, x: y)
+    }
+    if not placed {
+      List.push(b: inout next, x: x)
+    }
+    out = List.finish(b: next)
+  }
+  return out
+}
+
+-- Places nodes in layers by breadth-first distance from `entry` over the
+-- edges; nodes no edge reaches go in a final layer; each extra goes after
+-- the node it follows.
+pub fn layout_graph(
+  nodes: List[json.Json],
+  edges: List[json.Json],
+  entry: Text,
+  extras: List[Extra]
+) -> Layout may alloc, mutate {
+  var out: Dict[Text, List[Text]] = Map.dict()
+  for e: json.Json in edges {
+    let from_id: Text = json.str_at(j: e, key: "from")
+    let to_id: Text = json.str_at(j: e, key: "to")
+    let list: List[Text] = ids_or(o: Map.find(d: out, key: from_id))
+    if not List.contains(xs: list, x: to_id) {
+      Map.set(d: inout out, key: from_id, value: List.append(xs: list, x: to_id))
+    }
+  }
+  var layer_of: Dict[Text, Int] = Map.dict()
+  Map.set(d: inout layer_of, key: entry, value: 0)
+  -- Breadth first by level: each level reaches at least one node through an edge, so there are at most as many levels as edges.
+  var frontier: List[Text] = [entry]
+  var layer: Int = 0
+  for step: Int in 0 ..< List.len(xs: edges) + 1 {
+    var next_frontier: Builder[Text] = List.builder()
+    for id: Text in frontier {
+      for next: Text in ids_or(o: Map.find(d: out, key: id)) {
+        if not Map.contains(d: layer_of, key: next) {
+          Map.set(d: inout layer_of, key: next, value: layer + 1)
+          List.push(b: inout next_frontier, x: next)
+        }
+      }
+    }
+    frontier = List.finish(b: next_frontier)
+    layer = layer + 1
+  }
+  var deepest: Int = 0
+  for l: Int in Map.values(d: layer_of) {
+    deepest = max(a: deepest, b: l)
+  }
+  for n: json.Json in nodes {
+    let id: Text = json.str_at(j: n, key: "id")
+    if not Map.contains(d: layer_of, key: id) {
+      Map.set(d: inout layer_of, key: id, value: deepest + 1)
+    }
+  }
+  deepest = 0
+  for l: Int in Map.values(d: layer_of) {
+    deepest = max(a: deepest, b: l)
+  }
+  for x: Extra in extras {
+    Map.set(
+      d: inout layer_of,
+      key: x.id,
+      value: int_or(o: Map.find(d: layer_of, key: x.after), dflt: deepest) + 1
+    )
+  }
+  var layers: Dict[Int, List[Text]] = Map.dict()
+  var order: Builder[Text] = List.builder()
+  for n: json.Json in nodes {
+    List.push(b: inout order, x: json.str_at(j: n, key: "id"))
+  }
+  for x: Extra in extras {
+    List.push(b: inout order, x: x.id)
+  }
+  for id: Text in List.finish(b: order) {
+    let l: Int = int_or(o: Map.find(d: layer_of, key: id), dflt: 0)
+    Map.set(
+      d: inout layers,
+      key: l,
+      value: List.append(xs: ids_or(o: Map.find(d: layers, key: l)), x: id)
+    )
+  }
+  var widest: Int = 1
+  for ids: List[Text] in Map.values(d: layers) {
+    widest = max(a: widest, b: List.len(xs: ids))
+  }
+  let width: Int = margin * 2 + widest * node_w + (widest - 1) * h_gap
+  var placed: Dict[Text, Placed] = Map.dict()
+  var height: Int = margin
+  for depth: Int in sorted_ints(xs: Map.keys(d: layers)) {
+    let ids: List[Text] = ids_or(o: Map.find(d: layers, key: depth))
+    let row_width: Int = List.len(xs: ids) * node_w + (List.len(xs: ids) - 1) * h_gap
+    let x0: Int = (width - row_width) / 2
+    let y: Int = margin + depth * (node_h + v_gap)
+    var i: Int = 0
+    for id: Text in ids {
+      Map.set(
+        d: inout placed,
+        key: id,
+        value: Placed { id: id, layer: depth, x: x0 + i * (node_w + h_gap), y: y }
+      )
+      i = i + 1
+    }
+    height = max(a: height, b: y + node_h + margin)
+  }
+  return Layout { placed: placed, width: width, height: height }
+}
+
+-- Path view ------------------------------------------------------------------------------------------
+record Break {
+  id: Text
+  after: Text
+  reason: Text
+  at: Text
+}
+
+fn placed_of(layout: Layout, id: Text) -> Option[Placed] {
+  return Map.find(d: layout.placed, key: id)
+}
+
+fn texts_set(xs: List[Text]) -> Dict[Text, Bool] may alloc, mutate {
+  var out: Dict[Text, Bool] = Map.dict()
+  for x: Text in xs {
+    Map.set(d: inout out, key: x, value: true)
+  }
+  return out
+}
+
+-- The gate region around the guarded nodes, or nothing when none is placed.
+fn gate_svg(layout: Layout, g: json.Json) -> Text may alloc, mutate {
+  var any: Bool = false
+  var x: Int = 0
+  var y: Int = 0
+  var x2: Int = 0
+  var y2: Int = 0
+  for id: Text in json.texts_at(j: g, key: "guarded") {
+    match placed_of(layout: layout, id: id) with
+    | None -> skip()
+    | Some(value) -> {
+      if not any {
+        x = value.x
+        y = value.y
+        x2 = value.x
+        y2 = value.y
+        any = true
+      } else {
+        x = min(a: x, b: value.x)
+        y = min(a: y, b: value.y)
+        x2 = max(a: x2, b: value.x)
+        y2 = max(a: y2, b: value.y)
+      }
+    }
+  }
+  if not any {
+    return ""
+  }
+  let pad: Int = 14
+  let gx: Int = x - pad
+  let gy: Int = y - pad - 16
+  let gx2: Int = x2 + node_w + pad
+  let gy2: Int = y2 + node_h + pad
+  return "<rect class=\"gate\" x=\"" ++ num(n: gx) ++ "\" y=\"" ++ num(
+    n: gy
+  ) ++ "\" width=\"" ++ num(n: gx2 - gx) ++ "\" height=\"" ++ num(
+    n: gy2 - gy
+  ) ++ "\" rx=\"10\"/>\n<text class=\"gate-label\" x=\"" ++ num(n: gx + 8) ++ "\" y=\"" ++ num(
+    n: gy + 13
+  ) ++ "\">gate: " ++ esc(s: json.str_at(j: g, key: "evidence")) ++ " from " ++ esc(
+    s: Text.join(parts: json.texts_at(j: g, key: "producers"), sep: ", ")
+  ) ++ "</text>"
+}
+
+fn edge_svg(layout: Layout, e: json.Json) -> Text may alloc, mutate {
+  match placed_of(layout: layout, id: json.str_at(j: e, key: "from")) with
+  | None -> return ""
+  | Some(value) -> return edge_from(layout: layout, e: e, a: value)
+}
+
+fn edge_from(layout: Layout, e: json.Json, a: Placed) -> Text may alloc, mutate {
+  match placed_of(layout: layout, id: json.str_at(j: e, key: "to")) with
+  | None -> return ""
+  | Some(value) -> {
+    let x1: Int = a.x + node_w / 2
+    let y1: Int = a.y + node_h
+    let x2: Int = value.x + node_w / 2
+    let y2: Int = value.y
+    var back: Text = ""
+    if value.layer <= a.layer {
+      back = " back"
+    }
+    let mid: Text = num(n: (y1 + y2) / 2)
+    var out: Text = "<path class=\"edge" ++ back ++ "\" d=\"M" ++ num(n: x1) ++ "," ++ num(
+      n: y1
+    ) ++ " C" ++ num(n: x1) ++ "," ++ mid ++ " " ++ num(n: x2) ++ "," ++ mid ++ " " ++ num(
+      n: x2
+    ) ++ "," ++ num(n: y2) ++ "\"/>"
+    let effects: List[Text] = json.texts_at(j: e, key: "effects")
+    if List.len(xs: effects) > 0 {
+      out = out ++ "\n<text class=\"edge-label\" x=\"" ++ num(n: (x1 + x2) / 2) ++ "\" y=\"" ++ num(
+        n: (y1 + y2) / 2 - 4
+      ) ++ "\">" ++ esc(s: Text.join(parts: effects, sep: ", ")) ++ "</text>"
+    }
+    return out
+  }
+}
+
+fn break_svg(layout: Layout, b: Break) -> Text may alloc, mutate {
+  match placed_of(layout: layout, id: b.after) with
+  | None -> return ""
+  | Some(value) -> return break_from(layout: layout, b: b, a: value)
+}
+
+fn break_from(layout: Layout, b: Break, a: Placed) -> Text may alloc, mutate {
+  match placed_of(layout: layout, id: b.id) with
+  | None -> return ""
+  | Some(value) -> {
+    return "<path class=\"edge break\" d=\"M" ++ num(n: a.x + node_w / 2) ++ "," ++ num(
+      n: a.y + node_h
+    ) ++ " L" ++ num(n: value.x + node_w / 2) ++ "," ++ num(
+      n: value.y
+    ) ++ "\"/>\n<g class=\"node break\" transform=\"translate(" ++ num(n: value.x) ++ "," ++ num(
+      n: value.y
+    ) ++ ")\"><rect width=\"" ++ num(n: node_w) ++ "\" height=\"" ++ num(
+      n: node_h
+    ) ++ "\" rx=\"6\"/><text x=\"12\" y=\"22\">unresolvable call</text><text class=\"small\" x=\"12\" y=\"42\">" ++ esc(
+      s: b.at
+    ) ++ "</text><text class=\"small\" x=\"12\" y=\"60\">" ++ esc(
+      s: prefix36(t: b.reason)
+    ) ++ "</text></g>"
+  }
+}
+
+-- The first 36 code points of `t`, as the break label shows a reason.
+fn prefix36(t: Text) -> Text may alloc {
+  if Text.count(t: t) <= 36 {
+    return t
+  }
+  return Text.slice(t: t, from: 0, to: 36)
+}
+
+fn node_svg(
+  layout: Layout,
+  n: json.Json,
+  assumed_ids: Dict[Text, Bool],
+  recover_ids: Dict[Text, Bool]
+) -> Text may alloc, mutate {
+  let id: Text = json.str_at(j: n, key: "id")
+  match placed_of(layout: layout, id: id) with
+  | None -> return ""
+  | Some(value) -> {
+    var classes: Text = "node " ++ json.str_at(j: n, key: "kind")
+    if Map.contains(d: assumed_ids, key: id) or json.int_at(j: n, key: "assumes") > 0 {
+      classes = classes ++ " assumed"
+    }
+    if Map.contains(d: recover_ids, key: id) or json.int_at(j: n, key: "recovers") > 0 {
+      classes = classes ++ " recover"
+    }
+    let o: json.Json = json.at(j: n, key: "obligations")
+    let effects: List[Text] = json.texts_at(j: n, key: "effects")
+    var effects_text: Text = "pure"
+    if List.len(xs: effects) > 0 {
+      effects_text = Text.join(parts: effects, sep: ", ")
+    }
+    let claim_list: List[Text] = json.texts_at(j: n, key: "claims")
+    var claims_text: Text = "no claims"
+    if List.len(xs: claim_list) > 0 {
+      var shorts: Builder[Text] = List.builder()
+      for c: Text in claim_list {
+        List.push(b: inout shorts, x: last_segment(name: c))
+      }
+      claims_text = "claims " ++ Text.join(parts: List.finish(b: shorts), sep: ", ")
+    }
+    var tail: Text = ""
+    if json.int_at(j: n, key: "assumes") > 0 {
+      tail = tail ++ " · " ++ num(n: json.int_at(j: n, key: "assumes")) ++ " assume"
+    }
+    if json.int_at(j: n, key: "recovers") > 0 {
+      tail = tail ++ " · " ++ num(n: json.int_at(j: n, key: "recovers")) ++ " recover"
+    }
+    return "<g class=\"" ++ classes ++ "\" transform=\"translate(" ++ num(n: value.x) ++ "," ++ num(
+      n: value.y
+    ) ++ ")\" data-id=\"" ++ esc(s: id) ++ "\"><rect width=\"" ++ num(
+      n: node_w
+    ) ++ "\" height=\"" ++ num(
+      n: node_h
+    ) ++ "\" rx=\"6\"/>" ++ "<text class=\"name\" x=\"12\" y=\"20\">" ++ esc(
+      s: id
+    ) ++ "</text>" ++ "<text class=\"small\" x=\"12\" y=\"38\">" ++ esc(
+      s: effects_text
+    ) ++ "</text>" ++ "<text class=\"small\" x=\"12\" y=\"54\">" ++ esc(
+      s: claims_text
+    ) ++ "</text>" ++ "<text class=\"small\" x=\"12\" y=\"70\">" ++ num(
+      n: json.int_at(j: o, key: "proved")
+    ) ++ "/" ++ num(n: json.int_at(j: o, key: "checked")) ++ "/" ++ num(
+      n: json.int_at(j: o, key: "assumed")
+    ) ++ " proved/checked/assumed" ++ tail ++ "</text></g>"
+  }
+}
+
+fn push_nonempty(out: inout Builder[Text], s: Text) -> Unit may mutate, alloc {
+  if s != "" {
+    List.push(b: inout out, x: s)
+  }
+  return Unit
+}
+
+-- The path view: the graph as SVG, then the path's assumptions, capabilities and ledger rows.
+pub fn render_path_view(r: json.Json) -> Text may alloc, mutate {
+  let entry: Text = json.str_at(j: r, key: "entry")
+  var breaks: Builder[Break] = List.builder()
+  var extras: Builder[Extra] = List.builder()
+  var i: Int = 0
+  for u: json.Json in json.list_at(j: r, key: "unresolvable_calls") {
+    let at: Text = json.str_at(j: u, key: "at")
+    let b: Break = Break {
+      id: "break:" ++ num(n: i),
+      after: first_segment(name: at),
+      reason: json.str_at(j: u, key: "reason"),
+      at: at
+    }
+    List.push(b: inout breaks, x: b)
+    List.push(b: inout extras, x: Extra { id: b.id, after: b.after })
+    i = i + 1
+  }
+  let graph: json.Json = json.at(j: r, key: "graph")
+  let nodes: List[json.Json] = json.list_at(j: graph, key: "nodes")
+  let edges: List[json.Json] = json.list_at(j: graph, key: "edges")
+  let layout: Layout = layout_graph(
+    nodes: nodes,
+    edges: edges,
+    entry: entry,
+    extras: List.finish(b: extras)
+  )
+  var assumed_at: Builder[Text] = List.builder()
+  for a: json.Json in json.list_at(j: r, key: "assumes") {
+    List.push(b: inout assumed_at, x: json.str_at(j: a, key: "at"))
+  }
+  var recover_defs: Builder[Text] = List.builder()
+  for x: json.Json in json.list_at(j: r, key: "recovers") {
+    List.push(b: inout recover_defs, x: json.str_at(j: x, key: "def"))
+  }
+  let assumed_ids: Dict[Text, Bool] = texts_set(xs: List.finish(b: assumed_at))
+  let recover_ids: Dict[Text, Bool] = texts_set(xs: List.finish(b: recover_defs))
+  var svg: Builder[Text] = List.builder()
+  for g: json.Json in json.list_at(j: r, key: "gates") {
+    push_nonempty(out: inout svg, s: gate_svg(layout: layout, g: g))
+  }
+  for e: json.Json in edges {
+    push_nonempty(out: inout svg, s: edge_svg(layout: layout, e: e))
+  }
+  for b: Break in List.finish(b: breaks) {
+    push_nonempty(out: inout svg, s: break_svg(layout: layout, b: b))
+  }
+  for n: json.Json in nodes {
+    push_nonempty(
+      out: inout svg,
+      s: node_svg(layout: layout, n: n, assumed_ids: assumed_ids, recover_ids: recover_ids)
+    )
+  }
+  var ok_text: Text = "failed"
+  if json.bool_at(j: r, key: "ok") {
+    ok_text = "ok"
+  }
+  let effects: json.Json = json.at(j: r, key: "effects")
+  var head: Text = "<h2>path <code>" ++ esc(
+    s: json.str_at(j: r, key: "path")
+  ) ++ "</code> <span class=\"status " ++ ok_text ++ "\">" ++ ok_text ++ "</span></h2>\n<p>entry <code>" ++ esc(
+    s: entry
+  ) ++ "</code> · " ++ num(
+    n: List.len(xs: json.list_at(j: r, key: "reachable"))
+  ) ++ " reachable · effects { " ++ esc(
+    s: Text.join(parts: json.texts_at(j: effects, key: "actual"), sep: ", ")
+  ) ++ " }"
+  if not json.is_null(j: json.at(j: effects, key: "bound")) {
+    head = head ++ " within { " ++ esc(
+      s: Text.join(parts: json.texts_at(j: effects, key: "bound"), sep: ", ")
+    ) ++ " }"
+  }
+  let forbidden: List[Text] = json.texts_at(j: effects, key: "forbid")
+  if List.len(xs: forbidden) > 0 {
+    head = head ++ " · forbid { " ++ esc(s: Text.join(parts: forbidden, sep: ", ")) ++ " }"
+  }
+  let claims_j: json.Json = json.at(j: r, key: "claims")
+  let required: List[Text] = json.texts_at(j: claims_j, key: "required")
+  if List.len(xs: required) > 0 {
+    var satisfied: Text = "not satisfied"
+    if json.bool_at(j: claims_j, key: "satisfied") {
+      satisfied = "satisfied"
+    }
+    head = head ++ " · require { " ++ esc(
+      s: Text.join(parts: required, sep: ", ")
+    ) ++ " } " ++ satisfied
+  }
+  head = head ++ "</p>"
+  let assumes: List[json.Json] = json.list_at(j: r, key: "assumes")
+  var assumes_html: Text = "<p>No assumptions on this path.</p>"
+  if List.len(xs: assumes) > 0 {
+    var rows: Builder[Text] = List.builder()
+    for a: json.Json in assumes {
+      List.push(b: inout rows, x: path_assume_row(a: a))
+    }
+    assumes_html = "<table><thead><tr><th>assume</th><th>at</th><th>justification</th><th>permitted by</th><th>verified</th></tr></thead><tbody>" ++ Text.join(
+      parts: List.finish(b: rows),
+      sep: ""
+    ) ++ "</tbody></table>"
+  }
+  let caps: List[json.Json] = json.list_at(j: r, key: "capabilities")
+  var caps_html: Text = ""
+  if List.len(xs: caps) > 0 {
+    var rows: Builder[Text] = List.builder()
+    for c: json.Json in caps {
+      List.push(
+        b: inout rows,
+        x: "<tr><td><code>" ++ esc(
+          s: json.str_at(j: c, key: "type")
+        ) ++ "</code></td><td><code>" ++ esc(
+          s: json.str_at(j: c, key: "constructed_at")
+        ) ++ "</code></td><td>" ++ esc(
+          s: joined_or(xs: json.texts_at(j: c, key: "assumes"), sep: "; ", dflt: "none recorded")
+        ) ++ "</td></tr>"
+      )
+    }
+    caps_html = "<h3>Capabilities</h3><table><thead><tr><th>type</th><th>constructed at</th><th>assumes</th></tr></thead><tbody>" ++ Text.join(
+      parts: List.finish(b: rows),
+      sep: ""
+    ) ++ "</tbody></table>"
+  }
+  let recovers: List[json.Json] = json.list_at(j: r, key: "recovers")
+  var recovers_html: Text = ""
+  if List.len(xs: recovers) > 0 {
+    var items: Builder[Text] = List.builder()
+    for x: json.Json in recovers {
+      List.push(
+        b: inout items,
+        x: "<li class=\"recover\"><code>" ++ esc(
+          s: json.str_at(j: x, key: "def")
+        ) ++ "</code> at <code>" ++ esc(s: json.str_at(j: x, key: "at")) ++ "</code></li>"
+      )
+    }
+    recovers_html = "<h3>Recover sites</h3><ul>" ++ Text.join(
+      parts: List.finish(b: items),
+      sep: ""
+    ) ++ "</ul>"
+  }
+  var rows: Builder[Row] = List.builder()
+  for l: json.Json in json.list_at(j: r, key: "ledger") {
+    List.push(
+      b: inout rows,
+      x: row_of(l: l, def: json.str_at(j: l, key: "def"), at: json.str_at(j: l, key: "at"))
+    )
+  }
+  return "<section class=\"path\" data-path=\"" ++ esc(
+    s: json.str_at(j: r, key: "path")
+  ) ++ "\">" ++ head ++ "\n<div class=\"graph\"><svg viewBox=\"0 0 " ++ num(
+    n: layout.width
+  ) ++ " " ++ num(n: layout.height) ++ "\" width=\"" ++ num(
+    n: layout.width
+  ) ++ "\" height=\"" ++ num(n: layout.height) ++ "\">" ++ Text.join(
+    parts: List.finish(b: svg),
+    sep: "\n"
+  ) ++ "</svg></div>\n" ++ coverage_line(
+    c: json.at(j: r, key: "obligation_coverage")
+  ) ++ "\n<h3>Assumptions</h3>" ++ assumes_html ++ caps_html ++ recovers_html ++ "\n<h3>Ledger (" ++ counts(
+    o: json.at(j: r, key: "obligations")
+  ) ++ ")</h3>" ++ ledger_table(rows: List.finish(b: rows)) ++ "\n</section>"
+}
+
+fn joined_or(xs: List[Text], sep: Text, dflt: Text) -> Text may alloc {
+  let joined: Text = Text.join(parts: xs, sep: sep)
+  if joined == "" {
+    return dflt
+  }
+  return joined
+}
+
+fn verify_row(a: json.Json, cols: Text) -> Text may alloc {
+  let v: json.Json = json.at(j: a, key: "verify")
+  if json.is_null(j: v) {
+    return ""
+  }
+  return "<tr class=\"verify-row\"><td colspan=\"" ++ cols ++ "\"><pre class=\"verify\">" ++ esc(
+    s: json.str_of(j: v)
+  ) ++ "</pre></td></tr>"
+}
+
+fn fresh_class(a: json.Json) -> Text {
+  if json.str_at(j: json.at(j: a, key: "last_verified"), key: "result") == "passed" {
+    return "verified"
+  }
+  return "unverified"
+}
+
+fn path_assume_row(a: json.Json) -> Text may alloc {
+  var permitted: Text = "not permitted"
+  let by: json.Json = json.at(j: a, key: "permitted_by")
+  if not json.is_null(j: by) {
+    permitted = "permitted by " ++ esc(s: json.str_of(j: by))
+  }
+  return "<tr class=\"assumed\"><td><code>" ++ esc(
+    s: json.str_at(j: a, key: "claim")
+  ) ++ "</code></td><td><code>" ++ esc(
+    s: json.str_at(j: a, key: "at")
+  ) ++ "</code></td><td>" ++ esc(
+    s: json.str_at(j: a, key: "justification")
+  ) ++ "</td><td>" ++ permitted ++ "</td><td class=\"fresh " ++ fresh_class(
+    a: a
+  ) ++ "\">assumed, " ++ esc(s: freshness(a: a)) ++ "</td></tr>" ++ verify_row(a: a, cols: "5")
+}
+
+-- One row of a ledger table, as the path and the ledger views build them.
+record Row {
+  kind: Text
+  text: Text
+  def: Text
+  status: Text
+  by: Text
+  pinned: Bool
+  at: Text
+}
+
+fn row_of(l: json.Json, def: Text, at: Text) -> Row may alloc {
+  return Row {
+    kind: json.str_at(j: l, key: "kind"),
+    text: json.str_at(j: l, key: "text"),
+    def: def,
+    status: json.str_at(j: l, key: "status"),
+    by: json.str_at(j: l, key: "by"),
+    pinned: json.bool_at(j: l, key: "pinned"),
+    at: at
+  }
+}
+
+fn ledger_table(rows: List[Row]) -> Text may alloc, mutate {
+  if List.len(xs: rows) == 0 {
+    return "<p>No obligations.</p>"
+  }
+  var out: Builder[Text] = List.builder()
+  for l: Row in rows {
+    var pinned: Text = ""
+    if l.pinned {
+      pinned = " (pinned)"
+    }
+    List.push(
+      b: inout out,
+      x: "<tr class=\"ledger-row status-" ++ esc(s: l.status) ++ "\"><td class=\"status " ++ esc(
+        s: l.status
+      ) ++ "\">" ++ esc(s: l.status) ++ pinned ++ "</td><td>" ++ esc(
+        s: l.kind
+      ) ++ "</td><td><code>" ++ esc(s: l.text) ++ "</code></td><td><code>" ++ esc(
+        s: l.def
+      ) ++ "</code></td><td><code>" ++ esc(s: l.at) ++ "</code></td><td>" ++ esc(
+        s: l.by
+      ) ++ "</td></tr>"
+    )
+  }
+  return "<table class=\"ledger\"><thead><tr><th>status</th><th>kind</th><th>obligation</th><th>in</th><th>at</th><th>by</th></tr></thead><tbody>" ++ Text.join(
+    parts: List.finish(b: out),
+    sep: ""
+  ) ++ "</tbody></table>"
+}
+
+-- Interface view -------------------------------------------------------------------------------------
+fn contract_line(c: json.Json) -> Text may alloc {
+  let status: Text = json.str_at(j: c, key: "status")
+  var mark: Text = ""
+  if status == "checked" {
+    var at: Text = "runtime"
+    if json.has(j: c, key: "checked_at") {
+      at = json.str_at(j: c, key: "checked_at")
+    }
+    mark = " <span class=\"mark checked\">checked at " ++ esc(s: at) ++ "</span>"
+  } else {
+    if status != "proved" {
+      mark = " <span class=\"mark " ++ esc(s: status) ++ "\">" ++ esc(s: status) ++ "</span>"
+    }
+  }
+  var pinned: Text = ""
+  if json.bool_at(j: c, key: "pinned") {
+    pinned = "proved "
+  }
+  return "<div class=\"contract\"><code>" ++ esc(
+    s: json.str_at(j: c, key: "kind")
+  ) ++ " " ++ pinned ++ esc(s: json.str_at(j: c, key: "text")) ++ "</code>" ++ mark ++ "</div>"
+}
+
+-- The lines `l1..l2` (1-based, inclusive) of the source, as the item's span names them.
+fn body_of(lines: List[Text], item: json.Json) -> Text may alloc, mutate {
+  let span: List[json.Json] = json.list_at(j: json.at(j: item, key: "at"), key: "span")
+  if List.len(xs: span) < 2 {
+    return ""
+  }
+  let start: List[json.Json] = json.list_of(j: List.get(xs: span, i: 0))
+  let end: List[json.Json] = json.list_of(j: List.get(xs: span, i: 1))
+  if List.len(xs: start) < 1 or List.len(xs: end) < 1 {
+    return ""
+  }
+  let l1: Int = max(a: 0, b: json_int(j: List.get(xs: start, i: 0)) - 1)
+  let l2: Int = min(a: List.len(xs: lines), b: json_int(j: List.get(xs: end, i: 0)))
+  var out: Builder[Text] = List.builder()
+  var i: Int = 0
+  for line: Text in lines {
+    if i >= l1 and i < l2 {
+      List.push(b: inout out, x: line)
+    }
+    i = i + 1
+  }
+  return Text.join(parts: List.finish(b: out), sep: "\n")
+}
+
+fn item_html(
+  doc_module: Text,
+  item: json.Json,
+  lines: Option[List[Text]]
+) -> Text may alloc, mutate {
+  let kind: Text = json.str_at(j: item, key: "kind")
+  let name: Text = json.str_at(j: item, key: "name")
+  var sig_text: Text = json.str_at(j: item, key: "signature")
+  if kind == "fn" and json.str_at(j: item, key: "visibility") == "pub" {
+    sig_text = "pub " ++ sig_text
+  }
+  let sig: Text = "<pre class=\"signature\">" ++ esc(s: sig_text) ++ "</pre>"
+  var meta: Text = ""
+  if kind == "fn" {
+    let effects: List[Text] = json.texts_at(j: item, key: "effects")
+    var effects_text: Text = "pure"
+    if List.len(xs: effects) > 0 {
+      effects_text = "effects " ++ esc(s: Text.join(parts: effects, sep: ", "))
+    }
+    let claim_list: List[Text] = json.texts_at(j: item, key: "claims")
+    var claims_text: Text = ""
+    if List.len(xs: claim_list) > 0 {
+      claims_text = " · claims " ++ esc(s: Text.join(parts: claim_list, sep: ", "))
+    }
+    meta = "<p class=\"meta\">" ++ effects_text ++ claims_text ++ " · " ++ counts(
+      o: json.at(j: item, key: "obligations")
+    ) ++ "</p>"
+  }
+  var contracts: Text = ""
+  for c: json.Json in json.list_at(j: item, key: "contracts") {
+    contracts = contracts ++ contract_line(c: c)
+  }
+  var assumes: Text = ""
+  for a: json.Json in json.list_at(j: item, key: "assumes") {
+    var verify_html: Text = ""
+    if not json.is_null(j: json.at(j: a, key: "verify")) {
+      verify_html = "<pre class=\"verify\">" ++ esc(s: json.str_at(j: a, key: "verify")) ++ "</pre>"
+    }
+    assumes = assumes ++ "<div class=\"assumed\">assume <code>" ++ esc(
+      s: json.str_at(j: a, key: "claim")
+    ) ++ "</code> — " ++ esc(
+      s: json.str_at(j: a, key: "justification")
+    ) ++ " <span class=\"small\">(" ++ esc(s: loc_text(l: json.at(j: a, key: "at"))) ++ "; " ++ esc(
+      s: freshness(a: a)
+    ) ++ ")</span>" ++ verify_html ++ "</div>"
+  }
+  var recovers: Text = ""
+  for x: json.Json in json.list_at(j: item, key: "recovers") {
+    recovers = recovers ++ "<div class=\"recover\">recover at " ++ esc(
+      s: loc_text(l: json.at(j: x, key: "at"))
+    ) ++ "</div>"
+  }
+  var tests: Builder[Text] = List.builder()
+  for e: json.Json in json.list_at(j: item, key: "examples") {
+    let status: Text = json.str_at(j: e, key: "status")
+    List.push(
+      b: inout tests,
+      x: "<span class=\"test " ++ esc(
+        s: Text.replace(t: status, from: " ", to: "-")
+      ) ++ "\">example " ++ esc(s: json.str_at(j: e, key: "name")) ++ ": " ++ esc(
+        s: status
+      ) ++ "</span>"
+    )
+  }
+  for p: json.Json in json.list_at(j: item, key: "properties") {
+    let status: Text = json.str_at(j: p, key: "status")
+    List.push(
+      b: inout tests,
+      x: "<span class=\"test " ++ esc(s: status) ++ "\">property " ++ esc(
+        s: json.str_at(j: p, key: "name")
+      ) ++ ": " ++ esc(s: status) ++ "</span>"
+    )
+  }
+  var tests_html: Text = Text.join(parts: List.finish(b: tests), sep: " ")
+  if tests_html != "" {
+    tests_html = "<p>" ++ tests_html ++ "</p>"
+  }
+  var body_block: Text = ""
+  if kind == "fn" {
+    match lines with
+    | None -> skip()
+    | Some(value) -> body_block = "<details class=\"body\" data-module=\"" ++ esc(
+      s: doc_module
+    ) ++ "\" data-item=\"" ++ esc(
+      s: name
+    ) ++ "\"><summary><code>{ ... }</code> <span class=\"small\">expand body (counted)</span></summary><pre>" ++ esc(
+      s: body_of(lines: value, item: item)
+    ) ++ "</pre></details>"
+  }
+  return "<article class=\"item " ++ esc(s: kind) ++ "\" id=\"item-" ++ esc(
+    s: doc_module
+  ) ++ "-" ++ esc(
+    s: name
+  ) ++ "\">" ++ sig ++ meta ++ contracts ++ assumes ++ recovers ++ tests_html ++ body_block ++ "</article>"
+}
+
+-- The interface view of one module: signatures, contracts, examples, properties, with bodies collapsed and their opening counted.
+pub fn render_interface_view(doc: json.Json, source: Option[Text]) -> Text may alloc, mutate {
+  let module_name: Text = json.str_at(j: doc, key: "module")
+  var lines: Option[List[Text]] = None
+  match source with
+  | Some(value) -> lines = Some(value: Text.split(t: value, sep: "\n"))
+  | None -> skip()
+  var items: Builder[Text] = List.builder()
+  var fn_count: Int = 0
+  for item: json.Json in json.list_at(j: doc, key: "items") {
+    List.push(b: inout items, x: item_html(doc_module: module_name, item: item, lines: lines))
+    if json.str_at(j: item, key: "kind") == "fn" {
+      fn_count = fn_count + 1
+    }
+  }
+  var test_module: Text = ""
+  if json.bool_at(j: doc, key: "test_module") {
+    test_module = " (test module)"
+  }
+  let sealed_list: List[Text] = json.texts_at(j: doc, key: "sealed_types")
+  var sealed_text: Text = ""
+  if List.len(xs: sealed_list) > 0 {
+    sealed_text = " · sealed " ++ esc(s: Text.join(parts: sealed_list, sep: ", "))
+  }
+  return "<section class=\"module\" data-module=\"" ++ esc(
+    s: module_name
+  ) ++ "\"><h2>module <code>" ++ esc(
+    s: module_name
+  ) ++ "</code>" ++ test_module ++ "</h2>\n<p class=\"meta\">" ++ esc(
+    s: json.str_at(j: doc, key: "hash")
+  ) ++ " · imports " ++ esc(
+    s: joined_or(xs: json.texts_at(j: doc, key: "imports"), sep: ", ", dflt: "nothing")
+  ) ++ " · " ++ counts(o: json.at(j: doc, key: "obligations")) ++ " · " ++ plural(
+    n: List.len(xs: json.list_at(j: doc, key: "assumes")),
+    word: "assumed claim"
+  ) ++ " · " ++ plural(
+    n: List.len(xs: json.list_at(j: doc, key: "recovers")),
+    word: "recover site"
+  ) ++ sealed_text ++ " · <span class=\"rate\" data-module=\"" ++ esc(
+    s: module_name
+  ) ++ "\" data-total=\"" ++ num(n: fn_count) ++ "\">0 of " ++ num(
+    n: fn_count
+  ) ++ " bodies opened</span></p>\n" ++ coverage_line(
+    c: json.at(j: doc, key: "obligation_coverage")
+  ) ++ Text.join(parts: List.finish(b: items), sep: "\n") ++ "</section>"
+}
+
+-- The obligation coverage line (§20.5), or nothing when the report carries none.
+fn coverage_line(c: json.Json) -> Text may alloc {
+  if json.is_null(j: c) {
+    return ""
+  }
+  let detected: Int = json.int_at(j: c, key: "mutations_detected")
+  let surviving: Int = json.int_at(j: c, key: "mutations_surviving")
+  var mutations: Text = "no contract mutations run"
+  if detected + surviving > 0 {
+    var cls: Text = "ok"
+    if surviving > 0 {
+      cls = "surviving"
+    }
+    mutations = plural(
+      n: detected,
+      word: "contract mutation"
+    ) ++ " detected, <span class=\"" ++ cls ++ "\">" ++ num(n: surviving) ++ " surviving</span>"
+  }
+  var exercised_cls: Text = "ok"
+  if json.int_at(j: c, key: "checked_exercised") < json.int_at(j: c, key: "checked") {
+    exercised_cls = "unexercised"
+  }
+  return "<p class=\"coverage\">coverage: " ++ num(
+    n: json.int_at(j: c, key: "proved")
+  ) ++ " proved · " ++ num(
+    n: json.int_at(j: c, key: "checked")
+  ) ++ " checked, <span class=\"" ++ exercised_cls ++ "\">" ++ num(
+    n: json.int_at(j: c, key: "checked_exercised")
+  ) ++ " exercised by tests</span> · " ++ plural(
+    n: json.int_at(j: c, key: "assumptions"),
+    word: "assumption"
+  ) ++ ", " ++ num(n: json.int_at(j: c, key: "assumptions_verifiable")) ++ " verifiable, " ++ num(
+    n: json.int_at(j: c, key: "assumptions_verified")
+  ) ++ " verified · " ++ mutations ++ "</p>"
+}
+
+-- Ledger view ----------------------------------------------------------------------------------------
+-- Every obligation of every module, plus assumptions, recover sites and capability construction sites.
+pub fn render_ledger_view(data: json.Json) -> Text may alloc, mutate {
+  let modules: List[json.Json] = json.list_at(j: data, key: "modules")
+  var rows: Builder[Row] = List.builder()
+  var assumes: Builder[Text] = List.builder()
+  var recovers: Builder[Text] = List.builder()
+  for m: json.Json in modules {
+    let module_name: Text = json.str_at(j: m, key: "module")
+    for l: json.Json in json.list_at(j: m, key: "ledger") {
+      List.push(
+        b: inout rows,
+        x: row_of(
+          l: l,
+          def: module_name ++ "." ++ json.str_at(j: l, key: "def"),
+          at: loc_text(l: json.at(j: l, key: "at"))
+        )
+      )
+    }
+    for a: json.Json in json.list_at(j: m, key: "assumes") {
+      List.push(
+        b: inout assumes,
+        x: "<tr class=\"assumed\"><td><code>" ++ esc(s: module_name) ++ "." ++ esc(
+          s: json.str_at(j: a, key: "def")
+        ) ++ "</code></td><td><code>" ++ esc(
+          s: json.str_at(j: a, key: "claim")
+        ) ++ "</code></td><td>" ++ esc(
+          s: json.str_at(j: a, key: "justification")
+        ) ++ "</td><td><code>" ++ esc(
+          s: loc_text(l: json.at(j: a, key: "at"))
+        ) ++ "</code></td><td>" ++ esc(s: freshness(a: a)) ++ "</td></tr>" ++ verify_row(
+          a: a,
+          cols: "5"
+        )
+      )
+    }
+    for x: json.Json in json.list_at(j: m, key: "recovers") {
+      List.push(
+        b: inout recovers,
+        x: "<li class=\"recover\"><code>" ++ esc(s: module_name) ++ "." ++ esc(
+          s: json.str_at(j: x, key: "def")
+        ) ++ "</code> at <code>" ++ esc(s: loc_text(l: json.at(j: x, key: "at"))) ++ "</code></li>"
+      )
+    }
+  }
+  var caps: Builder[Text] = List.builder()
+  for p: json.Json in json.list_at(j: data, key: "paths") {
+    for c: json.Json in json.list_at(j: p, key: "capabilities") {
+      List.push(
+        b: inout caps,
+        x: "<tr><td><code>" ++ esc(
+          s: json.str_at(j: p, key: "path")
+        ) ++ "</code></td><td><code>" ++ esc(
+          s: json.str_at(j: c, key: "type")
+        ) ++ "</code></td><td><code>" ++ esc(
+          s: json.str_at(j: c, key: "constructed_at")
+        ) ++ "</code></td><td>" ++ esc(
+          s: joined_or(xs: json.texts_at(j: c, key: "assumes"), sep: "; ", dflt: "none recorded")
+        ) ++ "</td></tr>"
+      )
+    }
+  }
+  var filters: Builder[Text] = List.builder()
+  for s: Text in ["all", "proved", "checked", "assumed", "failed"] {
+    var active: Text = ""
+    if s == "all" {
+      active = " active"
+    }
+    List.push(
+      b: inout filters,
+      x: "<button class=\"filter" ++ active ++ "\" data-status=\"" ++ s ++ "\">" ++ s ++ "</button>"
+    )
+  }
+  let assume_rows: List[Text] = List.finish(b: assumes)
+  var assumes_html: Text = "<p>None.</p>"
+  if List.len(xs: assume_rows) > 0 {
+    assumes_html = "<table><thead><tr><th>in</th><th>claim</th><th>justification</th><th>at</th><th>verified</th></tr></thead><tbody>" ++ Text.join(
+      parts: assume_rows,
+      sep: ""
+    ) ++ "</tbody></table>"
+  }
+  let recover_items: List[Text] = List.finish(b: recovers)
+  var recovers_html: Text = "<p>None.</p>"
+  if List.len(xs: recover_items) > 0 {
+    recovers_html = "<ul>" ++ Text.join(parts: recover_items, sep: "") ++ "</ul>"
+  }
+  let cap_rows: List[Text] = List.finish(b: caps)
+  var caps_html: Text = "<p>None on any path.</p>"
+  if List.len(xs: cap_rows) > 0 {
+    caps_html = "<table><thead><tr><th>path</th><th>type</th><th>constructed at</th><th>depends on</th></tr></thead><tbody>" ++ Text.join(
+      parts: cap_rows,
+      sep: ""
+    ) ++ "</tbody></table>"
+  }
+  return "<section class=\"ledger-view\"><h2>Ledger</h2><p>" ++ Text.join(
+    parts: List.finish(b: filters),
+    sep: " "
+  ) ++ "</p>" ++ ledger_table(rows: List.finish(b: rows)) ++ "\n<h3>Assumptions (" ++ num(
+    n: List.len(xs: assume_rows)
+  ) ++ ")</h3>" ++ assumes_html ++ "\n<h3>Recover sites (" ++ num(
+    n: List.len(xs: recover_items)
+  ) ++ ")</h3>" ++ recovers_html ++ "\n<h3>Capability construction sites (" ++ num(
+    n: List.len(xs: cap_rows)
+  ) ++ ")</h3>" ++ caps_html ++ "</section>"
+}
+
+-- Diff view ------------------------------------------------------------------------------------------
+fn item_list(xs: List[json.Json]) -> Text may alloc, mutate {
+  if List.len(xs: xs) == 0 {
+    return "<li>none</li>"
+  }
+  var out: Builder[Text] = List.builder()
+  for x: json.Json in xs {
+    List.push(
+      b: inout out,
+      x: "<li><code>" ++ esc(s: json.str_at(j: x, key: "kind")) ++ " " ++ esc(
+        s: json.str_at(j: x, key: "name")
+      ) ++ "</code> (" ++ esc(s: json.str_at(j: x, key: "visibility")) ++ ")</li>"
+    )
+  }
+  return Text.join(parts: List.finish(b: out), sep: "")
+}
+
+fn changed_item(c: json.Json) -> Text may alloc, mutate {
+  var parts: Builder[Text] = List.builder()
+  let sig: json.Json = json.at(j: c, key: "signature")
+  if not json.is_null(j: sig) {
+    List.push(
+      b: inout parts,
+      x: "<div class=\"breaking\">signature changed<pre>- " ++ esc(
+        s: json.str_at(j: sig, key: "old")
+      ) ++ "\n+ " ++ esc(s: json.str_at(j: sig, key: "new")) ++ "</pre></div>"
+    )
+  }
+  let effects: json.Json = json.at(j: c, key: "effects")
+  let widened: List[Text] = json.texts_at(j: effects, key: "added")
+  if List.len(xs: widened) > 0 {
+    List.push(
+      b: inout parts,
+      x: "<div class=\"breaking\">effects widened: " ++ esc(
+        s: Text.join(parts: widened, sep: ", ")
+      ) ++ "</div>"
+    )
+  }
+  let narrowed: List[Text] = json.texts_at(j: effects, key: "removed")
+  if List.len(xs: narrowed) > 0 {
+    List.push(
+      b: inout parts,
+      x: "<div class=\"compatible\">effects narrowed: " ++ esc(
+        s: Text.join(parts: narrowed, sep: ", ")
+      ) ++ "</div>"
+    )
+  }
+  for k: json.Json in json.list_at(j: c, key: "contracts") {
+    let compat: Text = esc(s: json.str_at(j: k, key: "compatibility"))
+    List.push(
+      b: inout parts,
+      x: "<div class=\"" ++ compat ++ "\">" ++ esc(s: json.str_at(j: k, key: "kind")) ++ " " ++ esc(
+        s: json.str_at(j: k, key: "change")
+      ) ++ ": <code>" ++ esc(
+        s: json.str_at(j: k, key: "text")
+      ) ++ "</code> (" ++ compat ++ ")</div>"
+    )
+  }
+  let assumes: json.Json = json.at(j: c, key: "assumes")
+  for a: Text in json.texts_at(j: assumes, key: "added") {
+    List.push(
+      b: inout parts,
+      x: "<div class=\"assumed\">new assumption: <code>" ++ esc(s: a) ++ "</code></div>"
+    )
+  }
+  for a: Text in json.texts_at(j: assumes, key: "removed") {
+    List.push(
+      b: inout parts,
+      x: "<div class=\"compatible\">assumption removed: <code>" ++ esc(s: a) ++ "</code></div>"
+    )
+  }
+  let recovers: json.Json = json.at(j: c, key: "recovers")
+  let added: Int = json.int_at(j: recovers, key: "added")
+  if added > 0 {
+    List.push(
+      b: inout parts,
+      x: "<div class=\"recover\">" ++ num(n: added) ++ " new " ++ site_word(n: added) ++ "</div>"
+    )
+  }
+  let removed: Int = json.int_at(j: recovers, key: "removed")
+  if removed > 0 {
+    List.push(
+      b: inout parts,
+      x: "<div class=\"compatible\">" ++ num(n: removed) ++ " " ++ site_word(
+        n: removed
+      ) ++ " removed</div>"
+    )
+  }
+  for o: json.Json in json.list_at(j: c, key: "obligations") {
+    var cls: Text = "breaking"
+    if json.str_at(j: o, key: "to") == "proved" {
+      cls = "compatible"
+    }
+    List.push(
+      b: inout parts,
+      x: "<div class=\"" ++ cls ++ "\">" ++ esc(
+        s: json.str_at(j: o, key: "kind")
+      ) ++ " <code>" ++ esc(s: json.str_at(j: o, key: "text")) ++ "</code>: " ++ esc(
+        s: json.str_at(j: o, key: "from")
+      ) ++ " → " ++ esc(s: json.str_at(j: o, key: "to")) ++ "</div>"
+    )
+  }
+  var status: Text = "<span class=\"status ok\">compatible</span>"
+  if json.bool_at(j: c, key: "breaking") {
+    status = "<span class=\"status failed\">breaking</span>"
+  }
+  return "<article class=\"item\"><h4><code>" ++ esc(
+    s: json.str_at(j: c, key: "kind")
+  ) ++ " " ++ esc(
+    s: json.str_at(j: c, key: "name")
+  ) ++ "</code> " ++ status ++ "</h4>" ++ Text.join(
+    parts: List.finish(b: parts),
+    sep: ""
+  ) ++ "</article>"
+}
+
+fn site_word(n: Int) -> Text {
+  if n == 1 {
+    return "recover site"
+  }
+  return "recover sites"
+}
+
+-- Two interface documents compared, as the compiler diffed them (§15.1).
+pub fn render_diff_view(diff: json.Json) -> Text may alloc, mutate {
+  if json.is_null(j: diff) {
+    return "<section><h2>Diff</h2><p>No previous interface was given (<code>onus review --against &lt;interface.json&gt;</code>).</p></section>"
+  }
+  var changed: Builder[Text] = List.builder()
+  for c: json.Json in json.list_at(j: diff, key: "changed") {
+    List.push(b: inout changed, x: changed_item(c: c))
+  }
+  var changed_html: Text = Text.join(parts: List.finish(b: changed), sep: "")
+  if changed_html == "" {
+    changed_html = "<p>No item changed.</p>"
+  }
+  var status: Text = "<span class=\"status ok\">compatible</span>"
+  if json.bool_at(j: diff, key: "breaking") {
+    status = "<span class=\"status failed\">breaking</span>"
+  }
+  return "<section class=\"diff\"><h2>Diff " ++ status ++ "</h2>\n<p class=\"meta\"><code>" ++ esc(
+    s: json.str_at(j: diff, key: "module")
+  ) ++ "</code>: " ++ esc(s: json.str_at(j: diff, key: "old_hash")) ++ " → " ++ esc(
+    s: json.str_at(j: diff, key: "new_hash")
+  ) ++ "</p>\n<h3>Added</h3><ul>" ++ item_list(
+    xs: json.list_at(j: diff, key: "added")
+  ) ++ "</ul><h3>Removed</h3><ul>" ++ item_list(
+    xs: json.list_at(j: diff, key: "removed")
+  ) ++ "</ul><h3>Changed</h3>" ++ changed_html ++ "</section>"
+}
+
+-- Changes from the regeneration loop ------------------------------------------------------------------
+fn code_or(j: json.Json, dflt: Text) -> Text may alloc {
+  if json.is_null(j: j) {
+    return dflt
+  }
+  return "<code>" ++ esc(s: json.str_of(j: j)) ++ "</code>"
+}
+
+fn status_cell(j: json.Json) -> Text may alloc {
+  var s: Text = "none"
+  if not json.is_null(j: j) {
+    s = json.str_of(j: j)
+  }
+  return "<td class=\"status " ++ esc(s: s) ++ "\">" ++ esc(s: s) ++ "</td>"
+}
+
+-- One change or blocked report (loop spec §6): proposals marked as the loop's, the interface diff, the ledger delta, the body diff collapsed, the trace.
+pub fn render_change(c: json.Json) -> Text may alloc, mutate {
+  let task: json.Json = json.at(j: c, key: "task")
+  let m: json.Json = json.at(j: c, key: "metrics")
+  var status: Text = "<span class=\"status ok\">opened</span>"
+  if json.str_at(j: c, key: "status") != "opened" {
+    var cause: Text = ""
+    if not json.is_null(j: json.at(j: c, key: "cause")) {
+      cause = ": " ++ esc(s: json.str_at(j: c, key: "cause"))
+    }
+    status = "<span class=\"status failed\">blocked" ++ cause ++ "</span>"
+  }
+  let proposals: List[json.Json] = json.list_at(j: c, key: "proposals")
+  var proposals_html: Text = "<p>No proposals.</p>"
+  if List.len(xs: proposals) > 0 {
+    var rows: Builder[Text] = List.builder()
+    for p: json.Json in proposals {
+      var counterexample: Text = ""
+      let ce: json.Json = json.at(j: p, key: "counterexample")
+      if not json.is_null(j: ce) {
+        counterexample = "<pre class=\"counterexample\">" ++ esc(s: json.compact(j: ce)) ++ "</pre>"
+      }
+      List.push(
+        b: inout rows,
+        x: "<tr class=\"proposal\"><td><code>" ++ esc(
+          s: json.str_at(j: p, key: "kind")
+        ) ++ "</code></td><td><code>" ++ esc(
+          s: json.str_at(j: p, key: "def")
+        ) ++ "</code></td><td>" ++ code_or(
+          j: json.at(j: p, key: "current"),
+          dflt: ""
+        ) ++ "</td><td>" ++ code_or(
+          j: json.at(j: p, key: "proposed"),
+          dflt: "<em>for the reviewer to write</em>"
+        ) ++ "</td><td>" ++ esc(
+          s: json.str_at(j: p, key: "rationale")
+        ) ++ counterexample ++ "</td></tr>"
+      )
+    }
+    proposals_html = "<table><thead><tr><th>proposed by loop</th><th>on</th><th>current</th><th>proposed</th><th>why</th></tr></thead><tbody>" ++ Text.join(
+      parts: List.finish(b: rows),
+      sep: ""
+    ) ++ "</tbody></table>"
+  }
+  let diffs: List[json.Json] = json.list_at(j: c, key: "interface_diff")
+  var diffs_html: Text = ""
+  if List.len(xs: diffs) == 0 {
+    var required: Text = ""
+    let kind: Text = json.str_at(j: task, key: "kind")
+    if kind == "implement" or kind == "repair" {
+      required = ", as an implement or repair task requires"
+    }
+    diffs_html = "<p>The interface did not change" ++ required ++ ".</p>"
+  } else {
+    for d: json.Json in diffs {
+      diffs_html = diffs_html ++ render_diff_view(diff: d)
+    }
+  }
+  let delta: List[json.Json] = json.list_at(j: c, key: "ledger_delta")
+  var ledger_html: Text = "<p>No obligation moved.</p>"
+  if List.len(xs: delta) > 0 {
+    var rows: Builder[Text] = List.builder()
+    for l: json.Json in delta {
+      List.push(
+        b: inout rows,
+        x: "<tr><td><code>" ++ esc(s: json.str_at(j: l, key: "kind")) ++ " " ++ esc(
+          s: json.str_at(j: l, key: "text")
+        ) ++ "</code></td><td><code>" ++ esc(
+          s: json.str_at(j: l, key: "def")
+        ) ++ "</code></td>" ++ status_cell(j: json.at(j: l, key: "before")) ++ status_cell(
+          j: json.at(j: l, key: "after")
+        ) ++ "</tr>"
+      )
+    }
+    ledger_html = "<table class=\"ledger\"><thead><tr><th>obligation</th><th>in</th><th>before</th><th>after</th></tr></thead><tbody>" ++ Text.join(
+      parts: List.finish(b: rows),
+      sep: ""
+    ) ++ "</tbody></table>"
+  }
+  let audit: List[json.Json] = json.list_at(j: c, key: "audit")
+  var audit_html: Text = ""
+  if List.len(xs: audit) > 0 {
+    var items: Builder[Text] = List.builder()
+    for f: json.Json in audit {
+      List.push(
+        b: inout items,
+        x: "<li class=\"audit\"><code>" ++ esc(
+          s: json.str_at(j: f, key: "finding")
+        ) ++ "</code> " ++ esc(s: json.str_at(j: f, key: "detail")) ++ "</li>"
+      )
+    }
+    audit_html = "<h4>Regeneration audit</h4><ul>" ++ Text.join(
+      parts: List.finish(b: items),
+      sep: ""
+    ) ++ "</ul>"
+  }
+  let bodies: List[json.Json] = json.list_at(j: c, key: "body_diff")
+  var bodies_html: Text = ""
+  if List.len(xs: bodies) > 0 {
+    var parts: Builder[Text] = List.builder()
+    for b: json.Json in bodies {
+      List.push(
+        b: inout parts,
+        x: "<h5><code>" ++ esc(
+          s: json.str_at(j: b, key: "module")
+        ) ++ "</code></h5><pre class=\"before\">" ++ esc(
+          s: json.str_at(j: b, key: "before")
+        ) ++ "</pre><pre class=\"after\">" ++ esc(s: json.str_at(j: b, key: "after")) ++ "</pre>"
+      )
+    }
+    bodies_html = "<details class=\"body\"><summary>Body diff (" ++ plural(
+      n: List.len(xs: bodies),
+      word: "file"
+    ) ++ "; informational, counted if opened)</summary>" ++ Text.join(
+      parts: List.finish(b: parts),
+      sep: ""
+    ) ++ "</details>"
+  }
+  let trace: List[json.Json] = json.list_at(j: c, key: "trace")
+  var trace_html: Text = ""
+  if List.len(xs: trace) > 0 {
+    var rows: Builder[Text] = List.builder()
+    for t: json.Json in trace {
+      var escalation: Text = ""
+      if not json.is_null(j: json.at(j: t, key: "escalation")) {
+        escalation = esc(s: json.str_at(j: t, key: "escalation"))
+      }
+      List.push(
+        b: inout rows,
+        x: "<tr><td>" ++ json_num_text(j: json.at(j: t, key: "iteration")) ++ "</td><td>" ++ esc(
+          s: json.str_at(j: t, key: "classification")
+        ) ++ "</td><td>" ++ json_num_text(
+          j: json.at(j: t, key: "diagnostics_before")
+        ) ++ " → " ++ json_num_text(
+          j: json.at(j: t, key: "diagnostics_after")
+        ) ++ "</td><td>" ++ json_num_text(
+          j: json.at(j: t, key: "mechanical_repairs")
+        ) ++ "</td><td>" ++ json_num_text(
+          j: json.at(j: t, key: "tokens")
+        ) ++ "</td><td>" ++ json_num_text(
+          j: json.at(j: t, key: "ms")
+        ) ++ "</td><td>" ++ escalation ++ "</td></tr>"
+      )
+    }
+    trace_html = "<details><summary>Trace (" ++ plural(
+      n: List.len(xs: trace),
+      word: "iteration"
+    ) ++ ")</summary><table><thead><tr><th>iteration</th><th>result</th><th>diagnostics</th><th>repairs</th><th>tokens</th><th>ms</th><th>escalation</th></tr></thead><tbody>" ++ Text.join(
+      parts: List.finish(b: rows),
+      sep: ""
+    ) ++ "</tbody></table></details>"
+  }
+  var target: Text = ""
+  let target_j: json.Json = json.at(j: task, key: "target")
+  if not json.is_null(j: target_j) {
+    target = " of <code>" ++ esc(s: json.str_at(j: target_j, key: "def")) ++ "</code>"
+  }
+  let generated: json.Json = json.at(j: c, key: "generated")
+  return "<section class=\"change\" data-task=\"" ++ esc(
+    s: json.str_at(j: task, key: "id")
+  ) ++ "\"><h3>change <code>" ++ esc(
+    s: json.str_at(j: task, key: "id")
+  ) ++ "</code> " ++ status ++ "</h3>\n<p class=\"meta\">" ++ esc(
+    s: json.str_at(j: task, key: "kind")
+  ) ++ target ++ " · scope " ++ esc(
+    s: Text.join(parts: json.texts_at(j: task, key: "scope"), sep: ", ")
+  ) ++ " · " ++ esc(s: json.str_at(j: generated, key: "model")) ++ " at " ++ esc(
+    s: json.str_at(j: generated, key: "at")
+  ) ++ " · " ++ plural(
+    n: json.int_at(j: m, key: "iterations"),
+    word: "iteration"
+  ) ++ ", " ++ plural(
+    n: json.int_at(j: m, key: "mechanical_repairs"),
+    word: "mechanical repair"
+  ) ++ ", " ++ plural(
+    n: json.int_at(j: m, key: "escalation_steps"),
+    word: "escalation step"
+  ) ++ ", " ++ num(
+    n: json.int_at(j: m, key: "tokens")
+  ) ++ " tokens</p>\n<h4>Proposals</h4>" ++ proposals_html ++ "<h4>Interface diff</h4>" ++ diffs_html ++ "<h4>Ledger delta</h4>" ++ ledger_html ++ audit_html ++ bodies_html ++ trace_html ++ "</section>"
+}
+
+-- The Changes view: every change the loop wrote, newest first.
+pub fn render_changes_view(changes: List[json.Json]) -> Text may alloc, mutate {
+  if List.len(xs: changes) == 0 {
+    return "<section><h2>Changes</h2><p>The regeneration loop has written no change under <code>.onus/changes/</code>.</p></section>"
+  }
+  var parts: Builder[Text] = List.builder()
+  for c: json.Json in changes {
+    List.push(b: inout parts, x: render_change(c: c))
+  }
+  return "<section class=\"changes\"><h2>Changes (" ++ num(
+    n: List.len(xs: changes)
+  ) ++ ")</h2>" ++ Text.join(parts: List.finish(b: parts), sep: "\n") ++ "</section>"
+}
+
+-- Diagnostics and counterexamples ---------------------------------------------------------------------
+fn model_table(ce: json.Json) -> Text may alloc, mutate {
+  match ce with
+  | json.JObject(fields) -> {
+    var rows: Builder[Text] = List.builder()
+    for f: json.Field in fields {
+      List.push(
+        b: inout rows,
+        x: "<tr><td><code>" ++ esc(s: f.key) ++ "</code></td><td><code>" ++ esc(
+          s: plain(j: f.value)
+        ) ++ "</code></td></tr>"
+      )
+    }
+    return "<table class=\"model\"><thead><tr><th>name</th><th>value</th></tr></thead><tbody>" ++ Text.join(
+      parts: List.finish(b: rows),
+      sep: ""
+    ) ++ "</tbody></table>"
+  }
+  | _ -> return ""
+}
+
+-- Diagnostics with the solver's model against the contract text (§15.1, counterexample view).
+pub fn render_diagnostics_view(diagnostics: List[json.Json]) -> Text may alloc, mutate {
+  if List.len(xs: diagnostics) == 0 {
+    return "<section><h2>Diagnostics</h2><p>None.</p></section>"
+  }
+  var items: Builder[Text] = List.builder()
+  for d: json.Json in diagnostics {
+    let location: json.Json = json.at(j: d, key: "location")
+    var in_def: Text = ""
+    if not json.is_null(j: json.at(j: location, key: "def")) {
+      in_def = " in " ++ esc(s: json.str_at(j: location, key: "def"))
+    }
+    var context_html: Text = ""
+    for c: Text in json.texts_at(j: d, key: "context") {
+      context_html = context_html ++ "<p>" ++ esc(s: c) ++ "</p>"
+    }
+    var ob_html: Text = ""
+    if json.has(j: d, key: "obligation") {
+      let ob: json.Json = json.at(j: d, key: "obligation")
+      ob_html = "<p class=\"contract\"><code>" ++ esc(
+        s: json.str_at(j: ob, key: "kind")
+      ) ++ " " ++ esc(s: json.str_at(j: ob, key: "text")) ++ "</code> <span class=\"mark " ++ esc(
+        s: json.str_at(j: ob, key: "status")
+      ) ++ "\">" ++ esc(s: json.str_at(j: ob, key: "status")) ++ "</span></p>" ++ model_table(
+        ce: json.at(j: ob, key: "counterexample")
+      )
+    }
+    List.push(
+      b: inout items,
+      x: "<article class=\"diagnostic\"><h4><code>" ++ esc(
+        s: json.str_at(j: d, key: "code")
+      ) ++ "</code> " ++ esc(
+        s: json.str_at(j: d, key: "title")
+      ) ++ " <span class=\"small\">" ++ esc(
+        s: json.str_at(j: location, key: "file")
+      ) ++ ":" ++ span_start(
+        l: location
+      ) ++ in_def ++ "</span></h4>" ++ context_html ++ ob_html ++ "</article>"
+    )
+  }
+  return "<section><h2>Diagnostics (" ++ num(n: List.len(xs: diagnostics)) ++ ")</h2>" ++ Text.join(
+    parts: List.finish(b: items),
+    sep: ""
+  ) ++ "</section>"
+}
+
+-- `line:col` of the start of a location's span.
+fn span_start(l: json.Json) -> Text may alloc {
+  let loc_txt: Text = loc_text(l: l)
+  let parts: List[Text] = Text.split(t: loc_txt, sep: ":")
+  let n: Int = List.len(xs: parts)
+  if n < 2 {
+    return "0:0"
+  }
+  return List.get(xs: parts, i: n - 2) ++ ":" ++ List.get(xs: parts, i: n - 1)
+}
+
+-- The page -------------------------------------------------------------------------------------------
+const css: Text = "\n:root { color-scheme: light; --fg: #1f2328; --muted: #57606a; --line: #d0d7de; --bg: #ffffff; --panel: #f6f8fa; --amber: #fff3cd; --amber-line: #b8860b; --purple: #6f42c1; }\nbody { margin: 0; font: 14px/1.45 -apple-system, BlinkMacSystemFont, \"Segoe UI\", Helvetica, Arial, sans-serif; color: var(--fg); background: var(--bg); }\nheader { padding: 12px 24px; border-bottom: 1px solid var(--line); display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; }\nheader h1 { font-size: 16px; margin: 0; }\nnav button { font: inherit; background: none; border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; color: var(--fg); }\nnav button.active { background: var(--fg); color: var(--bg); border-color: var(--fg); }\nmain { padding: 16px 24px 48px; max-width: 1400px; }\n.view[hidden] { display: none; }\nh2 { font-size: 18px; margin: 20px 0 6px; } h3 { font-size: 15px; margin: 18px 0 6px; } h4 { margin: 12px 0 4px; }\ncode, pre { font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }\npre { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; overflow-x: auto; margin: 6px 0; white-space: pre-wrap; }\ntable { border-collapse: collapse; width: 100%; margin: 6px 0 12px; } th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); vertical-align: top; } th { color: var(--muted); font-weight: 600; }\n.meta, .small { color: var(--muted); } .small { font-size: 12px; }\n.item { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin: 10px 0; }\n.contract { margin: 2px 0 2px 12px; }\n.mark.checked { color: var(--muted); } .mark.failed, .status.failed, .breaking { color: #1f2328; font-weight: 600; } .status.ok, .compatible { color: var(--muted); }\n.assumed { background: var(--amber); } tr.assumed td { background: var(--amber); } div.assumed { border-left: 3px solid var(--amber-line); padding: 2px 8px; margin: 4px 0; }\n.recover { color: var(--purple); } div.recover { border-left: 3px solid var(--purple); padding: 2px 8px; margin: 4px 0; }\n.graph { overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }\nsvg text { font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: var(--fg); } svg text.small { font-size: 10.5px; fill: var(--muted); } svg text.name { font-weight: 600; }\nsvg .node rect { fill: #fff; stroke: #57606a; stroke-width: 1.2; } svg .node.entry rect { stroke-width: 2.4; stroke: #1f2328; } svg .node.intrinsic rect { stroke-dasharray: 4 3; }\nsvg .node.assumed rect { fill: var(--amber); stroke: var(--amber-line); } svg .node.recover rect { stroke: var(--purple); stroke-width: 2.4; }\nsvg .node.break rect { fill: #fff; stroke: #1f2328; stroke-dasharray: 2 4; } svg .edge { fill: none; stroke: #8c959f; stroke-width: 1.2; } svg .edge.back { stroke-dasharray: 6 3; } svg .edge.break { stroke: #1f2328; stroke-dasharray: 2 4; }\nsvg .edge-label { font-size: 10px; fill: var(--muted); text-anchor: middle; } svg .gate { fill: #d0d7de; fill-opacity: 0.35; stroke: #8c959f; stroke-dasharray: 8 4; } svg .gate-label { font-size: 11px; fill: var(--muted); }\n.filter.active { background: var(--fg); color: var(--bg); } .filter { font: inherit; border: 1px solid var(--line); border-radius: 6px; background: none; padding: 2px 8px; cursor: pointer; }\n.test.passed, .test.proved { color: var(--muted); } .test.failed { font-weight: 600; }\ndetails.body summary { cursor: pointer; color: var(--muted); }\npre.verify { margin: 6px 0 2px; background: #fff; } tr.verify-row td { background: var(--amber); border-top: none; padding-top: 0; }\n"
+
+const script: Text = "\n(function () {\n  var buttons = document.querySelectorAll('nav button[data-view]');\n  function show(name) {\n    document.querySelectorAll('.view').forEach(function (v) { v.hidden = v.getAttribute('data-view') !== name; });\n    buttons.forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-view') === name); });\n    try { localStorage.setItem('onus-review-view', name); } catch (e) {}\n  }\n  buttons.forEach(function (b) { b.addEventListener('click', function () { show(b.getAttribute('data-view')); }); });\n  var initial = null; try { initial = localStorage.getItem('onus-review-view'); } catch (e) {}\n  show(initial && document.querySelector('.view[data-view=\"' + initial + '\"]') ? initial : 'paths');\n  document.querySelectorAll('.filter').forEach(function (f) {\n    f.addEventListener('click', function () {\n      var status = f.getAttribute('data-status');\n      document.querySelectorAll('.filter').forEach(function (x) { x.classList.toggle('active', x === f); });\n      document.querySelectorAll('.ledger-view tr.ledger-row').forEach(function (row) { row.hidden = status !== 'all' && !row.classList.contains('status-' + status); });\n    });\n  });\n  var opened = {};\n  document.querySelectorAll('details.body').forEach(function (d) {\n    d.addEventListener('toggle', function () {\n      if (!d.open) return;\n      var m = d.getAttribute('data-module'); var item = d.getAttribute('data-item');\n      opened[m] = opened[m] || {}; opened[m][item] = true;\n      var n = Object.keys(opened[m]).length;\n      document.querySelectorAll('.rate[data-module=\"' + m + '\"]').forEach(function (r) {\n        var total = Number(r.getAttribute('data-total')) || 0;\n        r.textContent = n + ' of ' + total + ' bodies opened' + (total > 0 ? ' (' + Math.round(100 * n / total) + '%)' : '');\n      });\n    });\n  });\n})();\n"
+
+record View {
+  id: Text
+  label: Text
+  html: Text
+}
+
+fn count_label(word: Text, n: Int) -> Text may alloc {
+  if n > 0 {
+    return word ++ " (" ++ num(n: n) ++ ")"
+  }
+  return word
+}
+
+-- The whole review page: one self-contained HTML document with every view
+-- pre-rendered; the inline script only switches views, filters the ledger
+-- and counts body expansions.
+pub fn render_page(data: json.Json) -> Text may alloc, mutate {
+  let paths: List[json.Json] = json.list_at(j: data, key: "paths")
+  var paths_html: Text = "<section><h2>Paths</h2><p>The entry module declares no <code>path</code>.</p></section>"
+  if List.len(xs: paths) > 0 {
+    var parts: Builder[Text] = List.builder()
+    for r: json.Json in paths {
+      List.push(b: inout parts, x: render_path_view(r: r))
+    }
+    paths_html = Text.join(parts: List.finish(b: parts), sep: "\n")
+  }
+  let sources: json.Json = json.at(j: data, key: "sources")
+  var modules: Builder[Text] = List.builder()
+  for m: json.Json in json.list_at(j: data, key: "modules") {
+    let name: Text = json.str_at(j: m, key: "module")
+    var source: Option[Text] = None
+    if json.has(j: sources, key: name) {
+      source = Some(value: json.str_at(j: sources, key: name))
+    }
+    List.push(b: inout modules, x: render_interface_view(doc: m, source: source))
+  }
+  var modules_html: Text = Text.join(parts: List.finish(b: modules), sep: "\n")
+  if modules_html == "" {
+    modules_html = "<section><h2>Interfaces</h2><p>No modules.</p></section>"
+  }
+  let changes: List[json.Json] = json.list_at(j: data, key: "changes")
+  let diagnostics: List[json.Json] = json.list_at(j: data, key: "diagnostics")
+  let views: List[View] = [
+    View { id: "paths", label: "Paths", html: paths_html },
+    View { id: "interfaces", label: "Interfaces", html: modules_html },
+    View { id: "ledger", label: "Ledger", html: render_ledger_view(data: data) },
+    View { id: "diff", label: "Diff", html: render_diff_view(diff: json.at(j: data, key: "diff")) },
+    View {
+      id: "changes",
+      label: count_label(word: "Changes", n: List.len(xs: changes)),
+      html: render_changes_view(changes: changes)
+    },
+    View {
+      id: "diagnostics",
+      label: count_label(word: "Diagnostics", n: List.len(xs: diagnostics)),
+      html: render_diagnostics_view(diagnostics: diagnostics)
+    }
+  ]
+  var buttons: Builder[Text] = List.builder()
+  var panels: Builder[Text] = List.builder()
+  for v: View in views {
+    List.push(
+      b: inout buttons,
+      x: "<button data-view=\"" ++ v.id ++ "\">" ++ esc(s: v.label) ++ "</button>"
+    )
+    List.push(
+      b: inout panels,
+      x: "<div class=\"view\" data-view=\"" ++ v.id ++ "\" hidden>" ++ v.html ++ "</div>"
+    )
+  }
+  let entry: Text = esc(s: json.str_at(j: data, key: "entry"))
+  let generated: json.Json = json.at(j: data, key: "generated")
+  return "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Onus review: " ++ entry ++ "</title><style>" ++ css ++ ".coverage { color: #555; font-size: 0.95em; }\n.coverage .unexercised, .coverage .surviving { color: #a40; font-weight: 600; }\n.change { border-top: 1px solid #ddd; padding-top: 0.5em; }\n.change tr.proposal td:first-child { border-left: 3px solid #a40; }\n.change pre.before { background: #fff4f4; } .change pre.after { background: #f2fbf2; }\n</style></head>\n<body><header><h1>Onus review · <code>" ++ entry ++ "</code></h1><nav>" ++ Text.join(
+    parts: List.finish(b: buttons),
+    sep: " "
+  ) ++ "</nav><span class=\"small\">generated by " ++ esc(
+    s: json.str_at(j: generated, key: "tool")
+  ) ++ " at " ++ esc(
+    s: json.str_at(j: generated, key: "at")
+  ) ++ "</span></header>\n<main>" ++ Text.join(
+    parts: List.finish(b: panels),
+    sep: "\n"
+  ) ++ "</main>\n<script>" ++ script ++ "</script></body></html>\n"
+}
+
+-- The bundle -----------------------------------------------------------------------------------------
+fn module_of_file(ctx: context.Context, file: Int) -> Option[defs.ModuleRecord] {
+  for mid: Int in 0 ..< ctx.module_count {
+    match Map.find(d: ctx.modules, key: mid) with
+    | Some(value) -> {
+      if value.file == file {
+        return Some(value: value)
+      }
+    }
+    | None -> skip()
+  }
+  return None
+}
+
+-- Collects the review bundle after the pipeline ran to `paths`: the entry
+-- file is file 0. When diagnostics were reported, only they are included: the
+-- reports of an invalid program would describe a program that does not exist.
+pub fn review_data(
+  ctx: context.Context,
+  tab: Dict[Int, loc.LineTable],
+  against: Option[json.Json],
+  now: Text,
+  changes: List[json.Json]
+) -> json.Json may alloc, mutate {
+  let generated: json.Json = json.JObject(
+    fields: [
+      json.field(key: "tool", value: json.text(t: "onus review")),
+      json.field(key: "at", value: json.text(t: now))
+    ]
+  )
+  var entry: Text = first_path(files: List.finish(b: ctx.files))
+  var entry_name: Option[Text] = None
+  match module_of_file(ctx: ctx, file: 0) with
+  | Some(value) -> {
+    entry = value.name
+    entry_name = Some(value: value.name)
+  }
+  | None -> skip()
+  var diagnostics: Builder[json.Json] = List.builder()
+  for d: report.Diagnostic in List.finish(b: ctx.diagnostics) {
+    List.push(b: inout diagnostics, x: diagjson.to_json(ctx: ctx, tab: tab, d: d))
+  }
+  let diagnostics_json: json.Json = json.JArray(items: List.finish(b: diagnostics))
+  let changes_json: json.Json = json.JArray(items: changes)
+  if List.len(xs: json.list_of(j: diagnostics_json)) > 0 {
+    return json.JObject(
+      fields: [
+        json.field(key: "generated", value: generated),
+        json.field(key: "entry", value: json.text(t: entry)),
+        json.field(key: "modules", value: json.JArray(items: [])),
+        json.field(key: "sources", value: json.JObject(fields: [])),
+        json.field(key: "paths", value: json.JArray(items: [])),
+        json.field(key: "diagnostics", value: diagnostics_json),
+        json.field(key: "diff", value: json.JNull),
+        json.field(key: "changes", value: changes_json)
+      ]
+    )
+  }
+  var modules: Builder[json.Json] = List.builder()
+  var sources: Builder[json.Field] = List.builder()
+  var current: Option[json.Json] = None
+  for mid: Int in 0 ..< ctx.module_count {
+    match Map.find(d: ctx.modules, key: mid) with
+    | Some(value) -> {
+      if not value.is_std {
+        let doc: json.Json = interface.interface_of(ctx: ctx, mod: mid)
+        List.push(b: inout modules, x: doc)
+        push_source(ctx: ctx, m: value, sources: inout sources)
+        if entry_name == Some(value: value.name) and current is None {
+          current = Some(value: doc)
+        }
+      }
+    }
+    | None -> skip()
+  }
+  var paths: Builder[json.Json] = List.builder()
+  for k: Int in Map.keys(d: ctx.analyses) {
+    match Map.find(d: ctx.analyses, key: k) with
+    | Some(value) -> List.push(
+      b: inout paths,
+      x: pathreport.path_report(ctx: ctx, tab: tab, a: value)
+    )
+    | None -> skip()
+  }
+  return json.JObject(
+    fields: [
+      json.field(key: "generated", value: generated),
+      json.field(key: "entry", value: json.text(t: entry)),
+      json.field(key: "modules", value: json.JArray(items: List.finish(b: modules))),
+      json.field(key: "sources", value: json.JObject(fields: List.finish(b: sources))),
+      json.field(key: "paths", value: json.JArray(items: List.finish(b: paths))),
+      json.field(key: "diagnostics", value: diagnostics_json),
+      json.field(key: "diff", value: diff_of(against: against, current: current)),
+      json.field(key: "changes", value: changes_json)
+    ]
+  )
+}
+
+fn push_source(
+  ctx: context.Context,
+  m: defs.ModuleRecord,
+  sources: inout Builder[json.Field]
+) -> Unit may alloc, mutate {
+  match Map.find(d: ctx.canonical, key: m.file) with
+  | Some(value) -> List.push(
+    b: inout sources,
+    x: json.field(key: m.name, value: json.text(t: value))
+  )
+  | None -> skip()
+  return Unit
+}
+
+fn first_path(files: List[report.SourceFile]) -> Text {
+  for f: report.SourceFile in files {
+    return f.path
+  }
+  return ""
+}
+
+fn diff_of(against: Option[json.Json], current: Option[json.Json]) -> json.Json may alloc, mutate {
+  match against with
+  | None -> return json.JNull
+  | Some(value) -> return diff_against(before: value, current: current)
+}
+
+fn diff_against(before: json.Json, current: Option[json.Json]) -> json.Json may alloc, mutate {
+  match current with
+  | None -> return json.JNull
+  | Some(value) -> return idiff.diff_json(d: idiff.interface_diff(before: before, after: value))
+}
+
+-- Changes the loop wrote ------------------------------------------------------------------------------
+fn str_or_null(j: json.Json) -> json.Json {
+  match j with
+  | json.JString(_) -> return j
+  | _ -> return json.JNull
+}
+
+fn str_or_empty(j: json.Json) -> json.Json {
+  match j with
+  | json.JString(_) -> return j
+  | _ -> return json.text(t: "")
+}
+
+fn num_or_zero(j: json.Json) -> json.Json {
+  match j with
+  | json.JNumber(_) -> return j
+  | _ -> return json.JNumber(text: "0")
+}
+
+fn object_or_null(j: json.Json) -> json.Json {
+  match j with
+  | json.JObject(_) -> return j
+  | _ -> return json.JNull
+}
+
+fn objects_of(j: json.Json) -> List[json.Json] may alloc, mutate {
+  var out: Builder[json.Json] = List.builder()
+  for x: json.Json in json.list_of(j: j) {
+    if x is json.JObject {
+      List.push(b: inout out, x: x)
+    }
+  }
+  return List.finish(b: out)
+}
+
+fn strings_of(j: json.Json) -> json.Json may alloc, mutate {
+  var out: Builder[json.Json] = List.builder()
+  for x: json.Json in json.list_of(j: j) {
+    if x is json.JString {
+      List.push(b: inout out, x: x)
+    }
+  }
+  return json.JArray(items: List.finish(b: out))
+}
+
+fn field(key: Text, value: json.Json) -> json.Field {
+  return json.field(key: key, value: value)
+}
+
+fn mapped(j: json.Json, keys: List[Text], kinds: List[Text]) -> json.Json may alloc, mutate {
+  var out: Builder[json.Json] = List.builder()
+  for x: json.Json in objects_of(j: j) {
+    var fields: Builder[json.Field] = List.builder()
+    var i: Int = 0
+    for k: Text in keys {
+      let kind: Text = kind_at(kinds: kinds, i: i)
+      let v: json.Json = json.at(j: x, key: k)
+      if kind == "str" {
+        List.push(b: inout fields, x: field(key: k, value: str_or_empty(j: v)))
+      } else {
+        if kind == "str?" {
+          List.push(b: inout fields, x: field(key: k, value: str_or_null(j: v)))
+        } else {
+          List.push(b: inout fields, x: field(key: k, value: num_or_zero(j: v)))
+        }
+      }
+      i = i + 1
+    }
+    List.push(b: inout out, x: json.JObject(fields: List.finish(b: fields)))
+  }
+  return json.JArray(items: List.finish(b: out))
+}
+
+fn kind_at(kinds: List[Text], i: Int) -> Text {
+  if i >= 0 and i < List.len(xs: kinds) {
+    return List.get(xs: kinds, i: i)
+  }
+  return "str"
+}
+
+-- Narrows a parsed `change.json` (loop spec §5, §6) to what the page shows; nothing when it lacks the essentials.
+pub fn loop_change_of(j: json.Json) -> Option[json.Json] may alloc, mutate {
+  let task: json.Json = json.at(j: j, key: "task")
+  if not j is json.JObject or not task is json.JObject or not json.at(
+    j: task,
+    key: "id"
+  ) is json.JString {
+    return None
+  }
+  let status: Text = json.str_at(j: j, key: "status")
+  if status != "opened" and status != "blocked" {
+    return None
+  }
+  var target: json.Json = json.JNull
+  match json.at(j: task, key: "target") with
+  | json.JObject(_) -> target = json.JObject(
+    fields: [
+      field(
+        key: "def",
+        value: str_or_empty(j: json.at(j: json.at(j: task, key: "target"), key: "def"))
+      )
+    ]
+  )
+  | _ -> skip()
+  let generated: json.Json = json.at(j: j, key: "generated")
+  let metrics: json.Json = json.at(j: j, key: "metrics")
+  var proposals: Builder[json.Json] = List.builder()
+  for x: json.Json in objects_of(j: json.at(j: j, key: "proposals")) {
+    List.push(
+      b: inout proposals,
+      x: json.JObject(
+        fields: [
+          field(key: "kind", value: str_or_empty(j: json.at(j: x, key: "kind"))),
+          field(key: "def", value: str_or_empty(j: json.at(j: x, key: "def"))),
+          field(key: "current", value: str_or_null(j: json.at(j: x, key: "current"))),
+          field(key: "proposed", value: str_or_null(j: json.at(j: x, key: "proposed"))),
+          field(key: "rationale", value: str_or_empty(j: json.at(j: x, key: "rationale"))),
+          field(
+            key: "counterexample",
+            value: object_or_null(
+              j: json.at(
+                j: object_or_null(j: json.at(j: x, key: "evidence")),
+                key: "counterexample"
+              )
+            )
+          )
+        ]
+      )
+    )
+  }
+  return Some(
+    value: json.JObject(
+      fields: [
+        field(
+          key: "task",
+          value: json.JObject(
+            fields: [
+              field(key: "id", value: json.at(j: task, key: "id")),
+              field(key: "kind", value: str_or_empty(j: json.at(j: task, key: "kind"))),
+              field(key: "scope", value: strings_of(j: json.at(j: task, key: "scope"))),
+              field(key: "target", value: target)
+            ]
+          )
+        ),
+        field(key: "status", value: json.text(t: status)),
+        field(key: "cause", value: str_or_null(j: json.at(j: j, key: "cause"))),
+        field(
+          key: "generated",
+          value: json.JObject(
+            fields: [
+              field(key: "at", value: str_or_empty(j: json.at(j: generated, key: "at"))),
+              field(key: "model", value: str_or_empty(j: json.at(j: generated, key: "model")))
+            ]
+          )
+        ),
+        field(
+          key: "interface_diff",
+          value: json.JArray(items: objects_of(j: json.at(j: j, key: "interface_diff")))
+        ),
+        field(
+          key: "ledger_delta",
+          value: mapped(
+            j: json.at(j: j, key: "ledger_delta"),
+            keys: ["def", "kind", "text", "before", "after"],
+            kinds: ["str", "str", "str", "str?", "str?"]
+          )
+        ),
+        field(
+          key: "body_diff",
+          value: mapped(
+            j: json.at(j: j, key: "body_diff"),
+            keys: ["file", "module", "before", "after"],
+            kinds: ["str", "str", "str", "str"]
+          )
+        ),
+        field(
+          key: "trace",
+          value: mapped(
+            j: json.at(j: j, key: "trace"),
+            keys: [
+              "iteration",
+              "classification",
+              "diagnostics_before",
+              "diagnostics_after",
+              "mechanical_repairs",
+              "tokens",
+              "ms",
+              "escalation"
+            ],
+            kinds: ["num", "str", "num", "num", "num", "num", "num", "str?"]
+          )
+        ),
+        field(
+          key: "metrics",
+          value: json.JObject(
+            fields: [
+              field(
+                key: "iterations",
+                value: num_or_zero(j: json.at(j: metrics, key: "iterations"))
+              ),
+              field(
+                key: "mechanical_repairs",
+                value: num_or_zero(j: json.at(j: metrics, key: "mechanical_repairs"))
+              ),
+              field(
+                key: "escalation_steps",
+                value: num_or_zero(j: json.at(j: metrics, key: "escalation_steps"))
+              ),
+              field(key: "proposals", value: num_or_zero(j: json.at(j: metrics, key: "proposals"))),
+              field(key: "tokens", value: num_or_zero(j: json.at(j: metrics, key: "tokens")))
+            ]
+          )
+        ),
+        field(key: "proposals", value: json.JArray(items: List.finish(b: proposals))),
+        field(
+          key: "audit",
+          value: mapped(
+            j: json.at(j: j, key: "audit"),
+            keys: ["finding", "detail"],
+            kinds: ["str", "str"]
+          )
+        )
+      ]
+    )
+  )
+}
+
+-- Every change under `<root>/.onus/changes/`, newest first.
+pub fn read_changes(files: io.Files, root: Text) -> List[json.Json] may io.file, alloc, mutate {
+  let dir: Text = root ++ "/.onus/changes"
+  var out: List[json.Json] = []
+  match io.list_dir(files: files, path: dir) with
+  | Err(_) -> return []
+  | Ok(value) -> {
+    for name: Text in value {
+      add_change(files: files, path: dir ++ "/" ++ name ++ "/change.json", out: inout out)
+    }
+    return out
+  }
+}
+
+fn add_change(
+  files: io.Files,
+  path: Text,
+  out: inout List[json.Json]
+) -> Unit may io.file, alloc, mutate {
+  match read_change(files: files, path: path) with
+  | Some(value) -> out = insert_newest_first(xs: out, c: value)
+  | None -> skip()
+  return Unit
+}
+
+fn read_change(files: io.Files, path: Text) -> Option[json.Json] may io.file, alloc, mutate {
+  match io.read(files: files, path: path) with
+  | Err(_) -> return None
+  | Ok(value) -> return change_of_text(text: value)
+}
+
+fn change_of_text(text: Text) -> Option[json.Json] may alloc, mutate {
+  match json.parse(t: text) with
+  | None -> return None
+  | Some(value) -> return loop_change_of(j: value)
+}
+
+-- A stable insertion by `generated.at`, descending.
+fn insert_newest_first(xs: List[json.Json], c: json.Json) -> List[json.Json] may alloc, mutate {
+  let at: Text = json.str_at(j: json.at(j: c, key: "generated"), key: "at")
+  var out: Builder[json.Json] = List.builder()
+  var placed: Bool = false
+  for x: json.Json in xs {
+    if not placed and Text.compare(
+      a: json.str_at(j: json.at(j: x, key: "generated"), key: "at"),
+      b: at
+    ) < 0 {
+      List.push(b: inout out, x: c)
+      placed = true
+    }
+    List.push(b: inout out, x: x)
+  }
+  if not placed {
+    List.push(b: inout out, x: c)
+  }
+  return List.finish(b: out)
+}

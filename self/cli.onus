@@ -22,6 +22,7 @@ import obligations
 import ledger
 import bundle
 import testcmd
+import review
 import z3
 import mutate
 import defs
@@ -1183,6 +1184,76 @@ fn interface_command(
   return Ok(value: Unit)
 }
 
+-- `onus review` (§15; item 193): the review bundle and page written into the
+-- output directory after the pipeline ran to paths; diagnostics are
+-- reported and the page then holds them alone.
+fn review_command(
+  args: Args,
+  files: io.Files,
+  console: io.Console,
+  process: io.Process,
+  env: io.Env,
+  clock: io.Clock
+) -> Result[Int, io.Error] may io.file, io.env, io.clock, nondet, alloc, mutate {
+  if List.len(xs: args.files) == 0 {
+    return Err(error: usage_failure(console: console))
+  }
+  let entry: Text = List.get(xs: args.files, i: 0)
+  var against: Option[json.Json] = None
+  match value(args: args, name: "against") with
+  | Some(value) -> {
+    let old_text: Text = try io.read(files: files, path: value)
+    let old_doc: json.Json = or_null(o: json.parse(t: old_text))
+    if not is_interface_document(j: old_doc) {
+      io.eprint(console: console, text: "onus: " ++ value ++ " is not an interface document\n")
+      return Err(error: Other(detail: "not an interface document"))
+    }
+    against = Some(value: old_doc)
+  }
+  | None -> skip()
+  let s: Setup = setup(args: args, files: files, env: env)
+  var ctx: context.Context = s.ctx
+  try read_entries(ctx: inout ctx, files: files, paths: [entry])
+  check.run_passes(
+    ctx: inout ctx,
+    to: 11,
+    files: files,
+    console: console,
+    process: process,
+    vopts: s.vopts
+  )
+  let tab: Dict[Int, loc.LineTable] = loc.line_tables(ctx: ctx)
+  emit_diagnostics(ctx: ctx, console: console, tab: tab, as_json: flag(args: args, name: "json"))
+  let data: json.Json = review.review_data(
+    ctx: ctx,
+    tab: tab,
+    against: against,
+    now: assumptions.iso_of_millis(ms: io.time(clock: clock)),
+    changes: review.read_changes(files: files, root: s.root)
+  )
+  let out_dir: Text = value_or(
+    args: args,
+    name: "out",
+    fallback: nativebuild.dir_of(path: entry) ++ "/review"
+  )
+  try io.mkdir(files: files, path: out_dir)
+  try build.write_file(
+    files: files,
+    path: out_dir ++ "/index.html",
+    text: review.render_page(data: data)
+  )
+  try build.write_file(
+    files: files,
+    path: out_dir ++ "/review.json",
+    text: json.pretty(j: data) ++ "\n"
+  )
+  io.eprint(console: console, text: "onus review: wrote " ++ out_dir ++ "/index.html\n")
+  if not context.clean(ctx: ctx) {
+    return Err(error: Other(detail: "diagnostics"))
+  }
+  return Ok(value: 0)
+}
+
 -- `onus path`.
 fn path_command(
   args: Args,
@@ -1329,6 +1400,21 @@ pub fn main(
         value: exit_status(
           console: console,
           r: path_command(args: a, files: files, console: console, process: process, env: env)
+        )
+      )
+    }
+    if value == "review" {
+      return Ok(
+        value: exit_status_of(
+          console: console,
+          r: review_command(
+            args: a,
+            files: files,
+            console: console,
+            process: process,
+            env: env,
+            clock: clock
+          )
         )
       )
     }

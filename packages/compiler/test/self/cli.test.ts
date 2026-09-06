@@ -296,6 +296,62 @@ describe('the command line in Onus (M15.4)', () => {
     if (findZ3() !== null) expect(md.ts.stdout).toMatch(/^detected: drop `ensures [^\n]*` in mandelbrot.escape_count: `[^\n]*` in mandelbrot.escape_bounded no longer follows from the contracts$/m);
   }, 900000);
 
+  it('review: the bundle and the page of checkout, against a previous interface, with a loop change, and of an invalid program (item 193)', () => {
+    const cwd = stagedCheckout('review');
+    // A change the regeneration loop might have written (loop spec §6), so the Changes view renders on both sides.
+    const change = {
+      task: { id: 'task_test', kind: 'implement', scope: ['checkout'], target: { def: 'checkout.handle_checkout' } },
+      status: 'blocked',
+      cause: 'contract_conflict',
+      generated: { at: '2026-09-05T10:00:00.000Z', model: 'test-model' },
+      interface_diff: [],
+      ledger_delta: [{ def: 'checkout.handle_checkout', kind: 'ensures', text: 'lo <= result', before: 'proved', after: null }],
+      body_diff: [{ file: 'checkout.onus', module: 'checkout', before: 'a\n', after: 'b\n' }],
+      trace: [{ iteration: 1, classification: 'contract_conflict', diagnostics_before: 2, diagnostics_after: 1, mechanical_repairs: 0, tokens: 120, ms: 340, escalation: null }],
+      metrics: { iterations: 1, mechanical_repairs: 0, escalation_steps: 0, proposals: 1, tokens: 120 },
+      proposals: [{ kind: 'weaken_postcondition', def: 'checkout.handle_checkout', current: 'ensures lo <= result', proposed: null, rationale: 'the body cannot establish it', evidence: { counterexample: { lo: 3, result: 2 } } }],
+      audit: [{ finding: 'body_rewrote_contract', detail: 'the model touched a contract' }],
+    };
+    for (const d of [cwd.ts, cwd.onus]) {
+      mkdirSync(join(d, '.onus', 'changes', 'task_test'), { recursive: true });
+      writeFileSync(join(d, '.onus', 'changes', 'task_test', 'change.json'), `${JSON.stringify(change, null, 2)}\n`);
+    }
+    const undated = (text: string): string => text.replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g, '<at>');
+    const compare = (dirs: { ts: string; onus: string }, out: string): void => {
+      for (const f of ['review.json', 'index.html']) {
+        const ts = readFileSync(join(dirs.ts, out, f), 'utf8');
+        const onus = readFileSync(join(dirs.onus, out, f), 'utf8');
+        expect(undated(onus), f).toBe(undated(ts));
+      }
+    };
+    const r = both(['review', 'checkout.onus', '--out', 'review'], cwd);
+    agree(r);
+    expect(r.ts.status, r.ts.stdout + r.ts.stderr).toBe(0);
+    compare(cwd, 'review');
+    const html = readFileSync(join(cwd.onus, 'review', 'index.html'), 'utf8');
+    expect(html).toMatch(/<g class="node fn assumed" [^>]*data-id="vendor.payments.charge"/);
+    expect(html).toContain('<rect class="gate"');
+    expect(html).toContain('blocked: contract_conflict');
+    expect(html).toContain('proposed by loop');
+    expect(html).toContain('<details class="body" data-module="checkout" data-item="handle_checkout">');
+    // Against a previous interface document: the diff view.
+    const doc = both(['interface', 'checkout.onus', '--json'], cwd);
+    agree(doc);
+    for (const d of [cwd.ts, cwd.onus]) writeFileSync(join(d, 'old.json'), doc.ts.stdout.replace('"handle_checkout"', '"handle_checkout_renamed"'));
+    const against = both(['review', 'checkout.onus', '--out', 'review-against', '--against', 'old.json'], cwd);
+    agree(against);
+    compare(cwd, 'review-against');
+    expect(readFileSync(join(cwd.onus, 'review-against', 'index.html'), 'utf8')).toContain('<section class="diff">');
+    expect(both(['review', 'checkout.onus', '--out', 'review-bad', '--against', 'checkout.onus'], cwd).onus.status).toBe(2);
+    // An invalid program: the page holds the diagnostics alone, and the status is 1.
+    const failing = staged(join(repoRoot, 'packages/compiler/test/paths/e0416_unverified.onus'), 'review-failing');
+    const bad = both(['review', 'e0416_unverified.onus', '--out', 'review'], failing);
+    agree(bad);
+    expect(bad.ts.status).toBe(1);
+    compare(failing, 'review');
+    expect(readFileSync(join(failing.onus, 'review', 'index.html'), 'utf8')).toContain('E0416');
+  }, 600000);
+
   it.skipIf(clang === null)('the released compiler needs no repository: no --stdlib, no --runtime, no node on the path (item 180)', () => {
     const native = buildNative(ctx, { outDir: fresh('release-build') });
     const diags = ctx.sink.all().map((d) => toText(ctx, d));
