@@ -109,7 +109,7 @@ it, `bootstrap/` comes from the fixed point, and every later change is made in
 `self/` only. It stays in the tree, with the differential tests, until this
 process has been carried end to end on the compiler in Onus building for the
 native target. Removing it, with a fixture runner in Onus in place of vitest
-over the TypeScript library, is its own change (M15.5), never a side effect
+over the TypeScript library, is its own change (M15.7), never a side effect
 of another.
 
 ## Never

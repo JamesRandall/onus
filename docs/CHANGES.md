@@ -1341,6 +1341,17 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
 
 ### Deferred, not changed
 
+- Decided 2026-09-06, to apply in M15.5: generics compile natively by
+  monomorphisation (impl spec §6.1), and polymorphic recursion becomes a
+  checker error on every target, with a new code in the types range, the
+  `Nest[T]`/`depth[T]` program as its fixture and a §3 sentence in the spec,
+  made through the language-change process before the native lowering relies
+  on it. The checker accepts it today.
+- Noted 2026-09-06, not scheduled: definitional unfolding of proved-terminating
+  functions in the verifier (impl spec §12), so that a shape invariant stated as
+  a recursive predicate can be proved where a nested type would have enforced
+  it.
+
 - `Stream[T] ! e` as a type (§3.11) is not parsed: `-> Stream[T] ! e` is
   ambiguous between the stream's effect and the function's. To be settled
   when streams land.
