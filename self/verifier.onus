@@ -118,7 +118,7 @@ pub fn verify_pass(
   }
   | None -> skip()
   let reported: Int = List.built(b: ctx.diagnostics)
-  let vcs: vc.VCs = vc.build_vcs(ctx: inout ctx, skip_modules: replayed)
+  let vcs: vc.VCs = vc.build_vcs(ctx: inout ctx, skip_modules: replayed, mutation: None)
   equal_measure_calls(ctx: inout ctx)
   match solver with
   | None -> {

@@ -1913,6 +1913,48 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     rather than prove). Fixed point reached from `bootstrap/`, native
     stage agrees; promoted. `--mutate` is next (item 192).
 
+192. **`onus test --mutate` in Onus (M15.6; §20.4).** `self/mutate.onus`
+    (new; `mutate/mutate.ts`) and `self/cli.onus` provide `onus test <entry>
+    --mutate`: every contract weakening §20.4 names over the program's own
+    modules — each `ensures` clause dropped, each refined result or record
+    field widened to its base type, each guarded property's guards negated
+    — assessed one at a time. A static weakening is detected when a test
+    assertion the verifier proved becomes unprovable: the conditions are
+    rebuilt with the weakening in force and the proved assertions put to
+    z3 again, the first that is no longer `unsat` naming the detector;
+    without z3 the static weakenings are skipped and a line on stderr says
+    so. A guard negation is detected when the property, re-emitted with
+    its guards negated into `<out>-mutate/mutate/<i>` and run under
+    vitest's JSON reporter, fails over the complement of its domain.
+    Survivors are `M0001 undetected contract weakening` rows of the run,
+    not diagnostics; the records go to `.onus/ledger/mutations.json` under
+    the calendar time of the run, and the status is 0. For the static
+    weakenings the verifier in Onus gains what the TypeScript one has had
+    since M13: `lower.Mutation` (kind, definition, clause span, field) is
+    carried by the lowerer's state, and three places withhold a fact under
+    it — the callee's result refinement (`widened_ret`), the callee's
+    `ensures` clause at the span (`dropped`) and a record field's
+    refinement (`field_type`); `vc.build_vcs` takes the mutation, `None`
+    from the verifier. The port found nothing to change in either
+    compiler. Fixtures: `test/self/cli.test.ts` gains `test --mutate` on
+    `test/mutate/unexercised.onus` (the guard of `half_is_smaller`
+    detected, `plus_zero`'s surviving, the widened result of `half`
+    surviving under z3; standard output and status identical, the records
+    equal, the time in the ISO form, the programs under `out-mutate/`) and
+    on mandelbrot (dropping the `ensures` of `escape_count` detected by
+    `escape_bounded`, M13's acceptance, identical on both). Review
+    artefacts under `.onus/changes/192/`: the interface diff is `lower`
+    with `Mutation` added, `Lw` carrying it and `new_lw` taking it,
+    `vc.build_vcs` taking it, and `cli` with `test_mutate` added and the
+    usage text changed; `verifier` unchanged; the ledger delta is `cli` 54
+    → 59 (30 proved, 29 checked: a refinement proved, counters checked),
+    `lower` 349 → 352 (three representation obligations on definition ids
+    checked), `vc` and `verifier` unchanged, `mutate` new with 12 (3
+    proved, 9 checked: representation and overflow on ids, budgets and
+    the counter). Fixed point reached from `bootstrap/`, native stage
+    agrees; promoted. `test` is now whole in Onus; `review`, `next` and
+    `loop` remain.
+
 ### Deferred, not changed
 
 - Decided 2026-09-06, to apply in M15.5: generics compile natively by

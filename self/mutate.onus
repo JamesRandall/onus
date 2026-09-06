@@ -1,0 +1,437 @@
+module mutate
+import std.io
+import ast
+import context
+import defs
+import types
+import typecheck
+import printer
+import obligations
+import tables
+import lower
+import vc
+import verifier
+import z3
+import build
+import testcmd
+import json
+
+-- Contract mutation (§20.4; impl spec M13; `mutate/mutate.ts`): `onus test
+-- --mutate` weakens contracts one at a time and reports which weakenings no
+-- example, property or law detects. A weakening never changes a body, so a
+-- test detects it by meaning, not by failing: an assertion the verifier
+-- proved from the contracts that stops being provable without the clause
+-- shows that the test pins what the clause promised. Negating a property's
+-- guard is the one dynamic mutation: the property is re-run over the
+-- complement of its domain. Laws are not mutated (docs/CHANGES.md item 107).
+pub record Plan {
+  -- `drop-ensures`, `widen-return`, `widen-field` or `negate-guard`.
+  kind: Text
+  -- The static mutation, for the first three kinds.
+  mutation: Option[lower.Mutation]
+  -- The property whose guards are negated, else -1; its module and name.
+  property: Int
+  module_name: Text
+  name: Text
+  -- The qualified name of the function, record or property mutated, and the weakening in words.
+  def: Text
+  text: Text
+}
+
+pub record Options {
+  -- The solver, or none when static mutations cannot be assessed.
+  solver: Option[z3.Solver]
+  budget_ms: Int where it >= 0
+  -- Where the re-emitted programs for guard negation go.
+  out_dir: Text
+  -- The runtime as generated code imports it, and whether to write the bundled one beside each program.
+  runtime: Text
+  bundled: Bool
+}
+
+fn skip() -> Unit {
+  return Unit
+}
+
+fn static_plan(kind: Text, m: lower.Mutation, def: Text, text: Text) -> Plan {
+  return Plan {
+    kind: kind,
+    mutation: Some(value: m),
+    property: -1,
+    module_name: "",
+    name: "",
+    def: def,
+    text: text
+  }
+}
+
+fn module_name_of(ctx: context.Context, id: Int) -> Text {
+  match Map.find(d: ctx.modules, key: id) with
+  | Some(value) -> return value.name
+  | None -> return ""
+}
+
+-- Every contract weakening §20.4 names, over the program's own modules: each
+-- `ensures` clause dropped, each refined result or record field widened to
+-- its base type, and each guarded property's guards negated.
+pub fn enumerate(ctx: context.Context) -> List[Plan] may alloc, mutate {
+  var out: Builder[Plan] = List.builder()
+  for id: Int in 0 ..< context.def_count(ctx: ctx) {
+    let d: defs.Def = context.get_def(ctx: ctx, id: id)
+    let q: Text = context.qualified_name(ctx: ctx, id: id)
+    if not Text.starts_with(t: q, prefix: "std.") {
+      if d.kind is defs.Fn {
+        fn_plans(ctx: ctx, d: d, q: q, out: inout out)
+      }
+      if d.kind is defs.Record {
+        record_plans(ctx: ctx, d: d, q: q, out: inout out)
+      }
+      if d.kind is defs.Property {
+        property_plan(ctx: ctx, d: d, q: q, out: inout out)
+      }
+    }
+  }
+  return List.finish(b: out)
+}
+
+fn fn_plans(
+  ctx: context.Context,
+  d: defs.Def,
+  q: Text,
+  out: inout Builder[Plan]
+) -> Unit may alloc, mutate {
+  match Map.find(d: ctx.signatures, key: d.id) with
+  | None -> skip()
+  | Some(value) -> {
+    for c: ast.Contract in value.contracts {
+      if c.clause == "ensures" {
+        List.push(
+          b: inout out,
+          x: static_plan(
+            kind: "drop-ensures",
+            m: lower.Mutation { kind: "drop-ensures", def: d.id, span: c.span, field: "" },
+            def: q,
+            text: "drop `ensures " ++ printer.print_expr(e: c.expr) ++ "`"
+          )
+        )
+      }
+    }
+    if types.is_refined(t: value.ret) {
+      List.push(
+        b: inout out,
+        x: static_plan(
+          kind: "widen-return",
+          m: lower.Mutation { kind: "widen-return", def: d.id, span: d.span, field: "" },
+          def: q,
+          text: "widen the result from `" ++ typecheck.show(
+            ctx: ctx,
+            t: value.ret
+          ) ++ "` to `" ++ typecheck.show(ctx: ctx, t: types.strip(t: value.ret)) ++ "`"
+        )
+      )
+    }
+  }
+  return Unit
+}
+
+fn record_plans(
+  ctx: context.Context,
+  d: defs.Def,
+  q: Text,
+  out: inout Builder[Plan]
+) -> Unit may alloc, mutate {
+  match Map.find(d: ctx.fields, key: d.id) with
+  | None -> skip()
+  | Some(value) -> {
+    for f: types.FieldInfo in value {
+      if types.is_refined(t: f.ty) {
+        List.push(
+          b: inout out,
+          x: static_plan(
+            kind: "widen-field",
+            m: lower.Mutation { kind: "widen-field", def: d.id, span: d.span, field: f.name },
+            def: q,
+            text: "widen field `" ++ f.name ++ "` from `" ++ typecheck.show(
+              ctx: ctx,
+              t: f.ty
+            ) ++ "` to `" ++ typecheck.show(ctx: ctx, t: types.strip(t: f.ty)) ++ "`"
+          )
+        )
+      }
+    }
+  }
+  return Unit
+}
+
+fn property_plan(
+  ctx: context.Context,
+  d: defs.Def,
+  q: Text,
+  out: inout Builder[Plan]
+) -> Unit may alloc, mutate {
+  match d.node with
+  | defs.PropertyNode(decl) -> {
+    if guarded(ctx: ctx, file: d.file, params: decl.params) {
+      List.push(
+        b: inout out,
+        x: Plan {
+          kind: "negate-guard",
+          mutation: None,
+          property: d.id,
+          module_name: module_name_of(ctx: ctx, id: d.mod),
+          name: d.name,
+          def: q,
+          text: "negate the guards of `property " ++ d.name ++ "`"
+        }
+      )
+    }
+  }
+  | _ -> skip()
+  return Unit
+}
+
+-- Whether any parameter of the property carries a refinement: a guard to negate.
+fn guarded(ctx: context.Context, file: Int, params: List[ast.Param]) -> Bool may alloc {
+  for p: ast.Param in params {
+    if param_refined(ctx: ctx, file: file, p: p) {
+      return true
+    }
+  }
+  return false
+}
+
+fn param_refined(ctx: context.Context, file: Int, p: ast.Param) -> Bool may alloc {
+  match Map.find(
+    d: ctx.def_of,
+    key: defs.node_key(file: file, tag: defs.tag_sig, span: p.span)
+  ) with
+  | None -> return false
+  | Some(value) -> return decl_refined(ctx: ctx, def: value)
+}
+
+fn decl_refined(ctx: context.Context, def: Int) -> Bool {
+  match Map.find(d: ctx.decl_types, key: def) with
+  | None -> return false
+  | Some(value) -> return types.is_refined(t: value)
+}
+
+-- Assesses each planned mutation. Static mutations are detected when a test
+-- assertion the verifier proved becomes unprovable; guard negations when the
+-- property fails over the complement of its domain. Static mutations are
+-- skipped without a solver. Writes and runs programs under `opts.out_dir/mutate`.
+pub fn run(
+  ctx: inout context.Context,
+  files: io.Files,
+  process: io.Process,
+  plans: List[Plan],
+  opts: Options
+) -> Result[List[tables.MutationRecord], io.Error] may io.file, nondet, alloc, mutate {
+  var settled: Builder[obligations.Obligation] = List.builder()
+  for i: Int in 0 ..< ctx.obligation_count {
+    let o: obligations.Obligation = context.get_obligation(ctx: ctx, id: i)
+    if o.kind is obligations.Assertion and o.status is obligations.Proved {
+      List.push(b: inout settled, x: o)
+    }
+  }
+  let settled_list: List[obligations.Obligation] = List.finish(b: settled)
+  var out: Builder[tables.MutationRecord] = List.builder()
+  var i: Int = 0
+  for plan: Plan in plans {
+    if plan.kind == "negate-guard" {
+      let r: tables.MutationRecord = try negate_guard(
+        ctx: ctx,
+        files: files,
+        process: process,
+        plan: plan,
+        opts: opts,
+        dir: opts.out_dir ++ "/mutate/" ++ Int.to_text(x: i)
+      )
+      List.push(b: inout out, x: r)
+    } else {
+      match opts.solver with
+      | None -> skip()
+      | Some(value) -> List.push(
+        b: inout out,
+        x: static_record(
+          ctx: inout ctx,
+          process: process,
+          plan: plan,
+          solver: value,
+          budget_ms: opts.budget_ms,
+          settled: settled_list
+        )
+      )
+    }
+    i = i + 1
+  }
+  return Ok(value: List.finish(b: out))
+}
+
+-- The property re-emitted with its guards negated and run under vitest's JSON reporter.
+fn negate_guard(
+  ctx: context.Context,
+  files: io.Files,
+  process: io.Process,
+  plan: Plan,
+  opts: Options,
+  dir: Text
+) -> Result[tables.MutationRecord, io.Error] may io.file, nondet, alloc, mutate {
+  try io.remove_all(files: files, path: dir)
+  try io.mkdir(files: files, path: dir)
+  if opts.bundled {
+    try build.write_bundled_runtime(files: files, out_dir: dir)
+  }
+  let built: build.Built = try build.emit_all(
+    ctx: ctx,
+    files: files,
+    opts: build.Options {
+      out_dir: dir,
+      runtime: opts.runtime,
+      verify_all: false,
+      negate_guard: Some(value: plan.property)
+    }
+  )
+  let results: Dict[Text, Bool] = testcmd.run_js_examples(
+    files: files,
+    process: process,
+    out_dir: dir,
+    emitted: built.emitted,
+    include_properties: true
+  )
+  match Map.find(d: results, key: plan.module_name ++ ".property " ++ plan.name) with
+  | None -> return Ok(
+    value: tables.MutationRecord {
+      kind: plan.kind,
+      def: plan.def,
+      text: plan.text,
+      detected: false,
+      by: "the property did not run"
+    }
+  )
+  | Some(value) -> {
+    if value {
+      return Ok(
+        value: tables.MutationRecord {
+          kind: plan.kind,
+          def: plan.def,
+          text: plan.text,
+          detected: false,
+          by: "the property still passes over the complement of its domain"
+        }
+      )
+    }
+    return Ok(
+      value: tables.MutationRecord {
+        kind: plan.kind,
+        def: plan.def,
+        text: plan.text,
+        detected: true,
+        by: "the property fails over the complement of its domain"
+      }
+    )
+  }
+}
+
+-- The conditions rebuilt without the weakened clause; the first proved test
+-- assertion the solver can no longer discharge detects the weakening.
+fn static_record(
+  ctx: inout context.Context,
+  process: io.Process,
+  plan: Plan,
+  solver: z3.Solver,
+  budget_ms: Int where it >= 0,
+  settled: List[obligations.Obligation]
+) -> tables.MutationRecord may io.file, nondet, alloc, mutate {
+  let vcs: vc.VCs = vc.build_vcs(ctx: inout ctx, skip_modules: Map.dict(), mutation: plan.mutation)
+  let witness: Int = first_unprovable(
+    ctx: ctx,
+    process: process,
+    solver: solver,
+    budget_ms: budget_ms,
+    vcs: vcs,
+    settled: settled
+  )
+  if witness < 0 {
+    return tables.MutationRecord {
+      kind: plan.kind,
+      def: plan.def,
+      text: plan.text,
+      detected: false,
+      by: "no proved assertion of an example, property or law depends on it"
+    }
+  }
+  let o: obligations.Obligation = context.get_obligation(ctx: ctx, id: witness)
+  return tables.MutationRecord {
+    kind: plan.kind,
+    def: plan.def,
+    text: plan.text,
+    detected: true,
+    by: "`" ++ o.text ++ "` in " ++ context.qualified_name(
+      ctx: ctx,
+      id: o.def
+    ) ++ " no longer follows from the contracts"
+  }
+}
+
+fn first_unprovable(
+  ctx: context.Context,
+  process: io.Process,
+  solver: z3.Solver,
+  budget_ms: Int where it >= 0,
+  vcs: vc.VCs,
+  settled: List[obligations.Obligation]
+) -> Int may io.file, nondet, alloc, mutate {
+  for o: obligations.Obligation in settled {
+    match Map.find(d: vcs.built, key: o.id) with
+    | None -> skip()
+    | Some(value) -> {
+      let r: z3.SolverResult = z3.run_z3(
+        process: process,
+        solver: solver,
+        problem: verifier.problem_text(v: value, budget_ms: budget_ms),
+        budget_ms: budget_ms
+      )
+      if not r.outcome is z3.Unsat {
+        return o.id
+      }
+    }
+  }
+  return -1
+}
+
+-- Writes the mutation records with the time of the run to `<dir>/mutations.json`, creating the directory.
+pub fn write_ledger(
+  files: io.Files,
+  dir: Text,
+  records: List[tables.MutationRecord],
+  at: Text
+) -> Result[Unit, io.Error] may io.file, alloc, mutate {
+  var items: Builder[json.Json] = List.builder()
+  for r: tables.MutationRecord in records {
+    List.push(
+      b: inout items,
+      x: json.JObject(
+        fields: [
+          json.field(key: "kind", value: json.text(t: r.kind)),
+          json.field(key: "def", value: json.text(t: r.def)),
+          json.field(key: "text", value: json.text(t: r.text)),
+          json.field(key: "detected", value: json.bool(b: r.detected)),
+          json.field(key: "by", value: json.text(t: r.by))
+        ]
+      )
+    )
+  }
+  let doc: json.Json = json.JObject(
+    fields: [
+      json.field(key: "at", value: json.text(t: at)),
+      json.field(key: "results", value: json.JArray(items: List.finish(b: items)))
+    ]
+  )
+  try io.mkdir(files: files, path: dir)
+  try build.write_file(
+    files: files,
+    path: dir ++ "/mutations.json",
+    text: json.pretty(j: doc) ++ "\n"
+  )
+  return Ok(value: Unit)
+}

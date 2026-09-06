@@ -211,12 +211,17 @@ describe('the command line in Onus (M15.4)', () => {
     expect(last(r.onus.stdout)).toBe(last(r.ts.stdout));
     expect(readFileSync(join(cwd.onus, '.onus', 'ledger', 'coverage.json'), 'utf8')).toBe(readFileSync(join(cwd.ts, '.onus', 'ledger', 'coverage.json'), 'utf8'));
     expect(readFileSync(join(cwd.ts, '.onus', 'ledger', 'coverage.json'), 'utf8')).not.toBe('{}\n');
-    // A program without tests, and the switch that still needs the TypeScript compiler.
+    // A program without tests.
     const plain = { ts: fresh('test-none-ts'), onus: fresh('test-none-onus') };
-    for (const d of [plain.ts, plain.onus]) writeFileSync(join(d, 'plain.onus'), 'pub fn twice(x: Int) -> Int {\n  return 2 * x\n}\n');
-    agree(both(['test', 'plain.onus', '--out', 'out'], plain));
+    for (const d of [plain.ts, plain.onus]) writeFileSync(join(d, 'plain.onus'), 'module plain\n\npub fn twice(x: Int) -> Int {\n  return 2 * x\n}\n');
+    const untested = both(['test', 'plain.onus', '--out', 'out'], plain);
+    agree(untested);
+    expect(untested.ts.stdout).toBe('onus test: no example, property or law to run\n');
     expect(both(['test', 'primitives.onus', '--out', 'out', '--target', 'wasm'], cwd).onus.status).toBe(2);
-    expect(both(['test', 'primitives.onus', '--mutate'], cwd).onus.status).toBe(2);
+    // A program with no contract to weaken: nothing to mutate, on both (item 192).
+    const nothing = both(['test', 'plain.onus', '--mutate', '--out', 'out'], plain);
+    agree(nothing);
+    expect(nothing.ts.stdout).toBe('0 contract mutations: 0 detected, 0 surviving\n');
     // A program with no verify block: nothing to verify, on both (item 191).
     const none = both(['test', 'primitives.onus', '--assumptions', '--out', 'out'], cwd);
     agree(none);
@@ -270,6 +275,26 @@ describe('the command line in Onus (M15.4)', () => {
     expect(e.ts.status).toBe(1);
     expect(e.ts.stdout).toContain('E0603');
   }, 600000);
+
+  it('test --mutate: every contract weakening assessed, the survivors reported, and the ledger (item 192)', () => {
+    // vitest re-runs the negated properties and z3 re-checks the proved assertions; both sides see the same programs.
+    const cwd = staged(join(repoRoot, 'packages/compiler/test/mutate/unexercised.onus'), 'mutate');
+    const r = both(['test', 'unexercised.onus', '--mutate', '--out', 'out', '--budget', '2000'], cwd);
+    agree(r);
+    expect(r.ts.status, r.ts.stdout + r.ts.stderr).toBe(0);
+    expect(r.ts.stdout).toContain('detected: negate the guards of `property half_is_smaller` in unexercised.half_is_smaller');
+    expect(r.ts.stdout).toContain('M0001 undetected contract weakening: negate the guards of `property plus_zero` in unexercised.plus_zero');
+    if (findZ3() !== null) expect(r.ts.stdout).toContain('M0001 undetected contract weakening: widen the result from `Int where …` to `Int` in unexercised.half');
+    const ledger = (d: string): { at: string; results: unknown[] } => JSON.parse(readFileSync(join(d, '.onus', 'ledger', 'mutations.json'), 'utf8'));
+    expect(ledger(cwd.onus).results).toEqual(ledger(cwd.ts).results);
+    expect(ledger(cwd.onus).at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect(existsSync(join(cwd.onus, 'out-mutate', 'mutate'))).toBe(true);
+    // The mandelbrot example: dropping the `ensures` on `escape_count` is detected by its property (M13's acceptance).
+    const m = staged(join(repoRoot, 'examples/mandelbrot/mandelbrot.onus'), 'mutate-mandelbrot');
+    const md = both(['test', 'mandelbrot.onus', '--mutate', '--out', 'out', '--budget', '2000'], m);
+    agree(md);
+    if (findZ3() !== null) expect(md.ts.stdout).toMatch(/^detected: drop `ensures [^\n]*` in mandelbrot.escape_count: `[^\n]*` in mandelbrot.escape_bounded no longer follows from the contracts$/m);
+  }, 900000);
 
   it.skipIf(clang === null)('the released compiler needs no repository: no --stdlib, no --runtime, no node on the path (item 180)', () => {
     const native = buildNative(ctx, { outDir: fresh('release-build') });

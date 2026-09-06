@@ -22,25 +22,29 @@ import * as $testcmd from "./testcmd.js";
 import * as $pathtext from "./pathtext.js";
 import * as $config from "./config.js";
 import * as $assumptions from "./assumptions.js";
+import * as $z3 from "./z3.js";
+import * as $mutate from "./mutate.js";
 import * as $interface from "./interface.js";
 import * as $idiff from "./idiff.js";
 import * as $pathreport from "./pathreport.js";
 import * as $bundle from "./bundle.js";
 
-const $ob1 = { kind: "overflow", text: "i + 1 within Int", at: "self/cli.onus:86:40", def: "parse_args" };
-const $ob2 = { kind: "overflow", text: "i + 1 within Int", at: "self/cli.onus:87:74", def: "parse_args" };
-const $ob3 = { kind: "overflow", text: "i + 2 within Int", at: "self/cli.onus:88:13", def: "parse_args" };
-const $ob4 = { kind: "overflow", text: "i + 1 within Int", at: "self/cli.onus:91:15", def: "parse_args" };
-const $ob5 = { kind: "overflow", text: "i + 1 within Int", at: "self/cli.onus:94:15", def: "parse_args" };
-const $ob6 = { kind: "overflow", text: "i + 1 within Int", at: "self/cli.onus:103:11", def: "parse_args" };
-const $ob7 = { kind: "overflow", text: "n - width within Int", at: "self/cli.onus:145:38", def: "pad" };
-const $ob8 = { kind: "overflow", text: "syntax_errors + 1 within Int", at: "self/cli.onus:376:23", def: "fmt_command" };
-const $ob9 = { kind: "overflow", text: "failed + 1 within Int", at: "self/cli.onus:937:16", def: "test_assumptions" };
-const $ob10 = { kind: "overflow", text: "n - failed within Int", at: "self/cli.onus:959:10", def: "test_assumptions" };
-const $ob11 = { kind: "overflow", text: "-1 within Int", at: "self/cli.onus:995:10", def: "file_id_of" };
-const $ob12 = { kind: "overflow", text: "-1 within Int", at: "self/cli.onus:1056:18", def: "interface_command" };
-const $ob13 = { kind: "overflow", text: "-1 within Int", at: "self/cli.onus:1122:24", def: "path_command" };
-export const usage = "usage:\n  onus check <file.onus>... [--json] [--root <dir>] [--stdlib <dir>] [--to <pass>] [--budget <ms>] [--ledger] [--no-cache]\n      report every diagnostic; exit 1 if any. Passes: parse, canonical, load, resolve, types, consteval, effects, contracts, claims, capabilities, verify, paths\n  onus fmt <file.onus>... [--stdout]\n      rewrite files in canonical form\n  onus build <entry.onus> [--out <dir>] [--emit js|ir] [--target js|native|wasm] [--root <dir>] [--stdlib <dir>] [--runtime <path>]\n      check, then emit JavaScript for every module into <dir> (default: <entry dir>/out); --target native compiles\n      an executable with clang into <dir>/native (§19); --emit ir prints the target-neutral form\n  onus run <entry.onus> [--out <dir>] [--target js|native|wasm] [-- args...]\n      build, then run the entry module's main\n  onus test <entry.onus> [--out <dir>] [--target js|native|all] [--root <dir>] [--stdlib <dir>]\n      build, then run the generated example, property and law tests (§20.6); --target all runs the examples on\n      both targets and reports any disagreement as E0801 (§19.5); --mutate waits on a later change\n  onus test <entry.onus> --assumptions [--env <test module>] [--out <dir>] [--root <dir>] [--stdlib <dir>]\n      run every verify block against capabilities from the environment module and record the results in .onus/ledger/ (§20.2–§20.3)\n  onus interface <file.onus> [--json] [--diff <old-interface.json>] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]\n      check, then print the entry module's interface: canonical source with bodies elided, or the §11.1 JSON;\n      with --diff, the changes since a previous interface document (§11.1, §15.1)\n  onus path <file.onus> [<name>] [--json] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]\n      check, then print the §9.1 report of the entry module's paths (or of the named one)\n  onus --version\n      print the compiler's version\n  review, loop and next: run the TypeScript `onus` until M15.6 completes\nThe standard library is --stdlib or ONUS_STDLIB, else the one the compiler carries; the runtime for build and run is --runtime or ONUS_RUNTIME, else the one the compiler carries, written beside the program.\n";
+const $ob1 = { kind: "overflow", text: "i + 1 within Int", at: "self/cli.onus:88:40", def: "parse_args" };
+const $ob2 = { kind: "overflow", text: "i + 1 within Int", at: "self/cli.onus:89:74", def: "parse_args" };
+const $ob3 = { kind: "overflow", text: "i + 2 within Int", at: "self/cli.onus:90:13", def: "parse_args" };
+const $ob4 = { kind: "overflow", text: "i + 1 within Int", at: "self/cli.onus:93:15", def: "parse_args" };
+const $ob5 = { kind: "overflow", text: "i + 1 within Int", at: "self/cli.onus:96:15", def: "parse_args" };
+const $ob6 = { kind: "overflow", text: "i + 1 within Int", at: "self/cli.onus:105:11", def: "parse_args" };
+const $ob7 = { kind: "overflow", text: "n - width within Int", at: "self/cli.onus:147:38", def: "pad" };
+const $ob8 = { kind: "overflow", text: "syntax_errors + 1 within Int", at: "self/cli.onus:378:23", def: "fmt_command" };
+const $ob9 = { kind: "overflow", text: "failed + 1 within Int", at: "self/cli.onus:943:16", def: "test_assumptions" };
+const $ob10 = { kind: "overflow", text: "n - failed within Int", at: "self/cli.onus:965:10", def: "test_assumptions" };
+const $ob11 = { kind: "overflow", text: "surviving + 1 within Int", at: "self/cli.onus:1035:19", def: "test_mutate" };
+const $ob12 = { kind: "overflow", text: "n - surviving within Int", at: "self/cli.onus:1050:10", def: "test_mutate" };
+const $ob13 = { kind: "overflow", text: "-1 within Int", at: "self/cli.onus:1089:10", def: "file_id_of" };
+const $ob14 = { kind: "overflow", text: "-1 within Int", at: "self/cli.onus:1150:18", def: "interface_command" };
+const $ob15 = { kind: "overflow", text: "-1 within Int", at: "self/cli.onus:1216:24", def: "path_command" };
+export const usage = "usage:\n  onus check <file.onus>... [--json] [--root <dir>] [--stdlib <dir>] [--to <pass>] [--budget <ms>] [--ledger] [--no-cache]\n      report every diagnostic; exit 1 if any. Passes: parse, canonical, load, resolve, types, consteval, effects, contracts, claims, capabilities, verify, paths\n  onus fmt <file.onus>... [--stdout]\n      rewrite files in canonical form\n  onus build <entry.onus> [--out <dir>] [--emit js|ir] [--target js|native|wasm] [--root <dir>] [--stdlib <dir>] [--runtime <path>]\n      check, then emit JavaScript for every module into <dir> (default: <entry dir>/out); --target native compiles\n      an executable with clang into <dir>/native (§19); --emit ir prints the target-neutral form\n  onus run <entry.onus> [--out <dir>] [--target js|native|wasm] [-- args...]\n      build, then run the entry module's main\n  onus test <entry.onus> [--out <dir>] [--target js|native|all] [--root <dir>] [--stdlib <dir>]\n      build, then run the generated example, property and law tests (§20.6); --target all runs the examples on\n      both targets and reports any disagreement as E0801 (§19.5)\n  onus test <entry.onus> --mutate [--out <dir>] [--root <dir>] [--stdlib <dir>] [--budget <ms>]\n      weaken each contract in turn and report the weakenings no example, property or law detects (§20.4)\n  onus test <entry.onus> --assumptions [--env <test module>] [--out <dir>] [--root <dir>] [--stdlib <dir>]\n      run every verify block against capabilities from the environment module and record the results in .onus/ledger/ (§20.2–§20.3)\n  onus interface <file.onus> [--json] [--diff <old-interface.json>] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]\n      check, then print the entry module's interface: canonical source with bodies elided, or the §11.1 JSON;\n      with --diff, the changes since a previous interface document (§11.1, §15.1)\n  onus path <file.onus> [<name>] [--json] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]\n      check, then print the §9.1 report of the entry module's paths (or of the named one)\n  onus --version\n      print the compiler's version\n  review, loop and next: run the TypeScript `onus` until M15.6 completes\nThe standard library is --stdlib or ONUS_STDLIB, else the one the compiler carries; the runtime for build and run is --runtime or ONUS_RUNTIME, else the one the compiler carries, written beside the program.\n";
 
 export const passes = ["parse", "canonical", "load", "resolve", "types", "consteval", "effects", "contracts", "claims", "capabilities", "verify", "paths"];
 
@@ -678,11 +682,10 @@ export function test_command({ args, files, console, process, env, clock }) {
     if ($std_list.len({ xs: args.files }) === 0) {
       return { tag: "Err", error: usage_failure({ console: console }) };
     }
-    if (flag({ args: args, name: "mutate" })) {
-      $std_io.eprint({ console: console, text: "onus test: --mutate runs with the TypeScript `onus` until M15.6 completes\n" });
-      return { tag: "Err", error: { tag: "Other", detail: "--mutate" } };
-    }
     const entry = $std_list.get({ xs: args.files, i: 0 });
+    if (flag({ args: args, name: "mutate" })) {
+      return test_mutate({ args: args, entry: entry, files: files, console: console, process: process, env: env, clock: clock });
+    }
     const target = value_or({ args: args, name: "target", fallback: "js" });
     if (target !== "js" && target !== "native" && target !== "all") {
       $std_io.eprint({ console: console, text: "onus: --target takes js, native or all\n" });
@@ -693,9 +696,9 @@ export function test_command({ args, files, console, process, env, clock }) {
     }
     const s = setup({ args: args, files: files, env: env });
     let ctx = s.ctx;
-    const [$r98, ctx$12] = read_entries({ ctx: ctx, files: files, paths: [entry] });
+    const [$r96, ctx$12] = read_entries({ ctx: ctx, files: files, paths: [entry] });
     ctx = ctx$12;
-    $rt.unwrap($r98);
+    $rt.unwrap($r96);
     const out_dir = value_or({ args: args, name: "out", fallback: $nativebuild.dir_of({ path: entry }) + "/out" });
     const rt = runtime_choice({ args: args, env: env });
     const [, ctx$13] = $check.run_passes({ ctx: ctx, to: 11, files: files, console: console, process: process, vopts: s.vopts });
@@ -732,26 +735,26 @@ export function test_command({ args, files, console, process, env, clock }) {
       const table = $testcmd.merge_coverage({ files: files, dir: coverage_dir, base: ctx.coverage });
       $rt.unwrap($testcmd.write_coverage({ files: files, dir: ledger_dir, table: table }));
       ctx = { ...ctx, coverage: table };
-      const [$r107, ctx$14] = $testcmd.program_coverage({ ctx: ctx, tab: tab });
+      const [$r105, ctx$14] = $testcmd.program_coverage({ ctx: ctx, tab: tab });
       ctx = ctx$14;
-      $std_io.print({ console: console, text: "obligation coverage: " + $pathtext.coverage_text({ c: $r107 }) + "\n" });
+      $std_io.print({ console: console, text: "obligation coverage: " + $pathtext.coverage_text({ c: $r105 }) + "\n" });
       if (status < 0) {
         return { tag: "Ok", value: 1 };
       }
       return { tag: "Ok", value: status };
     }
-    const [$r110, ctx$15] = $nativebuild.build_native({ ctx: ctx, files: files, process: process, env: env, tab: tab, out_dir: out_dir, runtime_dir: rt.runtime_dir, target: "native" });
+    const [$r108, ctx$15] = $nativebuild.build_native({ ctx: ctx, files: files, process: process, env: env, tab: tab, out_dir: out_dir, runtime_dir: rt.runtime_dir, target: "native" });
     ctx = ctx$15;
-    const built = $rt.unwrap($r110);
+    const built = $rt.unwrap($r108);
     emit_diagnostics({ ctx: ctx, console: console, tab: tab, as_json: as_json });
-    const $m111 = built.exe;
-    $m111$match: {
-      if ($m111.tag === "None") {
+    const $m109 = built.exe;
+    $m109$match: {
+      if ($m109.tag === "None") {
         return { tag: "Err", error: { tag: "Other", detail: "diagnostics" } };
-        break $m111$match;
+        break $m109$match;
       }
-      if ($m111.tag === "Some") {
-        const value = $m111.value;
+      if ($m109.tag === "Some") {
+        const value = $m109.value;
         const native_run = $testcmd.run_native_examples({ process: process, exe: value });
         $std_io.print({ console: console, text: native_run.output });
         let native_ok = true;
@@ -776,15 +779,15 @@ export function test_command({ args, files, console, process, env, clock }) {
             js_ok = false;
           }
         }
-        const [$r116, ctx$16] = $testcmd.compare_targets({ ctx: ctx, js: js, native: native_run.results });
+        const [$r114, ctx$16] = $testcmd.compare_targets({ ctx: ctx, js: js, native: native_run.results });
         ctx = ctx$16;
-        const disagreements = $r116;
+        const disagreements = $r114;
         emit_diagnostics({ ctx: ctx, console: console, tab: tab, as_json: as_json });
         if (disagreements > 0 || !native_ok || !js_ok) {
           return { tag: "Ok", value: 1 };
         }
         return { tag: "Ok", value: 0 };
-        break $m111$match;
+        break $m109$match;
       }
       $rt.unreachable();
     }
@@ -804,22 +807,22 @@ export function test_assumptions({ args, entry, files, console, process, env, cl
       env_path = config_env_path({ cfg: cfg, root: s.root });
     }
     let paths = [entry];
-    const $m119 = env_path;
-    $m119$match: {
-      if ($m119.tag === "Some") {
-        const value = $m119.value;
+    const $m117 = env_path;
+    $m117$match: {
+      if ($m117.tag === "Some") {
+        const value = $m117.value;
         paths = [entry, value];
-        break $m119$match;
+        break $m117$match;
       }
-      if ($m119.tag === "None") {
+      if ($m117.tag === "None") {
         skip({  });
-        break $m119$match;
+        break $m117$match;
       }
       $rt.unreachable();
     }
-    const [$r120, ctx$17] = read_entries({ ctx: ctx, files: files, paths: paths });
+    const [$r118, ctx$17] = read_entries({ ctx: ctx, files: files, paths: paths });
     ctx = ctx$17;
-    $rt.unwrap($r120);
+    $rt.unwrap($r118);
     const out_dir = value_or({ args: args, name: "out", fallback: $nativebuild.dir_of({ path: entry }) + "/out" });
     const rt = runtime_choice({ args: args, env: env });
     const [, ctx$18] = $check.run_passes({ ctx: ctx, to: 11, files: files, console: console, process: process, vopts: s.vopts });
@@ -836,9 +839,9 @@ export function test_assumptions({ args, entry, files, console, process, env, cl
       $rt.unwrap($build.write_bundled_runtime({ files: files, out_dir: out_dir }));
     }
     const built = $rt.unwrap($build.emit_all({ ctx: ctx, files: files, opts: { out_dir: out_dir, runtime: rt.runtime, verify_all: true, negate_guard: { tag: "None" } } }));
-    const [$r125, ctx$19] = $assumptions.check({ ctx: ctx, p: p, emitted: built.emitted });
+    const [$r123, ctx$19] = $assumptions.check({ ctx: ctx, p: p, emitted: built.emitted });
     ctx = ctx$19;
-    if (!$r125) {
+    if (!$r123) {
       emit_diagnostics({ ctx: ctx, console: console, tab: tab, as_json: as_json });
       return { tag: "Err", error: { tag: "Other", detail: "diagnostics" } };
     }
@@ -886,27 +889,55 @@ export function test_assumptions({ args, entry, files, console, process, env, cl
   }
 }
 
-export function config_env_path({ cfg, root }) {
-  const $m133 = cfg.env;
-  $m133$match: {
-    if ($m133.tag === "None") {
-      return { tag: "None" };
-      break $m133$match;
+export function test_mutate({ args, entry, files, console, process, env, clock }) {
+  try {
+    const s = setup({ args: args, files: files, env: env });
+    let ctx = s.ctx;
+    const [$r131, ctx$22] = read_entries({ ctx: ctx, files: files, paths: [entry] });
+    ctx = ctx$22;
+    $rt.unwrap($r131);
+    const out_dir = value_or({ args: args, name: "out", fallback: $nativebuild.dir_of({ path: entry }) + "/out" });
+    const rt = runtime_choice({ args: args, env: env });
+    const [, ctx$23] = $check.run_passes({ ctx: ctx, to: 11, files: files, console: console, process: process, vopts: s.vopts });
+    ctx = ctx$23;
+    const tab = $loc.line_tables({ ctx: ctx });
+    if (!$context.clean({ ctx: ctx })) {
+      emit_diagnostics({ ctx: ctx, console: console, tab: tab, as_json: flag({ args: args, name: "json" }) });
+      return { tag: "Err", error: { tag: "Other", detail: "diagnostics" } };
     }
-    if ($m133.tag === "Some") {
-      const value = $m133.value;
-      if (root === ".") {
-        return { tag: "Some", value: value };
+    const solver = $z3.find_z3({ process: process, explicit: s.vopts.z3_path });
+    if (solver.tag === "None") {
+      $std_io.eprint({ console: console, text: "onus test --mutate: z3 not found on PATH; only property guards are mutated\n" });
+    }
+    const [$r135, ctx$24] = $mutate.run({ ctx: ctx, files: files, process: process, plans: $mutate.enumerate({ ctx: ctx }), opts: { solver: solver, budget_ms: s.vopts.budget_ms, out_dir: out_dir + "-mutate", runtime: rt.runtime, bundled: rt.bundled } });
+    ctx = ctx$24;
+    const records = $rt.unwrap($r135);
+    let surviving = 0;
+    for (const r of records) {
+      let head = "M0001 undetected contract weakening";
+      if (r.detected) {
+        head = "detected";
+      } else {
+        surviving = $rt.int.add(surviving, 1, $ob11);
       }
-      return { tag: "Some", value: root + "/" + value };
-      break $m133$match;
+      $std_io.print({ console: console, text: head + ": " + r.text + " in " + r.def + ": " + r.by + "\n" });
     }
-    $rt.unreachable();
+    const n = $std_list.len({ xs: records });
+    let plural = "s";
+    if (n === 1) {
+      plural = "";
+    }
+    $std_io.print({ console: console, text: $std_int.to_text({ x: n }) + " contract mutation" + plural + ": " + $std_int.to_text({ x: $rt.int.sub(n, surviving, $ob12) }) + " detected, " + $std_int.to_text({ x: surviving }) + " surviving\n" });
+    $rt.unwrap($mutate.write_ledger({ files: files, dir: s.root + "/.onus/ledger", records: records, at: $assumptions.iso_of_millis({ ms: $std_io.time({ clock: clock }) }) }));
+    return { tag: "Ok", value: 0 };
+  } catch ($e) {
+    if ($e instanceof $rt.EarlyReturn) return $e.value;
+    throw $e;
   }
 }
 
-export function module_at_path({ ctx, path }) {
-  const $m137 = path;
+export function config_env_path({ cfg, root }) {
+  const $m137 = cfg.env;
   $m137$match: {
     if ($m137.tag === "None") {
       return { tag: "None" };
@@ -914,8 +945,27 @@ export function module_at_path({ ctx, path }) {
     }
     if ($m137.tag === "Some") {
       const value = $m137.value;
-      return module_of_file({ ctx: ctx, file: file_id_of({ ctx: ctx, path: value }) });
+      if (root === ".") {
+        return { tag: "Some", value: value };
+      }
+      return { tag: "Some", value: root + "/" + value };
       break $m137$match;
+    }
+    $rt.unreachable();
+  }
+}
+
+export function module_at_path({ ctx, path }) {
+  const $m141 = path;
+  $m141$match: {
+    if ($m141.tag === "None") {
+      return { tag: "None" };
+      break $m141$match;
+    }
+    if ($m141.tag === "Some") {
+      const value = $m141.value;
+      return module_of_file({ ctx: ctx, file: file_id_of({ ctx: ctx, path: value }) });
+      break $m141$match;
     }
     $rt.unreachable();
   }
@@ -927,7 +977,7 @@ export function file_id_of({ ctx, path }) {
       return f.id;
     }
   }
-  return $rt.int.neg(1, $ob11);
+  return $rt.int.neg(1, $ob13);
 }
 
 export function module_of_file({ ctx, file }) {
@@ -943,17 +993,17 @@ export function module_of_file({ ctx, file }) {
 }
 
 export function copy_record({ from, to, key }) {
-  const $m142 = $std_map.find({ d: from, key: key });
-  $m142$match: {
-    if ($m142.tag === "Some") {
-      const value = $m142.value;
-      const [, to$22] = $std_map.set({ d: to, key: key, value: value });
-      to = to$22;
-      break $m142$match;
+  const $m146 = $std_map.find({ d: from, key: key });
+  $m146$match: {
+    if ($m146.tag === "Some") {
+      const value = $m146.value;
+      const [, to$25] = $std_map.set({ d: to, key: key, value: value });
+      to = to$25;
+      break $m146$match;
     }
-    if ($m142.tag === "None") {
+    if ($m146.tag === "None") {
       skip({  });
-      break $m142$match;
+      break $m146$match;
     }
     $rt.unreachable();
   }
@@ -962,16 +1012,16 @@ export function copy_record({ from, to, key }) {
 }
 
 export function js_flag({ d, key }) {
-  const $m143 = $std_map.find({ d: d, key: key });
-  $m143$match: {
-    if ($m143.tag === "Some") {
-      const value = $m143.value;
+  const $m147 = $std_map.find({ d: d, key: key });
+  $m147$match: {
+    if ($m147.tag === "Some") {
+      const value = $m147.value;
       return value;
-      break $m143$match;
+      break $m147$match;
     }
-    if ($m143.tag === "None") {
+    if ($m147.tag === "None") {
       return false;
-      break $m143$match;
+      break $m147$match;
     }
     $rt.unreachable();
   }
@@ -985,37 +1035,37 @@ export function interface_command({ args, files, console, process, env }) {
     const entry = $std_list.get({ xs: args.files, i: 0 });
     const s = setup({ args: args, files: files, env: env });
     let ctx = s.ctx;
-    const [$r144, ctx$23] = read_entries({ ctx: ctx, files: files, paths: [entry] });
-    ctx = ctx$23;
-    $rt.unwrap($r144);
-    const [, ctx$24] = $check.run_passes({ ctx: ctx, to: 11, files: files, console: console, process: process, vopts: s.vopts });
-    ctx = ctx$24;
+    const [$r148, ctx$26] = read_entries({ ctx: ctx, files: files, paths: [entry] });
+    ctx = ctx$26;
+    $rt.unwrap($r148);
+    const [, ctx$27] = $check.run_passes({ ctx: ctx, to: 11, files: files, console: console, process: process, vopts: s.vopts });
+    ctx = ctx$27;
     const tab = $loc.line_tables({ ctx: ctx });
     const as_json = flag({ args: args, name: "json" });
     emit_diagnostics({ ctx: ctx, console: console, tab: tab, as_json: as_json });
     if (!$context.clean({ ctx: ctx })) {
       return { tag: "Err", error: { tag: "Other", detail: "diagnostics" } };
     }
-    let mod = $rt.int.neg(1, $ob12);
-    const $m147 = entry_module({ ctx: ctx });
-    $m147$match: {
-      if ($m147.tag === "Some") {
-        const value = $m147.value;
+    let mod = $rt.int.neg(1, $ob14);
+    const $m151 = entry_module({ ctx: ctx });
+    $m151$match: {
+      if ($m151.tag === "Some") {
+        const value = $m151.value;
         mod = value;
-        break $m147$match;
+        break $m151$match;
       }
-      if ($m147.tag === "None") {
+      if ($m151.tag === "None") {
         $std_io.eprint({ console: console, text: "onus interface: " + entry + " is not a module\n" });
         return { tag: "Err", error: { tag: "Other", detail: "not a module" } };
-        break $m147$match;
+        break $m151$match;
       }
       $rt.unreachable();
     }
     const doc = $interface.interface_of({ ctx: ctx, mod: mod });
-    const $m150 = value({ args: args, name: "diff" });
-    $m150$match: {
-      if ($m150.tag === "Some") {
-        const value = $m150.value;
+    const $m154 = value({ args: args, name: "diff" });
+    $m154$match: {
+      if ($m154.tag === "Some") {
+        const value = $m154.value;
         const old_text = $rt.unwrap($std_io.read({ files: files, path: value }));
         const old_doc = or_null({ o: $json.parse({ t: old_text }) });
         if (!is_interface_document({ j: old_doc })) {
@@ -1032,11 +1082,11 @@ export function interface_command({ args, files, console, process, env }) {
           return { tag: "Err", error: { tag: "Other", detail: "breaking" } };
         }
         return { tag: "Ok", value: undefined };
-        break $m150$match;
+        break $m154$match;
       }
-      if ($m150.tag === "None") {
+      if ($m154.tag === "None") {
         skip({  });
-        break $m150$match;
+        break $m154$match;
       }
       $rt.unreachable();
     }
@@ -1064,49 +1114,49 @@ export function path_command({ args, files, console, process, env }) {
     }
     const s = setup({ args: args, files: files, env: env });
     let ctx = s.ctx;
-    const [$r159, ctx$25] = read_entries({ ctx: ctx, files: files, paths: [entry] });
-    ctx = ctx$25;
-    $rt.unwrap($r159);
-    const [, ctx$26] = $check.run_passes({ ctx: ctx, to: 11, files: files, console: console, process: process, vopts: s.vopts });
-    ctx = ctx$26;
+    const [$r163, ctx$28] = read_entries({ ctx: ctx, files: files, paths: [entry] });
+    ctx = ctx$28;
+    $rt.unwrap($r163);
+    const [, ctx$29] = $check.run_passes({ ctx: ctx, to: 11, files: files, console: console, process: process, vopts: s.vopts });
+    ctx = ctx$29;
     const tab = $loc.line_tables({ ctx: ctx });
     const as_json = flag({ args: args, name: "json" });
     emit_diagnostics({ ctx: ctx, console: console, tab: tab, as_json: as_json });
-    let entry_mod = $rt.int.neg(1, $ob13);
-    const $m160 = entry_module({ ctx: ctx });
-    $m160$match: {
-      if ($m160.tag === "Some") {
-        const value = $m160.value;
+    let entry_mod = $rt.int.neg(1, $ob15);
+    const $m164 = entry_module({ ctx: ctx });
+    $m164$match: {
+      if ($m164.tag === "Some") {
+        const value = $m164.value;
         entry_mod = value;
-        break $m160$match;
+        break $m164$match;
       }
-      if ($m160.tag === "None") {
+      if ($m164.tag === "None") {
         skip({  });
-        break $m160$match;
+        break $m164$match;
       }
       $rt.unreachable();
     }
     let reports = $std_list.builder({  });
     for (const k of $std_map.keys({ d: ctx.analyses })) {
-      const $m161 = $std_map.find({ d: ctx.analyses, key: k });
-      $m161$match: {
-        if ($m161.tag === "Some") {
-          const value = $m161.value;
+      const $m165 = $std_map.find({ d: ctx.analyses, key: k });
+      $m165$match: {
+        if ($m165.tag === "Some") {
+          const value = $m165.value;
           if (value.mod === entry_mod) {
             let chosen = true;
             if (wanted.tag === "Some") {
               chosen = $context.get_def({ ctx: ctx, id: value.def }).name === or_empty({ o: wanted });
             }
             if (chosen) {
-              const [, reports$27] = $std_list.push({ b: reports, x: $pathreport.path_report({ ctx: ctx, tab: tab, a: value }) });
-              reports = reports$27;
+              const [, reports$30] = $std_list.push({ b: reports, x: $pathreport.path_report({ ctx: ctx, tab: tab, a: value }) });
+              reports = reports$30;
             }
           }
-          break $m161$match;
+          break $m165$match;
         }
-        if ($m161.tag === "None") {
+        if ($m165.tag === "None") {
           skip({  });
-          break $m161$match;
+          break $m165$match;
         }
         $rt.unreachable();
       }
@@ -1139,14 +1189,14 @@ export function main({ args, files, console, process, env, clock }) {
     $std_io.print({ console: console, text: "onus " + $bundle.version + "\n" });
     return { tag: "Ok", value: 0 };
   }
-  const $m168 = a.command;
-  $m168$match: {
-    if ($m168.tag === "None") {
+  const $m172 = a.command;
+  $m172$match: {
+    if ($m172.tag === "None") {
       return { tag: "Ok", value: exit_status({ console: console, r: usage_error({ console: console }) }) };
-      break $m168$match;
+      break $m172$match;
     }
-    if ($m168.tag === "Some") {
-      const value = $m168.value;
+    if ($m172.tag === "Some") {
+      const value = $m172.value;
       if (value === "check") {
         return { tag: "Ok", value: exit_status({ console: console, r: check_command({ args: a, files: files, console: console, process: process, env: env }) }) };
       }
@@ -1166,7 +1216,7 @@ export function main({ args, files, console, process, env, clock }) {
         return { tag: "Ok", value: exit_status({ console: console, r: path_command({ args: a, files: files, console: console, process: process, env: env }) }) };
       }
       return { tag: "Ok", value: exit_status({ console: console, r: usage_error({ console: console }) }) };
-      break $m168$match;
+      break $m172$match;
     }
     $rt.unreachable();
   }

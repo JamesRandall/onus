@@ -214,7 +214,8 @@ pub fn measure_text(t: Text) -> Text may alloc {
 -- Effects: settles structural `decreases` obligations and reports E0344; otherwise none beyond the returned structure.
 pub fn build_vcs(
   ctx: inout context.Context,
-  skip_modules: Dict[Int, Bool]
+  skip_modules: Dict[Int, Bool],
+  mutation: Option[lower.Mutation]
 ) -> VCs may mutate, alloc {
   let out: VCs = VCs { built: Map.dict(), skipped: Map.dict() }
   var by_def: Dict[Int, List[Int]] = Map.dict()
@@ -240,7 +241,7 @@ pub fn build_vcs(
     for id: Int in ids_or(o: Map.find(d: by_def, key: def)) {
       Map.set(d: inout pending, key: id, value: true)
     }
-    var lw: lower.Lw = lower.new_lw(file: d.file)
+    var lw: lower.Lw = lower.new_lw(file: d.file, mutation: mutation)
     var w: W = W {
       def: d,
       file: d.file,

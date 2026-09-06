@@ -39,9 +39,22 @@ pub record CallInfo {
   subst: Dict[Int, types.TypeArg]
 }
 
+-- A contract weakening whose facts are withheld (§20.4, `onus test --mutate`;
+-- `verify/vc.ts` `Mutation`): `drop-ensures` withholds the `ensures` clause
+-- at `span` of function `def`; `widen-return` the result refinement of
+-- function `def`; `widen-field` the refinement of `field` of record `def`.
+pub record Mutation {
+  kind: Text
+  def: Int
+  span: ast.Span
+  field: Text
+}
+
 pub record Lw {
   -- The file of the nodes being lowered, for their keys.
   file: Int
+  -- A contract weakening whose facts are withheld (§20.4, `onus test --mutate`).
+  mutation: Option[Mutation]
   sorts: Dict[Text, Bool]
   fns: Dict[Text, FnDecl]
   axioms: Builder[formula.Formula]
@@ -75,9 +88,10 @@ pub record Lw {
   facts_memo: Dict[Text, Bool]
 }
 
-pub fn new_lw(file: Int) -> Lw may alloc {
+pub fn new_lw(file: Int, mutation: Option[Mutation]) -> Lw may alloc {
   return Lw {
     file: file,
+    mutation: mutation,
     sorts: Map.dict(),
     fns: Map.dict(),
     axioms: List.builder(),
@@ -111,6 +125,43 @@ fn or_neg(o: Option[Int]) -> Int {
   match o with
   | Some(value) -> return value
   | None -> return -1
+}
+
+-- The result type of `fn_def` as the facts see it: its base type under a `widen-return` mutation of it.
+fn widened_ret(lw: Lw, fn_def: Int, ret: types.Type) -> types.Type {
+  match lw.mutation with
+  | Some(value) -> {
+    if value.kind == "widen-return" and value.def == fn_def {
+      return types.strip(t: ret)
+    }
+    return ret
+  }
+  | None -> return ret
+}
+
+-- Whether the `ensures` clause `c` of `fn_def` is the one a `drop-ensures` mutation withholds.
+fn dropped(lw: Lw, fn_def: Int, c: ast.Contract) -> Bool {
+  match lw.mutation with
+  | Some(value) -> return value.kind == "drop-ensures" and value.def == fn_def and value.span.start == c.span.start and value.span.end == c.span.end
+  | None -> return false
+}
+
+-- The type of field `f` of record `owner` as the facts see it: its base type under a `widen-field` mutation of it.
+fn field_type(
+  lw: Lw,
+  owner: Int,
+  f: types.FieldInfo,
+  subst: Dict[Int, types.TypeArg]
+) -> types.Type may alloc, mutate {
+  let ft: types.Type = types.substitute(t: f.ty, subst: subst)
+  match lw.mutation with
+  | Some(value) -> {
+    if value.kind == "widen-field" and value.def == owner and value.field == f.name {
+      return types.strip(t: ft)
+    }
+    return ft
+  }
+  | None -> return ft
 }
 
 pub fn key(lw: Lw, tag: Int, span: ast.Span) -> Int {
@@ -2040,7 +2091,14 @@ fn callee_facts(
   if fuel == 0 {
     return Unit
   }
-  type_facts(fuel: fuel - 1, lw: inout lw, ctx: ctx, term: res, ty: ret, env: args)
+  type_facts(
+    fuel: fuel - 1,
+    lw: inout lw,
+    ctx: ctx,
+    term: res,
+    ty: widened_ret(lw: lw, fn_def: fn_def.id, ret: ret),
+    env: args
+  )
   -- A contract that calls its own function (`ensures compare(a, a) == 0`) is stated once, not unfolded forever.
   if Map.contains(d: lw.expanding, key: fn_def.id) {
     return Unit
@@ -2089,7 +2147,7 @@ fn callee_contracts(
   }
   lw = { lw with result_term: Some(value: res), olds: olds, file: fn_def.file }
   for c: ast.Contract in sig.contracts {
-    if c.clause == "ensures" {
+    if c.clause == "ensures" and not dropped(lw: lw, fn_def: fn_def.id, c: c) {
       match lower(fuel: fuel - 1, lw: inout lw, ctx: ctx, e: c.expr, env: args) with
       | Ok(value) -> push_axiom(lw: lw, f: value)
       | Err(_) -> skip()
@@ -2137,7 +2195,7 @@ pub fn type_facts(
     var siblings: Dict[Int, Binding] = copy_env(env: env)
     let fs: List[types.FieldInfo] = fields_of(ctx: ctx, owner: owner)
     for f: types.FieldInfo in fs {
-      let ft: types.Type = types.substitute(t: f.ty, subst: subst)
+      let ft: types.Type = field_type(lw: lw, owner: owner, f: f, subst: subst)
       match projection_of(
         lw: lw,
         ctx: ctx,
@@ -2151,7 +2209,7 @@ pub fn type_facts(
       | Err(_) -> skip()
     }
     for f: types.FieldInfo in fs {
-      let ft: types.Type = types.substitute(t: f.ty, subst: subst)
+      let ft: types.Type = field_type(lw: lw, owner: owner, f: f, subst: subst)
       if types.prim_name(t: types.strip(t: ft)) != "Float" {
         match projection_of(
           lw: lw,
