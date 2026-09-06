@@ -45,7 +45,10 @@ export function emitAll(ctx: Context, opts: BuildOptions): BuildResult {
   mkdirSync(opts.outDir, { recursive: true });
   writeFileSync(join(opts.outDir, 'package.json'), '{\n  "type": "module"\n}\n');
   // Generated tests run with `vitest run --root <outDir> --config <outDir>/vitest.config.mjs`.
-  writeFileSync(join(opts.outDir, 'vitest.config.mjs'), `export default { test: { include: ['**/*.examples.test.${ext}'], environment: 'node' } };\n`);
+  // The runtime records obligation coverage under `ONUS_COVERAGE_DIR` (§20.5); the config sets it to `coverage/`
+  // beside itself when the environment does not, so that a run of the generated tests by any means records beside
+  // the program, and the config never names the output directory (docs/CHANGES.md item 189).
+  writeFileSync(join(opts.outDir, 'vitest.config.mjs'), `import { fileURLToPath } from 'node:url';\nprocess.env.ONUS_COVERAGE_DIR ??= fileURLToPath(new URL('./coverage', import.meta.url));\nexport default { test: { include: ['**/*.examples.test.${ext}'], environment: 'node' } };\n`);
   if (opts.ts) {
     writeFileSync(
       join(opts.outDir, 'tsconfig.json'),

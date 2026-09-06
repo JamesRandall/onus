@@ -1799,6 +1799,52 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     Process: through the skill; `self/bundle.onus` regenerated; `self/`
     does not use them in this change.
 
+189. **`onus test` in Onus: examples, properties and laws, and obligation
+    coverage (M15.6; §19.5, §20.5, §20.6).** `self/testcmd.onus` (new) and
+    `self/cli.onus` provide `onus test <entry> [--out <dir>] [--target
+    js|native|all]` as the TypeScript command line does. On `js`: build,
+    run the generated example, property and law tests under vitest on the
+    user's own streams (`io.exec`), fold the hit files the test workers
+    wrote under `<out>/coverage/` (cleared first, so the ledger reflects the
+    last run alone) into `<root>/.onus/ledger/coverage.json`, keeping the
+    larger count per check, and print `obligation coverage: …` over the
+    program's own obligations and assumptions; the status is vitest's. On
+    `native`: build the executable and run its examples, printing what it
+    prints; 1 when any fails. On `all`: also run the examples under vitest's
+    JSON reporter (`<out>/examples.report.json`), print each outcome with
+    `(js)`, and report every disagreement as `E0801` (§19.5); 1 on a
+    disagreement or a failure. A program with no example, property or law
+    says so and succeeds. `--assumptions` and `--mutate` are refused with
+    status 2 and run with the TypeScript `onus` until items 190 and 191;
+    `build`'s runtime selection moved into `runtime_choice`, shared with
+    `test`. One change to both compilers, forced by the port: `onus test`
+    used to hand the coverage directory to the generated tests through the
+    environment, which `io.exec` does not pass on (item 184); the generated
+    `vitest.config.mjs` now sets `ONUS_COVERAGE_DIR` itself, to `coverage/`
+    beside the config (from `import.meta.url`) when the environment does
+    not, so a run of the generated tests by any means records beside the
+    program. The first attempt wrote the output directory's absolute path
+    into the config and the chain caught it: stage2 and stage3 differed in
+    that one line. Two deliberate differences from the TypeScript helpers:
+    the module of a vitest test file is found by matching its path against
+    the emitted modules rather than by the output directory's length, and
+    the JSON-reporter run does not set `CI=1`, which only affected the
+    terminal reporter. Fixtures: `test/self/cli.test.ts` gains `test` on
+    `test/native/primitives.onus` staged in a fresh directory (equal exit
+    status, equal `obligation coverage` line, equal `coverage.json` byte
+    for byte; a program without tests; the refused switches and an unknown
+    target) and `test --target native` and `--target all` on `primitives`
+    and mandelbrot (standard output and status identical). Review
+    artefacts under `.onus/changes/189/`: the interface diff of `cli` is
+    `RuntimeChoice`, `runtime_choice`, `test_command` and `js_flag` added
+    and the module comment and usage text changed; `build` has no
+    interface change; the ledger delta is `cli` 45 → 48 obligations (28
+    proved, 20 checked: one index refinement proved, two representation
+    obligations on counters checked) and `testcmd` new with 22 (10 proved,
+    12 checked: the representation and overflow obligations on counters
+    and indices, as throughout `self/`). Fixed point reached from
+    `bootstrap/`, native stage agrees; promoted.
+
 ### Deferred, not changed
 
 - Decided 2026-09-06, to apply in M15.5: generics compile natively by

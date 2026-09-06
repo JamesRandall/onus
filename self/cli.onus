@@ -21,16 +21,20 @@ import nativebuild
 import obligations
 import ledger
 import bundle
+import testcmd
+import jsemit
 
 -- The `onus` command line in Onus (impl spec §2, M15.4; `cli/main.ts`):
--- `check`, `fmt`, `build`, `run`, `interface` and `path`. `test`, `review`,
--- `loop` and `next` stay with the TypeScript `onus` until M15.5.
+-- `check`, `fmt`, `build`, `run`, `test` (examples, properties and laws;
+-- docs/CHANGES.md item 189), `interface` and `path`. `test --assumptions`,
+-- `test --mutate`, `review`, `loop` and `next` stay with the TypeScript `onus`
+-- until M15.6 completes.
 --
 -- Exit status, as the TypeScript command line reports it (docs/CHANGES.md
 -- item 187): 0 success, 1 diagnostics (or a breaking interface, or a native
 -- build that failed), 2 usage or I/O failure, and for `run` the program's own,
 -- since `run` hands the program the terminal through `io.exec`.
-pub const usage: Text = "usage:\n  onus check <file.onus>... [--json] [--root <dir>] [--stdlib <dir>] [--to <pass>] [--budget <ms>] [--ledger] [--no-cache]\n      report every diagnostic; exit 1 if any. Passes: parse, canonical, load, resolve, types, consteval, effects, contracts, claims, capabilities, verify, paths\n  onus fmt <file.onus>... [--stdout]\n      rewrite files in canonical form\n  onus build <entry.onus> [--out <dir>] [--emit js|ir] [--target js|native|wasm] [--root <dir>] [--stdlib <dir>] [--runtime <path>]\n      check, then emit JavaScript for every module into <dir> (default: <entry dir>/out); --target native compiles\n      an executable with clang into <dir>/native (§19); --emit ir prints the target-neutral form\n  onus run <entry.onus> [--out <dir>] [--target js|native|wasm] [-- args...]\n      build, then run the entry module's main\n  onus interface <file.onus> [--json] [--diff <old-interface.json>] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]\n      check, then print the entry module's interface: canonical source with bodies elided, or the §11.1 JSON;\n      with --diff, the changes since a previous interface document (§11.1, §15.1)\n  onus path <file.onus> [<name>] [--json] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]\n      check, then print the §9.1 report of the entry module's paths (or of the named one)\n  onus --version\n      print the compiler's version\n  test, review, loop and next: run the TypeScript `onus` until M15.5\nThe standard library is --stdlib or ONUS_STDLIB, else the one the compiler carries; the runtime for build and run is --runtime or ONUS_RUNTIME, else the one the compiler carries, written beside the program.\n"
+pub const usage: Text = "usage:\n  onus check <file.onus>... [--json] [--root <dir>] [--stdlib <dir>] [--to <pass>] [--budget <ms>] [--ledger] [--no-cache]\n      report every diagnostic; exit 1 if any. Passes: parse, canonical, load, resolve, types, consteval, effects, contracts, claims, capabilities, verify, paths\n  onus fmt <file.onus>... [--stdout]\n      rewrite files in canonical form\n  onus build <entry.onus> [--out <dir>] [--emit js|ir] [--target js|native|wasm] [--root <dir>] [--stdlib <dir>] [--runtime <path>]\n      check, then emit JavaScript for every module into <dir> (default: <entry dir>/out); --target native compiles\n      an executable with clang into <dir>/native (§19); --emit ir prints the target-neutral form\n  onus run <entry.onus> [--out <dir>] [--target js|native|wasm] [-- args...]\n      build, then run the entry module's main\n  onus test <entry.onus> [--out <dir>] [--target js|native|all] [--root <dir>] [--stdlib <dir>]\n      build, then run the generated example, property and law tests (§20.6); --target all runs the examples on\n      both targets and reports any disagreement as E0801 (§19.5); --assumptions and --mutate wait on later changes\n  onus interface <file.onus> [--json] [--diff <old-interface.json>] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]\n      check, then print the entry module's interface: canonical source with bodies elided, or the §11.1 JSON;\n      with --diff, the changes since a previous interface document (§11.1, §15.1)\n  onus path <file.onus> [<name>] [--json] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]\n      check, then print the §9.1 report of the entry module's paths (or of the named one)\n  onus --version\n      print the compiler's version\n  review, loop and next: run the TypeScript `onus` until M15.6 completes\nThe standard library is --stdlib or ONUS_STDLIB, else the one the compiler carries; the runtime for build and run is --runtime or ONUS_RUNTIME, else the one the compiler carries, written beside the program.\n"
 
 pub const passes: List[Text] = [
   "parse",
@@ -433,7 +437,7 @@ fn failure_status(console: io.Console, e: io.Error) -> Int may io.file, alloc {
     if detail == "diagnostics" or detail == "native build failed" or detail == "breaking" {
       return 1
     }
-    if detail == "usage" or detail == "unknown pass" or detail == "--emit ts" or detail == "--emit" or detail == "--target" or detail == "no main" or detail == "not a module" or detail == "not an interface document" or detail == "no such path" {
+    if detail == "usage" or detail == "unknown pass" or detail == "--emit ts" or detail == "--emit" or detail == "--target" or detail == "no main" or detail == "not a module" or detail == "not an interface document" or detail == "no such path" or detail == "--assumptions" or detail == "--mutate" {
       return 2
     }
     io.eprint(console: console, text: "onus: " ++ detail ++ "\n")
@@ -455,6 +459,32 @@ fn exit_status_of(console: io.Console, r: Result[Int, io.Error]) -> Int may io.f
   match r with
   | Ok(value) -> return value
   | Err(error) -> return failure_status(console: console, e: error)
+}
+
+-- The runtime a build uses: --runtime, else ONUS_RUNTIME, else the one the compiler
+-- carries, written beside the program (docs/CHANGES.md item 180).
+record RuntimeChoice {
+  runtime: Text
+  runtime_dir: Option[Text]
+  bundled: Bool
+}
+
+fn runtime_choice(args: Args, env: io.Env) -> RuntimeChoice may io.env, alloc, mutate {
+  var runtime_opt: Option[Text] = io.get_env(env: env, name: "ONUS_RUNTIME")
+  match value(args: args, name: "runtime") with
+  | Some(value) -> runtime_opt = Some(value: value)
+  | None -> skip()
+  match runtime_opt with
+  | Some(value) -> return RuntimeChoice {
+    runtime: value,
+    runtime_dir: runtime_dir_of(runtime: value),
+    bundled: false
+  }
+  | None -> return RuntimeChoice {
+    runtime: "./onus-runtime/index.js",
+    runtime_dir: None,
+    bundled: true
+  }
 }
 
 -- The native runtime sources next to the runtime package's entry point, when the runtime is given as a path.
@@ -504,21 +534,10 @@ fn build_command(
     name: "out",
     fallback: nativebuild.dir_of(path: entry) ++ "/out"
   )
-  -- The runtime: --runtime, else ONUS_RUNTIME, else the one the compiler carries, written beside the program (docs/CHANGES.md item 180).
-  var runtime_opt: Option[Text] = io.get_env(env: env, name: "ONUS_RUNTIME")
-  match value(args: args, name: "runtime") with
-  | Some(value) -> runtime_opt = Some(value: value)
-  | None -> skip()
-  var runtime: Text = "./onus-runtime/index.js"
-  var runtime_dir: Option[Text] = None
-  var bundled_runtime: Bool = true
-  match runtime_opt with
-  | Some(value) -> {
-    runtime = value
-    runtime_dir = runtime_dir_of(runtime: value)
-    bundled_runtime = false
-  }
-  | None -> skip()
+  let rt: RuntimeChoice = runtime_choice(args: args, env: env)
+  let runtime: Text = rt.runtime
+  let runtime_dir: Option[Text] = rt.runtime_dir
+  let bundled_runtime: Bool = rt.bundled
   check.run_passes(
     ctx: inout ctx,
     to: 11,
@@ -634,6 +653,179 @@ fn is_interface_document(j: json.Json) -> Bool {
     j: j,
     key: "items"
   ) is json.JArray
+}
+
+-- `onus test` (§20.6; docs/CHANGES.md item 189): the examples, properties and
+-- laws on the JavaScript target, the native target, or both compared.
+fn test_command(
+  args: Args,
+  files: io.Files,
+  console: io.Console,
+  process: io.Process,
+  env: io.Env
+) -> Result[Int, io.Error] may io.file, io.env, nondet, alloc, mutate {
+  if List.len(xs: args.files) == 0 {
+    return Err(error: usage_failure(console: console))
+  }
+  if flag(args: args, name: "mutate") {
+    io.eprint(
+      console: console,
+      text: "onus test: --mutate runs with the TypeScript `onus` until M15.6 completes\n"
+    )
+    return Err(error: Other(detail: "--mutate"))
+  }
+  if flag(args: args, name: "assumptions") {
+    io.eprint(
+      console: console,
+      text: "onus test: --assumptions runs with the TypeScript `onus` until M15.6 completes\n"
+    )
+    return Err(error: Other(detail: "--assumptions"))
+  }
+  let entry: Text = List.get(xs: args.files, i: 0)
+  let target: Text = value_or(args: args, name: "target", fallback: "js")
+  if target != "js" and target != "native" and target != "all" {
+    io.eprint(console: console, text: "onus: --target takes js, native or all\n")
+    return Err(error: Other(detail: "--target"))
+  }
+  let s: Setup = setup(args: args, files: files, env: env)
+  var ctx: context.Context = s.ctx
+  try read_entries(ctx: inout ctx, files: files, paths: [entry])
+  let out_dir: Text = value_or(
+    args: args,
+    name: "out",
+    fallback: nativebuild.dir_of(path: entry) ++ "/out"
+  )
+  let rt: RuntimeChoice = runtime_choice(args: args, env: env)
+  check.run_passes(
+    ctx: inout ctx,
+    to: 11,
+    files: files,
+    console: console,
+    process: process,
+    vopts: s.vopts
+  )
+  let tab: Dict[Int, loc.LineTable] = loc.line_tables(ctx: ctx)
+  let as_json: Bool = flag(args: args, name: "json")
+  if not context.clean(ctx: ctx) {
+    emit_diagnostics(ctx: ctx, console: console, tab: tab, as_json: as_json)
+    return Err(error: Other(detail: "diagnostics"))
+  }
+  if rt.bundled {
+    try build.write_bundled_runtime(files: files, out_dir: out_dir)
+  }
+  let built_js: build.Built = try build.emit_all(
+    ctx: ctx,
+    files: files,
+    opts: build.Options {
+      out_dir: out_dir,
+      runtime: rt.runtime,
+      verify_all: false,
+      negate_guard: None
+    }
+  )
+  emit_diagnostics(ctx: ctx, console: console, tab: tab, as_json: as_json)
+  if not context.clean(ctx: ctx) {
+    return Err(error: Other(detail: "diagnostics"))
+  }
+  if target == "js" {
+    var any_tests: Bool = false
+    for m: jsemit.Emitted in built_js.emitted {
+      if m.tests is Some {
+        any_tests = true
+      }
+    }
+    if not any_tests {
+      io.print(console: console, text: "onus test: no example, property or law to run\n")
+      return Ok(value: 0)
+    }
+    -- The run's coverage alone: what the previous run left is cleared first (§20.5).
+    let coverage_dir: Text = out_dir ++ "/coverage"
+    try io.remove_all(files: files, path: coverage_dir)
+    let status: Int = try io.exec(
+      process: process,
+      program: "npx",
+      args: ["vitest", "run", "--root", out_dir, "--config", "vitest.config.mjs"]
+    )
+    let ledger_dir: Text = s.root ++ "/.onus/ledger"
+    let table: Dict[Text, Int] = testcmd.merge_coverage(
+      files: files,
+      dir: coverage_dir,
+      base: ctx.coverage
+    )
+    try testcmd.write_coverage(files: files, dir: ledger_dir, table: table)
+    ctx = { ctx with coverage: table }
+    io.print(
+      console: console,
+      text: "obligation coverage: " ++ pathtext.coverage_text(
+        c: testcmd.program_coverage(ctx: inout ctx, tab: tab)
+      ) ++ "\n"
+    )
+    if status < 0 {
+      return Ok(value: 1)
+    }
+    return Ok(value: status)
+  }
+  let built: nativebuild.Built = try nativebuild.build_native(
+    ctx: inout ctx,
+    files: files,
+    process: process,
+    env: env,
+    tab: tab,
+    out_dir: out_dir,
+    runtime_dir: rt.runtime_dir,
+    target: "native"
+  )
+  emit_diagnostics(ctx: ctx, console: console, tab: tab, as_json: as_json)
+  match built.exe with
+  | None -> return Err(error: Other(detail: "diagnostics"))
+  | Some(value) -> {
+    let native_run: testcmd.NativeRun = testcmd.run_native_examples(process: process, exe: value)
+    io.print(console: console, text: native_run.output)
+    var native_ok: Bool = true
+    for ok: Bool in Map.values(d: native_run.results) {
+      if not ok {
+        native_ok = false
+      }
+    }
+    if target == "native" {
+      if native_ok {
+        return Ok(value: 0)
+      }
+      return Ok(value: 1)
+    }
+    let js: Dict[Text, Bool] = testcmd.run_js_examples(
+      files: files,
+      process: process,
+      out_dir: out_dir,
+      emitted: built_js.emitted,
+      include_properties: false
+    )
+    var js_ok: Bool = true
+    for name: Text in Map.keys(d: js) {
+      if Map.contains(d: js, key: name) and js_flag(d: js, key: name) {
+        io.print(console: console, text: "ok " ++ name ++ " (js)\n")
+      } else {
+        io.print(console: console, text: "FAIL " ++ name ++ " (js)\n")
+        js_ok = false
+      }
+    }
+    let disagreements: Int = testcmd.compare_targets(
+      ctx: inout ctx,
+      js: js,
+      native: native_run.results
+    )
+    emit_diagnostics(ctx: ctx, console: console, tab: tab, as_json: as_json)
+    if disagreements > 0 or not native_ok or not js_ok {
+      return Ok(value: 1)
+    }
+    return Ok(value: 0)
+  }
+}
+
+fn js_flag(d: Dict[Text, Bool], key: Text) -> Bool {
+  match Map.find(d: d, key: key) with
+  | Some(value) -> return value
+  | None -> return false
 }
 
 -- `onus interface`.
@@ -815,6 +1007,14 @@ pub fn main(
             env: env,
             run: value == "run"
           )
+        )
+      )
+    }
+    if value == "test" {
+      return Ok(
+        value: exit_status_of(
+          console: console,
+          r: test_command(args: a, files: files, console: console, process: process, env: env)
         )
       )
     }

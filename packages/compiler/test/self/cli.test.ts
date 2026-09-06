@@ -193,6 +193,47 @@ describe('the command line in Onus (M15.4)', () => {
     expect(readFileSync(join(onusRun, 'mandelbrot.pgm'), 'utf8')).toBe(readFileSync(join(tsRun, 'mandelbrot.pgm'), 'utf8'));
   }, 600000);
 
+  /** A program copied into two fresh directories so that `.onus/ledger` lands there rather than in the tree. */
+  function staged(source: string, name: string): { ts: string; onus: string } {
+    const dirs = { ts: fresh(`${name}-ts`), onus: fresh(`${name}-onus`) };
+    for (const d of [dirs.ts, dirs.onus]) writeFileSync(join(d, basename(source)), readFileSync(source, 'utf8'));
+    return dirs;
+  }
+
+  it('test: the examples on js, the coverage line, and the coverage ledger (item 189)', () => {
+    // vitest's own report carries timings, so only the compiler's last line, the status and the ledger are compared.
+    const last = (s: string): string => s.trimEnd().split('\n').at(-1) ?? '';
+    const cwd = staged(join(repoRoot, 'packages/compiler/test/native/primitives.onus'), 'test-js');
+    const r = both(['test', 'primitives.onus', '--out', 'out'], cwd);
+    expect(r.ts.status, r.ts.stdout + r.ts.stderr).toBe(0);
+    expect(r.onus.status, r.onus.stdout + r.onus.stderr).toBe(0);
+    expect(last(r.ts.stdout)).toContain('obligation coverage: ');
+    expect(last(r.onus.stdout)).toBe(last(r.ts.stdout));
+    expect(readFileSync(join(cwd.onus, '.onus', 'ledger', 'coverage.json'), 'utf8')).toBe(readFileSync(join(cwd.ts, '.onus', 'ledger', 'coverage.json'), 'utf8'));
+    expect(readFileSync(join(cwd.ts, '.onus', 'ledger', 'coverage.json'), 'utf8')).not.toBe('{}\n');
+    // A program without tests, and the switches that still need the TypeScript compiler.
+    const none = { ts: fresh('test-none-ts'), onus: fresh('test-none-onus') };
+    for (const d of [none.ts, none.onus]) writeFileSync(join(d, 'plain.onus'), 'pub fn twice(x: Int) -> Int {\n  return 2 * x\n}\n');
+    agree(both(['test', 'plain.onus', '--out', 'out'], none));
+    expect(both(['test', 'primitives.onus', '--out', 'out', '--target', 'wasm'], cwd).onus.status).toBe(2);
+    expect(both(['test', 'primitives.onus', '--mutate'], cwd).onus.status).toBe(2);
+    expect(both(['test', 'primitives.onus', '--assumptions'], cwd).onus.status).toBe(2);
+    expect(both(['test'], cwd).onus.status).toBe(2);
+  }, 600000);
+
+  it.skipIf(clang === null)('test --target native and all: the outcomes of every example on each target (item 189)', () => {
+    const native = staged(join(repoRoot, 'packages/compiler/test/native/primitives.onus'), 'test-native');
+    const r = both(['test', 'primitives.onus', '--out', 'out', '--target', 'native'], native);
+    agree(r);
+    expect(r.ts.status, r.ts.stdout + r.ts.stderr).toBe(0);
+    expect(r.ts.stdout).toContain('ok primitives.shapes\n');
+    const all = staged(join(repoRoot, 'examples/mandelbrot/mandelbrot.onus'), 'test-all');
+    const a = both(['test', 'mandelbrot.onus', '--out', 'out', '--target', 'all'], all);
+    agree(a);
+    expect(a.ts.status, a.ts.stdout + a.ts.stderr).toBe(0);
+    expect(a.ts.stdout).toContain(' (js)\n');
+  }, 900000);
+
   it.skipIf(clang === null)('the released compiler needs no repository: no --stdlib, no --runtime, no node on the path (item 180)', () => {
     const native = buildNative(ctx, { outDir: fresh('release-build') });
     const diags = ctx.sink.all().map((d) => toText(ctx, d));

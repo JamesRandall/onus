@@ -1,0 +1,408 @@
+module testcmd
+import std.io
+import ast
+import context
+import defs
+import report
+import loc
+import json
+import interface
+import ledger
+import obligations
+import tables
+import jsemit
+import build
+
+-- `onus test` in Onus (impl spec M15.6; `cli/main.ts` `testCommand`,
+-- `codegen/native-build.ts`, `report/ledger.ts`; docs/CHANGES.md item 189):
+-- the examples, properties and laws of a program on the JavaScript target
+-- (vitest over the generated tests, on the user's terminal), on the native
+-- target (the executable's `--onus-examples` mode), or on both with the
+-- outcomes compared (§19.5, E0801); and the obligation coverage a JavaScript
+-- run leaves, merged into `<root>/.onus/ledger/coverage.json` (§20.5).
+-- `--assumptions` and `--mutate` are later changes.
+pub record NativeRun {
+  -- Outcome by qualified example name, in the order the program reported them.
+  results: Dict[Text, Bool]
+  -- Everything the program wrote, standard output then standard error.
+  output: Text
+}
+
+fn skip() -> Unit {
+  return Unit
+}
+
+-- The rest of `line` after `prefix`, when it starts with it.
+fn after_prefix(line: Text, prefix: Text) -> Option[Text] may alloc {
+  if not Text.starts_with(t: line, prefix: prefix) {
+    return None
+  }
+  let n: Int = Text.count(t: prefix)
+  let m: Int = Text.count(t: line)
+  if n <= m {
+    return Some(value: Text.slice(t: line, from: n, to: m))
+  }
+  return None
+}
+
+-- Runs the native examples: the executable in its `--onus-examples` mode
+-- prints `ok <name>` or `FAIL <name>` per example.
+pub fn run_native_examples(
+  process: io.Process,
+  exe: Text
+) -> NativeRun may io.file, nondet, alloc, mutate {
+  match io.run(
+    process: process,
+    program: exe,
+    args: ["--onus-examples"],
+    stdin: "",
+    timeout_ms: 0
+  ) with
+  | Ok(value) -> {
+    var results: Dict[Text, Bool] = Map.dict()
+    for line: Text in Text.split(t: value.stdout, sep: "\n") {
+      note_line(results: inout results, line: line)
+    }
+    return NativeRun { results: results, output: value.stdout ++ value.stderr }
+  }
+  | Err(_) -> return NativeRun { results: Map.dict(), output: "" }
+}
+
+-- One line of the examples run: `ok <name>` or `FAIL <name>`; anything else is not an outcome.
+fn note_line(results: inout Dict[Text, Bool], line: Text) -> Unit may mutate, alloc {
+  match after_prefix(line: line, prefix: "ok ") with
+  | Some(value) -> Map.set(d: inout results, key: value, value: true)
+  | None -> note_failure(results: inout results, line: line)
+  return Unit
+}
+
+fn note_failure(results: inout Dict[Text, Bool], line: Text) -> Unit may mutate, alloc {
+  match after_prefix(line: line, prefix: "FAIL ") with
+  | Some(value) -> Map.set(d: inout results, key: value, value: false)
+  | None -> skip()
+  return Unit
+}
+
+-- The module whose generated test file `path` is: the emitted module whose
+-- `<a>/<b>.examples.test.js` ends `path`; "" when none does.
+fn module_of_test_file(path: Text, emitted: List[jsemit.Emitted]) -> Text may alloc, mutate {
+  for m: jsemit.Emitted in emitted {
+    let rel: Text = "/" ++ Text.replace(t: m.mod.name, from: ".", to: "/") ++ ".examples.test.js"
+    if Text.ends_with(t: path, suffix: rel) {
+      return m.mod.name
+    }
+  }
+  return ""
+}
+
+-- Runs the generated vitest tests with the JSON reporter and returns each
+-- example's outcome by qualified name; properties and laws only when asked.
+pub fn run_js_examples(
+  files: io.Files,
+  process: io.Process,
+  out_dir: Text,
+  emitted: List[jsemit.Emitted],
+  include_properties: Bool
+) -> Dict[Text, Bool] may io.file, nondet, alloc, mutate {
+  -- vitest resolves `--config` and `--outputFile` against `--root`.
+  match io.run(
+    process: process,
+    program: "npx",
+    args: [
+      "vitest",
+      "run",
+      "--root",
+      out_dir,
+      "--config",
+      "vitest.config.mjs",
+      "--reporter=json",
+      "--outputFile=examples.report.json"
+    ],
+    stdin: "",
+    timeout_ms: 0
+  ) with
+  | Ok(_) -> skip()
+  | Err(_) -> skip()
+  match io.read(files: files, path: out_dir ++ "/examples.report.json") with
+  | Err(_) -> return Map.dict()
+  | Ok(value) -> return results_of_report(
+    text: value,
+    emitted: emitted,
+    include_properties: include_properties
+  )
+}
+
+-- The outcomes in a vitest JSON report: `testResults[].assertionResults[]`, by module and title.
+fn results_of_report(
+  text: Text,
+  emitted: List[jsemit.Emitted],
+  include_properties: Bool
+) -> Dict[Text, Bool] may alloc, mutate {
+  var results: Dict[Text, Bool] = Map.dict()
+  match json.parse(t: text) with
+  | None -> return results
+  | Some(value) -> {
+    for file: json.Json in json.list_at(j: value, key: "testResults") {
+      let module_name: Text = module_of_test_file(
+        path: json.str_at(j: file, key: "name"),
+        emitted: emitted
+      )
+      if module_name != "" {
+        for a: json.Json in json.list_at(j: file, key: "assertionResults") {
+          let title: Text = json.str_at(j: a, key: "title")
+          let is_property: Bool = Text.starts_with(
+            t: title,
+            prefix: "property "
+          ) or Text.starts_with(t: title, prefix: "law ")
+          if include_properties or not is_property {
+            Map.set(
+              d: inout results,
+              key: module_name ++ "." ++ title,
+              value: json.str_at(j: a, key: "status") == "passed"
+            )
+          }
+        }
+      }
+    }
+    return results
+  }
+}
+
+-- The position of the last `.` in `name`, or -1.
+fn last_dot(name: Text) -> Int may alloc {
+  let cps: List[Int] = Text.code_points(t: name)
+  var at: Int = -1
+  var i: Int = 0
+  for c: Int in cps {
+    if c == 46 {
+      at = i
+    }
+    i = i + 1
+  }
+  return at
+}
+
+fn passes(ok: Bool) -> Text {
+  if ok {
+    return "passes"
+  }
+  return "fails"
+}
+
+-- Compares example outcomes across targets (§19.5): a disagreement on a
+-- program the compiler accepted is a backend defect, E0801 at the example.
+pub fn compare_targets(
+  ctx: inout context.Context,
+  js: Dict[Text, Bool],
+  native: Dict[Text, Bool]
+) -> Int may alloc, mutate {
+  var disagreements: Int = 0
+  for name: Text in Map.keys(d: native) {
+    let native_ok: Bool = flag_of(d: native, key: name)
+    match Map.find(d: js, key: name) with
+    | None -> skip()
+    | Some(value) -> {
+      if value != native_ok {
+        disagreements = disagreements + 1
+        let dot: Int = last_dot(name: name)
+        var module_name: Text = name
+        var example: Text = ""
+        if dot >= 0 and dot < Text.count(t: name) {
+          module_name = Text.slice(t: name, from: 0, to: dot)
+          example = Text.slice(t: name, from: dot + 1, to: Text.count(t: name))
+        }
+        let def: Int = test_def(ctx: inout ctx, module_name: module_name, example: example)
+        var file: Int = 0
+        var span: ast.Span = ast.Span { start: 0, end: 0 }
+        if def >= 0 {
+          let d: defs.Def = context.get_def(ctx: ctx, id: def)
+          file = d.file
+          span = d.span
+        }
+        context.report(
+          ctx: inout ctx,
+          d: report.diagnostic(
+            code: "E0801",
+            file: file,
+            span: span,
+            def_name: Some(value: example),
+            detail: "example `" ++ name ++ "` " ++ passes(ok: value) ++ " on js and " ++ passes(
+              ok: native_ok
+            ) ++ " on native; the targets must agree (§19.5)"
+          )
+        )
+      }
+    }
+  }
+  return disagreements
+}
+
+-- The definition of example `example` in the module named `module_name`, or -1.
+fn test_def(ctx: inout context.Context, module_name: Text, example: Text) -> Int may alloc, mutate {
+  let module: Int = module_id(ctx: ctx, name: module_name)
+  if module < 0 {
+    return -1
+  }
+  match Map.find(d: context.members_of(ctx: inout ctx, module: module).tests, key: example) with
+  | Some(value) -> return value
+  | None -> return -1
+}
+
+fn module_id(ctx: context.Context, name: Text) -> Int {
+  match Map.find(d: ctx.by_name, key: name) with
+  | Some(value) -> return value
+  | None -> return -1
+}
+
+fn flag_of(d: Dict[Text, Bool], key: Text) -> Bool {
+  match Map.find(d: d, key: key) with
+  | Some(value) -> return value
+  | None -> return false
+}
+
+-- Coverage (§20.5; `report/ledger.ts`) --------------------------------------------------------
+-- Folds the per-process hit files a test run wrote under `dir` into `base`,
+-- keeping the larger count per check; `base` is left alone.
+pub fn merge_coverage(
+  files: io.Files,
+  dir: Text,
+  base: Dict[Text, Int]
+) -> Dict[Text, Int] may io.file, alloc, mutate {
+  var out: Dict[Text, Int] = Map.dict()
+  for k: Text in Map.keys(d: base) {
+    Map.set(d: inout out, key: k, value: count_of(d: base, key: k))
+  }
+  match io.list_dir(files: files, path: dir) with
+  | Err(_) -> return out
+  | Ok(value) -> {
+    for name: Text in value {
+      if Text.ends_with(t: name, suffix: ".json") {
+        merge_file(files: files, path: dir ++ "/" ++ name, out: inout out)
+      }
+    }
+    return out
+  }
+}
+
+fn merge_file(
+  files: io.Files,
+  path: Text,
+  out: inout Dict[Text, Int]
+) -> Unit may io.file, alloc, mutate {
+  match io.read(files: files, path: path) with
+  | Err(_) -> skip()
+  | Ok(value) -> merge_text(text: value, out: inout out)
+  return Unit
+}
+
+fn merge_text(text: Text, out: inout Dict[Text, Int]) -> Unit may alloc, mutate {
+  match json.parse(t: text) with
+  | None -> skip()
+  | Some(value) -> {
+    match value with
+    | json.JObject(fields) -> {
+      for f: json.Field in fields {
+        merge_field(f: f, out: inout out)
+      }
+    }
+    | _ -> skip()
+  }
+  return Unit
+}
+
+fn merge_field(f: json.Field, out: inout Dict[Text, Int]) -> Unit may alloc, mutate {
+  match f.value with
+  | json.JNumber(text) -> {
+    match Int.parse(t: text) with
+    | Some(value) -> {
+      if value > count_of(d: out, key: f.key) {
+        Map.set(d: inout out, key: f.key, value: value)
+      }
+    }
+    | None -> skip()
+  }
+  | _ -> skip()
+  return Unit
+}
+
+fn count_of(d: Dict[Text, Int], key: Text) -> Int {
+  match Map.find(d: d, key: key) with
+  | Some(value) -> return value
+  | None -> return 0
+}
+
+-- Texts in code point order (insertion sort; the tables are small).
+fn sort_texts(xs: List[Text]) -> List[Text] may alloc, mutate {
+  var out: List[Text] = []
+  for x: Text in xs {
+    var placed: Bool = false
+    var next: Builder[Text] = List.builder()
+    for y: Text in out {
+      if not placed and Text.compare(a: x, b: y) < 0 {
+        List.push(b: inout next, x: x)
+        placed = true
+      }
+      List.push(b: inout next, x: y)
+    }
+    if not placed {
+      List.push(b: inout next, x: x)
+    }
+    out = List.finish(b: next)
+  }
+  return out
+}
+
+-- Writes `dir/coverage.json`, keys in order, as the TypeScript command line does.
+pub fn write_coverage(
+  files: io.Files,
+  dir: Text,
+  table: Dict[Text, Int]
+) -> Result[Unit, io.Error] may io.file, alloc, mutate {
+  try io.mkdir(files: files, path: dir)
+  var fields: Builder[json.Field] = List.builder()
+  for k: Text in sort_texts(xs: Map.keys(d: table)) {
+    List.push(
+      b: inout fields,
+      x: json.field(key: k, value: json.int(v: count_of(d: table, key: k)))
+    )
+  }
+  return build.write_file(
+    files: files,
+    path: dir ++ "/coverage.json",
+    text: json.pretty(j: json.JObject(fields: List.finish(b: fields))) ++ "\n"
+  )
+}
+
+-- The program's obligation coverage (`programCoverage`): its own obligations
+-- and assumptions, the standard library's excluded, against `ctx.coverage`.
+pub fn program_coverage(
+  ctx: inout context.Context,
+  tab: Dict[Int, loc.LineTable]
+) -> json.Json may alloc, mutate {
+  var obs: Builder[obligations.Obligation] = List.builder()
+  for o: obligations.Obligation in Map.values(d: ctx.obligations) {
+    if not Text.starts_with(t: context.qualified_name(ctx: ctx, id: o.def), prefix: "std.") {
+      List.push(b: inout obs, x: o)
+    }
+  }
+  var assumes: Builder[interface.AssumeEntry] = List.builder()
+  for site: tables.AssumeSite in List.finish(b: ctx.assume_sites) {
+    if not Text.starts_with(t: context.qualified_name(ctx: ctx, id: site.fn_def), prefix: "std.") {
+      List.push(
+        b: inout assumes,
+        x: interface.AssumeEntry {
+          j: json.JNull,
+          verifiable: site.verify_key is Some,
+          verified: ledger.is_verified(ctx: ctx, key: site.key)
+        }
+      )
+    }
+  }
+  return interface.coverage_json(
+    ctx: ctx,
+    tab: tab,
+    obs: List.finish(b: obs),
+    assumes: List.finish(b: assumes),
+    scope: ledger.Scope { prefix: Some(value: ""), names: Map.dict() }
+  )
+}

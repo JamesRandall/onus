@@ -188,11 +188,13 @@ pub fn emit_all(
     path: opts.out_dir ++ "/package.json",
     text: "{\n  \"type\": \"module\"\n}\n"
   )
-  -- Generated tests run with `vitest run --root <out_dir> --config <out_dir>/vitest.config.mjs`.
+  -- Generated tests run with `vitest run --root <out_dir> --config <out_dir>/vitest.config.mjs`. The config sets
+  -- the coverage directory (§20.5) to `coverage/` beside itself when the environment does not, and never names the
+  -- output directory, so that the same program builds the same files anywhere (item 189).
   try write_file(
     files: files,
     path: opts.out_dir ++ "/vitest.config.mjs",
-    text: "export default { test: { include: ['**/*.examples.test.js'], environment: 'node' } };\n"
+    text: "import { fileURLToPath } from 'node:url';\nprocess.env.ONUS_COVERAGE_DIR ??= fileURLToPath(new URL('./coverage', import.meta.url));\nexport default { test: { include: ['**/*.examples.test.js'], environment: 'node' } };\n"
   )
   let tables: Dict[Int, loc.LineTable] = loc.line_tables(ctx: ctx)
   var emitted: Builder[jsemit.Emitted] = List.builder()

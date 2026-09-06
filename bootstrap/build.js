@@ -12,7 +12,7 @@ import * as $std_map from "./std/map.js";
 
 const $ob1 = { kind: "overflow", text: "List.len(xs: Text.split(t: module_name, sep: \".\")) - 1 within Int", at: "self/build.onus:49:20", def: "runtime_for" };
 const $ob2 = { kind: "overflow", text: "List.len(xs: parts) - 1 within Int", at: "self/build.onus:87:23", def: "parent_dir" };
-const $ob3 = { kind: "overflow", text: "-1 within Int", at: "self/build.onus:201:23", def: "emit_all" };
+const $ob3 = { kind: "overflow", text: "-1 within Int", at: "self/build.onus:203:23", def: "emit_all" };
 export function write_file({ files, path, text }) {
   try {
     const f = $rt.unwrap($std_io.create({ files: files, path: path }));
@@ -143,7 +143,7 @@ export function emit_all({ ctx, files, opts }) {
   try {
     $rt.unwrap($std_io.mkdir({ files: files, path: opts.out_dir }));
     $rt.unwrap(write_file({ files: files, path: opts.out_dir + "/package.json", text: "{\n  \"type\": \"module\"\n}\n" }));
-    $rt.unwrap(write_file({ files: files, path: opts.out_dir + "/vitest.config.mjs", text: "export default { test: { include: ['**/*.examples.test.js'], environment: 'node' } };\n" }));
+    $rt.unwrap(write_file({ files: files, path: opts.out_dir + "/vitest.config.mjs", text: "import { fileURLToPath } from 'node:url';\nprocess.env.ONUS_COVERAGE_DIR ??= fileURLToPath(new URL('./coverage', import.meta.url));\nexport default { test: { include: ['**/*.examples.test.js'], environment: 'node' } };\n" }));
     const tables = $loc.line_tables({ ctx: ctx });
     let emitted = $std_list.builder({  });
     let launcher = { tag: "None" };
