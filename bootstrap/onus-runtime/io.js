@@ -3,7 +3,7 @@
  * constructed only by `runMain`.
  */
 import { spawnSync } from 'node:child_process';
-import { closeSync, mkdirSync, openSync, readFileSync, writeSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeSync } from 'node:fs';
 import { Capability } from './capability.js';
 export class Files extends Capability {
     constructor() {
@@ -132,6 +132,37 @@ export function exec(process, program, args) {
         return { tag: 'Err', error: { tag: 'Other', detail: r.error.message } };
     }
     return { tag: 'Ok', value: r.status ?? -1 };
+}
+/** `io.remove_all`: a file, or a directory and everything under it; Ok when nothing is there (docs/CHANGES.md item 188). */
+export function remove_all(files, path) {
+    void files;
+    try {
+        rmSync(path, { recursive: true, force: true });
+        return { tag: 'Ok', value: undefined };
+    }
+    catch (e) {
+        const code = typeof e === 'object' && e !== null && 'code' in e && typeof e.code === 'string' ? e.code : '';
+        if (code === 'EACCES' || code === 'EPERM')
+            return { tag: 'Err', error: { tag: 'Denied', path } };
+        return { tag: 'Err', error: { tag: 'Other', detail: e instanceof Error ? e.message : String(e) } };
+    }
+}
+/** `io.list_dir`: a directory's names in code point order, `.` and `..` excluded (docs/CHANGES.md item 188). */
+export function list_dir(files, path) {
+    void files;
+    try {
+        const names = readdirSync(path);
+        names.sort((a, b) => Buffer.compare(Buffer.from(a, 'utf8'), Buffer.from(b, 'utf8')));
+        return { tag: 'Ok', value: names };
+    }
+    catch (e) {
+        const code = typeof e === 'object' && e !== null && 'code' in e && typeof e.code === 'string' ? e.code : '';
+        if (code === 'ENOENT')
+            return { tag: 'Err', error: { tag: 'NotFound', path } };
+        if (code === 'EACCES' || code === 'EPERM')
+            return { tag: 'Err', error: { tag: 'Denied', path } };
+        return { tag: 'Err', error: { tag: 'Other', detail: e instanceof Error ? e.message : String(e) } };
+    }
 }
 export function mkdir(files, path) {
     void files;

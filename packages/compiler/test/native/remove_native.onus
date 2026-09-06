@@ -1,0 +1,30 @@
+module remove_native
+import std.io
+
+-- `io.remove_all` on both targets (docs/CHANGES.md item 188): a tree of
+-- directories and files goes, a file goes, and removing what is not there is
+-- `Ok`; the output is the same on both targets.
+pub fn main(
+  args: List[Text],
+  files: io.Files,
+  console: io.Console
+) -> Result[Unit, io.Error] may io.file, alloc {
+  try io.mkdir(files: files, path: "tree/a/b")
+  let inner: io.File = try io.create(files: files, path: "tree/a/b/leaf.txt")
+  try io.write(file: inner, text: "leaf\n")
+  let top: io.File = try io.create(files: files, path: "tree/top.txt")
+  try io.write(file: top, text: "top\n")
+  try io.remove_all(files: files, path: "tree")
+  match io.read(files: files, path: "tree/top.txt") with
+  | Ok(_) -> io.print(console: console, text: "tree remains\n")
+  | Err(_) -> io.print(console: console, text: "tree gone\n")
+  let single: io.File = try io.create(files: files, path: "single.txt")
+  try io.write(file: single, text: "x\n")
+  try io.remove_all(files: files, path: "single.txt")
+  match io.read(files: files, path: "single.txt") with
+  | Ok(_) -> io.print(console: console, text: "file remains\n")
+  | Err(_) -> io.print(console: console, text: "file gone\n")
+  try io.remove_all(files: files, path: "never-there")
+  io.print(console: console, text: "absent ok\n")
+  return Ok(value: Unit)
+}

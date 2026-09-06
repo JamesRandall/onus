@@ -1,0 +1,32 @@
+module list_native
+import std.io
+
+-- `io.list_dir` on both targets (docs/CHANGES.md item 188): the names of a
+-- directory in code point order, and `NotFound` for a directory that is not
+-- there; the output is the same on both targets.
+fn describe(e: io.Error) -> Text may alloc {
+  match e with
+  | NotFound(path) -> return "not found " ++ path
+  | Denied(path) -> return "denied " ++ path
+  | Other(detail) -> return "other " ++ detail
+}
+
+pub fn main(
+  args: List[Text],
+  files: io.Files,
+  console: io.Console
+) -> Result[Unit, io.Error] may io.file, alloc {
+  try io.mkdir(files: files, path: "listed/sub")
+  let b: io.File = try io.create(files: files, path: "listed/b.txt")
+  try io.write(file: b, text: "b\n")
+  let a: io.File = try io.create(files: files, path: "listed/a.txt")
+  try io.write(file: a, text: "a\n")
+  let z: io.File = try io.create(files: files, path: "listed/é.txt")
+  try io.write(file: z, text: "e\n")
+  let names: List[Text] = try io.list_dir(files: files, path: "listed")
+  io.print(console: console, text: Text.join(parts: names, sep: " ") ++ "\n")
+  match io.list_dir(files: files, path: "never-there") with
+  | Ok(_) -> io.print(console: console, text: "missing listed\n")
+  | Err(error) -> io.print(console: console, text: "missing: " ++ describe(e: error) ++ "\n")
+  return Ok(value: Unit)
+}

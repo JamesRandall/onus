@@ -40,3 +40,11 @@ export function mkdir({ files, path }) {
   return $rt.io.mkdir(files, path);
 }
 
+export function remove_all({ files, path }) {
+  return $rt.io.remove_all(files, path);
+}
+
+export function list_dir({ files, path }) {
+  return $rt.io.list_dir(files, path);
+}
+

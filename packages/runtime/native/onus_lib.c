@@ -11,6 +11,7 @@
 #include "unicode_tables.h"
 #include "blake3/blake3.h"
 
+#include <dirent.h>
 #include <errno.h>
 #ifndef __wasi__
 #include <poll.h>
@@ -489,6 +490,70 @@ onus_slot onus_io_exec(onus_slot process, onus_slot program, onus_slot args) {
   return onus_ok(WIFEXITED(st) ? WEXITSTATUS(st) : -1);
 }
 #endif
+
+/* `io.remove_all`: a file, or a directory and everything under it; Ok when nothing is there (docs/CHANGES.md item 188). */
+static int remove_tree(const char *path) {
+  struct stat st;
+  if (lstat(path, &st) != 0) return errno == ENOENT ? 0 : -1;
+  if (S_ISDIR(st.st_mode)) {
+    DIR *d = opendir(path);
+    if (d == NULL) return -1;
+    struct dirent *e;
+    int failed = 0;
+    while ((e = readdir(d)) != NULL) {
+      if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) continue;
+      size_t n = strlen(path) + 1 + strlen(e->d_name) + 1;
+      char *child = onus_alloc((int64_t)n);
+      snprintf(child, n, "%s/%s", path, e->d_name);
+      if (remove_tree(child) != 0) failed = 1;
+    }
+    closedir(d);
+    if (failed) return -1;
+    return rmdir(path);
+  }
+  return unlink(path);
+}
+
+onus_slot onus_io_remove_all(onus_slot files, onus_slot path) {
+  (void)files;
+  onus_text *p = onus_slot_ptr(path);
+  if (remove_tree(p->bytes) != 0) return onus_err(onus_io_error_for(p->bytes));
+  return onus_ok(0);
+}
+
+static int compare_names(const void *a, const void *b) {
+  return strcmp(*(const char *const *)a, *(const char *const *)b);
+}
+
+/* `io.list_dir`: a directory's names in code point order (UTF-8 byte order), `.` and `..` excluded (docs/CHANGES.md item 188). */
+onus_slot onus_io_list_dir(onus_slot files, onus_slot path) {
+  (void)files;
+  onus_text *p = onus_slot_ptr(path);
+  DIR *d = opendir(p->bytes);
+  if (d == NULL) return onus_err(onus_io_error_for(p->bytes));
+  int64_t cap = 16;
+  int64_t n = 0;
+  char **names = onus_alloc((int64_t)sizeof(char *) * cap);
+  struct dirent *e;
+  while ((e = readdir(d)) != NULL) {
+    if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) continue;
+    if (n == cap) {
+      cap *= 2;
+      char **grown = onus_alloc((int64_t)sizeof(char *) * cap);
+      memcpy(grown, names, sizeof(char *) * (size_t)n);
+      names = grown;
+    }
+    size_t len = strlen(e->d_name);
+    char *copy = onus_alloc((int64_t)len + 1);
+    memcpy(copy, e->d_name, len + 1);
+    names[n++] = copy;
+  }
+  closedir(d);
+  qsort(names, (size_t)n, sizeof(char *), compare_names);
+  onus_list *out = onus_rt_list_new(n);
+  for (int64_t i = 0; i < n; i++) out->slots[i] = onus_ptr_slot(onus_text_from(names[i], (int64_t)strlen(names[i])));
+  return onus_ok(onus_ptr_slot(out));
+}
 
 /* `io.mkdir`: creates the directory and any missing parents; Ok when it already exists. */
 onus_slot onus_io_mkdir(onus_slot files, onus_slot path) {

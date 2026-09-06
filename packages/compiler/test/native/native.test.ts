@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Context } from '../../src/context.js';
@@ -139,6 +139,53 @@ describe.skipIf(clang === null)('native target (§19)', () => {
     expect(r.stdout).toBe('exiting with 3\n');
     expect(r.stderr).toBe('');
     expect(r.status).toBe(3);
+  }, 120000);
+
+  it('`io.remove_all` removes trees and files on both targets', () => {
+    const out = fresh('remove');
+    const entry = join(repoRoot, 'packages', 'compiler', 'test', 'native', 'remove_native.onus');
+    const ctx = checked(entry);
+    const js = emitAll(ctx, { outDir: out, ts: false });
+    if (js.launcher === null) throw new Error('js build failed');
+    const expected = 'tree gone\nfile gone\nabsent ok\n';
+    const jsDir = join(out, 'js-run');
+    mkdirSync(jsDir, { recursive: true });
+    const jsRun = spawnSync(process.execPath, [js.launcher], { encoding: 'utf8', cwd: jsDir });
+    expect(jsRun.stdout).toBe(expected);
+    expect(jsRun.status).toBe(0);
+    const native = buildNative(ctx, { outDir: out });
+    expect(ctx.sink.all().map((d) => toText(ctx, d))).toEqual([]);
+    if (native.exe === null) throw new Error('native build failed');
+    const nativeDir = join(out, 'native-run');
+    mkdirSync(nativeDir, { recursive: true });
+    const r = spawnSync(native.exe, [], { encoding: 'utf8', cwd: nativeDir });
+    expect(r.stderr).toBe('');
+    expect(r.stdout).toBe(expected);
+    expect(r.status).toBe(0);
+    expect(existsSync(join(nativeDir, 'tree'))).toBe(false);
+  }, 120000);
+
+  it('`io.list_dir` lists names in code point order on both targets', () => {
+    const out = fresh('list');
+    const entry = join(repoRoot, 'packages', 'compiler', 'test', 'native', 'list_native.onus');
+    const ctx = checked(entry);
+    const js = emitAll(ctx, { outDir: out, ts: false });
+    if (js.launcher === null) throw new Error('js build failed');
+    const expected = 'a.txt b.txt sub \u00e9.txt\nmissing: not found never-there\n';
+    const jsDir = join(out, 'js-run');
+    mkdirSync(jsDir, { recursive: true });
+    const jsRun = spawnSync(process.execPath, [js.launcher], { encoding: 'utf8', cwd: jsDir });
+    expect(jsRun.stdout).toBe(expected);
+    expect(jsRun.status).toBe(0);
+    const native = buildNative(ctx, { outDir: out });
+    expect(ctx.sink.all().map((d) => toText(ctx, d))).toEqual([]);
+    if (native.exe === null) throw new Error('native build failed');
+    const nativeDir = join(out, 'native-run');
+    mkdirSync(nativeDir, { recursive: true });
+    const r = spawnSync(native.exe, [], { encoding: 'utf8', cwd: nativeDir });
+    expect(r.stderr).toBe('');
+    expect(r.stdout).toBe(expected);
+    expect(r.status).toBe(0);
   }, 120000);
 
   it('every example passes on both targets', () => {

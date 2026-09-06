@@ -74,3 +74,9 @@ pub intrinsic fn exec(
 
 -- Creates a directory and any missing parents; Ok when it already exists.
 pub intrinsic fn mkdir(files: Files, path: Text) -> Result[Unit, Error] may io.file
+
+-- Removes a file, or a directory and everything under it; Ok when nothing is there.
+pub intrinsic fn remove_all(files: Files, path: Text) -> Result[Unit, Error] may io.file
+
+-- The names in a directory, in code point order, without `.` and `..`.
+pub intrinsic fn list_dir(files: Files, path: Text) -> Result[List[Text], Error] may io.file, alloc

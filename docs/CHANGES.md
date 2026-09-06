@@ -1780,6 +1780,25 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     does not take, no status change. Not a language change; made through
     the process for the chain and the differentials.
 
+188. **`io.remove_all` and `io.list_dir` (§19.1).** `io.remove_all(files:
+    io.Files, path: Text) -> Result[Unit, Error] may io.file` removes a
+    file, or a directory and everything under it, and is `Ok` when nothing
+    is there; `io.list_dir(files, path) -> Result[List[Text], Error] may
+    io.file, alloc` is a directory's names in code point order (UTF-8 byte
+    order natively, the same order), without `.` and `..`, `NotFound` when
+    the directory is not there; a permission failure is `Denied`. `onus
+    test` needs both, as the TypeScript command line has them: to clear the
+    coverage files of the previous run before merging the new ones, so the
+    ledger reflects the last run alone, and to find the files the test
+    workers wrote (item 189). The JavaScript runtime removes recursively and
+    forcibly and reads the directory; the C runtime walks the tree and
+    sorts. Neither compiler changes. Fixtures:
+    `test/native/remove_native.onus` (a tree, a file and something absent
+    removed) and `test/native/list_native.onus` (names listed in order, a
+    missing directory `NotFound`), the same output on both targets.
+    Process: through the skill; `self/bundle.onus` regenerated; `self/`
+    does not use them in this change.
+
 ### Deferred, not changed
 
 - Decided 2026-09-06, to apply in M15.5: generics compile natively by
