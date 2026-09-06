@@ -791,3 +791,212 @@ onus_slot onus_list_pop(onus_slot *b) {
   bb->len -= 1;
   return some(bb->data[bb->len]);
 }
+
+/* ---------------------------------------------------------------------------
+ * Map and Dict (§19.1; docs/CHANGES.md item 173): an insertion-ordered
+ * open-addressing table keyed by value. The key kind the emitter passes on
+ * every keyed operation says how keys hash and compare: 0 as a slot (`Int`,
+ * `Duration`, `Bool`, `Unit`), 1 as text bytes. Entries keep insertion order;
+ * removal leaves a tombstone, compacted when the index is rebuilt; `Map.put`
+ * copies the table.
+ * ------------------------------------------------------------------------- */
+typedef struct {
+  int64_t kind; /* -1 until the first keyed operation */
+  int64_t len;  /* entries, tombstones included */
+  int64_t live;
+  int64_t cap;
+  int64_t icap; /* index capacity, a power of two; 0 before the first insert */
+  onus_slot *keys;
+  onus_slot *vals;
+  uint64_t *hashes;
+  uint8_t *dead;
+  int64_t *index; /* -1 empty, else an entry */
+} onus_map;
+
+static onus_map *map_new(void) {
+  onus_map *m = onus_alloc(sizeof(onus_map));
+  m->kind = -1;
+  return m;
+}
+
+static uint64_t map_hash(int64_t kind, onus_slot key) {
+  if (kind == 1) {
+    onus_text *t = slot_ptr(key);
+    uint64_t h = 1469598103934665603ULL;
+    for (int64_t i = 0; i < t->len; i++) {
+      h ^= (uint8_t)t->bytes[i];
+      h *= 1099511628211ULL;
+    }
+    return h;
+  }
+  uint64_t h = (uint64_t)key * 11400714819323198485ULL;
+  return h ^ (h >> 29);
+}
+
+static bool map_key_eq(int64_t kind, onus_slot a, onus_slot b) {
+  if (kind == 1) return onus_rt_text_eq(slot_ptr(a), slot_ptr(b));
+  return a == b;
+}
+
+static int64_t map_kind(onus_map *m, int64_t kind) {
+  return m->kind == -1 ? kind : m->kind;
+}
+
+/* The entry holding `key`, or -1. */
+static int64_t map_lookup(onus_map *m, int64_t kind, onus_slot key, uint64_t h) {
+  if (m->icap == 0 || m->live == 0) return -1;
+  uint64_t mask = (uint64_t)(m->icap - 1);
+  uint64_t slot = h & mask;
+  for (;;) {
+    int64_t e = m->index[slot];
+    if (e == -1) return -1;
+    if (!m->dead[e] && m->hashes[e] == h && map_key_eq(kind, m->keys[e], key)) return e;
+    slot = (slot + 1) & mask;
+  }
+}
+
+/* Drops the tombstones and rebuilds the index over `icap` slots. */
+static void map_reindex(onus_map *m, int64_t icap) {
+  int64_t w = 0;
+  for (int64_t e = 0; e < m->len; e++) {
+    if (m->dead[e]) continue;
+    if (w != e) {
+      m->keys[w] = m->keys[e];
+      m->vals[w] = m->vals[e];
+      m->hashes[w] = m->hashes[e];
+      m->dead[w] = 0;
+    }
+    w++;
+  }
+  m->len = w;
+  m->icap = icap;
+  m->index = onus_alloc((int64_t)sizeof(int64_t) * icap);
+  for (int64_t i = 0; i < icap; i++) m->index[i] = -1;
+  uint64_t mask = (uint64_t)(icap - 1);
+  for (int64_t e = 0; e < m->len; e++) {
+    uint64_t slot = m->hashes[e] & mask;
+    while (m->index[slot] != -1) slot = (slot + 1) & mask;
+    m->index[slot] = e;
+  }
+}
+
+static void map_set(onus_map *m, int64_t kind, onus_slot key, onus_slot value) {
+  if (m->kind == -1) m->kind = kind;
+  uint64_t h = map_hash(m->kind, key);
+  int64_t e = map_lookup(m, m->kind, key, h);
+  if (e >= 0) {
+    m->vals[e] = value;
+    return;
+  }
+  if (m->len == m->cap) {
+    int64_t cap = m->cap == 0 ? 8 : m->cap * 2;
+    onus_slot *keys = onus_alloc((int64_t)sizeof(onus_slot) * cap);
+    onus_slot *vals = onus_alloc((int64_t)sizeof(onus_slot) * cap);
+    uint64_t *hashes = onus_alloc((int64_t)sizeof(uint64_t) * cap);
+    uint8_t *dead = onus_alloc(cap);
+    for (int64_t i = 0; i < m->len; i++) {
+      keys[i] = m->keys[i];
+      vals[i] = m->vals[i];
+      hashes[i] = m->hashes[i];
+      dead[i] = m->dead[i];
+    }
+    m->keys = keys;
+    m->vals = vals;
+    m->hashes = hashes;
+    m->dead = dead;
+    m->cap = cap;
+  }
+  m->keys[m->len] = key;
+  m->vals[m->len] = value;
+  m->hashes[m->len] = h;
+  m->dead[m->len] = 0;
+  m->len++;
+  m->live++;
+  if (m->icap == 0 || m->len * 2 > m->icap) {
+    int64_t icap = 16;
+    while (icap < m->live * 4) icap *= 2;
+    map_reindex(m, icap);
+  } else {
+    uint64_t mask = (uint64_t)(m->icap - 1);
+    uint64_t slot = h & mask;
+    while (m->index[slot] != -1) slot = (slot + 1) & mask;
+    m->index[slot] = m->len - 1;
+  }
+}
+
+static onus_map *map_copy(onus_map *m) {
+  onus_map *out = map_new();
+  out->kind = m->kind;
+  for (int64_t e = 0; e < m->len; e++) {
+    if (!m->dead[e]) map_set(out, m->kind, m->keys[e], m->vals[e]);
+  }
+  return out;
+}
+
+onus_slot onus_map_dict(void) { return ptr_slot(map_new()); }
+onus_slot onus_map_empty(void) { return ptr_slot(map_new()); }
+onus_slot onus_map_count(onus_slot d) { return ((onus_map *)slot_ptr(d))->live; }
+onus_slot onus_map_size(onus_slot m) { return ((onus_map *)slot_ptr(m))->live; }
+
+onus_slot onus_map_set(onus_slot kind, onus_slot *d, onus_slot key, onus_slot value) {
+  map_set(slot_ptr(*d), kind, key, value);
+  return 0;
+}
+
+onus_slot onus_map_find(onus_slot kind, onus_slot d, onus_slot key) {
+  onus_map *m = slot_ptr(d);
+  int64_t k = map_kind(m, kind);
+  int64_t e = map_lookup(m, k, key, map_hash(k, key));
+  return e >= 0 ? some(m->vals[e]) : none();
+}
+
+onus_slot onus_map_get(onus_slot kind, onus_slot m, onus_slot key) { return onus_map_find(kind, m, key); }
+
+onus_slot onus_map_contains(onus_slot kind, onus_slot d, onus_slot key) {
+  onus_map *m = slot_ptr(d);
+  int64_t k = map_kind(m, kind);
+  return map_lookup(m, k, key, map_hash(k, key)) >= 0 ? 1 : 0;
+}
+
+onus_slot onus_map_remove(onus_slot kind, onus_slot *d, onus_slot key) {
+  onus_map *m = slot_ptr(*d);
+  int64_t k = map_kind(m, kind);
+  int64_t e = map_lookup(m, k, key, map_hash(k, key));
+  if (e >= 0) {
+    m->dead[e] = 1;
+    m->live--;
+  }
+  return 0;
+}
+
+onus_slot onus_map_put(onus_slot kind, onus_slot m, onus_slot key, onus_slot value) {
+  onus_map *out = map_copy(slot_ptr(m));
+  map_set(out, kind, key, value);
+  return ptr_slot(out);
+}
+
+static onus_slot map_entries(onus_map *m, bool values) {
+  onus_list *out = onus_rt_list_new(m->live);
+  int64_t w = 0;
+  for (int64_t e = 0; e < m->len; e++) {
+    if (m->dead[e]) continue;
+    out->slots[w++] = values ? m->vals[e] : m->keys[e];
+  }
+  return ptr_slot(out);
+}
+
+onus_slot onus_map_keys(onus_slot d) { return map_entries(slot_ptr(d), false); }
+onus_slot onus_map_values(onus_slot d) { return map_entries(slot_ptr(d), true); }
+
+/* Exported wrappers over the static helpers above, for onus_lib.c. */
+onus_slot onus_ptr_slot(const void *p) { return ptr_slot(p); }
+void *onus_slot_ptr(onus_slot s) { return slot_ptr(s); }
+void *onus_union_new(int64_t tag, int n, const onus_slot *fields) { return onus_union(tag, n, fields); }
+onus_slot onus_some(onus_slot v) { return some(v); }
+onus_slot onus_none(void) { return none(); }
+onus_slot onus_ok(onus_slot v) { return ptr_slot(ok(v)); }
+onus_slot onus_err(onus_slot e) { return ptr_slot(err(e)); }
+/* An `io.Error` for the current `errno` about `path`. */
+onus_slot onus_io_error_for(const char *path) {
+  return ptr_slot(io_error(onus_text_from(path, (int64_t)strlen(path))));
+}

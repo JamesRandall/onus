@@ -40,6 +40,15 @@ void onus_panic(const char *kind, const char *text, const char *at, const char *
 void onus_unreachable(void) __attribute__((noreturn));
 
 onus_text *onus_text_from(const char *bytes, int64_t len);
+/* Value construction shared with onus_lib.c: slots, unions, and the prelude's Option and Result. */
+onus_slot onus_ptr_slot(const void *p);
+void *onus_slot_ptr(onus_slot s);
+void *onus_union_new(int64_t tag, int n, const onus_slot *fields);
+onus_slot onus_some(onus_slot v);
+onus_slot onus_none(void);
+onus_slot onus_ok(onus_slot v);
+onus_slot onus_err(onus_slot e);
+onus_slot onus_io_error_for(const char *path);
 onus_text *onus_rt_text_concat(onus_text *a, onus_text *b);
 bool onus_rt_text_eq(onus_text *a, onus_text *b);
 

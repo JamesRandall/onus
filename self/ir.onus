@@ -189,7 +189,8 @@ pub union Expr =
   | Global of def: defs.Def, ty: types.Type
   -- A declared function used as a value: an adapter to the positional convention of function values.
   | FnRef of def: defs.Def, name: Text, sig: types.Signature
-  | Call of target: CallTarget, sig: types.Signature, dicts: List[Expr], consts: List[Expr], args: List[Expr], ty: types.Type, decoder: Option[Decoder]
+  -- `targs`: the instantiation of the callee's type parameters at this call; empty for a non-generic callee.
+  | Call of target: CallTarget, sig: types.Signature, dicts: List[Expr], consts: List[Expr], args: List[Expr], ty: types.Type, decoder: Option[Decoder], targs: List[types.TypeArg]
   | CallValue of callee: Expr, fn_type: types.Type, args: List[Expr], ty: types.Type
   | RecordE of def: defs.Def, ty: types.Type, fields: List[FieldInit]
   | VariantE of def: defs.Def, ty: types.Type, fields: List[FieldInit]

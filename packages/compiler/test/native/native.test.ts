@@ -62,8 +62,32 @@ describe.skipIf(clang === null)('native target (§19)', () => {
     expect(nativePgm).toBe(jsPgm);
   }, 120000);
 
+  it('`io.run` and `io.mkdir` behave the same on both targets', () => {
+    const out = fresh('process');
+    const entry = join(repoRoot, 'packages', 'compiler', 'test', 'native', 'process_native.onus');
+    const ctx = checked(entry);
+    const js = emitAll(ctx, { outDir: out, ts: false });
+    if (js.launcher === null) throw new Error('js build failed');
+    const jsDir = join(out, 'js-run');
+    mkdirSync(jsDir, { recursive: true });
+    const jsRun = spawnSync(process.execPath, [js.launcher, 'one', 'two'], { cwd: jsDir, encoding: 'utf8' });
+    expect(jsRun.status).toBe(0);
+    const native = buildNative(ctx, { outDir: out });
+    expect(ctx.sink.all().map((d) => toText(ctx, d))).toEqual([]);
+    if (native.exe === null) throw new Error('native build failed');
+    const nativeDir = join(out, 'native-run');
+    mkdirSync(nativeDir, { recursive: true });
+    const r = spawnSync(native.exe, ['one', 'two'], { cwd: nativeDir, encoding: 'utf8' });
+    expect(r.stderr).toBe('');
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe(['status 0 out hello native', 'cat fed through stdin', 'sh 3 oops', 'missing: not found onus-no-such-program', 'slow: other `sleep` did not finish within 200 ms', 'args 2', ''].join('\n'));
+    expect(r.stdout).toBe(jsRun.stdout);
+    expect(readFileSync(join(nativeDir, 'made', 'deep', 'dir', 'note.txt'), 'utf8')).toBe('hello native\n');
+    expect(readFileSync(join(jsDir, 'made', 'deep', 'dir', 'note.txt'), 'utf8')).toBe('hello native\n');
+  }, 120000);
+
   it('every example passes on both targets', () => {
-    for (const rel of ['examples/mandelbrot/mandelbrot.onus', 'packages/compiler/test/native/primitives.onus', 'packages/compiler/test/native/eq_recursive.onus']) {
+    for (const rel of ['examples/mandelbrot/mandelbrot.onus', 'packages/compiler/test/native/primitives.onus', 'packages/compiler/test/native/eq_recursive.onus', 'packages/compiler/test/native/dict.onus', 'packages/compiler/test/native/generics.onus', 'packages/compiler/test/native/text_native.onus']) {
       const out = fresh(`examples-${rel.split('/').pop() ?? 'x'}`);
       const ctx = checked(join(repoRoot, rel));
       const js = emitAll(ctx, { outDir: out, ts: false });
@@ -106,6 +130,16 @@ describe.skipIf(clang === null)('native target (§19)', () => {
     expect(diags.length).toBeGreaterThan(0);
     expect(diags.every((d) => d.code === 'E0800')).toBe(true);
     expect(diags[0]?.context[0]).toContain('function values');
+  }, 60000);
+
+  it('a Dict keyed by a record is E0800 on the native target (§19.1)', () => {
+    const out = fresh('dict-key');
+    const ctx = checked(join(here, 'e0800_dict_key.onus'));
+    const native = buildNative(ctx, { outDir: out });
+    expect(native.exe).toBeNull();
+    const diags = ctx.sink.all();
+    expect(diags.map((d) => d.code)).toEqual(['E0800']);
+    expect(diags[0]?.context[0]).toContain('`Dict` keys of type `Point`');
   }, 60000);
 });
 

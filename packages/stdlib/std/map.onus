@@ -1,19 +1,14 @@
 module std.map
-import std.host
 
 pub intrinsic type Map[K, V]
 
 pub intrinsic fn empty[K, V]() -> Map[K, V]
-  claims host.js
 
 pub intrinsic fn size[K, V](m: Map[K, V]) -> Int where it >= 0
-  claims host.js
 
 pub intrinsic fn get[K, V](m: Map[K, V], key: K) -> Option[V]
-  claims host.js
 
 pub intrinsic fn put[K, V](m: Map[K, V], key: K, value: V) -> Map[K, V] may alloc
-  claims host.js
 
 -- A dict collects entries in place, as a `List.Builder` collects elements:
 -- the runtime shares its storage, so bind one dict once and write through
@@ -21,30 +16,22 @@ pub intrinsic fn put[K, V](m: Map[K, V], key: K, value: V) -> Map[K, V] may allo
 pub intrinsic type Dict[K, V]
 
 pub intrinsic fn dict[K, V]() -> Dict[K, V] may alloc
-  claims host.js
   ensures count(d: result) == 0
 
 pub intrinsic fn count[K, V](d: Dict[K, V]) -> Int where it >= 0
-  claims host.js
 
 pub intrinsic fn set[K, V](d: inout Dict[K, V], key: K, value: V) -> Unit may mutate, alloc
-  claims host.js
 
 pub intrinsic fn find[K, V](d: Dict[K, V], key: K) -> Option[V]
-  claims host.js
 
 pub intrinsic fn contains[K, V](d: Dict[K, V], key: K) -> Bool
-  claims host.js
 
 pub intrinsic fn remove[K, V](d: inout Dict[K, V], key: K) -> Unit may mutate
-  claims host.js
 
 -- Keys in insertion order.
 pub intrinsic fn keys[K, V](d: Dict[K, V]) -> List[K] may alloc
-  claims host.js
   ensures List.len(xs: result) == count(d: d)
 
 -- Values in insertion order.
 pub intrinsic fn values[K, V](d: Dict[K, V]) -> List[V] may alloc
-  claims host.js
   ensures List.len(xs: result) == count(d: d)

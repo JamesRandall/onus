@@ -8,7 +8,7 @@ fn Ord$Int$compare(a: Int, b: Int) -> Int
     return (a -? b)
 fn smallest(dict $dict_T, a: T, b: T) -> T
   body:
-    if ($dict_T.compare(a, b) < 0):
+    if ($dict_T.compare[T](a, b) < 0):
       return a
     return b
 fn bump(inout v: Int, by: Int) -> Unit
@@ -54,7 +54,7 @@ fn apply(x: T, f: fn(v: T) -> U may e) -> U
   body:
     return f(x)
 example arithmetic:
-  assert (smallest(dict dict Ord$Int, 3, 2) == 2)
+  assert (smallest[Int](dict dict Ord$Int, 3, 2) == 2)
   assert (twice(4) == 8)
   assert (chain(10, 2) ==deep Ok(value: 2))
   assert (chain(1, 0) ==deep Err(error: "zero"))
@@ -62,7 +62,7 @@ example arithmetic:
   assert (area(Circle(radius: 2)) == 12)
   assert (area(Dot()) == 1)
   assert (sum([1, 2, 3]) == 6)
-  assert (apply(2, fn(v) { ... }) == 20)
+  assert (apply[Int, Int, effects](2, fn(v) { ... }) == 20)
   assert forall i: (i < 3)
   assert (Point { x: 1, y: 2 }.y == 2)
 example panics_recover:
@@ -71,6 +71,6 @@ example panics_recover:
 law Ord[Int].reflexive(a):
   assert (Ord$Int$compare(a, a) == 0)
 property smallest_is_one_of(a, b):
-  assert ((smallest(dict dict Ord$Int, a, b) == a) or (smallest(dict dict Ord$Int, a, b) == b))
+  assert ((smallest[Int](dict dict Ord$Int, a, b) == a) or (smallest[Int](dict dict Ord$Int, a, b) == b))
 property sums_of_positive(xs):
   assert (sum(xs) >= 0)

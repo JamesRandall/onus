@@ -15,12 +15,12 @@ fn escape_count(cx: Float, cy: Float, limit: Iter) -> Iter
     return i
 fn render(view: Viewport, width: Coord where …, height: Coord where …, limit: Iter where …) -> Grid[Iter, width, height]
   body:
-    var grid: Grid[Iter, width, height] = filled(0, width, height)
+    var grid: Grid[Iter, width, height] = filled[Iter](0, width, height)
     for py in 0 ..< height:
       for px in 0 ..< width:
         let cx: Float = (view.x_min +. (((view.x_max -. view.x_min) *. of(px)) /. of(width)))
         let cy: Float = (view.y_min +. (((view.y_max -. view.y_min) *. of(py)) /. of(height)))
-        set(const width, const height, grid, px, py, escape_count(cx, cy, limit)) inout grid
+        set[Iter, const sym, const sym](const width, const height, grid, px, py, escape_count(cx, cy, limit)) inout grid
     return grid
 fn main(args: List[Text], files: Files) -> Result[Unit, Error] early-return
   body:
@@ -30,7 +30,7 @@ fn main(args: List[Text], files: Files) -> Result[Unit, Error] early-return
     try write(out, "P2\n800 600\n255\n")
     for py in 0 ..< 600:
       for px in 0 ..< 800:
-        try write(out, (to_text(get(const const int, const const int, grid, px, py)) ++ " "))
+        try write(out, (to_text(get[Int, const int, const int](const const int, const const int, grid, px, py)) ++ " "))
       try write(out, "\n")
     return Ok(value: unit)
 example escape_count:

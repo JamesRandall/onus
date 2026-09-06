@@ -1,0 +1,17 @@
+module e0800_dict_key
+
+record Point {
+  x: Int
+  y: Int
+}
+
+-- A `Dict` keyed by a record: not native in v0 (§19.1), so the native build refuses `mark`.
+pub fn mark(p: Point) -> Dict[Point, Bool] may alloc, mutate {
+  var d: Dict[Point, Bool] = Map.dict()
+  Map.set(d: inout d, key: p, value: true)
+  return d
+}
+
+example marks {
+  Map.count(d: mark(p: Point { x: 1, y: 2 })) == 1
+}

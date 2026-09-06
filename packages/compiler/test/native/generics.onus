@@ -1,0 +1,62 @@
+module generics
+
+-- Generic code on the native target (impl spec §6.1): every instantiation
+-- reached from `main` and the examples is compiled as its own function, so
+-- equality on a type parameter and a `Dict` keyed by one are concrete there.
+record Pair[T] {
+  a: T
+  b: T
+}
+
+fn swap[T](p: Pair[T]) -> Pair[T] {
+  return Pair { a: p.b, b: p.a }
+}
+
+fn first_or[T](xs: List[T], fallback: T) -> T {
+  if List.len(xs: xs) == 0 {
+    return fallback
+  }
+  return List.get(xs: xs, i: 0)
+}
+
+fn same[T](x: T, y: T) -> Bool {
+  return x == y
+}
+
+fn count_of[T](xs: List[T], x: T) -> Int {
+  var n: Int = 0
+  for y: T in xs {
+    if y == x {
+      n = n + 1
+    }
+  }
+  return n
+}
+
+fn tally[K](keys: List[K]) -> Dict[K, Int] may alloc, mutate {
+  var d: Dict[K, Int] = Map.dict()
+  for k: K in keys {
+    var n: Int = 0
+    match Map.find(d: d, key: k) with
+    | Some(value) -> n = value
+    | None -> n = 0
+    Map.set(d: inout d, key: k, value: n + 1)
+  }
+  return d
+}
+
+example specialised {
+  swap(p: Pair { a: 1, b: 2 }) == Pair { a: 2, b: 1 }
+  swap(p: Pair { a: "x", b: "y" }).a == "y"
+  first_or(xs: ["x"], fallback: "none") == "x"
+  let empty: List[Int] = []
+  first_or(xs: empty, fallback: 7) == 7
+  same(x: "a", y: "a")
+  not same(x: Pair { a: 1, b: 2 }, y: Pair { a: 2, b: 1 })
+  count_of(xs: [1, 2, 1], x: 1) == 2
+  count_of(xs: ["a", "b"], x: "c") == 0
+  List.index_of(xs: ["p", "q"], x: "q") == Some(value: 1)
+  List.index_of(xs: [true, false], x: false) == Some(value: 1)
+  Map.find(d: tally(keys: ["a", "b", "a"]), key: "a") == Some(value: 2)
+  Map.find(d: tally(keys: [3, 3, 3]), key: 3) == Some(value: 3)
+}

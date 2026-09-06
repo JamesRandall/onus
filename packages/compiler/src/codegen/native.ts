@@ -17,9 +17,10 @@
  *
  * Programs reaching a construct outside the v0 native subset are refused
  * with `E0800 primitive unavailable on target` (§19.1): closures and
- * function values, interfaces, quantifiers at runtime, `recover`, `fake`,
- * `TypeInfo`, `old(...)`, structural equality on aggregates, `Map`, `Bytes`,
- * `sql`, and `Text` operations that need grapheme tables.
+ * function values, interfaces, quantifiers at runtime, `fake`, `old(...)`,
+ * `Spec` values, and `sql` without libpq. `Text`, `Bytes`, `TypeInfo`, `Map`
+ * and `Dict` are complete: the runtime carries the Unicode 16.0 tables
+ * (docs/CHANGES.md item 175).
  */
 import type { ClaimTables } from '../claims/tables.js';
 import type { Value } from '../consteval/values.js';
@@ -29,6 +30,8 @@ import type { Span } from '../source.js';
 import type { TypeTables } from '../types/tables.js';
 import { stripRefinements, substitute, typeToString, type Type, type TypeArg } from '../types/type.js';
 import type { IrBlock, IrDecoder, IrExpr, IrFn, IrModule, IrStmt, ObRef } from './ir.js';
+import { typeSlug } from './js.js';
+import { specialise } from './specialise.js';
 
 /** A construct the native backend does not compile in v0, at the definition that uses it. */
 export interface Unsupported {
@@ -53,6 +56,9 @@ interface Val {
   readonly t: LlType;
 }
 
+/** The `std.map` operations that take a key, and so its kind. */
+const MAP_KEYED: ReadonlySet<string> = new Set(['std.map.get', 'std.map.put', 'std.map.set', 'std.map.find', 'std.map.contains', 'std.map.remove']);
+
 class UnsupportedError extends Error {
   constructor(readonly what: string) {
     super(what);
@@ -70,7 +76,10 @@ export interface NativeOptions {
 }
 
 export function emitNative(ctx: Context, modules: readonly IrModule[], entry: IrModule | null, opts: NativeOptions = { sql: true }): NativeProgram {
-  return new NativeEmitter(ctx, modules, entry, opts).run();
+  // Generic code is compiled per instantiation (impl spec §6.1): the specialised modules replace the lowering's.
+  const specialised = specialise(ctx, modules);
+  const entryName = entry === null ? null : entry.module.name;
+  return new NativeEmitter(ctx, specialised, specialised.find((m) => m.module.name === entryName) ?? null, opts).run();
 }
 
 class NativeEmitter {
@@ -82,6 +91,8 @@ class NativeEmitter {
   private readonly globals: string[] = [];
   private readonly strings = new Map<string, string>();
   private readonly texts = new Map<string, string>();
+  /** `Bytes` constants emitted so far, for naming. */
+  private bytesCount = 0;
   /** A compile-time aggregate value (a `const` list, record or variant) built at the point of use. */
   private constValue(v: Value): Val {
     switch (v.k) {
@@ -125,8 +136,11 @@ class NativeEmitter {
         return { v: obj, t: 'ptr' };
       }
       case 'bytes':
-      case 'typeinfo':
-        throw new UnsupportedError(`\`${v.k}\` compile-time values`);
+        return { v: this.bytesConst(v.v), t: 'ptr' };
+      case 'typeinfo': {
+        if (v.owner.k !== 'def') return this.typeInfoObject(v.owner.name, []);
+        return this.typeInfoObject(this.t.def(v.owner.def).name, (this.ty.fields.get(v.owner.def) ?? []).map((f) => ({ name: f.name, type_name: typeSlug(this.t, f.type) })));
+      }
     }
   }
 
@@ -177,11 +191,11 @@ class NativeEmitter {
     for (const m of this.modules) {
       for (const item of m.items) {
         if (item.k === 'fn') {
-          if (reachable.has(item.def.id)) this.fnItem(m, item);
+          if (reachable.has(this.fnName(m.module.name, item.name))) this.fnItem(m, item);
         } else if (item.k === 'impl') {
-          for (const f of item.fns) if (reachable.has(f.def.id)) this.fnItem(m, f);
+          for (const f of item.fns) if (reachable.has(this.fnName(m.module.name, f.name))) this.fnItem(m, f);
         } else if (item.k === 'const') {
-          if (reachable.has(item.def.id)) this.constItem(m, item.def, item.type, item.value);
+          if (reachable.has(this.fnName(m.module.name, item.def.name))) this.constItem(m, item.def, item.type, item.value);
         }
       }
       if (m.tests !== null && !m.module.isStd) {
@@ -218,19 +232,20 @@ class NativeEmitter {
     return { ll: `${head.join('\n')}\n${this.fns.join('\n')}`, unsupported: this.unsupported, hasMain, examples: this.examples.map((e) => e.name) };
   }
 
-  /** Definitions reachable from the entry's `main` and the non-library examples, over calls, function references and constants. */
-  private reachable(): Set<DefId> {
-    const byDef = new Map<DefId, IrFn>();
-    const consts = new Map<DefId, IrExpr>();
+  /** Emitted names reachable from the entry's `main` and the non-library examples, over calls, function references and constants; a specialisation is its own name. */
+  private reachable(): Set<string> {
+    const byName = new Map<string, IrFn>();
+    const consts = new Map<string, IrExpr>();
     for (const m of this.modules) {
       for (const item of m.items) {
-        if (item.k === 'fn') byDef.set(item.def.id, item);
-        else if (item.k === 'impl') for (const f of item.fns) byDef.set(f.def.id, f);
-        else if (item.k === 'const') consts.set(item.def.id, item.value);
+        if (item.k === 'fn') byName.set(this.fnName(m.module.name, item.name), item);
+        else if (item.k === 'impl') for (const f of item.fns) byName.set(this.fnName(m.module.name, f.name), f);
+        else if (item.k === 'const') consts.set(this.fnName(m.module.name, item.def.name), item.value);
       }
     }
-    const seen = new Set<DefId>();
-    const queue: DefId[] = [];
+    const named = (def: Def, name: string): string => this.fnName(this.t.moduleOf(def.module).name, name);
+    const seen = new Set<string>();
+    const queue: string[] = [];
     const visitBlock = (b: IrBlock): void => {
       for (const s of b) visitStmt(s);
     };
@@ -286,15 +301,15 @@ class NativeEmitter {
     const visitExpr = (e: IrExpr): void => {
       switch (e.k) {
         case 'call':
-          if (e.target.k === 'fn') queue.push(e.target.def.id);
+          if (e.target.k === 'fn') queue.push(named(e.target.def, e.target.name));
           else visitExpr(e.target.dict);
           for (const x of [...e.dicts, ...e.consts, ...e.args]) visitExpr(x);
           return;
         case 'fnref':
-          queue.push(e.def.id);
+          queue.push(named(e.def, e.name));
           return;
         case 'global':
-          queue.push(e.def.id);
+          queue.push(named(e.def, e.def.name));
           return;
         case 'call-value':
           visitExpr(e.callee);
@@ -364,14 +379,14 @@ class NativeEmitter {
     };
     if (this.entry !== null && this.entry.main !== null) {
       const main = this.entry.items.find((i): i is IrFn => i.k === 'fn' && i.def.name === 'main');
-      if (main !== undefined) queue.push(main.def.id);
+      if (main !== undefined) queue.push(this.fnName(this.entry.module.name, main.name));
     }
     for (const m of this.modules) if (m.tests !== null && !m.module.isStd) for (const ex of m.tests.examples) visitBlock(ex.body);
     while (queue.length > 0) {
       const d = queue.pop();
       if (d === undefined || seen.has(d)) continue;
       seen.add(d);
-      const fn = byDef.get(d);
+      const fn = byName.get(d);
       if (fn !== undefined) {
         visitBlock(fn.entry);
         if (fn.body !== null) visitBlock(fn.body);
@@ -471,6 +486,7 @@ class NativeEmitter {
           case 'TypeInfo':
             return 'ptr';
           case 'Bytes':
+            return 'ptr';
           case 'Spec':
             throw new UnsupportedError(`\`${s.name}\` values`);
         }
@@ -481,7 +497,7 @@ class NativeEmitter {
         return 'ptr';
       case 'opaque': {
         const q = this.t.qualifiedName(s.def);
-        if (q === 'std.list.List' || q === 'std.list.Builder' || q === 'std.grid.Grid' || q === 'std.sql.Select' || q === 'std.sql.Param' || q === 'std.sql.Statement') return 'ptr';
+        if (q === 'std.list.List' || q === 'std.list.Builder' || q === 'std.grid.Grid' || q === 'std.sql.Select' || q === 'std.sql.Param' || q === 'std.sql.Statement' || q === 'std.map.Map' || q === 'std.map.Dict') return 'ptr';
         throw new UnsupportedError(`\`${this.t.def(s.def).name}\` values`);
       }
       case 'param':
@@ -569,6 +585,32 @@ class NativeEmitter {
     this.globals.push(`${name} = private unnamed_addr constant { i64, [${bytes.length + 1} x i8] } { i64 ${bytes.length}, [${bytes.length + 1} x i8] c"${escapeBytes(bytes)}\\00" }`);
     this.texts.set(s, name);
     return name;
+  }
+
+  /** A `Bytes` constant: the text layout, a length then the bytes (§19.1). */
+  private bytesConst(bytes: Uint8Array): string {
+    this.bytesCount += 1;
+    const name = `@byt${this.bytesCount}`;
+    this.globals.push(`${name} = private unnamed_addr constant { i64, [${bytes.length + 1} x i8] } { i64 ${bytes.length}, [${bytes.length + 1} x i8] c"${escapeBytes(bytes)}\\00" }`);
+    return name;
+  }
+
+  /** A `TypeInfo` value: a two-slot object of the type's name and its `Field` records, as `std.typeinfo` reads it (§19.1). */
+  private typeInfoObject(name: string, fields: readonly { readonly name: string; readonly type_name: string }[]): Val {
+    const list = this.tmp();
+    this.emit(`${list} = call ptr @onus_rt_list_new(i64 ${fields.length})`);
+    fields.forEach((f, i) => {
+      const rec = this.tmp();
+      this.emit(`${rec} = call ptr @onus_alloc(i64 16)`);
+      this.storeSlot(rec, 0, this.toSlot({ v: this.textConst(f.name), t: 'ptr' }));
+      this.storeSlot(rec, 1, this.toSlot({ v: this.textConst(f.type_name), t: 'ptr' }));
+      this.emit(`call void @onus_rt_list_set(ptr ${list}, i64 ${i}, i64 ${this.toSlot({ v: rec, t: 'ptr' })})`);
+    });
+    const obj = this.tmp();
+    this.emit(`${obj} = call ptr @onus_alloc(i64 16)`);
+    this.storeSlot(obj, 0, this.toSlot({ v: this.textConst(name), t: 'ptr' }));
+    this.storeSlot(obj, 1, this.toSlot({ v: list, t: 'ptr' }));
+    return { v: obj, t: 'ptr' };
   }
 
   private declare(sig: string): void {
@@ -1224,8 +1266,7 @@ class NativeEmitter {
       case 'fake':
         throw new UnsupportedError('`fake`');
       case 'typeinfo':
-        // Inert natively: the decoder the compiler generates replaces what `TypeInfo` describes.
-        return { v: 'null', t: 'ptr' };
+        return this.typeInfoObject(e.name, e.fields);
       case 'snapshot':
         throw new UnsupportedError('`old(...)` in a checked postcondition');
     }
@@ -1503,6 +1544,13 @@ class NativeEmitter {
       const q = this.t.qualifiedName(def.id);
       const cname = `@onus_${q.split('.').slice(1).join('_')}`;
       const paramTypes: string[] = [];
+      if (MAP_KEYED.has(q)) {
+        // A keyed map operation takes the key kind first (§19.1): how the runtime hashes and compares keys.
+        const k = e.targs[0];
+        if (k === undefined || k.k !== 'type') throw new UnsupportedError('a `Dict` whose key type is not known at the call');
+        args.push(`i64 ${this.keyKind(k.type)}`);
+        paramTypes.push('i64');
+      }
       for (const c of e.consts) {
         args.push(`i64 ${this.toSlot(this.expr(c))}`);
         paramTypes.push('i64');
@@ -1548,6 +1596,16 @@ class NativeEmitter {
     const out = this.tmp();
     this.emit(`${out} = call ${calleeRet} ${this.fnName(module, e.target.name)}(${args.join(', ')})`);
     return this.coerce({ v: out, t: calleeRet }, retLl);
+  }
+
+  /** How the runtime hashes and compares a `Dict` key of `type`: 0 as a slot, 1 as text bytes. Throws `Unsupported` for other key types (§19.1). */
+  private keyKind(type: Type): number {
+    const s = stripRefinements(type);
+    if (s.k === 'prim') {
+      if (s.name === 'Int' || s.name === 'Duration' || s.name === 'Bool' || s.name === 'Unit') return 0;
+      if (s.name === 'Text') return 1;
+    }
+    throw new UnsupportedError(`\`Dict\` keys of type \`${typeToString(s, this.t)}\` (only Int, Duration, Bool, Unit and Text keys are native in v0)`);
   }
 
   /** The address of an `inout` argument's slot: the local's storage, whose element type must be the slot type. */

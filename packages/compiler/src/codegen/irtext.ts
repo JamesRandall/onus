@@ -117,8 +117,9 @@ export function printIr(ir: IrModule, t: ResolveTables): string {
         return `fnref ${e.name}`;
       case 'call': {
         const target = e.target.k === 'fn' ? e.target.name : `${expr(e.target.dict)}.${e.target.name}`;
+        const targs = e.targs.length === 0 ? '' : `[${e.targs.map((a) => (a.k === 'type' ? ty(a.type) : a.k === 'const' ? `const ${a.value.k}` : 'effects')).join(', ')}]`;
         const decode = e.decoder === undefined ? '' : ` decode(${e.decoder.fields.map((f) => `${f.name}: ${f.kind}`).join(', ')}${e.decoder.checks.length > 0 ? `; ${e.decoder.checks.flatMap(stmt).join('; ')}` : ''})`;
-        return `${target}(${[...e.dicts.map((d) => `dict ${expr(d)}`), ...e.consts.map((c) => `const ${expr(c)}`), ...e.args.map(expr)].join(', ')})${decode}`;
+        return `${target}${targs}(${[...e.dicts.map((d) => `dict ${expr(d)}`), ...e.consts.map((c) => `const ${expr(c)}`), ...e.args.map(expr)].join(', ')})${decode}`;
       }
       case 'call-value':
         return `${expr(e.callee)}(${e.args.map(expr).join(', ')})`;

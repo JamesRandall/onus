@@ -842,7 +842,8 @@ class Lowerer {
       });
       args = this.decreasesCheck(e, sig, args);
       const decoder = this.t.qualifiedName(target.id) === 'std.sql.select' ? this.selectDecoder(e, sig) : null;
-      const call: IrExpr = decoder === null ? { k: 'call', target: callTarget, sig, dicts, consts, args, type } : { k: 'call', target: callTarget, sig, dicts, consts, args, type, decoder };
+      const inst = this.ty.instantiations.get(e.id) ?? [];
+      const call: IrExpr = decoder === null ? { k: 'call', targs: inst, target: callTarget, sig, dicts, consts, args, type } : { k: 'call', targs: inst, target: callTarget, sig, dicts, consts, args, type, decoder };
       const inoutParams = sig.params.filter((p) => p.inout);
       if (inoutParams.length === 0) return call;
       return this.inoutCall(call, type, inoutParams.map((p) => e.args.find((a) => a.name.text === p.name)), discard);

@@ -14,7 +14,7 @@ import type { Value } from '../consteval/values.js';
 import type { Def, DefId, ModuleId, ModuleRecord } from '../resolve/defs.js';
 import type * as A from '../syntax/ast.js';
 import type { Signature } from '../types/tables.js';
-import type { ConstValue, Type } from '../types/type.js';
+import type { ConstValue, Type, TypeArg } from '../types/type.js';
 
 /** What a runtime check reports when it fails (§10.2). */
 export interface ObRef {
@@ -180,7 +180,7 @@ export type IrExpr =
   | { readonly k: 'global'; readonly def: Def; readonly type: Type }
   /** A declared function used as a value: an adapter to the positional convention of function values. */
   | { readonly k: 'fnref'; readonly def: Def; readonly name: string; readonly sig: Signature }
-  | { readonly k: 'call'; readonly target: IrCallTarget; readonly sig: Signature; readonly dicts: readonly IrExpr[]; readonly consts: readonly IrExpr[]; readonly args: readonly IrExpr[]; readonly type: Type; readonly decoder?: IrDecoder }
+  | { readonly k: 'call'; /** The instantiation of the callee's type parameters at this call; empty for a non-generic callee. */ readonly targs: readonly TypeArg[]; readonly target: IrCallTarget; readonly sig: Signature; readonly dicts: readonly IrExpr[]; readonly consts: readonly IrExpr[]; readonly args: readonly IrExpr[]; readonly type: Type; readonly decoder?: IrDecoder }
   | { readonly k: 'call-value'; readonly callee: IrExpr; readonly fnType: Extract<Type, { k: 'fn' }>; readonly args: readonly IrExpr[]; readonly type: Type }
   | { readonly k: 'record'; readonly def: Def; readonly type: Type; readonly fields: readonly { readonly name: string; readonly value: IrExpr }[] }
   | { readonly k: 'variant'; readonly def: Def; readonly type: Type; readonly fields: readonly { readonly name: string; readonly value: IrExpr }[] }

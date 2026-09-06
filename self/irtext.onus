@@ -367,11 +367,18 @@ fn expr(ctx: context.Context, e: ir.Expr) -> Text may alloc, mutate
   | ir.Local(name, _) -> return name
   | ir.Global(def, _) -> return "global " ++ def.name
   | ir.FnRef(_, name, _) -> return "fnref " ++ name
-  | ir.Call(target, _, dicts, consts, args, _, decoder) -> {
+  | ir.Call(target, _, dicts, consts, args, _, decoder, targs) -> {
     var head: Text = ""
     match target with
     | ir.FnTarget(_, name) -> head = name
     | ir.DictTarget(dict, name) -> head = expr(ctx: ctx, e: dict) ++ "." ++ name
+    if List.len(xs: targs) > 0 {
+      var ts: Builder[Text] = List.builder()
+      for a: types.TypeArg in targs {
+        List.push(b: inout ts, x: targ_text(ctx: ctx, a: a))
+      }
+      head = head ++ "[" ++ Text.join(parts: List.finish(b: ts), sep: ", ") ++ "]"
+    }
     var parts: Builder[Text] = List.builder()
     for d: ir.Expr in dicts {
       List.push(b: inout parts, x: "dict " ++ expr(ctx: ctx, e: d))
@@ -506,6 +513,14 @@ fn name_or_underscore(o: Option[Text]) -> Text {
 }
 
 -- The `k` tag of a constant, as the TypeScript form names it.
+-- A type argument as the form's text: the type, `const <kind>`, or `effects`.
+fn targ_text(ctx: context.Context, a: types.TypeArg) -> Text may alloc, mutate {
+  match a with
+  | types.TypeA(ty) -> return typecheck.show(ctx: ctx, t: ty)
+  | types.ConstA(value) -> return "const " ++ const_kind(c: value)
+  | types.EffectsA(_) -> return "effects"
+}
+
 fn const_kind(c: types.ConstValue) -> Text {
   match c with
   | types.IntV(_) -> return "int"

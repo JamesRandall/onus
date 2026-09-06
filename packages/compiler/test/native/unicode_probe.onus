@@ -1,0 +1,70 @@
+module unicode_probe
+import std.io
+
+-- A probe for the native runtime's Unicode tables (docs/CHANGES.md item
+-- 175), driven by unicode.test.ts, which compares every line with what the
+-- JavaScript host computes for the same input:
+--   `cases <from> <to>`   one line per code point in the range: the code
+--                         point, its lowercase and uppercase forms as code
+--                         points, and the grapheme length after `trim`;
+--   `texts <text>...`     one line per argument: its lowercase and uppercase
+--                         forms as code points, then its grapheme clusters.
+fn cps(t: Text) -> Text may alloc, mutate {
+  var parts: Builder[Text] = List.builder()
+  for c: Int in Text.code_points(t: t) {
+    List.push(b: inout parts, x: Int.to_text(x: c))
+  }
+  return Text.join(parts: List.finish(b: parts), sep: " ")
+}
+
+fn clusters(t: Text) -> Text may alloc, mutate {
+  var parts: Builder[Text] = List.builder()
+  for g: Text in Text.graphemes(t: t) {
+    List.push(b: inout parts, x: cps(t: g))
+  }
+  return Text.join(parts: List.finish(b: parts), sep: "|")
+}
+
+fn or_zero(o: Option[Int]) -> Int {
+  match o with
+  | Some(value) -> return value
+  | None -> return 0
+}
+
+pub fn main(
+  args: List[Text],
+  console: io.Console
+) -> Result[Unit, io.Error] may io.file, alloc, mutate {
+  if List.len(xs: args) >= 3 and List.get(xs: args, i: 0) == "cases" {
+    let from: Int = or_zero(o: Int.parse(t: List.get(xs: args, i: 1)))
+    let to: Int = or_zero(o: Int.parse(t: List.get(xs: args, i: 2)))
+    var out: Builder[Text] = List.builder()
+    for cp: Int in from ..< to {
+      if 0 <= cp and cp <= 1114111 and (cp < 55296 or cp > 57343) {
+        let t: Text = Text.of_code_point(cp: cp)
+        List.push(
+          b: inout out,
+          x: Int.to_text(x: cp) ++ "\t" ++ cps(t: Text.lower(t: t)) ++ "\t" ++ cps(
+            t: Text.upper(t: t)
+          ) ++ "\t" ++ Int.to_text(x: Text.len(t: Text.trim(t: t)))
+        )
+      }
+    }
+    io.print(console: console, text: Text.join(parts: List.finish(b: out), sep: "\n") ++ "\n")
+    return Ok(value: Unit)
+  }
+  if List.len(xs: args) >= 1 and List.get(xs: args, i: 0) == "texts" {
+    for i: Int in 1 ..< List.len(xs: args) {
+      let t: Text = List.get(xs: args, i: i)
+      io.print(
+        console: console,
+        text: cps(t: Text.lower(t: t)) ++ "\t" ++ cps(t: Text.upper(t: t)) ++ "\t" ++ clusters(
+          t: t
+        ) ++ "\n"
+      )
+    }
+    return Ok(value: Unit)
+  }
+  io.print(console: console, text: "usage: unicode_probe cases <from> <to> | texts <text>...\n")
+  return Ok(value: Unit)
+}

@@ -1,0 +1,897 @@
+module specialise
+import context
+import defs
+import types
+import typecheck
+import ir
+
+-- Specialisation for the native target (impl spec §6.1; `codegen/specialise.ts`):
+-- a native slot carries no type, so generic code is compiled once per
+-- instantiation. After the shared lowering, every call to a generic function
+-- is retargeted to a copy of that function specialised to the call's type
+-- arguments, and the copy's own calls are specialised in turn, until the set
+-- is closed (finite by spec §3.6: polymorphic recursion is refused). Inside a
+-- copy the type parameters are concrete, so equality, `old(...)`, `TypeInfo`
+-- and `Dict` keys resolve to the concrete type.
+--
+-- A copy is named `f[T1, T2]` after its type arguments (const arguments are
+-- values, not specialised; effect arguments are erased). Generic functions
+-- themselves are dropped from the modules: nothing calls them after this.
+-- Copies are appended to the module that declared the function, in discovery
+-- order. The JavaScript target never sees this step: it runs only inside
+-- `native.emit_native`.
+pub const max_depth: Int = 100000
+
+record Generic {
+  mod_name: Text
+  f: ir.Fn
+}
+
+record Pending {
+  mod_name: Text
+  f: ir.Fn
+  subst: Dict[Int, types.TypeArg]
+  name: Text
+}
+
+-- The specialiser's state; builders and dictionaries share their storage across copies.
+record Sp {
+  -- Generic functions by emitted name, `module.name`.
+  generic: Dict[Text, Generic]
+  -- Specialisations made or queued, by emitted name.
+  seen: Dict[Text, Bool]
+  queue: Builder[Pending]
+  -- Specialisations per module name, in the order they were made.
+  added: Dict[Text, Builder[ir.Fn]]
+}
+
+fn skip() -> Unit {
+  return Unit
+}
+
+-- Whether a function has type parameters (not const or effect parameters).
+fn is_generic(sig: types.Signature) -> Bool {
+  for p: types.TParamInfo in sig.tparams {
+    if p is types.TypeP {
+      return true
+    }
+  }
+  return false
+}
+
+fn key_of(mod_name: Text, name: Text) -> Text may alloc {
+  return mod_name ++ "." ++ name
+}
+
+-- Specialises every generic function reached from the modules' functions, constants and examples.
+-- Preconditions: `modules` are the shared lowering's output for the whole program.
+-- Effects: none beyond the returned modules.
+pub fn specialise(
+  ctx: context.Context,
+  modules: List[ir.Module]
+) -> List[ir.Module] may alloc, mutate {
+  var sp: Sp = Sp {
+    generic: Map.dict(),
+    seen: Map.dict(),
+    queue: List.builder(),
+    added: Map.dict()
+  }
+  for m: ir.Module in modules {
+    for item: ir.Item in m.items {
+      match item with
+      | ir.FnItem(f) -> {
+        if f.body is Some and f.intrinsic is None and is_generic(sig: f.sig) {
+          var generic: Dict[Text, Generic] = sp.generic
+          Map.set(
+            d: inout generic,
+            key: key_of(mod_name: m.mod.name, name: f.name),
+            value: Generic { mod_name: m.mod.name, f: f }
+          )
+        }
+      }
+      | _ -> skip()
+    }
+  }
+  let empty: Dict[Int, types.TypeArg] = Map.dict()
+  -- Rewrite what is not generic first: it discovers the instantiations the program uses.
+  var rewritten: Builder[ir.Module] = List.builder()
+  for m: ir.Module in modules {
+    var items: Builder[ir.Item] = List.builder()
+    for item: ir.Item in m.items {
+      match item with
+      | ir.FnItem(f) -> {
+        if not Map.contains(d: sp.generic, key: key_of(mod_name: m.mod.name, name: f.name)) {
+          List.push(
+            b: inout items,
+            x: ir.FnItem(f: fn_copy(sp: inout sp, ctx: ctx, f: f, subst: empty, name: f.name))
+          )
+        }
+      }
+      | ir.ImplItem(def, iface, target, dict_name, fns, entries) -> {
+        var new_fns: Builder[ir.Fn] = List.builder()
+        for f: ir.Fn in fns {
+          List.push(
+            b: inout new_fns,
+            x: fn_copy(sp: inout sp, ctx: ctx, f: f, subst: empty, name: f.name)
+          )
+        }
+        var new_entries: Builder[ir.Entry] = List.builder()
+        for e: ir.Entry in entries {
+          List.push(
+            b: inout new_entries,
+            x: ir.Entry {
+              name: e.name,
+              fn_ir: fn_copy(sp: inout sp, ctx: ctx, f: e.fn_ir, subst: empty, name: e.fn_ir.name)
+            }
+          )
+        }
+        List.push(
+          b: inout items,
+          x: ir.ImplItem(
+            def: def,
+            iface: iface,
+            target: target,
+            dict_name: dict_name,
+            fns: List.finish(b: new_fns),
+            entries: List.finish(b: new_entries)
+          )
+        )
+      }
+      | ir.ConstItem(def, ty, value) -> List.push(
+        b: inout items,
+        x: ir.ConstItem(
+          def: def,
+          ty: ty,
+          value: subst_expr(fuel: max_depth, sp: inout sp, ctx: ctx, e: value, subst: empty)
+        )
+      )
+      | _ -> List.push(b: inout items, x: item)
+    }
+    var tests: Option[ir.Tests] = None
+    match m.tests with
+    | Some(value) -> tests = Some(value: tests_copy(sp: inout sp, ctx: ctx, t: value, subst: empty))
+    | None -> skip()
+    List.push(
+      b: inout rewritten,
+      x: ir.Module {
+        mod: m.mod,
+        items: List.finish(b: items),
+        tests: tests,
+        verifies: m.verifies,
+        main: m.main
+      }
+    )
+  }
+  var next: Int where it >= 0 = 0
+  var steps: Int where it >= 0 = max_depth
+  loop while next < List.built(b: sp.queue) and steps > 0
+    invariant steps >= 0 and next >= 0
+    decreases steps
+  {
+    steps = steps - 1
+    let p: Pending = List.at(b: sp.queue, i: next)
+    next = next + 1
+    let copy: ir.Fn = fn_copy(sp: inout sp, ctx: ctx, f: p.f, subst: p.subst, name: p.name)
+    push_added(sp: sp, mod_name: p.mod_name, f: copy)
+  }
+  var out: Builder[ir.Module] = List.builder()
+  for m: ir.Module in List.finish(b: rewritten) {
+    var items: Builder[ir.Item] = List.builder()
+    for item: ir.Item in m.items {
+      List.push(b: inout items, x: item)
+    }
+    match Map.find(d: sp.added, key: m.mod.name) with
+    | Some(value) -> {
+      for f: ir.Fn in List.finish(b: value) {
+        List.push(b: inout items, x: ir.FnItem(f: f))
+      }
+    }
+    | None -> skip()
+    List.push(
+      b: inout out,
+      x: ir.Module {
+        mod: m.mod,
+        items: List.finish(b: items),
+        tests: m.tests,
+        verifies: m.verifies,
+        main: m.main
+      }
+    )
+  }
+  return List.finish(b: out)
+}
+
+fn push_added(sp: Sp, mod_name: Text, f: ir.Fn) -> Unit may mutate, alloc {
+  var added: Dict[Text, Builder[ir.Fn]] = sp.added
+  match Map.find(d: added, key: mod_name) with
+  | Some(value) -> {
+    var b: Builder[ir.Fn] = value
+    List.push(b: inout b, x: f)
+  }
+  | None -> {
+    var b: Builder[ir.Fn] = List.builder()
+    List.push(b: inout b, x: f)
+    Map.set(d: inout added, key: mod_name, value: b)
+  }
+  return Unit
+}
+
+-- The specialised name for `g` at `targs`, queueing the copy on first sight.
+fn instantiate(
+  sp: inout Sp,
+  ctx: context.Context,
+  g: Generic,
+  targs: List[types.TypeArg]
+) -> Text may alloc, mutate {
+  var subst: Dict[Int, types.TypeArg] = Map.dict()
+  var shown: Builder[Text] = List.builder()
+  let tparams: List[types.TParamInfo] = g.f.sig.tparams
+  for i: Int in 0 ..< List.len(xs: tparams) {
+    if i < List.len(xs: targs) {
+      match List.get(xs: tparams, i: i) with
+      | types.TypeP(def, _) -> {
+        match List.get(xs: targs, i: i) with
+        | types.TypeA(ty) -> {
+          Map.set(d: inout subst, key: def, value: types.TypeA(ty: ty))
+          List.push(b: inout shown, x: typecheck.show(ctx: ctx, t: ty))
+        }
+        | _ -> skip()
+      }
+      | _ -> skip()
+    }
+  }
+  let name: Text = g.f.name ++ "[" ++ Text.join(parts: List.finish(b: shown), sep: ", ") ++ "]"
+  let k: Text = key_of(mod_name: g.mod_name, name: name)
+  if not Map.contains(d: sp.seen, key: k) {
+    var seen: Dict[Text, Bool] = sp.seen
+    Map.set(d: inout seen, key: k, value: true)
+    var queue: Builder[Pending] = sp.queue
+    List.push(b: inout queue, x: Pending { mod_name: g.mod_name, f: g.f, subst: subst, name: name })
+  }
+  return name
+}
+
+fn subst_ty(t: types.Type, subst: Dict[Int, types.TypeArg]) -> types.Type may alloc, mutate {
+  if Map.count(d: subst) == 0 {
+    return t
+  }
+  return types.substitute(t: t, subst: subst)
+}
+
+fn ty_opt(
+  t: Option[types.Type],
+  subst: Dict[Int, types.TypeArg]
+) -> Option[types.Type] may alloc, mutate {
+  match t with
+  | Some(value) -> return Some(value: subst_ty(t: value, subst: subst))
+  | None -> return None
+}
+
+fn targs_of(
+  targs: List[types.TypeArg],
+  subst: Dict[Int, types.TypeArg]
+) -> List[types.TypeArg] may alloc, mutate {
+  var out: Builder[types.TypeArg] = List.builder()
+  for a: types.TypeArg in targs {
+    match a with
+    | types.TypeA(ty) -> List.push(b: inout out, x: types.TypeA(ty: subst_ty(t: ty, subst: subst)))
+    | _ -> List.push(b: inout out, x: a)
+  }
+  return List.finish(b: out)
+}
+
+fn sig_of(
+  sig: types.Signature,
+  subst: Dict[Int, types.TypeArg]
+) -> types.Signature may alloc, mutate {
+  if Map.count(d: subst) == 0 {
+    return sig
+  }
+  var params: Builder[types.FnParam] = List.builder()
+  for p: types.FnParam in sig.params {
+    List.push(
+      b: inout params,
+      x: types.FnParam { name: p.name, is_inout: p.is_inout, ty: subst_ty(t: p.ty, subst: subst) }
+    )
+  }
+  return { sig with params: List.finish(b: params), ret: subst_ty(t: sig.ret, subst: subst) }
+}
+
+fn params_of(
+  params: List[ir.Param],
+  subst: Dict[Int, types.TypeArg]
+) -> List[ir.Param] may alloc, mutate {
+  var out: Builder[ir.Param] = List.builder()
+  for p: ir.Param in params {
+    List.push(
+      b: inout out,
+      x: ir.Param { name: p.name, ty: subst_ty(t: p.ty, subst: subst), is_inout: p.is_inout }
+    )
+  }
+  return List.finish(b: out)
+}
+
+fn fn_copy(
+  sp: inout Sp,
+  ctx: context.Context,
+  f: ir.Fn,
+  subst: Dict[Int, types.TypeArg],
+  name: Text
+) -> ir.Fn may alloc, mutate {
+  var const_params: Builder[ir.ConstParam] = List.builder()
+  for c: ir.ConstParam in f.const_params {
+    List.push(
+      b: inout const_params,
+      x: ir.ConstParam { def: c.def, name: c.name, ty: subst_ty(t: c.ty, subst: subst) }
+    )
+  }
+  var body: Option[List[ir.Stmt]] = None
+  match f.body with
+  | Some(value) -> body = Some(
+    value: block(fuel: max_depth, sp: inout sp, ctx: ctx, b: value, subst: subst)
+  )
+  | None -> skip()
+  return ir.Fn {
+    def: f.def,
+    sig: sig_of(sig: f.sig, subst: subst),
+    name: name,
+    dict_params: f.dict_params,
+    const_params: List.finish(b: const_params),
+    params: params_of(params: f.params, subst: subst),
+    ret: subst_ty(t: f.ret, subst: subst),
+    intrinsic: f.intrinsic,
+    entry_checks: block(fuel: max_depth, sp: inout sp, ctx: ctx, b: f.entry_checks, subst: subst),
+    body: body,
+    early_return: f.early_return
+  }
+}
+
+fn tests_copy(
+  sp: inout Sp,
+  ctx: context.Context,
+  t: ir.Tests,
+  subst: Dict[Int, types.TypeArg]
+) -> ir.Tests may alloc, mutate {
+  var examples: Builder[ir.Example] = List.builder()
+  for ex: ir.Example in t.examples {
+    List.push(
+      b: inout examples,
+      x: ir.Example {
+        name: ex.name,
+        body: block(fuel: max_depth, sp: inout sp, ctx: ctx, b: ex.body, subst: subst)
+      }
+    )
+  }
+  var properties: Builder[ir.Property] = List.builder()
+  for p: ir.Property in t.properties {
+    var params: Builder[ir.GenParam] = List.builder()
+    for q: ir.GenParam in p.params {
+      List.push(
+        b: inout params,
+        x: ir.GenParam {
+          name: q.name,
+          gen: gen_copy(sp: inout sp, ctx: ctx, g: q.gen, subst: subst)
+        }
+      )
+    }
+    List.push(
+      b: inout properties,
+      x: ir.Property {
+        label: p.label,
+        params: List.finish(b: params),
+        body: block(fuel: max_depth, sp: inout sp, ctx: ctx, b: p.body, subst: subst)
+      }
+    )
+  }
+  return ir.Tests { examples: List.finish(b: examples), properties: List.finish(b: properties) }
+}
+
+fn gen_copy(
+  sp: inout Sp,
+  ctx: context.Context,
+  g: ir.Gen,
+  subst: Dict[Int, types.TypeArg]
+) -> ir.Gen may alloc, mutate {
+  var filters: Builder[ir.Filter] = List.builder()
+  for f: ir.Filter in g.filters {
+    List.push(
+      b: inout filters,
+      x: ir.Filter {
+        it_name: f.it_name,
+        cond: subst_expr(fuel: max_depth, sp: inout sp, ctx: ctx, e: f.cond, subst: subst)
+      }
+    )
+  }
+  return ir.Gen { base: g.base, filters: List.finish(b: filters) }
+}
+
+fn block(
+  fuel: Int where it >= 0,
+  sp: inout Sp,
+  ctx: context.Context,
+  b: List[ir.Stmt],
+  subst: Dict[Int, types.TypeArg]
+) -> List[ir.Stmt] may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return []
+  }
+  var out: Builder[ir.Stmt] = List.builder()
+  for st: ir.Stmt in b {
+    List.push(b: inout out, x: stmt(fuel: fuel - 1, sp: inout sp, ctx: ctx, st: st, subst: subst))
+  }
+  return List.finish(b: out)
+}
+
+fn exprs(
+  fuel: Int where it >= 0,
+  sp: inout Sp,
+  ctx: context.Context,
+  es: List[ir.Expr],
+  subst: Dict[Int, types.TypeArg]
+) -> List[ir.Expr] may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return []
+  }
+  var out: Builder[ir.Expr] = List.builder()
+  for e: ir.Expr in es {
+    List.push(
+      b: inout out,
+      x: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: e, subst: subst)
+    )
+  }
+  return List.finish(b: out)
+}
+
+fn inits(
+  fuel: Int where it >= 0,
+  sp: inout Sp,
+  ctx: context.Context,
+  fields: List[ir.FieldInit],
+  subst: Dict[Int, types.TypeArg]
+) -> List[ir.FieldInit] may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return []
+  }
+  var out: Builder[ir.FieldInit] = List.builder()
+  for f: ir.FieldInit in fields {
+    List.push(
+      b: inout out,
+      x: ir.FieldInit {
+        name: f.name,
+        value: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: f.value, subst: subst)
+      }
+    )
+  }
+  return List.finish(b: out)
+}
+
+fn target_of(t: ir.Target, subst: Dict[Int, types.TypeArg]) -> ir.Target may alloc, mutate {
+  return ir.Target { name: t.name, ty: subst_ty(t: t.ty, subst: subst) }
+}
+
+fn stmt(
+  fuel: Int where it >= 0,
+  sp: inout Sp,
+  ctx: context.Context,
+  st: ir.Stmt,
+  subst: Dict[Int, types.TypeArg]
+) -> ir.Stmt may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return ir.Unreachable
+  }
+  match st with
+  | ir.Let(name, ty, mutable, value) -> return ir.Let(
+    name: name,
+    ty: subst_ty(t: ty, subst: subst),
+    mutable: mutable,
+    value: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: value, subst: subst)
+  )
+  | ir.Assign(name, ty, value) -> return ir.Assign(
+    name: name,
+    ty: subst_ty(t: ty, subst: subst),
+    value: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: value, subst: subst)
+  )
+  | ir.Return(value) -> return ir.Return(
+    value: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: value, subst: subst)
+  )
+  | ir.If(cond, then_block, else_block) -> {
+    var else_out: Option[List[ir.Stmt]] = None
+    match else_block with
+    | Some(value) -> else_out = Some(
+      value: block(fuel: fuel - 1, sp: inout sp, ctx: ctx, b: value, subst: subst)
+    )
+    | None -> skip()
+    return ir.If(
+      cond: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: cond, subst: subst),
+      then_block: block(fuel: fuel - 1, sp: inout sp, ctx: ctx, b: then_block, subst: subst),
+      else_block: else_out
+    )
+  }
+  | ir.Match(tmp, ty, scrutinee, arms) -> {
+    var out_arms: Builder[ir.Arm] = List.builder()
+    for a: ir.Arm in arms {
+      List.push(
+        b: inout out_arms,
+        x: arm(fuel: fuel - 1, sp: inout sp, ctx: ctx, a: a, subst: subst)
+      )
+    }
+    return ir.Match(
+      tmp: tmp,
+      ty: subst_ty(t: ty, subst: subst),
+      scrutinee: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: scrutinee, subst: subst),
+      arms: List.finish(b: out_arms)
+    )
+  }
+  | ir.Loop(cond, body) -> return ir.Loop(
+    cond: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: cond, subst: subst),
+    body: block(fuel: fuel - 1, sp: inout sp, ctx: ctx, b: body, subst: subst)
+  )
+  | ir.ForRange(name, lo, hi, body) -> return ir.ForRange(
+    name: name,
+    lo: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: lo, subst: subst),
+    hi: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: hi, subst: subst),
+    body: block(fuel: fuel - 1, sp: inout sp, ctx: ctx, b: body, subst: subst)
+  )
+  | ir.ForEach(name, ty, list, body) -> return ir.ForEach(
+    name: name,
+    ty: subst_ty(t: ty, subst: subst),
+    list: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: list, subst: subst),
+    body: block(fuel: fuel - 1, sp: inout sp, ctx: ctx, b: body, subst: subst)
+  )
+  | ir.Check(cond, ob) -> return ir.Check(
+    cond: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: cond, subst: subst),
+    ob: ob
+  )
+  | ir.Assert(cond) -> return ir.Assert(
+    cond: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: cond, subst: subst)
+  )
+  | ir.ExprStmt(expr) -> return ir.ExprStmt(
+    expr: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: expr, subst: subst)
+  )
+  | ir.CallInout(result_target, call, targets) -> {
+    var result_out: Option[ir.Target] = None
+    match result_target with
+    | Some(value) -> result_out = Some(value: target_of(t: value, subst: subst))
+    | None -> skip()
+    var out_targets: Builder[ir.Target] = List.builder()
+    for t: ir.Target in targets {
+      List.push(b: inout out_targets, x: target_of(t: t, subst: subst))
+    }
+    return ir.CallInout(
+      result_target: result_out,
+      call: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: call, subst: subst),
+      targets: List.finish(b: out_targets)
+    )
+  }
+  | ir.Unreachable -> return st
+  | ir.Comment(_) -> return st
+  | ir.Reject(cond, column) -> return ir.Reject(
+    cond: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: cond, subst: subst),
+    column: column
+  )
+}
+
+fn arm(
+  fuel: Int where it >= 0,
+  sp: inout Sp,
+  ctx: context.Context,
+  a: ir.Arm,
+  subst: Dict[Int, types.TypeArg]
+) -> ir.Arm may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return a
+  }
+  var pattern_test: Option[ir.Expr] = None
+  match a.pattern_test with
+  | Some(value) -> pattern_test = Some(
+    value: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: value, subst: subst)
+  )
+  | None -> skip()
+  var bindings: Builder[ir.Binding] = List.builder()
+  for bd: ir.Binding in a.bindings {
+    List.push(
+      b: inout bindings,
+      x: ir.Binding {
+        name: bd.name,
+        ty: subst_ty(t: bd.ty, subst: subst),
+        value: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: bd.value, subst: subst)
+      }
+    )
+  }
+  var guard: Option[ir.Expr] = None
+  match a.guard with
+  | Some(value) -> guard = Some(
+    value: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: value, subst: subst)
+  )
+  | None -> skip()
+  return ir.Arm {
+    pattern_test: pattern_test,
+    bindings: List.finish(b: bindings),
+    guard: guard,
+    body: block(fuel: fuel - 1, sp: inout sp, ctx: ctx, b: a.body, subst: subst)
+  }
+}
+
+fn decoder_of(
+  fuel: Int where it >= 0,
+  sp: inout Sp,
+  ctx: context.Context,
+  d: ir.Decoder,
+  subst: Dict[Int, types.TypeArg]
+) -> ir.Decoder may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return d
+  }
+  return ir.Decoder {
+    it_name: d.it_name,
+    ty: subst_ty(t: d.ty, subst: subst),
+    fields: d.fields,
+    checks: block(fuel: fuel - 1, sp: inout sp, ctx: ctx, b: d.checks, subst: subst)
+  }
+}
+
+fn domain_of(
+  fuel: Int where it >= 0,
+  sp: inout Sp,
+  ctx: context.Context,
+  d: ir.Domain,
+  subst: Dict[Int, types.TypeArg]
+) -> ir.Domain may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return d
+  }
+  match d with
+  | ir.RangeD(lo, hi) -> return ir.RangeD(
+    lo: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: lo, subst: subst),
+    hi: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: hi, subst: subst)
+  )
+  | ir.ListD(expr) -> return ir.ListD(
+    expr: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: expr, subst: subst)
+  )
+  | ir.OkListD(expr) -> return ir.OkListD(
+    expr: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: expr, subst: subst)
+  )
+  | ir.BoolsD -> return d
+}
+
+fn else_of(
+  fuel: Int where it >= 0,
+  sp: inout Sp,
+  ctx: context.Context,
+  c: ir.ElseClause,
+  subst: Dict[Int, types.TypeArg]
+) -> ir.ElseClause may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return c
+  }
+  return ir.ElseClause {
+    name: c.name,
+    error_type: subst_ty(t: c.error_type, subst: subst),
+    value: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: c.value, subst: subst)
+  }
+}
+
+fn subst_expr(
+  fuel: Int where it >= 0,
+  sp: inout Sp,
+  ctx: context.Context,
+  e: ir.Expr,
+  subst: Dict[Int, types.TypeArg]
+) -> ir.Expr may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return e
+  }
+  match e with
+  | ir.Local(name, ty) -> return ir.Local(name: name, ty: subst_ty(t: ty, subst: subst))
+  | ir.Global(def, ty) -> return ir.Global(def: def, ty: subst_ty(t: ty, subst: subst))
+  | ir.FnRef(def, name, sig) -> return ir.FnRef(
+    def: def,
+    name: name,
+    sig: sig_of(sig: sig, subst: subst)
+  )
+  | ir.Call(target, sig, dicts, consts, args, ty, decoder, targs) -> {
+    let new_targs: List[types.TypeArg] = targs_of(targs: targs, subst: subst)
+    var new_target: ir.CallTarget = target
+    match target with
+    | ir.FnTarget(def, name) -> {
+      match Map.find(
+        d: sp.generic,
+        key: key_of(mod_name: context.module_name(ctx: ctx, id: def.mod), name: name)
+      ) with
+      | Some(value) -> new_target = ir.FnTarget(
+        def: def,
+        name: instantiate(sp: inout sp, ctx: ctx, g: value, targs: new_targs)
+      )
+      | None -> skip()
+    }
+    | ir.DictTarget(dict, name) -> new_target = ir.DictTarget(
+      dict: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: dict, subst: subst),
+      name: name
+    )
+    var new_decoder: Option[ir.Decoder] = None
+    match decoder with
+    | Some(value) -> new_decoder = Some(
+      value: decoder_of(fuel: fuel - 1, sp: inout sp, ctx: ctx, d: value, subst: subst)
+    )
+    | None -> skip()
+    return ir.Call(
+      target: new_target,
+      sig: sig_of(sig: sig, subst: subst),
+      dicts: exprs(fuel: fuel - 1, sp: inout sp, ctx: ctx, es: dicts, subst: subst),
+      consts: exprs(fuel: fuel - 1, sp: inout sp, ctx: ctx, es: consts, subst: subst),
+      args: exprs(fuel: fuel - 1, sp: inout sp, ctx: ctx, es: args, subst: subst),
+      ty: subst_ty(t: ty, subst: subst),
+      decoder: new_decoder,
+      targs: new_targs
+    )
+  }
+  | ir.CallValue(callee, fn_type, args, ty) -> return ir.CallValue(
+    callee: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: callee, subst: subst),
+    fn_type: subst_ty(t: fn_type, subst: subst),
+    args: exprs(fuel: fuel - 1, sp: inout sp, ctx: ctx, es: args, subst: subst),
+    ty: subst_ty(t: ty, subst: subst)
+  )
+  | ir.RecordE(def, ty, fields) -> return ir.RecordE(
+    def: def,
+    ty: subst_ty(t: ty, subst: subst),
+    fields: inits(fuel: fuel - 1, sp: inout sp, ctx: ctx, fields: fields, subst: subst)
+  )
+  | ir.VariantE(def, ty, fields) -> return ir.VariantE(
+    def: def,
+    ty: subst_ty(t: ty, subst: subst),
+    fields: inits(fuel: fuel - 1, sp: inout sp, ctx: ctx, fields: fields, subst: subst)
+  )
+  | ir.Update(base, def, ty, fields) -> return ir.Update(
+    base: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: base, subst: subst),
+    def: def,
+    ty: subst_ty(t: ty, subst: subst),
+    fields: inits(fuel: fuel - 1, sp: inout sp, ctx: ctx, fields: fields, subst: subst)
+  )
+  | ir.FieldE(object, name, ty, owner) -> return ir.FieldE(
+    object: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: object, subst: subst),
+    name: name,
+    ty: subst_ty(t: ty, subst: subst),
+    owner: owner
+  )
+  | ir.ListE(elems, ty) -> return ir.ListE(
+    elems: exprs(fuel: fuel - 1, sp: inout sp, ctx: ctx, es: elems, subst: subst),
+    ty: subst_ty(t: ty, subst: subst)
+  )
+  | ir.Concat(left, right, is_text, ty) -> return ir.Concat(
+    left: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: left, subst: subst),
+    right: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: right, subst: subst),
+    is_text: is_text,
+    ty: subst_ty(t: ty, subst: subst)
+  )
+  | ir.IntOp(op, left, right, ob) -> return ir.IntOp(
+    op: op,
+    left: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: left, subst: subst),
+    right: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: right, subst: subst),
+    ob: ob
+  )
+  | ir.FloatOp(op, left, right) -> return ir.FloatOp(
+    op: op,
+    left: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: left, subst: subst),
+    right: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: right, subst: subst)
+  )
+  | ir.Neg(operand, is_float, ob) -> return ir.Neg(
+    operand: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: operand, subst: subst),
+    is_float: is_float,
+    ob: ob
+  )
+  | ir.Cmp(op, left, right, is_float) -> return ir.Cmp(
+    op: op,
+    left: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: left, subst: subst),
+    right: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: right, subst: subst),
+    is_float: is_float
+  )
+  | ir.Eq(left, right, ty, prim, negate) -> return ir.Eq(
+    left: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: left, subst: subst),
+    right: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: right, subst: subst),
+    ty: subst_ty(t: ty, subst: subst),
+    prim: prim,
+    negate: negate
+  )
+  | ir.Not(operand) -> return ir.Not(
+    operand: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: operand, subst: subst)
+  )
+  | ir.And(operands) -> return ir.And(
+    operands: exprs(fuel: fuel - 1, sp: inout sp, ctx: ctx, es: operands, subst: subst)
+  )
+  | ir.Or(operands) -> return ir.Or(
+    operands: exprs(fuel: fuel - 1, sp: inout sp, ctx: ctx, es: operands, subst: subst)
+  )
+  | ir.Implies(left, right) -> return ir.Implies(
+    left: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: left, subst: subst),
+    right: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: right, subst: subst)
+  )
+  | ir.IsVariant(subject, variant, ty) -> return ir.IsVariant(
+    subject: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: subject, subst: subst),
+    variant: variant,
+    ty: subst_ty(t: ty, subst: subst)
+  )
+  | ir.Try(operand, option, outer_option, else_clause, raw, ty) -> {
+    var new_else: Option[ir.ElseClause] = None
+    match else_clause with
+    | Some(value) -> new_else = Some(
+      value: else_of(fuel: fuel - 1, sp: inout sp, ctx: ctx, c: value, subst: subst)
+    )
+    | None -> skip()
+    return ir.Try(
+      operand: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: operand, subst: subst),
+      option: option,
+      outer_option: outer_option,
+      else_clause: new_else,
+      raw: raw,
+      ty: subst_ty(t: ty, subst: subst)
+    )
+  }
+  | ir.Recover(body, value, ty) -> return ir.Recover(
+    body: block(fuel: fuel - 1, sp: inout sp, ctx: ctx, b: body, subst: subst),
+    value: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: value, subst: subst),
+    ty: subst_ty(t: ty, subst: subst)
+  )
+  | ir.Quantifier(quant, name, binder, domain, where_, body) -> {
+    var new_where: Option[ir.Expr] = None
+    match where_ with
+    | Some(value) -> new_where = Some(
+      value: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: value, subst: subst)
+    )
+    | None -> skip()
+    return ir.Quantifier(
+      quant: quant,
+      name: name,
+      binder: subst_ty(t: binder, subst: subst),
+      domain: domain_of(fuel: fuel - 1, sp: inout sp, ctx: ctx, d: domain, subst: subst),
+      where_: new_where,
+      body: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: body, subst: subst)
+    )
+  }
+  | ir.Closure(params, fn_type, entry_checks, body, early_return) -> return ir.Closure(
+    params: params_of(params: params, subst: subst),
+    fn_type: ty_opt(t: fn_type, subst: subst),
+    entry_checks: block(fuel: fuel - 1, sp: inout sp, ctx: ctx, b: entry_checks, subst: subst),
+    body: block(fuel: fuel - 1, sp: inout sp, ctx: ctx, b: body, subst: subst),
+    early_return: early_return
+  )
+  | ir.Fake(kind, fields, ty) -> return ir.Fake(
+    kind: kind,
+    fields: inits(fuel: fuel - 1, sp: inout sp, ctx: ctx, fields: fields, subst: subst),
+    ty: subst_ty(t: ty, subst: subst)
+  )
+  | ir.Checked(value, it_name, ty, checks) -> return ir.Checked(
+    value: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: value, subst: subst),
+    it_name: it_name,
+    ty: subst_ty(t: ty, subst: subst),
+    checks: block(fuel: fuel - 1, sp: inout sp, ctx: ctx, b: checks, subst: subst)
+  )
+  | ir.DictE(iface, target, mod, name) -> return ir.DictE(
+    iface: iface,
+    target: subst_ty(t: target, subst: subst),
+    mod: mod,
+    name: name
+  )
+  | ir.Snapshot(value, ty) -> return ir.Snapshot(
+    value: subst_expr(fuel: fuel - 1, sp: inout sp, ctx: ctx, e: value, subst: subst),
+    ty: subst_ty(t: ty, subst: subst)
+  )
+  | _ -> return e
+}

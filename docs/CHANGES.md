@@ -1381,6 +1381,116 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     and the checks only for numeric measures. Product output is unchanged:
     after verification a structural measure has no unproved obligation.
 
+### 2026-09-06 — `Map` on the native target (M15.5)
+
+173. **`Map` and `Dict` natively; calls carry their type arguments.** The C
+    runtime gains an insertion-ordered hash table keyed by value (`Int`,
+    `Duration`, `Bool`, `Unit` as slots, `Text` by its bytes), with tombstones
+    for removal and `Map.put` copying (spec §19.1). The twelve `std.map`
+    intrinsics no longer claim `host.js`. The emitters pass a key kind on
+    every keyed operation, taken from the call's type arguments, which the
+    target-neutral form now records: `call` gains `targs`, the instantiation
+    of the callee's type parameters at the call (empty for a non-generic
+    callee), printed as `f[Int, Text](…)` in the form's text. A `Dict` keyed
+    by any other type — `Float` included, whose JavaScript equality is not
+    slot equality — is `E0800` on the native target. Fixtures:
+    `test/native/dict.onus` runs on both targets (text and integer keys,
+    insertion order under replacement and removal, the persistent `Map`);
+    `test/native/e0800_dict_key.onus` pins the refusal. No generic function
+    over a `Dict[K, V]` compiles natively yet: the key kind of a type
+    parameter waits on the specialisation step (impl spec §6.1). Review
+    artefacts: the interface diff of `self/ir.onus` is the `Call` variant of
+    `Expr` gaining `targs` (reported breaking, as a public union's shape is);
+    of `self/native.onus`, two private functions added and `call_val`'s
+    signature widened by the type arguments; `self/lowerir.onus`,
+    `self/irtext.onus` and `self/jsemit.onus` changed in bodies and pattern
+    arity only. Ledger deltas: ir: 0 -> 0 obligations; added 0 ({}; checked kinds {}), removed 0, status changes 0; native: 240 -> 242 obligations; added 2 ({'checked': 1, 'proved': 1}; checked kinds {'representation': 1}), removed 0, status changes 0 — the checked
+    additions are representation and overflow obligations, checked at
+    runtime by rule. The chain from `bootstrap/` reached the fixed point and
+    stage2 was promoted.
+
+174. **Generic code compiles natively by specialisation (impl spec §6.1).**
+    `codegen/specialise.ts` and `self/specialise.onus` run first inside
+    `emitNative`: every call to a generic function is retargeted to a copy of
+    it specialised to the call's type arguments (from the `targs` item 173
+    added to calls), copies are named `f[Int, Text]`, appended to their
+    module in discovery order, and specialised in turn until the set is
+    closed — finite by §3.6, the rule item 171 made for this. Inside a copy
+    the type parameters are concrete, so equality on a type parameter, a
+    `Dict` keyed by one and the rest resolve to the concrete type; generic
+    functions themselves are dropped, and the emitters' reachability is
+    keyed by emitted name rather than definition, since a definition now has
+    many copies. The JavaScript target is untouched. Fixture:
+    `test/native/generics.onus` — `swap[T]`, `first_or[T]`, equality on a
+    `T`, `count_of[T]`, `List.index_of` at `Text` and `Bool`, and a
+    `Dict[K, Int]` keyed by a type parameter — runs on both targets. The
+    native census of the compiler itself fell from 481 refused functions to
+    14 (five `Text.trim`, five `hash.blake3_hex`, one each of `Text.lower`,
+    `len`, `graphemes`, and a `Bytes` value). Review artefacts: the interface
+    diff of `self/native.onus` is the five reachability visitors taking a
+    context and a queue of names (private, reported breaking) and
+    `emit_native` unchanged; `self/specialise.onus` is new, 266 obligations,
+    177 proved and 89 checked, every checked one a representation or
+    overflow obligation; the native ledger lost one obligation with no
+    status change. Fixed point reached from `bootstrap/`; promoted.
+
+175. **The rest of the primitive surface natively; no stdlib module claims
+    `host.js` (§19.1).** The C runtime gains `onus_lib.c`: `Text.len`,
+    `graphemes`, `lower`, `upper` and `trim` over Unicode 16.0 tables
+    generated from the UCD by `scripts/unicode-tables.mjs` into
+    `unicode_tables.h` (grapheme clusters per UAX #29 with the GB9c, GB11
+    and GB12–13 state; default case conversion with SpecialCasing's
+    one-to-many mappings and Final_Sigma; `trim` over JavaScript's WhiteSpace
+    and LineTerminator set, which is what the host does); `Bytes` as the text
+    layout, so `Text.bytes` is a view and `Bytes.len`/`get` read it;
+    `hash.blake3_hex` over the vendored BLAKE3 1.8.2 reference implementation
+    in `blake3/`, built portable (`-DBLAKE3_NO_*`, `-DBLAKE3_USE_NEON=0`);
+    `io.run` over `posix_spawnp` with three pipes, `poll` and a monotonic
+    deadline, returning the `Output` record, `NotFound` for a program that
+    cannot start and `Other` with "`prog` did not finish within N ms" on
+    timeout, exactly the host's messages, and `Other` for every call under
+    WASI, which has no processes; `io.mkdir` creating parents; and
+    `typeinfo.name`/`fields` reading a two-slot object. Both native emitters
+    build that object where a type is used as a value (the expression form
+    and the compile-time value, through `typeSlug`/`lowerir.type_slug`) in
+    place of the `null` they emitted, emit `Bytes` constants as text-layout
+    globals, and map `Bytes` to a pointer; both build drivers add the new C
+    sources and flags. The ten remaining `claims host.js` in `std.text`,
+    `std.bytes`, `std.hash` and `std.typeinfo` are removed with their
+    `std.host` imports. Spec §19.1 lists the primitives. Fixtures:
+    `test/native/text_native.onus` (lengths, cases, bytes, BLAKE3 vectors,
+    `TypeInfo`; runs on both targets), `test/native/process_native.onus`
+    (a `main` exercising `run` five ways and `mkdir`, compared to the
+    JavaScript build's output and files), and `test/native/unicode.test.ts`
+    driving `unicode_probe.onus`: case conversion and `trim` for every code
+    point of the cased blocks (over 14,000) and Final_Sigma, SpecialCasing
+    and grapheme clustering over 31 texts, each line compared with what the
+    Node host (ICU, Unicode 16.0) computes. Review artefacts: the interface
+    diff of `self/native.onus` is three private functions added
+    (`bytes_global`, `typeinfo_obj`, `typeinfo_owner`) and the module
+    comment (reported breaking, as any doc change is); `self/nativebuild.onus`
+    unchanged; ledger delta of `native` +6 obligations, 4 proved, 2 checked
+    (both `overflow` on a counter and a length in `bytes_global`, like every
+    checked obligation in the module), no status change; `nativebuild`
+    unchanged. The native census of `self/cli.onus` is zero: `onus build
+    self/cli.onus --target native` writes `cli`, and that binary, with node
+    absent, checks mandelbrot with every obligation proved through z3 by
+    `io.run` in 0.7 s and builds it for the native target to an image
+    byte-identical to the node-hosted build's. It still needs `--stdlib` and
+    `--runtime`; embedding them is the release work of M15.5. Fixed point
+    reached from `bootstrap/`; promoted.
+
+176. **A column counts code points (§13).** The first fixture with characters
+    outside the Basic Multilingual Plane (item 175's `text_native.onus`)
+    made the two compilers disagree on one column: the TypeScript compiler
+    computed columns as UTF-16 units from the offset, the compiler in Onus
+    as code points, and the specification said neither. Code points it is,
+    since a column must not depend on the host's string representation;
+    `source.ts` now counts them and the spec says so. Fixture:
+    `test/checker/e0105_columns_code_points.onus`, an unknown name after four
+    flag emoji at column 20 rather than 24. The compiler in Onus is
+    unchanged.
+
 ### Deferred, not changed
 
 - Decided 2026-09-06, to apply in M15.5: generics compile natively by

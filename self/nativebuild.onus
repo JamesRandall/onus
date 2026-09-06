@@ -337,6 +337,16 @@ fn build_with(
   List.push(b: inout args, x: exe)
   List.push(b: inout args, x: ll)
   List.push(b: inout args, x: rt ++ "/onus.c")
+  -- The rest of the primitive surface (docs/CHANGES.md item 175) and BLAKE3, built portable.
+  List.push(b: inout args, x: rt ++ "/onus_lib.c")
+  List.push(b: inout args, x: rt ++ "/blake3/blake3.c")
+  List.push(b: inout args, x: rt ++ "/blake3/blake3_dispatch.c")
+  List.push(b: inout args, x: rt ++ "/blake3/blake3_portable.c")
+  List.push(b: inout args, x: "-DBLAKE3_NO_SSE2")
+  List.push(b: inout args, x: "-DBLAKE3_NO_SSE41")
+  List.push(b: inout args, x: "-DBLAKE3_NO_AVX2")
+  List.push(b: inout args, x: "-DBLAKE3_NO_AVX512")
+  List.push(b: inout args, x: "-DBLAKE3_USE_NEON=0")
   match libpq with
   | Some(value) -> {
     List.push(b: inout args, x: rt ++ "/onus_sql.c")

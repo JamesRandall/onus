@@ -338,45 +338,63 @@ export function build_with({ ctx, files, process, env, program, entry_name, dir,
     args = args$25;
     const [, args$26] = $std_list.push({ b: args, x: rt + "/onus.c" });
     args = args$26;
+    const [, args$27] = $std_list.push({ b: args, x: rt + "/onus_lib.c" });
+    args = args$27;
+    const [, args$28] = $std_list.push({ b: args, x: rt + "/blake3/blake3.c" });
+    args = args$28;
+    const [, args$29] = $std_list.push({ b: args, x: rt + "/blake3/blake3_dispatch.c" });
+    args = args$29;
+    const [, args$30] = $std_list.push({ b: args, x: rt + "/blake3/blake3_portable.c" });
+    args = args$30;
+    const [, args$31] = $std_list.push({ b: args, x: "-DBLAKE3_NO_SSE2" });
+    args = args$31;
+    const [, args$32] = $std_list.push({ b: args, x: "-DBLAKE3_NO_SSE41" });
+    args = args$32;
+    const [, args$33] = $std_list.push({ b: args, x: "-DBLAKE3_NO_AVX2" });
+    args = args$33;
+    const [, args$34] = $std_list.push({ b: args, x: "-DBLAKE3_NO_AVX512" });
+    args = args$34;
+    const [, args$35] = $std_list.push({ b: args, x: "-DBLAKE3_USE_NEON=0" });
+    args = args$35;
     const $m43 = libpq;
     $m43$match: {
       if ($m43.tag === "Some") {
         const value = $m43.value;
-        const [, args$27] = $std_list.push({ b: args, x: rt + "/onus_sql.c" });
-        args = args$27;
-        const [, args$28] = $std_list.push({ b: args, x: "-I" });
-        args = args$28;
-        const [, args$29] = $std_list.push({ b: args, x: value.include });
-        args = args$29;
-        const [, args$30] = $std_list.push({ b: args, x: "-L" });
-        args = args$30;
-        const [, args$31] = $std_list.push({ b: args, x: value.lib });
-        args = args$31;
-        const [, args$32] = $std_list.push({ b: args, x: "-lpq" });
-        args = args$32;
-        const [, args$33] = $std_list.push({ b: args, x: "-Wl,-rpath," + value.lib });
-        args = args$33;
+        const [, args$36] = $std_list.push({ b: args, x: rt + "/onus_sql.c" });
+        args = args$36;
+        const [, args$37] = $std_list.push({ b: args, x: "-I" });
+        args = args$37;
+        const [, args$38] = $std_list.push({ b: args, x: value.include });
+        args = args$38;
+        const [, args$39] = $std_list.push({ b: args, x: "-L" });
+        args = args$39;
+        const [, args$40] = $std_list.push({ b: args, x: value.lib });
+        args = args$40;
+        const [, args$41] = $std_list.push({ b: args, x: "-lpq" });
+        args = args$41;
+        const [, args$42] = $std_list.push({ b: args, x: "-Wl,-rpath," + value.lib });
+        args = args$42;
         break $m43$match;
       }
       if ($m43.tag === "None") {
-        const [, args$34] = $std_list.push({ b: args, x: "-DONUS_NO_SQL" });
-        args = args$34;
+        const [, args$43] = $std_list.push({ b: args, x: "-DONUS_NO_SQL" });
+        args = args$43;
         break $m43$match;
       }
       $rt.unreachable();
     }
-    const [, args$35] = $std_list.push({ b: args, x: "-I" });
-    args = args$35;
-    const [, args$36] = $std_list.push({ b: args, x: rt });
-    args = args$36;
-    const [, args$37] = $std_list.push({ b: args, x: "-lm" });
-    args = args$37;
+    const [, args$44] = $std_list.push({ b: args, x: "-I" });
+    args = args$44;
+    const [, args$45] = $std_list.push({ b: args, x: rt });
+    args = args$45;
+    const [, args$46] = $std_list.push({ b: args, x: "-lm" });
+    args = args$46;
     const $m44 = $std_io.run({ process: process, program: or_empty({ o: clang }), args: $std_list.finish({ b: args }), stdin: "", timeout_ms: 0 });
     $m44$match: {
       if ($m44.tag === "Err") {
         const error = $m44.error;
-        const [, ctx$38] = report_e0999({ ctx: ctx, lines: ["clang could not be run: " + io_error_text({ e: error })] });
-        ctx = ctx$38;
+        const [, ctx$47] = report_e0999({ ctx: ctx, lines: ["clang could not be run: " + io_error_text({ e: error })] });
+        ctx = ctx$47;
         return [{ tag: "Ok", value: none }, ctx];
         break $m44$match;
       }
@@ -386,8 +404,8 @@ export function build_with({ ctx, files, process, env, program, entry_name, dir,
           $rt.unwrap($build.write_file({ files: files, path: dir + "/run_wasm.mjs", text: wasm_runner({  }) }));
         }
         if (value.status !== 0) {
-          const [, ctx$39] = report_e0999({ ctx: ctx, lines: [...["clang rejected the generated IR; this is a compiler bug, please report it"], ...first_lines({ t: value.stderr, n: 20 })] });
-          ctx = ctx$39;
+          const [, ctx$48] = report_e0999({ ctx: ctx, lines: [...["clang rejected the generated IR; this is a compiler bug, please report it"], ...first_lines({ t: value.stderr, n: 20 })] });
+          ctx = ctx$48;
           return [{ tag: "Ok", value: none }, ctx];
         }
         return [{ tag: "Ok", value: { exe: { tag: "Some", value: exe }, ll: ll, examples: program.examples, has_main: program.has_main } }, ctx];

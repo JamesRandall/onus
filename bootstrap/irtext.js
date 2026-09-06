@@ -554,6 +554,7 @@ export function expr({ ctx, e }) {
       const consts = $m11.consts;
       const args = $m11.args;
       const decoder = $m11.decoder;
+      const targs = $m11.targs;
       let head = "";
       const $m12 = target;
       $m12$match: {
@@ -570,18 +571,26 @@ export function expr({ ctx, e }) {
         }
         $rt.unreachable();
       }
+      if ($std_list.len({ xs: targs }) > 0) {
+        let ts = $std_list.builder({  });
+        for (const a of targs) {
+          const [, ts$55] = $std_list.push({ b: ts, x: targ_text({ ctx: ctx, a: a }) });
+          ts = ts$55;
+        }
+        head = head + "[" + $std_text.join({ parts: $std_list.finish({ b: ts }), sep: ", " }) + "]";
+      }
       let parts = $std_list.builder({  });
       for (const d of dicts) {
-        const [, parts$55] = $std_list.push({ b: parts, x: "dict " + expr({ ctx: ctx, e: d }) });
-        parts = parts$55;
-      }
-      for (const c of consts) {
-        const [, parts$56] = $std_list.push({ b: parts, x: "const " + expr({ ctx: ctx, e: c }) });
+        const [, parts$56] = $std_list.push({ b: parts, x: "dict " + expr({ ctx: ctx, e: d }) });
         parts = parts$56;
       }
-      for (const a of args) {
-        const [, parts$57] = $std_list.push({ b: parts, x: expr({ ctx: ctx, e: a }) });
+      for (const c of consts) {
+        const [, parts$57] = $std_list.push({ b: parts, x: "const " + expr({ ctx: ctx, e: c }) });
         parts = parts$57;
+      }
+      for (const a of args) {
+        const [, parts$58] = $std_list.push({ b: parts, x: expr({ ctx: ctx, e: a }) });
+        parts = parts$58;
       }
       let decode = "";
       const $m13 = decoder;
@@ -590,8 +599,8 @@ export function expr({ ctx, e }) {
           const value = $m13.value;
           let fs = $std_list.builder({  });
           for (const f of value.fields) {
-            const [, fs$58] = $std_list.push({ b: fs, x: f.name + ": " + f.kind });
-            fs = fs$58;
+            const [, fs$59] = $std_list.push({ b: fs, x: f.name + ": " + f.kind });
+            fs = fs$59;
           }
           decode = " decode(" + $std_text.join({ parts: $std_list.finish({ b: fs }), sep: ", " });
           if ($std_list.len({ xs: value.checks }) > 0) {
@@ -769,8 +778,8 @@ export function expr({ ctx, e }) {
       const params = $m11.params;
       let names = $std_list.builder({  });
       for (const p of params) {
-        const [, names$59] = $std_list.push({ b: names, x: p.name });
-        names = names$59;
+        const [, names$60] = $std_list.push({ b: names, x: p.name });
+        names = names$60;
       }
       return "fn(" + $std_text.join({ parts: $std_list.finish({ b: names }), sep: ", " }) + ") { ... }";
       break $m11$match;
@@ -837,51 +846,29 @@ export function name_or_underscore({ o }) {
   }
 }
 
-export function const_kind({ c }) {
-  const $m16 = c;
+export function targ_text({ ctx, a }) {
+  const $m16 = a;
   $m16$match: {
-    if ($m16.tag === "IntV") {
-      return "int";
+    if ($m16.tag === "TypeA") {
+      const ty = $m16.ty;
+      return $typecheck.show({ ctx: ctx, t: ty });
       break $m16$match;
     }
-    if ($m16.tag === "FloatV") {
-      return "float";
+    if ($m16.tag === "ConstA") {
+      const value = $m16.value;
+      return "const " + const_kind({ c: value });
       break $m16$match;
     }
-    if ($m16.tag === "BoolV") {
-      return "bool";
-      break $m16$match;
-    }
-    if ($m16.tag === "TextV") {
-      return "text";
-      break $m16$match;
-    }
-    if ($m16.tag === "DurationV") {
-      return "duration";
-      break $m16$match;
-    }
-    if ($m16.tag === "UnitV") {
-      return "unit";
-      break $m16$match;
-    }
-    if ($m16.tag === "VariantV") {
-      return "variant";
-      break $m16$match;
-    }
-    if ($m16.tag === "SymV") {
-      return "sym";
-      break $m16$match;
-    }
-    if ($m16.tag === "ErrorV") {
-      return "error";
+    if ($m16.tag === "EffectsA") {
+      return "effects";
       break $m16$match;
     }
     $rt.unreachable();
   }
 }
 
-export function value_kind({ v }) {
-  const $m17 = v;
+export function const_kind({ c }) {
+  const $m17 = c;
   $m17$match: {
     if ($m17.tag === "IntV") {
       return "int";
@@ -907,25 +894,68 @@ export function value_kind({ v }) {
       return "unit";
       break $m17$match;
     }
-    if ($m17.tag === "BytesV") {
-      return "bytes";
-      break $m17$match;
-    }
-    if ($m17.tag === "ListV") {
-      return "list";
-      break $m17$match;
-    }
-    if ($m17.tag === "RecordV") {
-      return "record";
-      break $m17$match;
-    }
     if ($m17.tag === "VariantV") {
       return "variant";
       break $m17$match;
     }
-    if ($m17.tag === "TypeInfoV") {
-      return "typeinfo";
+    if ($m17.tag === "SymV") {
+      return "sym";
       break $m17$match;
+    }
+    if ($m17.tag === "ErrorV") {
+      return "error";
+      break $m17$match;
+    }
+    $rt.unreachable();
+  }
+}
+
+export function value_kind({ v }) {
+  const $m18 = v;
+  $m18$match: {
+    if ($m18.tag === "IntV") {
+      return "int";
+      break $m18$match;
+    }
+    if ($m18.tag === "FloatV") {
+      return "float";
+      break $m18$match;
+    }
+    if ($m18.tag === "BoolV") {
+      return "bool";
+      break $m18$match;
+    }
+    if ($m18.tag === "TextV") {
+      return "text";
+      break $m18$match;
+    }
+    if ($m18.tag === "DurationV") {
+      return "duration";
+      break $m18$match;
+    }
+    if ($m18.tag === "UnitV") {
+      return "unit";
+      break $m18$match;
+    }
+    if ($m18.tag === "BytesV") {
+      return "bytes";
+      break $m18$match;
+    }
+    if ($m18.tag === "ListV") {
+      return "list";
+      break $m18$match;
+    }
+    if ($m18.tag === "RecordV") {
+      return "record";
+      break $m18$match;
+    }
+    if ($m18.tag === "VariantV") {
+      return "variant";
+      break $m18$match;
+    }
+    if ($m18.tag === "TypeInfoV") {
+      return "typeinfo";
+      break $m18$match;
     }
     $rt.unreachable();
   }

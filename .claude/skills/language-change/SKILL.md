@@ -52,7 +52,8 @@ the change is small.
 
 ### 3. Contracts in `self/` before bodies
 
-- Save the interface of every module the change will touch:
+- Save the interface of every module the change will touch — bodies included,
+  since the document carries the module's ledger and step 6 diffs it:
   `pnpm onus interface self/<m>.onus --json --root self > .onus/before/<m>.json`.
 - Change signatures and contracts first: types, `requires`, `ensures`,
   effects, claims, `decreases`. Do not edit bodies yet.

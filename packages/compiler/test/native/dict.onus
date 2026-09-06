@@ -1,0 +1,60 @@
+module dict
+
+-- `Dict` and `Map` on both targets (§19.1): text and integer keys, insertion
+-- order under replacement and removal, and the persistent `Map`.
+fn counts(words: List[Text]) -> Dict[Text, Int] may alloc, mutate {
+  var d: Dict[Text, Int] = Map.dict()
+  for w: Text in words {
+    var n: Int = 0
+    match Map.find(d: d, key: w) with
+    | Some(value) -> n = value
+    | None -> n = 0
+    Map.set(d: inout d, key: w, value: n + 1)
+  }
+  return d
+}
+
+fn by_number() -> Dict[Int, Text] may alloc, mutate {
+  var d: Dict[Int, Text] = Map.dict()
+  Map.set(d: inout d, key: 3, value: "three")
+  Map.set(d: inout d, key: 1, value: "one")
+  Map.set(d: inout d, key: 3, value: "drei")
+  return d
+}
+
+fn without(d: Dict[Int, Text], key: Int) -> Dict[Int, Text] may alloc, mutate {
+  var out: Dict[Int, Text] = d
+  Map.remove(d: inout out, key: key)
+  return out
+}
+
+fn readded(d: Dict[Int, Text]) -> Dict[Int, Text] may alloc, mutate {
+  var out: Dict[Int, Text] = d
+  Map.set(d: inout out, key: 3, value: "again")
+  return out
+}
+
+example text_keys {
+  Map.find(d: counts(words: ["a", "b", "a"]), key: "a") == Some(value: 2)
+  Map.find(d: counts(words: ["a", "b", "a"]), key: "c") is None
+  Map.keys(d: counts(words: ["a", "b", "a"])) == ["a", "b"]
+  Map.count(d: counts(words: ["a", "b", "a"])) == 2
+  Map.contains(d: counts(words: ["a", "b", "a"]), key: "b")
+}
+
+example integer_keys_keep_their_order {
+  Map.keys(d: by_number()) == [3, 1]
+  Map.values(d: by_number()) == ["drei", "one"]
+  Map.keys(d: without(d: by_number(), key: 3)) == [1]
+  not Map.contains(d: without(d: by_number(), key: 3), key: 3)
+  Map.keys(d: readded(d: without(d: by_number(), key: 3))) == [1, 3]
+}
+
+example persistent_map {
+  let m0: Map[Int, Int] = Map.empty()
+  let m1: Map[Int, Int] = Map.put(m: m0, key: 1, value: 10)
+  Map.size(m: m0) == 0
+  Map.size(m: m1) == 1
+  Map.get(m: m1, key: 1) == Some(value: 10)
+  Map.get(m: m0, key: 1) is None
+}

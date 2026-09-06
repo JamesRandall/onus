@@ -31,6 +31,11 @@ export interface NativeBuildResult {
   readonly hasMain: boolean;
 }
 
+/** The C sources of the runtime besides `onus.c`, relative to its directory: the primitive surface of docs/CHANGES.md item 175 and the vendored BLAKE3 reference implementation. */
+const RUNTIME_SOURCES = ['onus_lib.c', 'blake3/blake3.c', 'blake3/blake3_dispatch.c', 'blake3/blake3_portable.c'];
+/** BLAKE3 is built portable: no SIMD dispatch, so one build works on every target. */
+const BLAKE3_FLAGS = ['-DBLAKE3_NO_SSE2', '-DBLAKE3_NO_SSE41', '-DBLAKE3_NO_AVX2', '-DBLAKE3_NO_AVX512', '-DBLAKE3_USE_NEON=0'];
+
 /** The directory holding `onus.c` and `onus.h`. Effects: none. */
 export function nativeRuntimeDir(): string {
   return join(dirname(runtimeEntry()), '..', 'native');
@@ -96,7 +101,7 @@ export function buildNative(ctx: Context, opts: NativeBuildOptions): NativeBuild
   const runtime = nativeRuntimeDir();
   const sqlFlags = libpq === null ? ['-DONUS_NO_SQL'] : [join(runtime, 'onus_sql.c'), '-I', libpq.include, '-L', libpq.lib, '-lpq', `-Wl,-rpath,${libpq.lib}`];
   const targetFlags = wasm && sdk !== null ? ['--target=wasm32-wasi', `--sysroot=${join(sdk, 'share', 'wasi-sysroot')}`, '-D_WASI_EMULATED_SIGNAL', '-lwasi-emulated-signal', '-D_WASI_EMULATED_PROCESS_CLOCKS'] : [];
-  const r = spawnSync(clang, ['-O1', '-Wno-override-module', ...targetFlags, '-o', exe, ll, join(runtime, 'onus.c'), ...sqlFlags, '-I', runtime, '-lm', ...(opts.cflags ?? [])], { encoding: 'utf8' });
+  const r = spawnSync(clang, ['-O1', '-Wno-override-module', ...targetFlags, '-o', exe, ll, join(runtime, 'onus.c'), ...RUNTIME_SOURCES.map((f) => join(runtime, f)), ...BLAKE3_FLAGS, ...sqlFlags, '-I', runtime, '-lm', ...(opts.cflags ?? [])], { encoding: 'utf8' });
   if (wasm && r.status === 0) {
     writeFileSync(
       join(dir, 'run_wasm.mjs'),

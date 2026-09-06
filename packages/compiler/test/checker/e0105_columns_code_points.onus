@@ -1,0 +1,8 @@
+module e0105_columns_code_points
+
+-- A column counts code points (§13; docs/CHANGES.md item 176): the unknown
+-- name after the four flags is at column 20, not the 24 that UTF-16 units
+-- would give.
+fn flags() -> Text may alloc {
+  return "🇬🇧🇫🇷" ++ missing
+}

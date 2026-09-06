@@ -863,7 +863,7 @@ fn expr(
       prec: p_arrow
     )
   }
-  | ir.Call(target, sig, dicts, consts, args, _, decoder) -> {
+  | ir.Call(target, sig, dicts, consts, args, _, decoder, _) -> {
     var callee: Text = ""
     match target with
     | ir.FnTarget(def, name) -> callee = qualified(e: inout e, ctx: ctx, mod: def.mod, name: name)

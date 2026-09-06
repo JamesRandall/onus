@@ -909,7 +909,8 @@ function wrap(t: string): string {
   return /^[A-Za-z0-9_.$<>, ]+$/.test(t) ? t : `(${t})`;
 }
 
-function typeSlug(t: ResolveTables, type: Type): string {
+/** The `type_name` a `TypeInfo` field carries (§3.8.1): the type's name with its arguments joined by `_`. Effects: none. */
+export function typeSlug(t: ResolveTables, type: Type): string {
   const s = stripRefinements(type);
   switch (s.k) {
     case 'prim':

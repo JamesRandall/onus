@@ -2761,6 +2761,10 @@ fn named_call(
   if context.qualified_name(ctx: ctx, id: target.id) == "std.sql.select" {
     decoder = select_decoder(fuel: fuel - 1, l: inout l, ctx: ctx, call_key: call_key, sig: sig)
   }
+  var inst: List[types.TypeArg] = []
+  match Map.find(d: ctx.instantiations, key: call_key) with
+  | Some(value) -> inst = value
+  | None -> skip()
   let call_ir: ir.Expr = ir.Call(
     target: call_target,
     sig: sig,
@@ -2768,7 +2772,8 @@ fn named_call(
     consts: List.finish(b: consts),
     args: arg_list,
     ty: call_ty,
-    decoder: decoder
+    decoder: decoder,
+    targs: inst
   )
   if List.built(b: inout_args) == 0 {
     return call_ir

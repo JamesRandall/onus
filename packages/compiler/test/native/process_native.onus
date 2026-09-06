@@ -1,0 +1,66 @@
+module process_native
+import std.io
+
+-- `io.run` and `io.mkdir` on the native target (docs/CHANGES.md item 175):
+-- a program that runs, one fed through stdin, one that fails, one that does
+-- not exist, one that overruns its timeout, and a nested directory. The test
+-- compares this program's output on both targets.
+fn describe(e: io.Error) -> Text may alloc {
+  match e with
+  | NotFound(path) -> return "not found " ++ path
+  | Denied(path) -> return "denied " ++ path
+  | Other(detail) -> return "other " ++ detail
+}
+
+pub fn main(
+  args: List[Text],
+  files: io.Files,
+  console: io.Console,
+  process: io.Process
+) -> Result[Unit, io.Error] may io.file, nondet, alloc {
+  let echoed: io.Output = try io.run(
+    process: process,
+    program: "echo",
+    args: ["hello", "native"],
+    stdin: "",
+    timeout_ms: 5000
+  )
+  io.print(
+    console: console,
+    text: "status " ++ Int.to_text(x: echoed.status) ++ " out " ++ echoed.stdout
+  )
+  let piped: io.Output = try io.run(
+    process: process,
+    program: "cat",
+    args: [],
+    stdin: "fed through stdin\n",
+    timeout_ms: 5000
+  )
+  io.print(console: console, text: "cat " ++ piped.stdout)
+  let failing: io.Output = try io.run(
+    process: process,
+    program: "sh",
+    args: ["-c", "echo oops >&2; exit 3"],
+    stdin: "",
+    timeout_ms: 5000
+  )
+  io.print(console: console, text: "sh " ++ Int.to_text(x: failing.status) ++ " " ++ failing.stderr)
+  match io.run(
+    process: process,
+    program: "onus-no-such-program",
+    args: [],
+    stdin: "",
+    timeout_ms: 5000
+  ) with
+  | Ok(_) -> io.print(console: console, text: "missing started\n")
+  | Err(error) -> io.print(console: console, text: "missing: " ++ describe(e: error) ++ "\n")
+  match io.run(process: process, program: "sleep", args: ["5"], stdin: "", timeout_ms: 200) with
+  | Ok(_) -> io.print(console: console, text: "slow finished\n")
+  | Err(error) -> io.print(console: console, text: "slow: " ++ describe(e: error) ++ "\n")
+  try io.mkdir(files: files, path: "made/deep/dir")
+  try io.mkdir(files: files, path: "made/deep/dir")
+  let note: io.File = try io.create(files: files, path: "made/deep/dir/note.txt")
+  try io.write(file: note, text: echoed.stdout)
+  io.print(console: console, text: "args " ++ Int.to_text(x: List.len(xs: args)) ++ "\n")
+  return Ok(value: Unit)
+}

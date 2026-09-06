@@ -1,0 +1,63 @@
+module text_native
+import std.hash
+import std.typeinfo
+
+-- The primitives that reached the native target last (docs/CHANGES.md item
+-- 175): grapheme-aware `Text`, case conversion, `trim`, `Bytes`, BLAKE3 and
+-- `TypeInfo`. Every example runs on both targets and must agree (§19.5).
+record Point {
+  x: Int
+  label: Text
+}
+
+fn second_byte(t: Text) -> Int may alloc {
+  let b: Bytes = Text.bytes(t: t)
+  if Bytes.len(b: b) > 1 {
+    return Bytes.get(b: b, i: 1)
+  }
+  return -1
+}
+
+fn first_field(t: TypeInfo) -> Text may alloc {
+  let fs: List[typeinfo.Field] = typeinfo.fields(t: t)
+  if List.len(xs: fs) > 0 {
+    return List.get(xs: fs, i: 0).name ++ ": " ++ List.get(xs: fs, i: 0).type_name
+  }
+  return ""
+}
+
+example lengths {
+  Text.len(t: "héllo") == 5
+  Text.len(t: "🇬🇧🇫🇷") == 2
+  Text.len(t: "👨‍👩‍👧‍👦") == 1
+  Text.len(t: "e" ++ Text.of_code_point(cp: 769)) == 1
+  Text.count(t: "👨‍👩‍👧‍👦") == 7
+  List.len(xs: Text.graphemes(t: "a\r\nb")) == 3
+  Text.graphemes(t: "ab") == ["a", "b"]
+  Text.len(t: "") == 0
+}
+
+example cases {
+  Text.lower(t: "ÀÉÎ Straße ΣΑΣ") == "àéî straße σας"
+  Text.upper(t: "straße ǆ") == "STRASSE Ǆ"
+  Text.trim(t: "  \t x y " ++ Text.of_code_point(cp: 160)) == "x y"
+  Text.trim(t: "   ") == ""
+  Text.contains(t: "haystack", needle: "st")
+}
+
+example bytes {
+  Bytes.len(b: Text.bytes(t: "hé")) == 3
+  second_byte(t: "hé") == 195
+  Bytes.len(b: Text.bytes(t: "")) == 0
+}
+
+example hashing {
+  hash.blake3_hex(t: "") == "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262"
+  hash.blake3_hex(t: "abc") == "6437b3ac38465133ffb63b75273a8db548c558465d79db03fd359c6cd5bd9d85"
+}
+
+example type_info {
+  typeinfo.name(t: Point) == "Point"
+  first_field(t: Point) == "x: Int"
+  List.len(xs: typeinfo.fields(t: Point)) == 2
+}

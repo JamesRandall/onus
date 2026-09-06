@@ -882,7 +882,7 @@ Obligations are keyed by the content hash of the canonical text of everything th
 }
 ```
 
-Required fields for every diagnostic: a stable `code`, the innermost `def`, a `span`, the violated `obligation` where applicable, a machine-checkable `counterexample` when the solver produced one, and zero or more `repairs` that are syntactically valid and, when applied, produce canonical source. The full code catalogue is part of the language specification and is versioned with it.
+A `span` is a pair of 1-based line and column positions; a column counts code points, so it is the same on every host. <!-- changed: 2026-09-06, docs/CHANGES.md item 176 — the TypeScript compiler counted UTF-16 units --> Required fields for every diagnostic: a stable `code`, the innermost `def`, a `span`, the violated `obligation` where applicable, a machine-checkable `counterexample` when the solver produced one, and zero or more `repairs` that are syntactically valid and, when applied, produce canonical source. The full code catalogue is part of the language specification and is versioned with it.
 
 ---
 
@@ -1194,10 +1194,13 @@ Each target provides a runtime implementing exactly the following primitives. Ev
 - Memory: allocate, free-at-scope-exit (native) or no-op (collected hosts).
 - `Int`: 64-bit signed arithmetic with overflow detection; see 19.3.
 - `Float`: IEEE 754 binary64 arithmetic; `classify`; formatting to text per the algorithm in `std.float` (shortest round-trip representation).
-- `Text`: UTF-8 storage; grapheme-cluster segmentation per Unicode 16.0 (pinned; the runtime carries the tables); byte and grapheme views; equality by code point sequence.
-- `Bytes`: contiguous byte sequence with bounds-checked access.
+- `Text`: UTF-8 storage; grapheme-cluster segmentation per Unicode 16.0 (pinned; the runtime carries the tables); byte and grapheme views; equality by code point sequence; default case conversion (`lower` and `upper`, with SpecialCasing's one-to-many mappings and the Final_Sigma context) and `trim` over the White_Space and line-terminator code points, from the same tables. <!-- changed: 2026-09-06, docs/CHANGES.md item 175 — the native runtime carries the tables; `std.text` no longer claims `host.js` -->
+- `Bytes`: contiguous byte sequence with bounds-checked access; natively the same layout as a text, so `Text.bytes` is a view. <!-- changed: 2026-09-06, docs/CHANGES.md item 175 — `std.bytes` no longer claims `host.js` -->
+- Hashing: BLAKE3 over the bytes of a text, as lowercase hexadecimal (`hash.blake3_hex`); the native runtime carries the reference implementation. <!-- changed: 2026-09-06, docs/CHANGES.md item 175 -->
+- `TypeInfo`: a type's name and its fields as `std.typeinfo` reads them (§3.8.1), constructed by the emitter where a type is used as a value. <!-- changed: 2026-09-06, docs/CHANGES.md item 175 -->
+- `Map` and `Dict`: insertion-ordered hash tables keyed by value — `Int`, `Duration`, `Bool`, `Unit` and `Text` keys; a key of any other type is `E0800` on the native target in v0. <!-- changed: 2026-09-06, docs/CHANGES.md item 173 — the native runtime gains them; `std.map` no longer claims `host.js` -->
 - Panic: raise with an obligation id and optional model; `recover` boundary.
-- Capabilities: opaque handles for `io.Files`, `io.Env`, `io.Net`, `io.Clock`, `io.Rand`, `sql.Db`, plus the `__fake` constructor available only to test modules.
+- Capabilities: opaque handles for `io.Files`, `io.Env`, `io.Net`, `io.Clock`, `io.Rand`, `io.Console`, `io.Process`, `sql.Db`, plus the `__fake` constructor available only to test modules. `io.run` starts the program through the platform's process creation with both streams captured and a timeout; a program that cannot start is `NotFound`, one that overruns is `Other`, and WebAssembly has no processes, so there every `run` is `Other`. `io.mkdir` creates missing parents. <!-- changed: 2026-09-06, docs/CHANGES.md item 175 — both natively -->
 - `io.*` and `sql.*` raw calls, each mapped one-to-one from an `assume` leaf in `std.io` / `std.sql`.
 
 The primitive surface is versioned with the specification. A backend that lacks a primitive reports `E0800 primitive unavailable on target` at build time for any program reaching it.

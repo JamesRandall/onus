@@ -7,201 +7,205 @@ import * as $context from "./context.js";
 import * as $std_text from "./std/text.js";
 import * as $std_float from "./std/float.js";
 import * as $types from "./types.js";
+import * as $lowerir from "./lowerir.js";
 import * as $claimcheck from "./claimcheck.js";
 import * as $typecheck from "./typecheck.js";
+import * as $specialise from "./specialise.js";
 
-const $ob1 = { kind: "overflow", text: "total + 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:219:15", def: "utf8_len" };
-const $ob2 = { kind: "overflow", text: "total + 2 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:222:17", def: "utf8_len" };
-const $ob3 = { kind: "overflow", text: "total + 3 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:225:19", def: "utf8_len" };
-const $ob4 = { kind: "overflow", text: "total + 4 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:227:19", def: "utf8_len" };
-const $ob5 = { kind: "overflow", text: "-1074 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:310:30", def: "double_literal" };
-const $ob6 = { kind: "overflow", text: "-1022 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:321:11", def: "double_literal" };
-const $ob7 = { kind: "overflow", text: "nib * 2 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:337:13", def: "double_literal" };
-const $ob8 = { kind: "overflow", text: "nib + 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:339:15", def: "double_literal" };
-const $ob9 = { kind: "overflow", text: "List.len(xs: parts) - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:373:33", def: "last_segment" };
-const $ob10 = { kind: "overflow", text: "-1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:397:10", def: "field_index" };
-const $ob11 = { kind: "overflow", text: "8 * k within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:414:10", def: "slots_size" };
-const $ob12 = { kind: "overflow", text: "n.counter + 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:528:25", def: "new_tmp" };
-const $ob13 = { kind: "overflow", text: "n.counter + 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:533:25", def: "new_label" };
-const $ob14 = { kind: "overflow", text: "n.counter + 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:594:25", def: "alloc_local" };
-const $ob15 = { kind: "overflow", text: "n.string_count + 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:606:30", def: "c_string" };
-const $ob16 = { kind: "overflow", text: "bytes + 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:612:10", def: "c_string" };
-const $ob17 = { kind: "overflow", text: "n.text_count + 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:624:28", def: "text_global" };
-const $ob18 = { kind: "overflow", text: "bytes + 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:627:31", def: "text_global" };
-const $ob19 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:824:15", def: "const_val" };
-const $ob20 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:849:43", def: "const_val" };
-const $ob21 = { kind: "overflow", text: "1 + List.len(xs: fs) within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:863:64", def: "const_val" };
-const $ob22 = { kind: "overflow", text: "8 * (1 + List.len(xs: fs)) within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:863:59", def: "const_val" };
-const $ob23 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:874:43", def: "const_val" };
-const $ob24 = { kind: "overflow", text: "1 + i within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:876:47", def: "const_val" };
-const $ob25 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:946:22", def: "visit_block" };
-const $ob26 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:962:48", def: "visit_stmt" };
-const $ob27 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:963:48", def: "visit_stmt" };
-const $ob28 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:964:42", def: "visit_stmt" };
-const $ob29 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:965:43", def: "visit_stmt" };
-const $ob30 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:967:22", def: "visit_stmt" };
-const $ob31 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:968:23", def: "visit_stmt" };
-const $ob32 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:970:40", def: "visit_stmt" };
-const $ob33 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:974:22", def: "visit_stmt" };
-const $ob34 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:977:41", def: "visit_stmt" };
-const $ob35 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:980:26", def: "visit_stmt" };
-const $ob36 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:983:41", def: "visit_stmt" };
-const $ob37 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:985:25", def: "visit_stmt" };
-const $ob38 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:989:22", def: "visit_stmt" };
-const $ob39 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:990:23", def: "visit_stmt" };
-const $ob40 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:993:22", def: "visit_stmt" };
-const $ob41 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:994:22", def: "visit_stmt" };
-const $ob42 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:995:23", def: "visit_stmt" };
-const $ob43 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:998:22", def: "visit_stmt" };
-const $ob44 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:999:23", def: "visit_stmt" };
-const $ob45 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1001:43", def: "visit_stmt" };
-const $ob46 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1002:41", def: "visit_stmt" };
-const $ob47 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1003:50", def: "visit_stmt" };
-const $ob48 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1006:44", def: "visit_stmt" };
-const $ob49 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1021:22", def: "visit_exprs" };
-const $ob50 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1037:22", def: "visit_inits" };
-const $ob51 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1052:50", def: "visit_expr" };
-const $ob52 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1053:23", def: "visit_expr" };
-const $ob53 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1054:23", def: "visit_expr" };
-const $ob54 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1055:23", def: "visit_expr" };
-const $ob55 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1060:22", def: "visit_expr" };
-const $ob56 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1061:23", def: "visit_expr" };
-const $ob57 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1063:51", def: "visit_expr" };
-const $ob58 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1064:52", def: "visit_expr" };
-const $ob59 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1065:48", def: "visit_expr" };
-const $ob60 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1067:22", def: "visit_expr" };
-const $ob61 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1068:23", def: "visit_expr" };
-const $ob62 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1070:52", def: "visit_expr" };
-const $ob63 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1071:41", def: "visit_expr" };
-const $ob64 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1072:47", def: "visit_expr" };
-const $ob65 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1073:45", def: "visit_expr" };
-const $ob66 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1074:43", def: "visit_expr" };
-const $ob67 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1075:42", def: "visit_expr" };
-const $ob68 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1077:22", def: "visit_expr" };
-const $ob69 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1078:22", def: "visit_expr" };
-const $ob70 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1081:22", def: "visit_expr" };
-const $ob71 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1082:22", def: "visit_expr" };
-const $ob72 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1085:22", def: "visit_expr" };
-const $ob73 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1086:22", def: "visit_expr" };
-const $ob74 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1089:22", def: "visit_expr" };
-const $ob75 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1090:22", def: "visit_expr" };
-const $ob76 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1093:22", def: "visit_expr" };
-const $ob77 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1094:22", def: "visit_expr" };
-const $ob78 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1097:22", def: "visit_expr" };
-const $ob79 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1098:22", def: "visit_expr" };
-const $ob80 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1100:47", def: "visit_expr" };
-const $ob81 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1101:53", def: "visit_expr" };
-const $ob82 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1103:22", def: "visit_expr" };
-const $ob83 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1105:39", def: "visit_expr" };
-const $ob84 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1109:23", def: "visit_expr" };
-const $ob85 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1110:22", def: "visit_expr" };
-const $ob86 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1115:24", def: "visit_expr" };
-const $ob87 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1116:24", def: "visit_expr" };
-const $ob88 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1118:42", def: "visit_expr" };
-const $ob89 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1119:44", def: "visit_expr" };
-const $ob90 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1122:39", def: "visit_expr" };
-const $ob91 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1124:22", def: "visit_expr" };
-const $ob92 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1127:23", def: "visit_expr" };
-const $ob93 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1128:23", def: "visit_expr" };
-const $ob94 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1131:22", def: "visit_expr" };
-const $ob95 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1132:23", def: "visit_expr" };
-const $ob96 = { kind: "overflow", text: "steps - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1190:13", def: "reachable" };
-const $ob97 = { kind: "overflow", text: "List.len(xs: queue) - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1191:41", def: "reachable" };
-const $ob98 = { kind: "overflow", text: "List.len(xs: queue) - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1192:48", def: "reachable" };
-const $ob99 = { kind: "overflow", text: "n.counter + 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1599:25", def: "decoder_fn" };
-const $ob100 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1605:50", def: "decoder_fn" };
-const $ob101 = { kind: "overflow", text: "-1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1625:22", def: "decoder_body" };
-const $ob102 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1649:25", def: "decoder_body" };
-const $ob103 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1689:25", def: "block_stmts" };
-const $ob104 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1713:38", def: "stmt_ir" };
-const $ob105 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1721:38", def: "stmt_ir" };
-const $ob106 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1732:38", def: "stmt_ir" };
-const $ob107 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1739:38", def: "stmt_ir" };
-const $ob108 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1750:27", def: "stmt_ir" };
-const $ob109 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1755:29", def: "stmt_ir" };
-const $ob110 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1764:38", def: "stmt_ir" };
-const $ob111 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1774:42", def: "stmt_ir" };
-const $ob112 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1782:43", def: "stmt_ir" };
-const $ob113 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1789:42", def: "stmt_ir" };
-const $ob114 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1796:29", def: "stmt_ir" };
-const $ob115 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1812:38", def: "stmt_ir" };
-const $ob116 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1816:27", def: "stmt_ir" };
-const $ob117 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1822:39", def: "stmt_ir" };
-const $ob118 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1824:39", def: "stmt_ir" };
-const $ob119 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1839:27", def: "stmt_ir" };
-const $ob120 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1852:38", def: "stmt_ir" };
-const $ob121 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1881:27", def: "stmt_ir" };
-const $ob122 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1887:38", def: "stmt_ir" };
-const $ob123 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1898:38", def: "stmt_ir" };
-const $ob124 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1910:38", def: "stmt_ir" };
-const $ob125 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1914:37", def: "stmt_ir" };
-const $ob126 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1936:38", def: "stmt_ir" };
-const $ob127 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2002:11", def: "expr_val" };
-const $ob128 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2021:40", def: "expr_val" };
-const $ob129 = { kind: "overflow", text: "1 + List.len(xs: fs) within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2032:64", def: "expr_val" };
-const $ob130 = { kind: "overflow", text: "8 * (1 + List.len(xs: fs)) within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2032:59", def: "expr_val" };
-const $ob131 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2042:40", def: "expr_val" };
-const $ob132 = { kind: "overflow", text: "1 + idx within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2044:45", def: "expr_val" };
-const $ob133 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2050:38", def: "expr_val" };
-const $ob134 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2063:40", def: "expr_val" };
-const $ob135 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2070:38", def: "expr_val" };
-const $ob136 = { kind: "overflow", text: "base + idx within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2081:63", def: "expr_val" };
-const $ob137 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2093:40", def: "expr_val" };
-const $ob138 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2105:38", def: "expr_val" };
-const $ob139 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2107:38", def: "expr_val" };
-const $ob140 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2121:38", def: "expr_val" };
-const $ob141 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2123:38", def: "expr_val" };
-const $ob142 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2128:38", def: "expr_val" };
-const $ob143 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2130:38", def: "expr_val" };
-const $ob144 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2138:40", def: "expr_val" };
-const $ob145 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2144:38", def: "expr_val" };
-const $ob146 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2151:40", def: "expr_val" };
-const $ob147 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2153:40", def: "expr_val" };
-const $ob148 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2160:40", def: "expr_val" };
-const $ob149 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2162:40", def: "expr_val" };
-const $ob150 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2169:11", def: "expr_val" };
-const $ob151 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2178:38", def: "expr_val" };
-const $ob152 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2185:11", def: "expr_val" };
-const $ob153 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2192:11", def: "expr_val" };
-const $ob154 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2199:11", def: "expr_val" };
-const $ob155 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2206:38", def: "expr_val" };
-const $ob156 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2225:11", def: "expr_val" };
-const $ob157 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2237:38", def: "expr_val" };
-const $ob158 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2241:27", def: "expr_val" };
-const $ob159 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2252:35", def: "expr_val" };
-const $ob160 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2261:11", def: "expr_val" };
-const $ob161 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2364:40", def: "eq_val" };
-const $ob162 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2365:38", def: "eq_val" };
-const $ob163 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2367:38", def: "eq_val" };
-const $ob164 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2381:38", def: "eq_val" };
-const $ob165 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2383:38", def: "eq_val" };
-const $ob166 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2393:38", def: "eq_val" };
-const $ob167 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2395:38", def: "eq_val" };
-const $ob168 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2406:36", def: "eq_val" };
-const $ob169 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2408:36", def: "eq_val" };
-const $ob170 = { kind: "overflow", text: "n.counter + 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2441:25", def: "recover_val" };
-const $ob171 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2448:11", def: "recover_val" };
-const $ob172 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2505:25", def: "recover_body" };
-const $ob173 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2507:38", def: "recover_body" };
-const $ob174 = { kind: "overflow", text: "n.counter + 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2535:25", def: "eq_fn_of" };
-const $ob175 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2543:11", def: "eq_fn_of" };
-const $ob176 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2616:40", def: "eq_slots" };
-const $ob177 = { kind: "overflow", text: "1 + j within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2658:62", def: "eq_slots" };
-const $ob178 = { kind: "overflow", text: "1 + j within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2659:62", def: "eq_slots" };
-const $ob179 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2660:42", def: "eq_slots" };
-const $ob180 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2686:40", def: "eq_slots" };
-const $ob181 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2717:27", def: "eq_field" };
-const $ob182 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2719:38", def: "eq_field" };
-const $ob183 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2779:13", def: "short_circuit" };
-const $ob184 = { kind: "overflow", text: "count - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2785:13", def: "short_circuit" };
-const $ob185 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2912:42", def: "call_val" };
-const $ob186 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2926:46", def: "call_val" };
-const $ob187 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2935:46", def: "call_val" };
-const $ob188 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2961:40", def: "call_val" };
-const $ob189 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2972:44", def: "call_val" };
-const $ob190 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:3021:36", def: "try_val" };
-const $ob191 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:3035:38", def: "try_val" };
-const $ob192 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:3060:40", def: "try_val" };
+const $ob1 = { kind: "overflow", text: "total + 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:222:15", def: "utf8_len" };
+const $ob2 = { kind: "overflow", text: "total + 2 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:225:17", def: "utf8_len" };
+const $ob3 = { kind: "overflow", text: "total + 3 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:228:19", def: "utf8_len" };
+const $ob4 = { kind: "overflow", text: "total + 4 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:230:19", def: "utf8_len" };
+const $ob5 = { kind: "overflow", text: "-1074 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:313:30", def: "double_literal" };
+const $ob6 = { kind: "overflow", text: "-1022 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:324:11", def: "double_literal" };
+const $ob7 = { kind: "overflow", text: "nib * 2 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:340:13", def: "double_literal" };
+const $ob8 = { kind: "overflow", text: "nib + 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:342:15", def: "double_literal" };
+const $ob9 = { kind: "overflow", text: "List.len(xs: parts) - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:376:33", def: "last_segment" };
+const $ob10 = { kind: "overflow", text: "-1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:400:10", def: "field_index" };
+const $ob11 = { kind: "overflow", text: "8 * k within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:417:10", def: "slots_size" };
+const $ob12 = { kind: "overflow", text: "n.counter + 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:534:25", def: "new_tmp" };
+const $ob13 = { kind: "overflow", text: "n.counter + 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:539:25", def: "new_label" };
+const $ob14 = { kind: "overflow", text: "n.counter + 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:600:25", def: "alloc_local" };
+const $ob15 = { kind: "overflow", text: "n.string_count + 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:612:30", def: "c_string" };
+const $ob16 = { kind: "overflow", text: "bytes + 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:618:10", def: "c_string" };
+const $ob17 = { kind: "overflow", text: "n.text_count + 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:630:28", def: "text_global" };
+const $ob18 = { kind: "overflow", text: "bytes + 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:633:31", def: "text_global" };
+const $ob19 = { kind: "overflow", text: "n.text_count + 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:647:28", def: "bytes_global" };
+const $ob20 = { kind: "overflow", text: "List.len(xs: bytes) + 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:649:31", def: "bytes_global" };
+const $ob21 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:916:15", def: "const_val" };
+const $ob22 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:941:43", def: "const_val" };
+const $ob23 = { kind: "overflow", text: "1 + List.len(xs: fs) within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:955:64", def: "const_val" };
+const $ob24 = { kind: "overflow", text: "8 * (1 + List.len(xs: fs)) within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:955:59", def: "const_val" };
+const $ob25 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:966:43", def: "const_val" };
+const $ob26 = { kind: "overflow", text: "1 + i within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:968:47", def: "const_val" };
+const $ob27 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1041:22", def: "visit_block" };
+const $ob28 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1058:48", def: "visit_stmt" };
+const $ob29 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1059:48", def: "visit_stmt" };
+const $ob30 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1060:42", def: "visit_stmt" };
+const $ob31 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1061:43", def: "visit_stmt" };
+const $ob32 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1063:22", def: "visit_stmt" };
+const $ob33 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1064:23", def: "visit_stmt" };
+const $ob34 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1066:40", def: "visit_stmt" };
+const $ob35 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1070:22", def: "visit_stmt" };
+const $ob36 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1073:41", def: "visit_stmt" };
+const $ob37 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1076:26", def: "visit_stmt" };
+const $ob38 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1079:41", def: "visit_stmt" };
+const $ob39 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1081:25", def: "visit_stmt" };
+const $ob40 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1085:22", def: "visit_stmt" };
+const $ob41 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1086:23", def: "visit_stmt" };
+const $ob42 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1089:22", def: "visit_stmt" };
+const $ob43 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1090:22", def: "visit_stmt" };
+const $ob44 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1091:23", def: "visit_stmt" };
+const $ob45 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1094:22", def: "visit_stmt" };
+const $ob46 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1095:23", def: "visit_stmt" };
+const $ob47 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1097:43", def: "visit_stmt" };
+const $ob48 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1098:41", def: "visit_stmt" };
+const $ob49 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1099:50", def: "visit_stmt" };
+const $ob50 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1102:44", def: "visit_stmt" };
+const $ob51 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1118:22", def: "visit_exprs" };
+const $ob52 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1135:22", def: "visit_inits" };
+const $ob53 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1157:50", def: "visit_expr" };
+const $ob54 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1158:23", def: "visit_expr" };
+const $ob55 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1159:23", def: "visit_expr" };
+const $ob56 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1160:23", def: "visit_expr" };
+const $ob57 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1169:22", def: "visit_expr" };
+const $ob58 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1170:23", def: "visit_expr" };
+const $ob59 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1173:11", def: "visit_expr" };
+const $ob60 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1179:11", def: "visit_expr" };
+const $ob61 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1185:11", def: "visit_expr" };
+const $ob62 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1191:22", def: "visit_expr" };
+const $ob63 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1192:23", def: "visit_expr" };
+const $ob64 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1195:11", def: "visit_expr" };
+const $ob65 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1200:41", def: "visit_expr" };
+const $ob66 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1201:47", def: "visit_expr" };
+const $ob67 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1202:45", def: "visit_expr" };
+const $ob68 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1203:43", def: "visit_expr" };
+const $ob69 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1204:42", def: "visit_expr" };
+const $ob70 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1206:22", def: "visit_expr" };
+const $ob71 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1207:22", def: "visit_expr" };
+const $ob72 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1210:22", def: "visit_expr" };
+const $ob73 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1211:22", def: "visit_expr" };
+const $ob74 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1214:22", def: "visit_expr" };
+const $ob75 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1215:22", def: "visit_expr" };
+const $ob76 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1218:22", def: "visit_expr" };
+const $ob77 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1219:22", def: "visit_expr" };
+const $ob78 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1222:22", def: "visit_expr" };
+const $ob79 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1223:22", def: "visit_expr" };
+const $ob80 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1226:22", def: "visit_expr" };
+const $ob81 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1227:22", def: "visit_expr" };
+const $ob82 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1229:47", def: "visit_expr" };
+const $ob83 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1231:11", def: "visit_expr" };
+const $ob84 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1237:22", def: "visit_expr" };
+const $ob85 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1239:39", def: "visit_expr" };
+const $ob86 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1243:23", def: "visit_expr" };
+const $ob87 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1244:22", def: "visit_expr" };
+const $ob88 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1249:24", def: "visit_expr" };
+const $ob89 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1250:24", def: "visit_expr" };
+const $ob90 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1252:42", def: "visit_expr" };
+const $ob91 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1253:44", def: "visit_expr" };
+const $ob92 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1256:39", def: "visit_expr" };
+const $ob93 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1258:22", def: "visit_expr" };
+const $ob94 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1261:23", def: "visit_expr" };
+const $ob95 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1262:23", def: "visit_expr" };
+const $ob96 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1265:22", def: "visit_expr" };
+const $ob97 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1266:23", def: "visit_expr" };
+const $ob98 = { kind: "overflow", text: "steps - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1332:13", def: "reachable" };
+const $ob99 = { kind: "overflow", text: "List.len(xs: queue) - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1333:42", def: "reachable" };
+const $ob100 = { kind: "overflow", text: "List.len(xs: queue) - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1334:48", def: "reachable" };
+const $ob101 = { kind: "overflow", text: "n.counter + 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1741:25", def: "decoder_fn" };
+const $ob102 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1747:50", def: "decoder_fn" };
+const $ob103 = { kind: "overflow", text: "-1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1767:22", def: "decoder_body" };
+const $ob104 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1791:25", def: "decoder_body" };
+const $ob105 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1831:25", def: "block_stmts" };
+const $ob106 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1855:38", def: "stmt_ir" };
+const $ob107 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1863:38", def: "stmt_ir" };
+const $ob108 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1874:38", def: "stmt_ir" };
+const $ob109 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1881:38", def: "stmt_ir" };
+const $ob110 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1892:27", def: "stmt_ir" };
+const $ob111 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1897:29", def: "stmt_ir" };
+const $ob112 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1906:38", def: "stmt_ir" };
+const $ob113 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1916:42", def: "stmt_ir" };
+const $ob114 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1924:43", def: "stmt_ir" };
+const $ob115 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1931:42", def: "stmt_ir" };
+const $ob116 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1938:29", def: "stmt_ir" };
+const $ob117 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1954:38", def: "stmt_ir" };
+const $ob118 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1958:27", def: "stmt_ir" };
+const $ob119 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1964:39", def: "stmt_ir" };
+const $ob120 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1966:39", def: "stmt_ir" };
+const $ob121 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1981:27", def: "stmt_ir" };
+const $ob122 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:1994:38", def: "stmt_ir" };
+const $ob123 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2023:27", def: "stmt_ir" };
+const $ob124 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2029:38", def: "stmt_ir" };
+const $ob125 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2040:38", def: "stmt_ir" };
+const $ob126 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2052:38", def: "stmt_ir" };
+const $ob127 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2056:37", def: "stmt_ir" };
+const $ob128 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2078:38", def: "stmt_ir" };
+const $ob129 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2144:11", def: "expr_val" };
+const $ob130 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2164:40", def: "expr_val" };
+const $ob131 = { kind: "overflow", text: "1 + List.len(xs: fs) within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2175:64", def: "expr_val" };
+const $ob132 = { kind: "overflow", text: "8 * (1 + List.len(xs: fs)) within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2175:59", def: "expr_val" };
+const $ob133 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2185:40", def: "expr_val" };
+const $ob134 = { kind: "overflow", text: "1 + idx within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2187:45", def: "expr_val" };
+const $ob135 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2193:38", def: "expr_val" };
+const $ob136 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2206:40", def: "expr_val" };
+const $ob137 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2213:38", def: "expr_val" };
+const $ob138 = { kind: "overflow", text: "base + idx within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2224:63", def: "expr_val" };
+const $ob139 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2236:40", def: "expr_val" };
+const $ob140 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2248:38", def: "expr_val" };
+const $ob141 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2250:38", def: "expr_val" };
+const $ob142 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2264:38", def: "expr_val" };
+const $ob143 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2266:38", def: "expr_val" };
+const $ob144 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2271:38", def: "expr_val" };
+const $ob145 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2273:38", def: "expr_val" };
+const $ob146 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2281:40", def: "expr_val" };
+const $ob147 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2287:38", def: "expr_val" };
+const $ob148 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2294:40", def: "expr_val" };
+const $ob149 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2296:40", def: "expr_val" };
+const $ob150 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2303:40", def: "expr_val" };
+const $ob151 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2305:40", def: "expr_val" };
+const $ob152 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2312:11", def: "expr_val" };
+const $ob153 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2321:38", def: "expr_val" };
+const $ob154 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2328:11", def: "expr_val" };
+const $ob155 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2335:11", def: "expr_val" };
+const $ob156 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2342:11", def: "expr_val" };
+const $ob157 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2349:38", def: "expr_val" };
+const $ob158 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2368:11", def: "expr_val" };
+const $ob159 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2380:38", def: "expr_val" };
+const $ob160 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2384:27", def: "expr_val" };
+const $ob161 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2395:35", def: "expr_val" };
+const $ob162 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2404:11", def: "expr_val" };
+const $ob163 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2509:40", def: "eq_val" };
+const $ob164 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2510:38", def: "eq_val" };
+const $ob165 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2512:38", def: "eq_val" };
+const $ob166 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2526:38", def: "eq_val" };
+const $ob167 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2528:38", def: "eq_val" };
+const $ob168 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2538:38", def: "eq_val" };
+const $ob169 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2540:38", def: "eq_val" };
+const $ob170 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2551:36", def: "eq_val" };
+const $ob171 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2553:36", def: "eq_val" };
+const $ob172 = { kind: "overflow", text: "n.counter + 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2586:25", def: "recover_val" };
+const $ob173 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2593:11", def: "recover_val" };
+const $ob174 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2650:25", def: "recover_body" };
+const $ob175 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2652:38", def: "recover_body" };
+const $ob176 = { kind: "overflow", text: "n.counter + 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2680:25", def: "eq_fn_of" };
+const $ob177 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2688:11", def: "eq_fn_of" };
+const $ob178 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2761:40", def: "eq_slots" };
+const $ob179 = { kind: "overflow", text: "1 + j within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2803:62", def: "eq_slots" };
+const $ob180 = { kind: "overflow", text: "1 + j within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2804:62", def: "eq_slots" };
+const $ob181 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2805:42", def: "eq_slots" };
+const $ob182 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2831:40", def: "eq_slots" };
+const $ob183 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2862:27", def: "eq_field" };
+const $ob184 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2864:38", def: "eq_field" };
+const $ob185 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2924:13", def: "short_circuit" };
+const $ob186 = { kind: "overflow", text: "count - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:2930:13", def: "short_circuit" };
+const $ob187 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:3064:42", def: "call_val" };
+const $ob188 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:3078:46", def: "call_val" };
+const $ob189 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:3087:46", def: "call_val" };
+const $ob190 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:3113:40", def: "call_val" };
+const $ob191 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:3124:44", def: "call_val" };
+const $ob192 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:3206:36", def: "try_val" };
+const $ob193 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:3220:38", def: "try_val" };
+const $ob194 = { kind: "overflow", text: "fuel - 1 within Int", at: "/Users/jamesrandall/code/onus/self/native.onus:3245:40", def: "try_val" };
 export const max_depth = 100000;
 
 export function skip($args) {
@@ -592,7 +596,10 @@ export function ll_of({ ctx, t }) {
       if (name === "Text" || name === "TypeInfo") {
         return { tag: "Ok", value: "ptr" };
       }
-      if (name === "Bytes" || name === "Spec") {
+      if (name === "Bytes") {
+        return { tag: "Ok", value: "ptr" };
+      }
+      if (name === "Spec") {
         return { tag: "Err", error: "`" + name + "` values" };
       }
       return { tag: "Ok", value: "i64" };
@@ -613,7 +620,7 @@ export function ll_of({ ctx, t }) {
     if ($m22.tag === "Opaque") {
       const def = $m22.def;
       const q = $context.qualified_name({ ctx: ctx, id: def });
-      if (q === "std.list.List" || q === "std.list.Builder" || q === "std.grid.Grid" || q === "std.sql.Select" || q === "std.sql.Param" || q === "std.sql.Statement") {
+      if (q === "std.list.List" || q === "std.list.Builder" || q === "std.grid.Grid" || q === "std.sql.Select" || q === "std.sql.Param" || q === "std.sql.Statement" || q === "std.map.Map" || q === "std.map.Dict") {
         return { tag: "Ok", value: "ptr" };
       }
       return { tag: "Err", error: "`" + $context.get_def({ ctx: ctx, id: def }).name + "` values" };
@@ -742,16 +749,16 @@ export function alloc_local({ n, name, t, ty }) {
 }
 
 export function c_string({ n, x }) {
-  const $m47 = $std_map.find({ d: n.strings, key: x });
-  $m47$match: {
-    if ($m47.tag === "Some") {
-      const value = $m47.value;
+  const $m48 = $std_map.find({ d: n.strings, key: x });
+  $m48$match: {
+    if ($m48.tag === "Some") {
+      const value = $m48.value;
       return [value, n];
-      break $m47$match;
+      break $m48$match;
     }
-    if ($m47.tag === "None") {
+    if ($m48.tag === "None") {
       skip({  });
-      break $m47$match;
+      break $m48$match;
     }
     $rt.unreachable();
   }
@@ -766,16 +773,16 @@ export function c_string({ n, x }) {
 }
 
 export function text_global({ n, x }) {
-  const $m49 = $std_map.find({ d: n.texts, key: x });
-  $m49$match: {
-    if ($m49.tag === "Some") {
-      const value = $m49.value;
+  const $m50 = $std_map.find({ d: n.texts, key: x });
+  $m50$match: {
+    if ($m50.tag === "Some") {
+      const value = $m50.value;
       return [value, n];
-      break $m49$match;
+      break $m50$match;
     }
-    if ($m49.tag === "None") {
+    if ($m50.tag === "None") {
       skip({  });
-      break $m49$match;
+      break $m50$match;
     }
     $rt.unreachable();
   }
@@ -790,19 +797,122 @@ export function text_global({ n, x }) {
   return [name, n];
 }
 
-export function emit_panic({ n, ob }) {
-  const [$r51, n$27] = c_string({ n: n, x: ob.kind });
-  n = n$27;
-  const k = $r51;
-  const [$r52, n$28] = c_string({ n: n, x: ob.text });
+export function bytes_global({ n, bytes }) {
+  n = { ...n, text_count: $rt.int.add(n.text_count, 1, $ob19) };
+  const name = "@byt" + s({ i: n.text_count });
+  const arr = "[" + s({ i: $rt.int.add($std_list.len({ xs: bytes }), 1, $ob20) }) + " x i8]";
+  let out = $std_list.builder({  });
+  for (const b of bytes) {
+    if (0 <= b && b <= 255) {
+      const [, out$27] = push_byte({ out: out, b: b });
+      out = out$27;
+    }
+  }
+  push_global({ n: n, line: name + " = private unnamed_addr constant { i64, " + arr + " } { i64 " + s({ i: $std_list.len({ xs: bytes }) }) + ", " + arr + " c\"" + $std_text.join({ parts: $std_list.finish({ b: out }), sep: "" }) + "\\00\" }" });
+  return [name, n];
+}
+
+export function typeinfo_obj({ n, name, fields }) {
+  const [$r53, n$28] = new_tmp({ n: n });
   n = n$28;
-  const t = $r52;
-  const [$r53, n$29] = c_string({ n: n, x: ob.at });
-  n = n$29;
-  const a = $r53;
-  const [$r54, n$30] = c_string({ n: n, x: ob.def });
-  n = n$30;
-  const d = $r54;
+  const list = $r53;
+  emit_line({ n: n, line: list + " = call ptr @onus_rt_list_new(i64 " + s({ i: $std_list.len({ xs: fields }) }) + ")" });
+  const $hi54 = $std_list.len({ xs: fields });
+  for (let i = 0; i < $hi54; i++) {
+    const f = $std_list.get({ xs: fields, i: i });
+    const [$r55, n$29] = new_tmp({ n: n });
+    n = n$29;
+    const rec = $r55;
+    emit_line({ n: n, line: rec + " = call ptr @onus_alloc(i64 16)" });
+    const [$r56, n$30] = text_global({ n: n, x: f.name });
+    n = n$30;
+    const [$r57, n$31] = to_slot({ n: n, v: val({ v: $r56, t: "ptr" }) });
+    n = n$31;
+    const fname = $r57;
+    const [, n$32] = store_slot({ n: n, obj: rec, idx: 0, slot: fname });
+    n = n$32;
+    const [$r58, n$33] = text_global({ n: n, x: f.type_name });
+    n = n$33;
+    const [$r59, n$34] = to_slot({ n: n, v: val({ v: $r58, t: "ptr" }) });
+    n = n$34;
+    const tname = $r59;
+    const [, n$35] = store_slot({ n: n, obj: rec, idx: 1, slot: tname });
+    n = n$35;
+    const [$r60, n$36] = to_slot({ n: n, v: val({ v: rec, t: "ptr" }) });
+    n = n$36;
+    const rslot = $r60;
+    emit_line({ n: n, line: "call void @onus_rt_list_set(ptr " + list + ", i64 " + s({ i: i }) + ", i64 " + rslot + ")" });
+  }
+  const [$r61, n$37] = new_tmp({ n: n });
+  n = n$37;
+  const obj = $r61;
+  emit_line({ n: n, line: obj + " = call ptr @onus_alloc(i64 16)" });
+  const [$r62, n$38] = text_global({ n: n, x: name });
+  n = n$38;
+  const [$r63, n$39] = to_slot({ n: n, v: val({ v: $r62, t: "ptr" }) });
+  n = n$39;
+  const nslot = $r63;
+  const [, n$40] = store_slot({ n: n, obj: obj, idx: 0, slot: nslot });
+  n = n$40;
+  const [$r64, n$41] = to_slot({ n: n, v: val({ v: list, t: "ptr" }) });
+  n = n$41;
+  const lslot = $r64;
+  const [, n$42] = store_slot({ n: n, obj: obj, idx: 1, slot: lslot });
+  n = n$42;
+  return [val({ v: obj, t: "ptr" }), n];
+}
+
+export function typeinfo_owner({ n, ctx, owner }) {
+  const $m65 = owner;
+  $m65$match: {
+    if ($m65.tag === "PrimOwner") {
+      const name = $m65.name;
+      const [$r66, n$43] = typeinfo_obj({ n: n, name: name, fields: [] });
+      n = n$43;
+      return [$r66, n];
+      break $m65$match;
+    }
+    if ($m65.tag === "DefOwner") {
+      const def = $m65.def;
+      let fs = $std_list.builder({  });
+      const $m67 = $std_map.find({ d: ctx.fields, key: def });
+      $m67$match: {
+        if ($m67.tag === "Some") {
+          const value = $m67.value;
+          for (const f of value) {
+            const [, fs$44] = $std_list.push({ b: fs, x: { name: f.name, type_name: $lowerir.type_slug({ fuel: 1000, ctx: ctx, t: f.ty }) } });
+            fs = fs$44;
+          }
+          break $m67$match;
+        }
+        if ($m67.tag === "None") {
+          skip({  });
+          break $m67$match;
+        }
+        $rt.unreachable();
+      }
+      const [$r69, n$45] = typeinfo_obj({ n: n, name: $context.get_def({ ctx: ctx, id: def }).name, fields: $std_list.finish({ b: fs }) });
+      n = n$45;
+      return [$r69, n];
+      break $m65$match;
+    }
+    $rt.unreachable();
+  }
+}
+
+export function emit_panic({ n, ob }) {
+  const [$r70, n$46] = c_string({ n: n, x: ob.kind });
+  n = n$46;
+  const k = $r70;
+  const [$r71, n$47] = c_string({ n: n, x: ob.text });
+  n = n$47;
+  const t = $r71;
+  const [$r72, n$48] = c_string({ n: n, x: ob.at });
+  n = n$48;
+  const a = $r72;
+  const [$r73, n$49] = c_string({ n: n, x: ob.def });
+  n = n$49;
+  const d = $r73;
   emit_line({ n: n, line: "call void @onus_panic(ptr " + k + ", ptr " + t + ", ptr " + a + ", ptr " + d + ")" });
   emit_line({ n: n, line: "unreachable" });
   n = { ...n, terminated: true };
@@ -814,9 +924,9 @@ export function to_slot({ n, v }) {
   if (v.t === "i64") {
     return [v.v, n];
   }
-  const [$r56, n$31] = new_tmp({ n: n });
-  n = n$31;
-  const r = $r56;
+  const [$r75, n$50] = new_tmp({ n: n });
+  n = n$50;
+  const r = $r75;
   if (v.t === "double") {
     emit_line({ n: n, line: r + " = bitcast double " + v.v + " to i64" });
   }
@@ -833,9 +943,9 @@ export function from_slot({ n, slot, t }) {
   if (t === "i64") {
     return [val({ v: slot, t: t }), n];
   }
-  const [$r57, n$32] = new_tmp({ n: n });
-  n = n$32;
-  const r = $r57;
+  const [$r76, n$51] = new_tmp({ n: n });
+  n = n$51;
+  const r = $r76;
   if (t === "double") {
     emit_line({ n: n, line: r + " = bitcast i64 " + slot + " to double" });
   }
@@ -852,30 +962,30 @@ export function coerce_to({ n, v, to }) {
   if (v.t === to) {
     return [v, n];
   }
-  const [$r58, n$33] = to_slot({ n: n, v: v });
-  n = n$33;
-  const slot = $r58;
-  const [$r59, n$34] = from_slot({ n: n, slot: slot, t: to });
-  n = n$34;
-  return [$r59, n];
+  const [$r77, n$52] = to_slot({ n: n, v: v });
+  n = n$52;
+  const slot = $r77;
+  const [$r78, n$53] = from_slot({ n: n, slot: slot, t: to });
+  n = n$53;
+  return [$r78, n];
 }
 
 export function load_slot({ n, obj, idx }) {
-  const [$r60, n$35] = new_tmp({ n: n });
-  n = n$35;
-  const p = $r60;
+  const [$r79, n$54] = new_tmp({ n: n });
+  n = n$54;
+  const p = $r79;
   emit_line({ n: n, line: p + " = getelementptr i64, ptr " + obj + ", i64 " + s({ i: idx }) });
-  const [$r61, n$36] = new_tmp({ n: n });
-  n = n$36;
-  const v = $r61;
+  const [$r80, n$55] = new_tmp({ n: n });
+  n = n$55;
+  const v = $r80;
   emit_line({ n: n, line: v + " = load i64, ptr " + p });
   return [v, n];
 }
 
 export function store_slot({ n, obj, idx, slot }) {
-  const [$r62, n$37] = new_tmp({ n: n });
-  n = n$37;
-  const p = $r62;
+  const [$r81, n$56] = new_tmp({ n: n });
+  n = n$56;
+  const p = $r81;
   emit_line({ n: n, line: p + " = getelementptr i64, ptr " + obj + ", i64 " + s({ i: idx }) });
   emit_line({ n: n, line: "store i64 " + slot + ", ptr " + p });
   return [undefined, n];
@@ -914,18 +1024,18 @@ export function restore_fn({ n, sv }) {
 }
 
 export function require_native({ n, ctx, def }) {
-  const $m66 = n.host_js;
-  $m66$match: {
-    if ($m66.tag === "Some") {
-      const value = $m66.value;
+  const $m85 = n.host_js;
+  $m85$match: {
+    if ($m85.tag === "Some") {
+      const value = $m85.value;
       if ($claimcheck.carries({ ctx: ctx, fn_def: def.id, claim_def: value })) {
         return { tag: "Err", error: "`" + $context.qualified_name({ ctx: ctx, id: def.id }) + "`, which claims `host.js` and runs only on the JavaScript host" };
       }
-      break $m66$match;
+      break $m85$match;
     }
-    if ($m66.tag === "None") {
+    if ($m85.tag === "None") {
       skip({  });
-      break $m66$match;
+      break $m85$match;
     }
     $rt.unreachable();
   }
@@ -940,136 +1050,142 @@ export function const_val({ fuel, n, ctx, x }) {
     if (fuel === 0) {
       return [{ tag: "Err", error: "out of fuel" }, n];
     }
-    const $m71 = x;
-    $m71$match: {
-      if ($m71.tag === "IntV") {
-        const v = $m71.v;
+    const $m90 = x;
+    $m90$match: {
+      if ($m90.tag === "IntV") {
+        const v = $m90.v;
         return [{ tag: "Ok", value: val({ v: s({ i: v }), t: "i64" }) }, n];
-        break $m71$match;
+        break $m90$match;
       }
-      if ($m71.tag === "DurationV") {
-        const v = $m71.v;
+      if ($m90.tag === "DurationV") {
+        const v = $m90.v;
         return [{ tag: "Ok", value: val({ v: s({ i: v }), t: "i64" }) }, n];
-        break $m71$match;
+        break $m90$match;
       }
-      if ($m71.tag === "BoolV") {
-        const v = $m71.v;
+      if ($m90.tag === "BoolV") {
+        const v = $m90.v;
         return [{ tag: "Ok", value: val({ v: bool_text({ b: v }), t: "i1" }) }, n];
-        break $m71$match;
+        break $m90$match;
       }
-      if ($m71.tag === "FloatV") {
-        const v = $m71.v;
+      if ($m90.tag === "FloatV") {
+        const v = $m90.v;
         return [{ tag: "Ok", value: val({ v: double_literal({ v: v }), t: "double" }) }, n];
-        break $m71$match;
+        break $m90$match;
       }
-      if ($m71.tag === "TextV") {
-        const v = $m71.v;
-        const [$r76, n$38] = text_global({ n: n, x: v });
-        n = n$38;
-        return [{ tag: "Ok", value: val({ v: $r76, t: "ptr" }) }, n];
-        break $m71$match;
+      if ($m90.tag === "TextV") {
+        const v = $m90.v;
+        const [$r95, n$57] = text_global({ n: n, x: v });
+        n = n$57;
+        return [{ tag: "Ok", value: val({ v: $r95, t: "ptr" }) }, n];
+        break $m90$match;
       }
-      if ($m71.tag === "UnitV") {
+      if ($m90.tag === "UnitV") {
         return [{ tag: "Ok", value: val({ v: "0", t: "i64" }) }, n];
-        break $m71$match;
+        break $m90$match;
       }
-      if ($m71.tag === "ListV") {
-        const items = $m71.items;
-        const [$r79, n$39] = new_tmp({ n: n });
-        n = n$39;
-        const list = $r79;
+      if ($m90.tag === "ListV") {
+        const items = $m90.items;
+        const [$r98, n$58] = new_tmp({ n: n });
+        n = n$58;
+        const list = $r98;
         emit_line({ n: n, line: list + " = call ptr @onus_rt_list_new(i64 " + s({ i: $std_list.len({ xs: items }) }) + ")" });
-        const $hi80 = $std_list.len({ xs: items });
-        for (let i = 0; i < $hi80; i++) {
-          const [$r81, n$40] = const_val({ fuel: $rt.int.sub(fuel, 1, $ob19), n: n, ctx: ctx, x: $std_list.get({ xs: items, i: i }) });
-          n = n$40;
-          const cv = $rt.unwrap($r81);
-          const [$r82, n$41] = to_slot({ n: n, v: cv });
-          n = n$41;
-          const slot = $r82;
+        const $hi99 = $std_list.len({ xs: items });
+        for (let i = 0; i < $hi99; i++) {
+          const [$r100, n$59] = const_val({ fuel: $rt.int.sub(fuel, 1, $ob21), n: n, ctx: ctx, x: $std_list.get({ xs: items, i: i }) });
+          n = n$59;
+          const cv = $rt.unwrap($r100);
+          const [$r101, n$60] = to_slot({ n: n, v: cv });
+          n = n$60;
+          const slot = $r101;
           emit_line({ n: n, line: "call void @onus_rt_list_set(ptr " + list + ", i64 " + s({ i: i }) + ", i64 " + slot + ")" });
         }
         return [{ tag: "Ok", value: val({ v: list, t: "ptr" }) }, n];
-        break $m71$match;
+        break $m90$match;
       }
-      if ($m71.tag === "RecordV") {
-        const def = $m71.def;
-        const fields = $m71.fields;
+      if ($m90.tag === "RecordV") {
+        const def = $m90.def;
+        const fields = $m90.fields;
         const fs = fields_of({ ctx: ctx, owner: def });
-        const [$r84, n$42] = new_tmp({ n: n });
-        n = n$42;
-        const obj = $r84;
+        const [$r103, n$61] = new_tmp({ n: n });
+        n = n$61;
+        const obj = $r103;
         emit_line({ n: n, line: obj + " = call ptr @onus_alloc(i64 " + s({ i: slots_size({ k: $std_list.len({ xs: fs }) }) }) + ")" });
-        const $hi85 = $std_list.len({ xs: fs });
-        for (let i = 0; i < $hi85; i++) {
-          const $m86 = find_value({ fields: fields, name: $std_list.get({ xs: fs, i: i }).name });
-          $m86$match: {
-            if ($m86.tag === "Some") {
-              const value = $m86.value;
-              const [$r87, n$43] = const_val({ fuel: $rt.int.sub(fuel, 1, $ob20), n: n, ctx: ctx, x: value });
-              n = n$43;
-              const cv = $rt.unwrap($r87);
-              const [$r88, n$44] = to_slot({ n: n, v: cv });
-              n = n$44;
-              const slot = $r88;
-              const [, n$45] = store_slot({ n: n, obj: obj, idx: i, slot: slot });
-              n = n$45;
-              break $m86$match;
+        const $hi104 = $std_list.len({ xs: fs });
+        for (let i = 0; i < $hi104; i++) {
+          const $m105 = find_value({ fields: fields, name: $std_list.get({ xs: fs, i: i }).name });
+          $m105$match: {
+            if ($m105.tag === "Some") {
+              const value = $m105.value;
+              const [$r106, n$62] = const_val({ fuel: $rt.int.sub(fuel, 1, $ob22), n: n, ctx: ctx, x: value });
+              n = n$62;
+              const cv = $rt.unwrap($r106);
+              const [$r107, n$63] = to_slot({ n: n, v: cv });
+              n = n$63;
+              const slot = $r107;
+              const [, n$64] = store_slot({ n: n, obj: obj, idx: i, slot: slot });
+              n = n$64;
+              break $m105$match;
             }
-            if ($m86.tag === "None") {
+            if ($m105.tag === "None") {
               skip({  });
-              break $m86$match;
+              break $m105$match;
             }
             $rt.unreachable();
           }
         }
         return [{ tag: "Ok", value: val({ v: obj, t: "ptr" }) }, n];
-        break $m71$match;
+        break $m90$match;
       }
-      if ($m71.tag === "VariantV") {
-        const def = $m71.def;
-        const fields = $m71.fields;
+      if ($m90.tag === "VariantV") {
+        const def = $m90.def;
+        const fields = $m90.fields;
         const parent = $context.get_def({ ctx: ctx, id: def }).parent;
         const fs = fields_of({ ctx: ctx, owner: def });
-        const [$r90, n$46] = new_tmp({ n: n });
-        n = n$46;
-        const obj = $r90;
-        emit_line({ n: n, line: obj + " = call ptr @onus_alloc(i64 " + s({ i: $rt.int.mul(8, $rt.int.add(1, $std_list.len({ xs: fs }), $ob21), $ob22) }) + ")" });
-        const [, n$47] = store_slot({ n: n, obj: obj, idx: 0, slot: variant_tag({ ctx: ctx, parent: parent, variant: def }) });
-        n = n$47;
-        const $hi91 = $std_list.len({ xs: fs });
-        for (let i = 0; i < $hi91; i++) {
-          const $m92 = find_value({ fields: fields, name: $std_list.get({ xs: fs, i: i }).name });
-          $m92$match: {
-            if ($m92.tag === "Some") {
-              const value = $m92.value;
-              const [$r93, n$48] = const_val({ fuel: $rt.int.sub(fuel, 1, $ob23), n: n, ctx: ctx, x: value });
-              n = n$48;
-              const cv = $rt.unwrap($r93);
-              const [$r94, n$49] = to_slot({ n: n, v: cv });
-              n = n$49;
-              const slot = $r94;
-              const [, n$50] = store_slot({ n: n, obj: obj, idx: $rt.int.add(1, i, $ob24), slot: slot });
-              n = n$50;
-              break $m92$match;
+        const [$r109, n$65] = new_tmp({ n: n });
+        n = n$65;
+        const obj = $r109;
+        emit_line({ n: n, line: obj + " = call ptr @onus_alloc(i64 " + s({ i: $rt.int.mul(8, $rt.int.add(1, $std_list.len({ xs: fs }), $ob23), $ob24) }) + ")" });
+        const [, n$66] = store_slot({ n: n, obj: obj, idx: 0, slot: variant_tag({ ctx: ctx, parent: parent, variant: def }) });
+        n = n$66;
+        const $hi110 = $std_list.len({ xs: fs });
+        for (let i = 0; i < $hi110; i++) {
+          const $m111 = find_value({ fields: fields, name: $std_list.get({ xs: fs, i: i }).name });
+          $m111$match: {
+            if ($m111.tag === "Some") {
+              const value = $m111.value;
+              const [$r112, n$67] = const_val({ fuel: $rt.int.sub(fuel, 1, $ob25), n: n, ctx: ctx, x: value });
+              n = n$67;
+              const cv = $rt.unwrap($r112);
+              const [$r113, n$68] = to_slot({ n: n, v: cv });
+              n = n$68;
+              const slot = $r113;
+              const [, n$69] = store_slot({ n: n, obj: obj, idx: $rt.int.add(1, i, $ob26), slot: slot });
+              n = n$69;
+              break $m111$match;
             }
-            if ($m92.tag === "None") {
+            if ($m111.tag === "None") {
               skip({  });
-              break $m92$match;
+              break $m111$match;
             }
             $rt.unreachable();
           }
         }
         return [{ tag: "Ok", value: val({ v: obj, t: "ptr" }) }, n];
-        break $m71$match;
+        break $m90$match;
       }
-      if ($m71.tag === "BytesV") {
-        return [{ tag: "Err", error: "`bytes` compile-time values" }, n];
-        break $m71$match;
+      if ($m90.tag === "BytesV") {
+        const bytes = $m90.bytes;
+        const [$r115, n$70] = bytes_global({ n: n, bytes: bytes });
+        n = n$70;
+        return [{ tag: "Ok", value: val({ v: $r115, t: "ptr" }) }, n];
+        break $m90$match;
       }
-      if ($m71.tag === "TypeInfoV") {
-        return [{ tag: "Err", error: "`typeinfo` compile-time values" }, n];
-        break $m71$match;
+      if ($m90.tag === "TypeInfoV") {
+        const owner = $m90.owner;
+        const [$r117, n$71] = typeinfo_owner({ n: n, ctx: ctx, owner: owner });
+        n = n$71;
+        return [{ tag: "Ok", value: $r117 }, n];
+        break $m90$match;
       }
       $rt.unreachable();
     }
@@ -1080,16 +1196,16 @@ export function const_val({ fuel, n, ctx, x }) {
 }
 
 export function literal_of({ e }) {
-  const $m98 = e;
-  $m98$match: {
-    if ($m98.tag === "ValueE") {
-      const value = $m98.value;
+  const $m119 = e;
+  $m119$match: {
+    if ($m119.tag === "ValueE") {
+      const value = $m119.value;
       return { tag: "Some", value: value };
-      break $m98$match;
+      break $m119$match;
     }
     if (true) {
       return { tag: "None" };
-      break $m98$match;
+      break $m119$match;
     }
     $rt.unreachable();
   }
@@ -1103,47 +1219,47 @@ export function bool_text({ b }) {
 }
 
 export function scalar_value({ e }) {
-  const $m101 = e;
-  $m101$match: {
-    if ($m101.tag === "ValueE") {
-      const value = $m101.value;
+  const $m122 = e;
+  $m122$match: {
+    if ($m122.tag === "ValueE") {
+      const value = $m122.value;
       return is_scalar({ x: value });
-      break $m101$match;
+      break $m122$match;
     }
     if (true) {
       return false;
-      break $m101$match;
+      break $m122$match;
     }
     $rt.unreachable();
   }
 }
 
 export function is_scalar({ x }) {
-  const $m102 = x;
-  $m102$match: {
-    if ($m102.tag === "IntV") {
+  const $m123 = x;
+  $m123$match: {
+    if ($m123.tag === "IntV") {
       return true;
-      break $m102$match;
+      break $m123$match;
     }
-    if ($m102.tag === "DurationV") {
+    if ($m123.tag === "DurationV") {
       return true;
-      break $m102$match;
+      break $m123$match;
     }
-    if ($m102.tag === "FloatV") {
+    if ($m123.tag === "FloatV") {
       return true;
-      break $m102$match;
+      break $m123$match;
     }
-    if ($m102.tag === "BoolV") {
+    if ($m123.tag === "BoolV") {
       return true;
-      break $m102$match;
+      break $m123$match;
     }
-    if ($m102.tag === "TextV") {
+    if ($m123.tag === "TextV") {
       return true;
-      break $m102$match;
+      break $m123$match;
     }
     if (true) {
       return false;
-      break $m102$match;
+      break $m123$match;
     }
     $rt.unreachable();
   }
@@ -1152,20 +1268,20 @@ export function is_scalar({ x }) {
 export function aggregate_const({ n, target_def }) {
   for (const m of n.modules) {
     for (const item of m.items) {
-      const $m103 = item;
-      $m103$match: {
-        if ($m103.tag === "ConstItem") {
-          const def = $m103.def;
-          const ty = $m103.ty;
-          const value = $m103.value;
+      const $m124 = item;
+      $m124$match: {
+        if ($m124.tag === "ConstItem") {
+          const def = $m124.def;
+          const ty = $m124.ty;
+          const value = $m124.value;
           if (def.id === target_def) {
             return !scalar_value({ e: value });
           }
-          break $m103$match;
+          break $m124$match;
         }
         if (true) {
           skip({  });
-          break $m103$match;
+          break $m124$match;
         }
         $rt.unreachable();
       }
@@ -1174,176 +1290,176 @@ export function aggregate_const({ n, target_def }) {
   return false;
 }
 
-export function visit_block({ fuel, queue, b }) {
+export function visit_block({ fuel, ctx, queue, b }) {
   if (fuel === 0) {
     return [undefined, queue];
   }
   for (const st of b) {
-    const [, queue$51] = visit_stmt({ fuel: $rt.int.sub(fuel, 1, $ob25), queue: queue, st: st });
-    queue = queue$51;
+    const [, queue$72] = visit_stmt({ fuel: $rt.int.sub(fuel, 1, $ob27), ctx: ctx, queue: queue, st: st });
+    queue = queue$72;
   }
   return [undefined, queue];
   return [undefined, queue];
 }
 
-export function visit_stmt({ fuel, queue, st }) {
+export function visit_stmt({ fuel, ctx, queue, st }) {
   if (fuel === 0) {
     return [undefined, queue];
   }
-  const $m104 = st;
-  $m104$match: {
-    if ($m104.tag === "Let") {
-      const value = $m104.value;
-      const [, queue$52] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob26), queue: queue, e: value });
-      queue = queue$52;
-      break $m104$match;
+  const $m125 = st;
+  $m125$match: {
+    if ($m125.tag === "Let") {
+      const value = $m125.value;
+      const [, queue$73] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob28), ctx: ctx, queue: queue, e: value });
+      queue = queue$73;
+      break $m125$match;
     }
-    if ($m104.tag === "Assign") {
-      const value = $m104.value;
-      const [, queue$53] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob27), queue: queue, e: value });
-      queue = queue$53;
-      break $m104$match;
+    if ($m125.tag === "Assign") {
+      const value = $m125.value;
+      const [, queue$74] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob29), ctx: ctx, queue: queue, e: value });
+      queue = queue$74;
+      break $m125$match;
     }
-    if ($m104.tag === "Return") {
-      const value = $m104.value;
-      const [, queue$54] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob28), queue: queue, e: value });
-      queue = queue$54;
-      break $m104$match;
+    if ($m125.tag === "Return") {
+      const value = $m125.value;
+      const [, queue$75] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob30), ctx: ctx, queue: queue, e: value });
+      queue = queue$75;
+      break $m125$match;
     }
-    if ($m104.tag === "ExprStmt") {
-      const expr = $m104.expr;
-      const [, queue$55] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob29), queue: queue, e: expr });
-      queue = queue$55;
-      break $m104$match;
+    if ($m125.tag === "ExprStmt") {
+      const expr = $m125.expr;
+      const [, queue$76] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob31), ctx: ctx, queue: queue, e: expr });
+      queue = queue$76;
+      break $m125$match;
     }
-    if ($m104.tag === "If") {
-      const cond = $m104.cond;
-      const then_block = $m104.then_block;
-      const else_block = $m104.else_block;
-      const [, queue$56] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob30), queue: queue, e: cond });
-      queue = queue$56;
-      const [, queue$57] = visit_block({ fuel: $rt.int.sub(fuel, 1, $ob31), queue: queue, b: then_block });
-      queue = queue$57;
-      const $m105 = else_block;
-      $m105$match: {
-        if ($m105.tag === "Some") {
-          const value = $m105.value;
-          const [, queue$58] = visit_block({ fuel: $rt.int.sub(fuel, 1, $ob32), queue: queue, b: value });
-          queue = queue$58;
-          break $m105$match;
+    if ($m125.tag === "If") {
+      const cond = $m125.cond;
+      const then_block = $m125.then_block;
+      const else_block = $m125.else_block;
+      const [, queue$77] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob32), ctx: ctx, queue: queue, e: cond });
+      queue = queue$77;
+      const [, queue$78] = visit_block({ fuel: $rt.int.sub(fuel, 1, $ob33), ctx: ctx, queue: queue, b: then_block });
+      queue = queue$78;
+      const $m126 = else_block;
+      $m126$match: {
+        if ($m126.tag === "Some") {
+          const value = $m126.value;
+          const [, queue$79] = visit_block({ fuel: $rt.int.sub(fuel, 1, $ob34), ctx: ctx, queue: queue, b: value });
+          queue = queue$79;
+          break $m126$match;
         }
-        if ($m105.tag === "None") {
+        if ($m126.tag === "None") {
           skip({  });
-          break $m105$match;
+          break $m126$match;
         }
         $rt.unreachable();
       }
-      break $m104$match;
+      break $m125$match;
     }
-    if ($m104.tag === "Match") {
-      const scrutinee = $m104.scrutinee;
-      const arms = $m104.arms;
-      const [, queue$59] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob33), queue: queue, e: scrutinee });
-      queue = queue$59;
+    if ($m125.tag === "Match") {
+      const scrutinee = $m125.scrutinee;
+      const arms = $m125.arms;
+      const [, queue$80] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob35), ctx: ctx, queue: queue, e: scrutinee });
+      queue = queue$80;
       for (const a of arms) {
-        const $m106 = a.pattern_test;
-        $m106$match: {
-          if ($m106.tag === "Some") {
-            const value = $m106.value;
-            const [, queue$60] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob34), queue: queue, e: value });
-            queue = queue$60;
-            break $m106$match;
+        const $m127 = a.pattern_test;
+        $m127$match: {
+          if ($m127.tag === "Some") {
+            const value = $m127.value;
+            const [, queue$81] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob36), ctx: ctx, queue: queue, e: value });
+            queue = queue$81;
+            break $m127$match;
           }
-          if ($m106.tag === "None") {
+          if ($m127.tag === "None") {
             skip({  });
-            break $m106$match;
+            break $m127$match;
           }
           $rt.unreachable();
         }
         for (const bd of a.bindings) {
-          const [, queue$61] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob35), queue: queue, e: bd.value });
-          queue = queue$61;
+          const [, queue$82] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob37), ctx: ctx, queue: queue, e: bd.value });
+          queue = queue$82;
         }
-        const $m107 = a.guard;
-        $m107$match: {
-          if ($m107.tag === "Some") {
-            const value = $m107.value;
-            const [, queue$62] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob36), queue: queue, e: value });
-            queue = queue$62;
-            break $m107$match;
+        const $m128 = a.guard;
+        $m128$match: {
+          if ($m128.tag === "Some") {
+            const value = $m128.value;
+            const [, queue$83] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob38), ctx: ctx, queue: queue, e: value });
+            queue = queue$83;
+            break $m128$match;
           }
-          if ($m107.tag === "None") {
+          if ($m128.tag === "None") {
             skip({  });
-            break $m107$match;
+            break $m128$match;
           }
           $rt.unreachable();
         }
-        const [, queue$63] = visit_block({ fuel: $rt.int.sub(fuel, 1, $ob37), queue: queue, b: a.body });
-        queue = queue$63;
+        const [, queue$84] = visit_block({ fuel: $rt.int.sub(fuel, 1, $ob39), ctx: ctx, queue: queue, b: a.body });
+        queue = queue$84;
       }
-      break $m104$match;
+      break $m125$match;
     }
-    if ($m104.tag === "Loop") {
-      const cond = $m104.cond;
-      const body = $m104.body;
-      const [, queue$64] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob38), queue: queue, e: cond });
-      queue = queue$64;
-      const [, queue$65] = visit_block({ fuel: $rt.int.sub(fuel, 1, $ob39), queue: queue, b: body });
-      queue = queue$65;
-      break $m104$match;
+    if ($m125.tag === "Loop") {
+      const cond = $m125.cond;
+      const body = $m125.body;
+      const [, queue$85] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob40), ctx: ctx, queue: queue, e: cond });
+      queue = queue$85;
+      const [, queue$86] = visit_block({ fuel: $rt.int.sub(fuel, 1, $ob41), ctx: ctx, queue: queue, b: body });
+      queue = queue$86;
+      break $m125$match;
     }
-    if ($m104.tag === "ForRange") {
-      const lo = $m104.lo;
-      const hi = $m104.hi;
-      const body = $m104.body;
-      const [, queue$66] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob40), queue: queue, e: lo });
-      queue = queue$66;
-      const [, queue$67] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob41), queue: queue, e: hi });
-      queue = queue$67;
-      const [, queue$68] = visit_block({ fuel: $rt.int.sub(fuel, 1, $ob42), queue: queue, b: body });
-      queue = queue$68;
-      break $m104$match;
+    if ($m125.tag === "ForRange") {
+      const lo = $m125.lo;
+      const hi = $m125.hi;
+      const body = $m125.body;
+      const [, queue$87] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob42), ctx: ctx, queue: queue, e: lo });
+      queue = queue$87;
+      const [, queue$88] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob43), ctx: ctx, queue: queue, e: hi });
+      queue = queue$88;
+      const [, queue$89] = visit_block({ fuel: $rt.int.sub(fuel, 1, $ob44), ctx: ctx, queue: queue, b: body });
+      queue = queue$89;
+      break $m125$match;
     }
-    if ($m104.tag === "ForEach") {
-      const list = $m104.list;
-      const body = $m104.body;
-      const [, queue$69] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob43), queue: queue, e: list });
-      queue = queue$69;
-      const [, queue$70] = visit_block({ fuel: $rt.int.sub(fuel, 1, $ob44), queue: queue, b: body });
-      queue = queue$70;
-      break $m104$match;
+    if ($m125.tag === "ForEach") {
+      const list = $m125.list;
+      const body = $m125.body;
+      const [, queue$90] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob45), ctx: ctx, queue: queue, e: list });
+      queue = queue$90;
+      const [, queue$91] = visit_block({ fuel: $rt.int.sub(fuel, 1, $ob46), ctx: ctx, queue: queue, b: body });
+      queue = queue$91;
+      break $m125$match;
     }
-    if ($m104.tag === "Check") {
-      const cond = $m104.cond;
-      const [, queue$71] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob45), queue: queue, e: cond });
-      queue = queue$71;
-      break $m104$match;
+    if ($m125.tag === "Check") {
+      const cond = $m125.cond;
+      const [, queue$92] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob47), ctx: ctx, queue: queue, e: cond });
+      queue = queue$92;
+      break $m125$match;
     }
-    if ($m104.tag === "Assert") {
-      const cond = $m104.cond;
-      const [, queue$72] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob46), queue: queue, e: cond });
-      queue = queue$72;
-      break $m104$match;
+    if ($m125.tag === "Assert") {
+      const cond = $m125.cond;
+      const [, queue$93] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob48), ctx: ctx, queue: queue, e: cond });
+      queue = queue$93;
+      break $m125$match;
     }
-    if ($m104.tag === "CallInout") {
-      const call = $m104.call;
-      const [, queue$73] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob47), queue: queue, e: call });
-      queue = queue$73;
-      break $m104$match;
+    if ($m125.tag === "CallInout") {
+      const call = $m125.call;
+      const [, queue$94] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob49), ctx: ctx, queue: queue, e: call });
+      queue = queue$94;
+      break $m125$match;
     }
-    if ($m104.tag === "Unreachable") {
+    if ($m125.tag === "Unreachable") {
       skip({  });
-      break $m104$match;
+      break $m125$match;
     }
-    if ($m104.tag === "Comment") {
+    if ($m125.tag === "Comment") {
       skip({  });
-      break $m104$match;
+      break $m125$match;
     }
-    if ($m104.tag === "Reject") {
-      const cond = $m104.cond;
-      const [, queue$74] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob48), queue: queue, e: cond });
-      queue = queue$74;
-      break $m104$match;
+    if ($m125.tag === "Reject") {
+      const cond = $m125.cond;
+      const [, queue$95] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob50), ctx: ctx, queue: queue, e: cond });
+      queue = queue$95;
+      break $m125$match;
     }
     $rt.unreachable();
   }
@@ -1351,314 +1467,316 @@ export function visit_stmt({ fuel, queue, st }) {
   return [undefined, queue];
 }
 
-export function visit_exprs({ fuel, queue, es }) {
+export function visit_exprs({ fuel, ctx, queue, es }) {
   if (fuel === 0) {
     return [undefined, queue];
   }
   for (const e of es) {
-    const [, queue$75] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob49), queue: queue, e: e });
-    queue = queue$75;
+    const [, queue$96] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob51), ctx: ctx, queue: queue, e: e });
+    queue = queue$96;
   }
   return [undefined, queue];
   return [undefined, queue];
 }
 
-export function visit_inits({ fuel, queue, fields }) {
+export function visit_inits({ fuel, ctx, queue, fields }) {
   if (fuel === 0) {
     return [undefined, queue];
   }
   for (const f of fields) {
-    const [, queue$76] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob50), queue: queue, e: f.value });
-    queue = queue$76;
+    const [, queue$97] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob52), ctx: ctx, queue: queue, e: f.value });
+    queue = queue$97;
   }
   return [undefined, queue];
   return [undefined, queue];
 }
 
-export function visit_expr({ fuel, queue, e }) {
+export function visit_expr({ fuel, ctx, queue, e }) {
   if (fuel === 0) {
     return [undefined, queue];
   }
-  const $m108 = e;
-  $m108$match: {
-    if ($m108.tag === "Call") {
-      const target = $m108.target;
-      const dicts = $m108.dicts;
-      const consts = $m108.consts;
-      const args = $m108.args;
-      const $m109 = target;
-      $m109$match: {
-        if ($m109.tag === "FnTarget") {
-          const def = $m109.def;
-          queue = [...queue, ...[def.id]];
-          break $m109$match;
+  const $m129 = e;
+  $m129$match: {
+    if ($m129.tag === "Call") {
+      const target = $m129.target;
+      const dicts = $m129.dicts;
+      const consts = $m129.consts;
+      const args = $m129.args;
+      const $m130 = target;
+      $m130$match: {
+        if ($m130.tag === "FnTarget") {
+          const def = $m130.def;
+          const name = $m130.name;
+          queue = [...queue, ...[fn_name({ module: $context.module_name({ ctx: ctx, id: def.mod }), name: name })]];
+          break $m130$match;
         }
-        if ($m109.tag === "DictTarget") {
-          const dict = $m109.dict;
-          const [, queue$77] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob51), queue: queue, e: dict });
-          queue = queue$77;
-          break $m109$match;
+        if ($m130.tag === "DictTarget") {
+          const dict = $m130.dict;
+          const [, queue$98] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob53), ctx: ctx, queue: queue, e: dict });
+          queue = queue$98;
+          break $m130$match;
         }
         $rt.unreachable();
       }
-      const [, queue$78] = visit_exprs({ fuel: $rt.int.sub(fuel, 1, $ob52), queue: queue, es: dicts });
-      queue = queue$78;
-      const [, queue$79] = visit_exprs({ fuel: $rt.int.sub(fuel, 1, $ob53), queue: queue, es: consts });
-      queue = queue$79;
-      const [, queue$80] = visit_exprs({ fuel: $rt.int.sub(fuel, 1, $ob54), queue: queue, es: args });
-      queue = queue$80;
-      break $m108$match;
-    }
-    if ($m108.tag === "FnRef") {
-      const def = $m108.def;
-      queue = [...queue, ...[def.id]];
-      break $m108$match;
-    }
-    if ($m108.tag === "Global") {
-      const def = $m108.def;
-      queue = [...queue, ...[def.id]];
-      break $m108$match;
-    }
-    if ($m108.tag === "CallValue") {
-      const callee = $m108.callee;
-      const args = $m108.args;
-      const [, queue$81] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob55), queue: queue, e: callee });
-      queue = queue$81;
-      const [, queue$82] = visit_exprs({ fuel: $rt.int.sub(fuel, 1, $ob56), queue: queue, es: args });
-      queue = queue$82;
-      break $m108$match;
-    }
-    if ($m108.tag === "RecordE") {
-      const fields = $m108.fields;
-      const [, queue$83] = visit_inits({ fuel: $rt.int.sub(fuel, 1, $ob57), queue: queue, fields: fields });
-      queue = queue$83;
-      break $m108$match;
-    }
-    if ($m108.tag === "VariantE") {
-      const fields = $m108.fields;
-      const [, queue$84] = visit_inits({ fuel: $rt.int.sub(fuel, 1, $ob58), queue: queue, fields: fields });
-      queue = queue$84;
-      break $m108$match;
-    }
-    if ($m108.tag === "Fake") {
-      const fields = $m108.fields;
-      const [, queue$85] = visit_inits({ fuel: $rt.int.sub(fuel, 1, $ob59), queue: queue, fields: fields });
-      queue = queue$85;
-      break $m108$match;
-    }
-    if ($m108.tag === "Update") {
-      const base = $m108.base;
-      const fields = $m108.fields;
-      const [, queue$86] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob60), queue: queue, e: base });
-      queue = queue$86;
-      const [, queue$87] = visit_inits({ fuel: $rt.int.sub(fuel, 1, $ob61), queue: queue, fields: fields });
-      queue = queue$87;
-      break $m108$match;
-    }
-    if ($m108.tag === "FieldE") {
-      const object = $m108.object;
-      const [, queue$88] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob62), queue: queue, e: object });
-      queue = queue$88;
-      break $m108$match;
-    }
-    if ($m108.tag === "Not") {
-      const operand = $m108.operand;
-      const [, queue$89] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob63), queue: queue, e: operand });
-      queue = queue$89;
-      break $m108$match;
-    }
-    if ($m108.tag === "Snapshot") {
-      const value = $m108.value;
-      const [, queue$90] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob64), queue: queue, e: value });
-      queue = queue$90;
-      break $m108$match;
-    }
-    if ($m108.tag === "ListE") {
-      const elems = $m108.elems;
-      const [, queue$91] = visit_exprs({ fuel: $rt.int.sub(fuel, 1, $ob65), queue: queue, es: elems });
-      queue = queue$91;
-      break $m108$match;
-    }
-    if ($m108.tag === "And") {
-      const operands = $m108.operands;
-      const [, queue$92] = visit_exprs({ fuel: $rt.int.sub(fuel, 1, $ob66), queue: queue, es: operands });
-      queue = queue$92;
-      break $m108$match;
-    }
-    if ($m108.tag === "Or") {
-      const operands = $m108.operands;
-      const [, queue$93] = visit_exprs({ fuel: $rt.int.sub(fuel, 1, $ob67), queue: queue, es: operands });
-      queue = queue$93;
-      break $m108$match;
-    }
-    if ($m108.tag === "Concat") {
-      const left = $m108.left;
-      const right = $m108.right;
-      const [, queue$94] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob68), queue: queue, e: left });
-      queue = queue$94;
-      const [, queue$95] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob69), queue: queue, e: right });
-      queue = queue$95;
-      break $m108$match;
-    }
-    if ($m108.tag === "IntOp") {
-      const left = $m108.left;
-      const right = $m108.right;
-      const [, queue$96] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob70), queue: queue, e: left });
-      queue = queue$96;
-      const [, queue$97] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob71), queue: queue, e: right });
-      queue = queue$97;
-      break $m108$match;
-    }
-    if ($m108.tag === "FloatOp") {
-      const left = $m108.left;
-      const right = $m108.right;
-      const [, queue$98] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob72), queue: queue, e: left });
-      queue = queue$98;
-      const [, queue$99] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob73), queue: queue, e: right });
+      const [, queue$99] = visit_exprs({ fuel: $rt.int.sub(fuel, 1, $ob54), ctx: ctx, queue: queue, es: dicts });
       queue = queue$99;
-      break $m108$match;
-    }
-    if ($m108.tag === "Cmp") {
-      const left = $m108.left;
-      const right = $m108.right;
-      const [, queue$100] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob74), queue: queue, e: left });
+      const [, queue$100] = visit_exprs({ fuel: $rt.int.sub(fuel, 1, $ob55), ctx: ctx, queue: queue, es: consts });
       queue = queue$100;
-      const [, queue$101] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob75), queue: queue, e: right });
+      const [, queue$101] = visit_exprs({ fuel: $rt.int.sub(fuel, 1, $ob56), ctx: ctx, queue: queue, es: args });
       queue = queue$101;
-      break $m108$match;
+      break $m129$match;
     }
-    if ($m108.tag === "Eq") {
-      const left = $m108.left;
-      const right = $m108.right;
-      const [, queue$102] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob76), queue: queue, e: left });
+    if ($m129.tag === "FnRef") {
+      const def = $m129.def;
+      const name = $m129.name;
+      queue = [...queue, ...[fn_name({ module: $context.module_name({ ctx: ctx, id: def.mod }), name: name })]];
+      break $m129$match;
+    }
+    if ($m129.tag === "Global") {
+      const def = $m129.def;
+      queue = [...queue, ...[fn_name({ module: $context.module_name({ ctx: ctx, id: def.mod }), name: def.name })]];
+      break $m129$match;
+    }
+    if ($m129.tag === "CallValue") {
+      const callee = $m129.callee;
+      const args = $m129.args;
+      const [, queue$102] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob57), ctx: ctx, queue: queue, e: callee });
       queue = queue$102;
-      const [, queue$103] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob77), queue: queue, e: right });
+      const [, queue$103] = visit_exprs({ fuel: $rt.int.sub(fuel, 1, $ob58), ctx: ctx, queue: queue, es: args });
       queue = queue$103;
-      break $m108$match;
+      break $m129$match;
     }
-    if ($m108.tag === "Implies") {
-      const left = $m108.left;
-      const right = $m108.right;
-      const [, queue$104] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob78), queue: queue, e: left });
+    if ($m129.tag === "RecordE") {
+      const fields = $m129.fields;
+      const [, queue$104] = visit_inits({ fuel: $rt.int.sub(fuel, 1, $ob59), ctx: ctx, queue: queue, fields: fields });
       queue = queue$104;
-      const [, queue$105] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob79), queue: queue, e: right });
+      break $m129$match;
+    }
+    if ($m129.tag === "VariantE") {
+      const fields = $m129.fields;
+      const [, queue$105] = visit_inits({ fuel: $rt.int.sub(fuel, 1, $ob60), ctx: ctx, queue: queue, fields: fields });
       queue = queue$105;
-      break $m108$match;
+      break $m129$match;
     }
-    if ($m108.tag === "Neg") {
-      const operand = $m108.operand;
-      const [, queue$106] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob80), queue: queue, e: operand });
+    if ($m129.tag === "Fake") {
+      const fields = $m129.fields;
+      const [, queue$106] = visit_inits({ fuel: $rt.int.sub(fuel, 1, $ob61), ctx: ctx, queue: queue, fields: fields });
       queue = queue$106;
-      break $m108$match;
+      break $m129$match;
     }
-    if ($m108.tag === "IsVariant") {
-      const subject = $m108.subject;
-      const [, queue$107] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob81), queue: queue, e: subject });
+    if ($m129.tag === "Update") {
+      const base = $m129.base;
+      const fields = $m129.fields;
+      const [, queue$107] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob62), ctx: ctx, queue: queue, e: base });
       queue = queue$107;
-      break $m108$match;
-    }
-    if ($m108.tag === "Try") {
-      const operand = $m108.operand;
-      const else_clause = $m108.else_clause;
-      const [, queue$108] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob82), queue: queue, e: operand });
+      const [, queue$108] = visit_inits({ fuel: $rt.int.sub(fuel, 1, $ob63), ctx: ctx, queue: queue, fields: fields });
       queue = queue$108;
-      const $m110 = else_clause;
-      $m110$match: {
-        if ($m110.tag === "Some") {
-          const value = $m110.value;
-          const [, queue$109] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob83), queue: queue, e: value.value });
-          queue = queue$109;
-          break $m110$match;
-        }
-        if ($m110.tag === "None") {
-          skip({  });
-          break $m110$match;
-        }
-        $rt.unreachable();
-      }
-      break $m108$match;
+      break $m129$match;
     }
-    if ($m108.tag === "Recover") {
-      const body = $m108.body;
-      const value = $m108.value;
-      const [, queue$110] = visit_block({ fuel: $rt.int.sub(fuel, 1, $ob84), queue: queue, b: body });
+    if ($m129.tag === "FieldE") {
+      const object = $m129.object;
+      const [, queue$109] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob64), ctx: ctx, queue: queue, e: object });
+      queue = queue$109;
+      break $m129$match;
+    }
+    if ($m129.tag === "Not") {
+      const operand = $m129.operand;
+      const [, queue$110] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob65), ctx: ctx, queue: queue, e: operand });
       queue = queue$110;
-      const [, queue$111] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob85), queue: queue, e: value });
+      break $m129$match;
+    }
+    if ($m129.tag === "Snapshot") {
+      const value = $m129.value;
+      const [, queue$111] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob66), ctx: ctx, queue: queue, e: value });
       queue = queue$111;
-      break $m108$match;
+      break $m129$match;
     }
-    if ($m108.tag === "Quantifier") {
-      const domain = $m108.domain;
-      const where_ = $m108.where_;
-      const body = $m108.body;
-      const $m111 = domain;
-      $m111$match: {
-        if ($m111.tag === "RangeD") {
-          const lo = $m111.lo;
-          const hi = $m111.hi;
-          const [, queue$112] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob86), queue: queue, e: lo });
-          queue = queue$112;
-          const [, queue$113] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob87), queue: queue, e: hi });
-          queue = queue$113;
-          break $m111$match;
-        }
-        if ($m111.tag === "ListD") {
-          const expr = $m111.expr;
-          const [, queue$114] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob88), queue: queue, e: expr });
-          queue = queue$114;
-          break $m111$match;
-        }
-        if ($m111.tag === "OkListD") {
-          const expr = $m111.expr;
-          const [, queue$115] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob89), queue: queue, e: expr });
-          queue = queue$115;
-          break $m111$match;
-        }
-        if ($m111.tag === "BoolsD") {
-          skip({  });
-          break $m111$match;
-        }
-        $rt.unreachable();
-      }
-      const $m112 = where_;
-      $m112$match: {
-        if ($m112.tag === "Some") {
-          const value = $m112.value;
-          const [, queue$116] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob90), queue: queue, e: value });
-          queue = queue$116;
-          break $m112$match;
-        }
-        if ($m112.tag === "None") {
-          skip({  });
-          break $m112$match;
-        }
-        $rt.unreachable();
-      }
-      const [, queue$117] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob91), queue: queue, e: body });
+    if ($m129.tag === "ListE") {
+      const elems = $m129.elems;
+      const [, queue$112] = visit_exprs({ fuel: $rt.int.sub(fuel, 1, $ob67), ctx: ctx, queue: queue, es: elems });
+      queue = queue$112;
+      break $m129$match;
+    }
+    if ($m129.tag === "And") {
+      const operands = $m129.operands;
+      const [, queue$113] = visit_exprs({ fuel: $rt.int.sub(fuel, 1, $ob68), ctx: ctx, queue: queue, es: operands });
+      queue = queue$113;
+      break $m129$match;
+    }
+    if ($m129.tag === "Or") {
+      const operands = $m129.operands;
+      const [, queue$114] = visit_exprs({ fuel: $rt.int.sub(fuel, 1, $ob69), ctx: ctx, queue: queue, es: operands });
+      queue = queue$114;
+      break $m129$match;
+    }
+    if ($m129.tag === "Concat") {
+      const left = $m129.left;
+      const right = $m129.right;
+      const [, queue$115] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob70), ctx: ctx, queue: queue, e: left });
+      queue = queue$115;
+      const [, queue$116] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob71), ctx: ctx, queue: queue, e: right });
+      queue = queue$116;
+      break $m129$match;
+    }
+    if ($m129.tag === "IntOp") {
+      const left = $m129.left;
+      const right = $m129.right;
+      const [, queue$117] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob72), ctx: ctx, queue: queue, e: left });
       queue = queue$117;
-      break $m108$match;
-    }
-    if ($m108.tag === "Closure") {
-      const entry_checks = $m108.entry_checks;
-      const body = $m108.body;
-      const [, queue$118] = visit_block({ fuel: $rt.int.sub(fuel, 1, $ob92), queue: queue, b: entry_checks });
+      const [, queue$118] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob73), ctx: ctx, queue: queue, e: right });
       queue = queue$118;
-      const [, queue$119] = visit_block({ fuel: $rt.int.sub(fuel, 1, $ob93), queue: queue, b: body });
-      queue = queue$119;
-      break $m108$match;
+      break $m129$match;
     }
-    if ($m108.tag === "Checked") {
-      const value = $m108.value;
-      const checks = $m108.checks;
-      const [, queue$120] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob94), queue: queue, e: value });
+    if ($m129.tag === "FloatOp") {
+      const left = $m129.left;
+      const right = $m129.right;
+      const [, queue$119] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob74), ctx: ctx, queue: queue, e: left });
+      queue = queue$119;
+      const [, queue$120] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob75), ctx: ctx, queue: queue, e: right });
       queue = queue$120;
-      const [, queue$121] = visit_block({ fuel: $rt.int.sub(fuel, 1, $ob95), queue: queue, b: checks });
+      break $m129$match;
+    }
+    if ($m129.tag === "Cmp") {
+      const left = $m129.left;
+      const right = $m129.right;
+      const [, queue$121] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob76), ctx: ctx, queue: queue, e: left });
       queue = queue$121;
-      break $m108$match;
+      const [, queue$122] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob77), ctx: ctx, queue: queue, e: right });
+      queue = queue$122;
+      break $m129$match;
+    }
+    if ($m129.tag === "Eq") {
+      const left = $m129.left;
+      const right = $m129.right;
+      const [, queue$123] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob78), ctx: ctx, queue: queue, e: left });
+      queue = queue$123;
+      const [, queue$124] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob79), ctx: ctx, queue: queue, e: right });
+      queue = queue$124;
+      break $m129$match;
+    }
+    if ($m129.tag === "Implies") {
+      const left = $m129.left;
+      const right = $m129.right;
+      const [, queue$125] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob80), ctx: ctx, queue: queue, e: left });
+      queue = queue$125;
+      const [, queue$126] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob81), ctx: ctx, queue: queue, e: right });
+      queue = queue$126;
+      break $m129$match;
+    }
+    if ($m129.tag === "Neg") {
+      const operand = $m129.operand;
+      const [, queue$127] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob82), ctx: ctx, queue: queue, e: operand });
+      queue = queue$127;
+      break $m129$match;
+    }
+    if ($m129.tag === "IsVariant") {
+      const subject = $m129.subject;
+      const [, queue$128] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob83), ctx: ctx, queue: queue, e: subject });
+      queue = queue$128;
+      break $m129$match;
+    }
+    if ($m129.tag === "Try") {
+      const operand = $m129.operand;
+      const else_clause = $m129.else_clause;
+      const [, queue$129] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob84), ctx: ctx, queue: queue, e: operand });
+      queue = queue$129;
+      const $m131 = else_clause;
+      $m131$match: {
+        if ($m131.tag === "Some") {
+          const value = $m131.value;
+          const [, queue$130] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob85), ctx: ctx, queue: queue, e: value.value });
+          queue = queue$130;
+          break $m131$match;
+        }
+        if ($m131.tag === "None") {
+          skip({  });
+          break $m131$match;
+        }
+        $rt.unreachable();
+      }
+      break $m129$match;
+    }
+    if ($m129.tag === "Recover") {
+      const body = $m129.body;
+      const value = $m129.value;
+      const [, queue$131] = visit_block({ fuel: $rt.int.sub(fuel, 1, $ob86), ctx: ctx, queue: queue, b: body });
+      queue = queue$131;
+      const [, queue$132] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob87), ctx: ctx, queue: queue, e: value });
+      queue = queue$132;
+      break $m129$match;
+    }
+    if ($m129.tag === "Quantifier") {
+      const domain = $m129.domain;
+      const where_ = $m129.where_;
+      const body = $m129.body;
+      const $m132 = domain;
+      $m132$match: {
+        if ($m132.tag === "RangeD") {
+          const lo = $m132.lo;
+          const hi = $m132.hi;
+          const [, queue$133] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob88), ctx: ctx, queue: queue, e: lo });
+          queue = queue$133;
+          const [, queue$134] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob89), ctx: ctx, queue: queue, e: hi });
+          queue = queue$134;
+          break $m132$match;
+        }
+        if ($m132.tag === "ListD") {
+          const expr = $m132.expr;
+          const [, queue$135] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob90), ctx: ctx, queue: queue, e: expr });
+          queue = queue$135;
+          break $m132$match;
+        }
+        if ($m132.tag === "OkListD") {
+          const expr = $m132.expr;
+          const [, queue$136] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob91), ctx: ctx, queue: queue, e: expr });
+          queue = queue$136;
+          break $m132$match;
+        }
+        if ($m132.tag === "BoolsD") {
+          skip({  });
+          break $m132$match;
+        }
+        $rt.unreachable();
+      }
+      const $m133 = where_;
+      $m133$match: {
+        if ($m133.tag === "Some") {
+          const value = $m133.value;
+          const [, queue$137] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob92), ctx: ctx, queue: queue, e: value });
+          queue = queue$137;
+          break $m133$match;
+        }
+        if ($m133.tag === "None") {
+          skip({  });
+          break $m133$match;
+        }
+        $rt.unreachable();
+      }
+      const [, queue$138] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob93), ctx: ctx, queue: queue, e: body });
+      queue = queue$138;
+      break $m129$match;
+    }
+    if ($m129.tag === "Closure") {
+      const entry_checks = $m129.entry_checks;
+      const body = $m129.body;
+      const [, queue$139] = visit_block({ fuel: $rt.int.sub(fuel, 1, $ob94), ctx: ctx, queue: queue, b: entry_checks });
+      queue = queue$139;
+      const [, queue$140] = visit_block({ fuel: $rt.int.sub(fuel, 1, $ob95), ctx: ctx, queue: queue, b: body });
+      queue = queue$140;
+      break $m129$match;
+    }
+    if ($m129.tag === "Checked") {
+      const value = $m129.value;
+      const checks = $m129.checks;
+      const [, queue$141] = visit_expr({ fuel: $rt.int.sub(fuel, 1, $ob96), ctx: ctx, queue: queue, e: value });
+      queue = queue$141;
+      const [, queue$142] = visit_block({ fuel: $rt.int.sub(fuel, 1, $ob97), ctx: ctx, queue: queue, b: checks });
+      queue = queue$142;
+      break $m129$match;
     }
     if (true) {
       skip({  });
-      break $m108$match;
+      break $m129$match;
     }
     $rt.unreachable();
   }
@@ -1666,37 +1784,37 @@ export function visit_expr({ fuel, queue, e }) {
   return [undefined, queue];
 }
 
-export function reachable({ n }) {
-  let by_def = $std_map.dict({  });
+export function reachable({ n, ctx }) {
+  let by_name = $std_map.dict({  });
   let consts = $std_map.dict({  });
   for (const m of n.modules) {
     for (const item of m.items) {
-      const $m113 = item;
-      $m113$match: {
-        if ($m113.tag === "FnItem") {
-          const f = $m113.f;
-          const [, by_def$122] = $std_map.set({ d: by_def, key: f.def.id, value: f });
-          by_def = by_def$122;
-          break $m113$match;
+      const $m134 = item;
+      $m134$match: {
+        if ($m134.tag === "FnItem") {
+          const f = $m134.f;
+          const [, by_name$143] = $std_map.set({ d: by_name, key: fn_name({ module: m.mod.name, name: f.name }), value: f });
+          by_name = by_name$143;
+          break $m134$match;
         }
-        if ($m113.tag === "ImplItem") {
-          const fns = $m113.fns;
+        if ($m134.tag === "ImplItem") {
+          const fns = $m134.fns;
           for (const f of fns) {
-            const [, by_def$123] = $std_map.set({ d: by_def, key: f.def.id, value: f });
-            by_def = by_def$123;
+            const [, by_name$144] = $std_map.set({ d: by_name, key: fn_name({ module: m.mod.name, name: f.name }), value: f });
+            by_name = by_name$144;
           }
-          break $m113$match;
+          break $m134$match;
         }
-        if ($m113.tag === "ConstItem") {
-          const def = $m113.def;
-          const value = $m113.value;
-          const [, consts$124] = $std_map.set({ d: consts, key: def.id, value: value });
-          consts = consts$124;
-          break $m113$match;
+        if ($m134.tag === "ConstItem") {
+          const def = $m134.def;
+          const value = $m134.value;
+          const [, consts$145] = $std_map.set({ d: consts, key: fn_name({ module: m.mod.name, name: def.name }), value: value });
+          consts = consts$145;
+          break $m134$match;
         }
         if (true) {
           skip({  });
-          break $m113$match;
+          break $m134$match;
         }
         $rt.unreachable();
       }
@@ -1704,94 +1822,94 @@ export function reachable({ n }) {
   }
   let seen = $std_map.dict({  });
   let queue = [];
-  const $m114 = n.entry;
-  $m114$match: {
-    if ($m114.tag === "Some") {
-      const value = $m114.value;
+  const $m135 = n.entry;
+  $m135$match: {
+    if ($m135.tag === "Some") {
+      const value = $m135.value;
       if (value.main.tag === "Some") {
         let found = false;
         for (const item of value.items) {
-          const $m115 = item;
-          $m115$match: {
-            if ($m115.tag === "FnItem") {
-              const f = $m115.f;
+          const $m136 = item;
+          $m136$match: {
+            if ($m136.tag === "FnItem") {
+              const f = $m136.f;
               if (!found && f.def.name === "main") {
-                queue = [...queue, ...[f.def.id]];
+                queue = [...queue, ...[fn_name({ module: value.mod.name, name: f.name })]];
                 found = true;
               }
-              break $m115$match;
+              break $m136$match;
             }
             if (true) {
               skip({  });
-              break $m115$match;
+              break $m136$match;
             }
             $rt.unreachable();
           }
         }
       }
-      break $m114$match;
+      break $m135$match;
     }
-    if ($m114.tag === "None") {
+    if ($m135.tag === "None") {
       skip({  });
-      break $m114$match;
+      break $m135$match;
     }
     $rt.unreachable();
   }
   for (const m of n.modules) {
-    const $m116 = m.tests;
-    $m116$match: {
-      if ($m116.tag === "Some") {
-        const value = $m116.value;
+    const $m137 = m.tests;
+    $m137$match: {
+      if ($m137.tag === "Some") {
+        const value = $m137.value;
         if (!m.mod.is_std) {
           for (const ex of value.examples) {
-            const [, queue$125] = visit_block({ fuel: max_depth, queue: queue, b: ex.body });
-            queue = queue$125;
+            const [, queue$146] = visit_block({ fuel: max_depth, ctx: ctx, queue: queue, b: ex.body });
+            queue = queue$146;
           }
         }
-        break $m116$match;
+        break $m137$match;
       }
-      if ($m116.tag === "None") {
+      if ($m137.tag === "None") {
         skip({  });
-        break $m116$match;
+        break $m137$match;
       }
       $rt.unreachable();
     }
   }
   let steps = max_depth;
   while ($std_list.len({ xs: queue }) > 0 && steps > 0) {
-    steps = $rt.int.sub(steps, 1, $ob96);
-    const d = $std_list.get({ xs: queue, i: $rt.int.sub($std_list.len({ xs: queue }), 1, $ob97) });
-    queue = $std_list.slice({ xs: queue, from: 0, to: $rt.int.sub($std_list.len({ xs: queue }), 1, $ob98) });
+    steps = $rt.int.sub(steps, 1, $ob98);
+    const d = $std_list.get({ xs: queue, i: $rt.int.sub($std_list.len({ xs: queue }), 1, $ob99) });
+    queue = $std_list.slice({ xs: queue, from: 0, to: $rt.int.sub($std_list.len({ xs: queue }), 1, $ob100) });
     if (!$std_map.contains({ d: seen, key: d })) {
-      const [, seen$126] = $std_map.set({ d: seen, key: d, value: true });
-      seen = seen$126;
-      const $m118 = $std_map.find({ d: by_def, key: d });
-      $m118$match: {
-        if ($m118.tag === "Some") {
-          const value = $m118.value;
-          const [, queue$127] = visit_block({ fuel: max_depth, queue: queue, b: value.entry_checks });
-          queue = queue$127;
-          const [, queue$128] = visit_block({ fuel: max_depth, queue: queue, b: fn_body({ f: value }) });
-          queue = queue$128;
-          break $m118$match;
+      const [, seen$147] = $std_map.set({ d: seen, key: d, value: true });
+      seen = seen$147;
+      const $m139 = $std_map.find({ d: by_name, key: d });
+      $m139$match: {
+        if ($m139.tag === "Some") {
+          const value = $m139.value;
+          const [, queue$148] = visit_block({ fuel: max_depth, ctx: ctx, queue: queue, b: value.entry_checks });
+          queue = queue$148;
+          const [, queue$149] = visit_block({ fuel: max_depth, ctx: ctx, queue: queue, b: fn_body({ f: value }) });
+          queue = queue$149;
+          break $m139$match;
         }
-        if ($m118.tag === "None") {
+        if ($m139.tag === "None") {
           skip({  });
-          break $m118$match;
+          break $m139$match;
         }
         $rt.unreachable();
       }
-      const $m119 = $std_map.find({ d: consts, key: d });
-      $m119$match: {
-        if ($m119.tag === "Some") {
-          const value = $m119.value;
-          const [, queue$129] = visit_expr({ fuel: max_depth, queue: queue, e: value });
-          queue = queue$129;
-          break $m119$match;
+      const $m140 = $std_map.find({ d: consts, key: d });
+      $m140$match: {
+        if ($m140.tag === "Some") {
+          const value = $m140.value;
+          const [, queue$150] = visit_expr({ fuel: max_depth, ctx: ctx, queue: queue, e: value });
+          queue = queue$150;
+          break $m140$match;
         }
-        if ($m119.tag === "None") {
+        if ($m140.tag === "None") {
           skip({  });
-          break $m119$match;
+          break $m140$match;
         }
         $rt.unreachable();
       }
@@ -1802,24 +1920,24 @@ export function reachable({ n }) {
 
 export function record_unsupported({ n, def, file, span, what }) {
   let u = n.unsupported;
-  const [, u$130] = $std_list.push({ b: u, x: { def: def, file: file, span: span, what: what } });
-  u = u$130;
+  const [, u$151] = $std_list.push({ b: u, x: { def: def, file: file, span: span, what: what } });
+  u = u$151;
   return undefined;
 }
 
 export function fn_item({ n, ctx, m, f }) {
-  const [$r122, n$131] = fn_item_body({ n: n, ctx: ctx, m: m, f: f });
-  n = n$131;
-  const $m121 = $r122;
-  $m121$match: {
-    if ($m121.tag === "Ok") {
+  const [$r143, n$152] = fn_item_body({ n: n, ctx: ctx, m: m, f: f });
+  n = n$152;
+  const $m142 = $r143;
+  $m142$match: {
+    if ($m142.tag === "Ok") {
       skip({  });
-      break $m121$match;
+      break $m142$match;
     }
-    if ($m121.tag === "Err") {
-      const error = $m121.error;
+    if ($m142.tag === "Err") {
+      const error = $m142.error;
       record_unsupported({ n: n, def: $context.qualified_name({ ctx: ctx, id: f.def.id }), file: f.def.file, span: f.def.span, what: error });
-      break $m121$match;
+      break $m142$match;
     }
     $rt.unreachable();
   }
@@ -1837,16 +1955,16 @@ export function fn_item_body({ n, ctx, m, f }) {
     if ($std_list.len({ xs: f.dict_params }) > 0) {
       return [{ tag: "Err", error: "functions with interface-bounded type parameters" }, n];
     }
-    const [, n$132] = begin_fn({ n: n });
-    n = n$132;
+    const [, n$153] = begin_fn({ n: n });
+    n = n$153;
     let params = $std_list.builder({  });
     let stores = $std_list.builder({  });
     for (const c of f.const_params) {
       const t = $rt.unwrap(ll_of({ ctx: ctx, t: c.ty }));
-      const [, params$133] = $std_list.push({ b: params, x: t + " %\"p." + c.name + "\"" });
-      params = params$133;
-      const [, stores$134] = $std_list.push({ b: stores, x: { name: c.name, t: t, ty: c.ty, is_inout: false } });
-      stores = stores$134;
+      const [, params$154] = $std_list.push({ b: params, x: t + " %\"p." + c.name + "\"" });
+      params = params$154;
+      const [, stores$155] = $std_list.push({ b: stores, x: { name: c.name, t: t, ty: c.ty, is_inout: false } });
+      stores = stores$155;
     }
     for (const p of f.params) {
       const t = $rt.unwrap(ll_of({ ctx: ctx, t: p.ty }));
@@ -1854,10 +1972,10 @@ export function fn_item_body({ n, ctx, m, f }) {
       if (p.is_inout) {
         shown = "ptr";
       }
-      const [, params$135] = $std_list.push({ b: params, x: shown + " %\"p." + p.name + "\"" });
-      params = params$135;
-      const [, stores$136] = $std_list.push({ b: stores, x: { name: p.name, t: t, ty: p.ty, is_inout: p.is_inout } });
-      stores = stores$136;
+      const [, params$156] = $std_list.push({ b: params, x: shown + " %\"p." + p.name + "\"" });
+      params = params$156;
+      const [, stores$157] = $std_list.push({ b: stores, x: { name: p.name, t: t, ty: p.ty, is_inout: p.is_inout } });
+      stores = stores$157;
     }
     const ret = $rt.unwrap(ll_of({ ctx: ctx, t: f.ret }));
     n = { ...n, fn_ret: ret };
@@ -1865,18 +1983,18 @@ export function fn_item_body({ n, ctx, m, f }) {
       if (st.is_inout) {
         set_local({ n: n, name: st.name, l: { ptr: "%\"p." + st.name + "\"", t: st.t, ty: st.ty } });
       } else {
-        const [$r129, n$137] = alloc_local({ n: n, name: st.name, t: st.t, ty: st.ty });
-        n = n$137;
-        const ptr = $r129;
+        const [$r150, n$158] = alloc_local({ n: n, name: st.name, t: st.t, ty: st.ty });
+        n = n$158;
+        const ptr = $r150;
         emit_line({ n: n, line: "store " + st.t + " %\"p." + st.name + "\", ptr " + ptr });
       }
     }
-    const [$r130, n$138] = block_stmts({ fuel: max_depth, n: n, ctx: ctx, b: f.entry_checks });
-    n = n$138;
-    $rt.unwrap($r130);
-    const [$r131, n$139] = block_stmts({ fuel: max_depth, n: n, ctx: ctx, b: fn_body({ f: f }) });
-    n = n$139;
-    $rt.unwrap($r131);
+    const [$r151, n$159] = block_stmts({ fuel: max_depth, n: n, ctx: ctx, b: f.entry_checks });
+    n = n$159;
+    $rt.unwrap($r151);
+    const [$r152, n$160] = block_stmts({ fuel: max_depth, n: n, ctx: ctx, b: fn_body({ f: f }) });
+    n = n$160;
+    $rt.unwrap($r152);
     if (!n.terminated) {
       emit_line({ n: n, line: default_return({ ret: ret }) });
     }
@@ -1902,18 +2020,18 @@ export function default_return({ ret }) {
 }
 
 export function const_item({ n, ctx, m, def, ty, init }) {
-  const [$r134, n$140] = const_item_body({ n: n, ctx: ctx, m: m, def: def, ty: ty, init: init });
-  n = n$140;
-  const $m133 = $r134;
-  $m133$match: {
-    if ($m133.tag === "Ok") {
+  const [$r155, n$161] = const_item_body({ n: n, ctx: ctx, m: m, def: def, ty: ty, init: init });
+  n = n$161;
+  const $m154 = $r155;
+  $m154$match: {
+    if ($m154.tag === "Ok") {
       skip({  });
-      break $m133$match;
+      break $m154$match;
     }
-    if ($m133.tag === "Err") {
-      const error = $m133.error;
+    if ($m154.tag === "Err") {
+      const error = $m154.error;
       record_unsupported({ n: n, def: $context.qualified_name({ ctx: ctx, id: def.id }), file: def.file, span: def.span, what: error });
-      break $m133$match;
+      break $m154$match;
     }
     $rt.unreachable();
   }
@@ -1927,55 +2045,55 @@ export function const_item_body({ n, ctx, m, def, ty, init }) {
     const t = $rt.unwrap(ll_of({ ctx: ctx, t: ty }));
     const literal = literal_of({ e: init });
     let done = false;
-    const $m135 = literal;
-    $m135$match: {
-      if ($m135.tag === "Some") {
-        const value = $m135.value;
-        const $m136 = value;
-        $m136$match: {
-          if ($m136.tag === "IntV") {
-            const v = $m136.v;
+    const $m156 = literal;
+    $m156$match: {
+      if ($m156.tag === "Some") {
+        const value = $m156.value;
+        const $m157 = value;
+        $m157$match: {
+          if ($m157.tag === "IntV") {
+            const v = $m157.v;
             push_global({ n: n, line: name + " = constant i64 " + s({ i: v }) });
             done = true;
-            break $m136$match;
+            break $m157$match;
           }
-          if ($m136.tag === "DurationV") {
-            const v = $m136.v;
+          if ($m157.tag === "DurationV") {
+            const v = $m157.v;
             push_global({ n: n, line: name + " = constant i64 " + s({ i: v }) });
             done = true;
-            break $m136$match;
+            break $m157$match;
           }
-          if ($m136.tag === "FloatV") {
-            const v = $m136.v;
+          if ($m157.tag === "FloatV") {
+            const v = $m157.v;
             push_global({ n: n, line: name + " = constant double " + double_literal({ v: v }) });
             done = true;
-            break $m136$match;
+            break $m157$match;
           }
-          if ($m136.tag === "BoolV") {
-            const v = $m136.v;
+          if ($m157.tag === "BoolV") {
+            const v = $m157.v;
             push_global({ n: n, line: name + " = constant i1 " + bool_text({ b: v }) });
             done = true;
-            break $m136$match;
+            break $m157$match;
           }
-          if ($m136.tag === "TextV") {
-            const v = $m136.v;
-            const [$r137, n$141] = text_global({ n: n, x: v });
-            n = n$141;
-            push_global({ n: n, line: name + " = constant ptr " + $r137 });
+          if ($m157.tag === "TextV") {
+            const v = $m157.v;
+            const [$r158, n$162] = text_global({ n: n, x: v });
+            n = n$162;
+            push_global({ n: n, line: name + " = constant ptr " + $r158 });
             done = true;
-            break $m136$match;
+            break $m157$match;
           }
           if (true) {
             skip({  });
-            break $m136$match;
+            break $m157$match;
           }
           $rt.unreachable();
         }
-        break $m135$match;
+        break $m156$match;
       }
-      if ($m135.tag === "None") {
+      if ($m156.tag === "None") {
         skip({  });
-        break $m135$match;
+        break $m156$match;
       }
       $rt.unreachable();
     }
@@ -1983,29 +2101,29 @@ export function const_item_body({ n, ctx, m, def, ty, init }) {
       return [{ tag: "Ok", value: undefined }, n];
     }
     let lazy = n.lazy_consts;
-    const [, lazy$142] = $std_map.set({ d: lazy, key: def.id, value: true });
-    lazy = lazy$142;
+    const [, lazy$163] = $std_map.set({ d: lazy, key: def.id, value: true });
+    lazy = lazy$163;
     push_global({ n: n, line: name + " = global i64 0" });
     const getter = getter_name({ module: m.mod.name, name: def.name });
     const saved = save_fn({ n: n });
-    const [, n$143] = begin_fn({ n: n });
-    n = n$143;
+    const [, n$164] = begin_fn({ n: n });
+    n = n$164;
     n = { ...n, fn_ret: "i64" };
-    const [$r140, n$144] = const_getter({ n: n, ctx: ctx, name: name, getter: getter, t: t, init: init });
-    n = n$144;
-    const r = $r140;
-    const [, n$145] = restore_fn({ n: n, sv: saved });
-    n = n$145;
-    const $m141 = r;
-    $m141$match: {
-      if ($m141.tag === "Ok") {
+    const [$r161, n$165] = const_getter({ n: n, ctx: ctx, name: name, getter: getter, t: t, init: init });
+    n = n$165;
+    const r = $r161;
+    const [, n$166] = restore_fn({ n: n, sv: saved });
+    n = n$166;
+    const $m162 = r;
+    $m162$match: {
+      if ($m162.tag === "Ok") {
         skip({  });
-        break $m141$match;
+        break $m162$match;
       }
-      if ($m141.tag === "Err") {
-        const error = $m141.error;
+      if ($m162.tag === "Err") {
+        const error = $m162.error;
         return [{ tag: "Err", error: error }, n];
-        break $m141$match;
+        break $m162$match;
       }
       $rt.unreachable();
     }
@@ -2018,41 +2136,41 @@ export function const_item_body({ n, ctx, m, def, ty, init }) {
 
 export function const_getter({ n, ctx, name, getter, t, init }) {
   try {
-    const [$r144, n$146] = new_tmp({ n: n });
-    n = n$146;
-    const cur = $r144;
+    const [$r165, n$167] = new_tmp({ n: n });
+    n = n$167;
+    const cur = $r165;
     emit_line({ n: n, line: cur + " = load i64, ptr " + name });
-    const [$r145, n$147] = new_tmp({ n: n });
-    n = n$147;
-    const empty = $r145;
+    const [$r166, n$168] = new_tmp({ n: n });
+    n = n$168;
+    const empty = $r166;
     emit_line({ n: n, line: empty + " = icmp eq i64 " + cur + ", 0" });
-    const [$r146, n$148] = new_label({ n: n, prefix: "cinit" });
-    n = n$148;
-    const init_l = $r146;
-    const [$r147, n$149] = new_label({ n: n, prefix: "cdone" });
-    n = n$149;
-    const done = $r147;
-    const [, n$150] = cond_br({ n: n, cond: empty, then_l: init_l, else_l: done });
-    n = n$150;
-    const [, n$151] = start_block({ n: n, name: init_l });
-    n = n$151;
-    const [$r148, n$152] = expr_val({ fuel: max_depth, n: n, ctx: ctx, e: init });
-    n = n$152;
-    const ev = $rt.unwrap($r148);
-    const [$r149, n$153] = coerce_to({ n: n, v: ev, to: t });
-    n = n$153;
-    const cv = $r149;
-    const [$r150, n$154] = to_slot({ n: n, v: cv });
-    n = n$154;
-    const slot = $r150;
+    const [$r167, n$169] = new_label({ n: n, prefix: "cinit" });
+    n = n$169;
+    const init_l = $r167;
+    const [$r168, n$170] = new_label({ n: n, prefix: "cdone" });
+    n = n$170;
+    const done = $r168;
+    const [, n$171] = cond_br({ n: n, cond: empty, then_l: init_l, else_l: done });
+    n = n$171;
+    const [, n$172] = start_block({ n: n, name: init_l });
+    n = n$172;
+    const [$r169, n$173] = expr_val({ fuel: max_depth, n: n, ctx: ctx, e: init });
+    n = n$173;
+    const ev = $rt.unwrap($r169);
+    const [$r170, n$174] = coerce_to({ n: n, v: ev, to: t });
+    n = n$174;
+    const cv = $r170;
+    const [$r171, n$175] = to_slot({ n: n, v: cv });
+    n = n$175;
+    const slot = $r171;
     emit_line({ n: n, line: "store i64 " + slot + ", ptr " + name });
-    const [, n$155] = br({ n: n, target: done });
-    n = n$155;
-    const [, n$156] = start_block({ n: n, name: done });
-    n = n$156;
-    const [$r151, n$157] = new_tmp({ n: n });
-    n = n$157;
-    const out = $r151;
+    const [, n$176] = br({ n: n, target: done });
+    n = n$176;
+    const [, n$177] = start_block({ n: n, name: done });
+    n = n$177;
+    const [$r172, n$178] = new_tmp({ n: n });
+    n = n$178;
+    const out = $r172;
     emit_line({ n: n, line: out + " = load i64, ptr " + name });
     emit_line({ n: n, line: "ret i64 " + out });
     finish_fn({ n: n, header: "define i64 " + getter + "() {" });
@@ -2065,37 +2183,37 @@ export function const_getter({ n, ctx, name, getter, t, init }) {
 
 export function example_fn({ n, ctx, m, name, body }) {
   const fn_id = "@\"" + m.mod.name + ".example." + name + "\"";
-  const [$r154, n$158] = example_body({ n: n, ctx: ctx, fn_id: fn_id, body: body });
-  n = n$158;
-  const $m153 = $r154;
-  $m153$match: {
-    if ($m153.tag === "Ok") {
+  const [$r175, n$179] = example_body({ n: n, ctx: ctx, fn_id: fn_id, body: body });
+  n = n$179;
+  const $m174 = $r175;
+  $m174$match: {
+    if ($m174.tag === "Ok") {
       let examples = n.examples;
-      const [, examples$159] = $std_list.push({ b: examples, x: { name: m.mod.name + "." + name, fn_name: fn_id } });
-      examples = examples$159;
-      break $m153$match;
+      const [, examples$180] = $std_list.push({ b: examples, x: { name: m.mod.name + "." + name, fn_name: fn_id } });
+      examples = examples$180;
+      break $m174$match;
     }
-    if ($m153.tag === "Err") {
-      const error = $m153.error;
+    if ($m174.tag === "Err") {
+      const error = $m174.error;
       let file = m.mod.file;
       let span = m.mod.tree.span;
-      const $m156 = test_def({ ctx: ctx, mod_id: m.mod.id, name: name });
-      $m156$match: {
-        if ($m156.tag === "Some") {
-          const value = $m156.value;
+      const $m177 = test_def({ ctx: ctx, mod_id: m.mod.id, name: name });
+      $m177$match: {
+        if ($m177.tag === "Some") {
+          const value = $m177.value;
           const d = $context.get_def({ ctx: ctx, id: value });
           file = d.file;
           span = d.span;
-          break $m156$match;
+          break $m177$match;
         }
-        if ($m156.tag === "None") {
+        if ($m177.tag === "None") {
           skip({  });
-          break $m156$match;
+          break $m177$match;
         }
         $rt.unreachable();
       }
       record_unsupported({ n: n, def: m.mod.name + "." + name, file: file, span: span, what: error });
-      break $m153$match;
+      break $m174$match;
     }
     $rt.unreachable();
   }
@@ -2104,16 +2222,16 @@ export function example_fn({ n, ctx, m, name, body }) {
 }
 
 export function test_def({ ctx, mod_id, name }) {
-  const $m157 = $std_map.find({ d: ctx.members, key: mod_id });
-  $m157$match: {
-    if ($m157.tag === "Some") {
-      const value = $m157.value;
+  const $m178 = $std_map.find({ d: ctx.members, key: mod_id });
+  $m178$match: {
+    if ($m178.tag === "Some") {
+      const value = $m178.value;
       return $std_map.find({ d: value.tests, key: name });
-      break $m157$match;
+      break $m178$match;
     }
-    if ($m157.tag === "None") {
+    if ($m178.tag === "None") {
       return { tag: "None" };
-      break $m157$match;
+      break $m178$match;
     }
     $rt.unreachable();
   }
@@ -2121,12 +2239,12 @@ export function test_def({ ctx, mod_id, name }) {
 
 export function example_body({ n, ctx, fn_id, body }) {
   try {
-    const [, n$160] = begin_fn({ n: n });
-    n = n$160;
+    const [, n$181] = begin_fn({ n: n });
+    n = n$181;
     n = { ...n, fn_ret: "i1" };
-    const [$r160, n$161] = block_stmts({ fuel: max_depth, n: n, ctx: ctx, b: body });
-    n = n$161;
-    $rt.unwrap($r160);
+    const [$r181, n$182] = block_stmts({ fuel: max_depth, n: n, ctx: ctx, b: body });
+    n = n$182;
+    $rt.unwrap($r181);
     if (!n.terminated) {
       emit_line({ n: n, line: "ret i1 1" });
     }
@@ -2140,43 +2258,43 @@ export function example_body({ n, ctx, fn_id, body }) {
 
 export function main_fn({ n, ctx }) {
   try {
-    const [, n$162] = begin_fn({ n: n });
-    n = n$162;
+    const [, n$183] = begin_fn({ n: n });
+    n = n$183;
     n = { ...n, fn_ret: "i64" };
     emit_line({ n: n, line: "%mode = call i32 @onus_start(i32 %argc, ptr %argv)" });
     emit_line({ n: n, line: "%isExamples = icmp eq i32 %mode, 1" });
-    const [, n$163] = cond_br({ n: n, cond: "%isExamples", then_l: "examples", else_l: "program" });
-    n = n$163;
-    const [, n$164] = start_block({ n: n, name: "examples" });
-    n = n$164;
+    const [, n$184] = cond_br({ n: n, cond: "%isExamples", then_l: "examples", else_l: "program" });
+    n = n$184;
+    const [, n$185] = start_block({ n: n, name: "examples" });
+    n = n$185;
     for (const ex of $std_list.finish({ b: n.examples })) {
-      const [$r163, n$165] = new_tmp({ n: n });
-      n = n$165;
-      const ok = $r163;
+      const [$r184, n$186] = new_tmp({ n: n });
+      n = n$186;
+      const ok = $r184;
       emit_line({ n: n, line: ok + " = call i1 " + ex.fn_name + "()" });
-      const [$r164, n$166] = c_string({ n: n, x: ex.name });
-      n = n$166;
-      const label_text = $r164;
+      const [$r185, n$187] = c_string({ n: n, x: ex.name });
+      n = n$187;
+      const label_text = $r185;
       emit_line({ n: n, line: "call void @onus_report_example(ptr " + label_text + ", i1 " + ok + ")" });
     }
     emit_line({ n: n, line: "%exampleCode = call i32 @onus_examples_done()" });
     emit_line({ n: n, line: "ret i32 %exampleCode" });
     n = { ...n, terminated: true };
-    const [, n$167] = start_block({ n: n, name: "program" });
-    n = n$167;
+    const [, n$188] = start_block({ n: n, name: "program" });
+    n = n$188;
     let emitted = false;
-    const $m166 = n.entry;
-    $m166$match: {
-      if ($m166.tag === "Some") {
-        const value = $m166.value;
-        const [$r167, n$168] = main_call_opt({ n: n, ctx: ctx, entry: value });
-        n = n$168;
-        emitted = $rt.unwrap($r167);
-        break $m166$match;
+    const $m187 = n.entry;
+    $m187$match: {
+      if ($m187.tag === "Some") {
+        const value = $m187.value;
+        const [$r188, n$189] = main_call_opt({ n: n, ctx: ctx, entry: value });
+        n = n$189;
+        emitted = $rt.unwrap($r188);
+        break $m187$match;
       }
-      if ($m166.tag === "None") {
+      if ($m187.tag === "None") {
         skip({  });
-        break $m166$match;
+        break $m187$match;
       }
       $rt.unreachable();
     }
@@ -2193,18 +2311,18 @@ export function main_fn({ n, ctx }) {
 }
 
 export function main_call_opt({ n, ctx, entry }) {
-  const $m170 = entry.main;
-  $m170$match: {
-    if ($m170.tag === "Some") {
-      const value = $m170.value;
-      const [$r171, n$169] = main_call({ n: n, ctx: ctx, entry: entry, spec: value });
-      n = n$169;
-      return [$r171, n];
-      break $m170$match;
+  const $m191 = entry.main;
+  $m191$match: {
+    if ($m191.tag === "Some") {
+      const value = $m191.value;
+      const [$r192, n$190] = main_call({ n: n, ctx: ctx, entry: entry, spec: value });
+      n = n$190;
+      return [$r192, n];
+      break $m191$match;
     }
-    if ($m170.tag === "None") {
+    if ($m191.tag === "None") {
       return [{ tag: "Ok", value: false }, n];
-      break $m170$match;
+      break $m191$match;
     }
     $rt.unreachable();
   }
@@ -2214,45 +2332,45 @@ export function main_call({ n, ctx, entry, spec }) {
   try {
     let main_fn = { tag: "None" };
     for (const item of entry.items) {
-      const $m174 = item;
-      $m174$match: {
-        if ($m174.tag === "FnItem") {
-          const f = $m174.f;
+      const $m195 = item;
+      $m195$match: {
+        if ($m195.tag === "FnItem") {
+          const f = $m195.f;
           if (main_fn.tag === "None" && f.def.name === "main") {
             main_fn = { tag: "Some", value: f };
           }
-          break $m174$match;
+          break $m195$match;
         }
         if (true) {
           skip({  });
-          break $m174$match;
+          break $m195$match;
         }
         $rt.unreachable();
       }
     }
-    const $m176 = main_fn;
-    $m176$match: {
-      if ($m176.tag === "None") {
+    const $m197 = main_fn;
+    $m197$match: {
+      if ($m197.tag === "None") {
         return [{ tag: "Ok", value: false }, n];
-        break $m176$match;
+        break $m197$match;
       }
-      if ($m176.tag === "Some") {
-        const value = $m176.value;
+      if ($m197.tag === "Some") {
+        const value = $m197.value;
         let args = $std_list.builder({  });
         for (const p of value.params) {
           if (p.name === spec.args) {
-            const [, args$170] = $std_list.push({ b: args, x: "ptr %args" });
-            args = args$170;
+            const [, args$191] = $std_list.push({ b: args, x: "ptr %args" });
+            args = args$191;
           } else {
             const kind = root_kind({ roots: spec.roots, name: p.name });
             if (kind.tag === "Some") {
-              const [$r178, n$171] = root_call({ n: n, kind: or_empty({ o: kind }) });
-              n = n$171;
-              const [, args$172] = $std_list.push({ b: args, x: "ptr " + $r178 });
-              args = args$172;
+              const [$r199, n$192] = root_call({ n: n, kind: or_empty({ o: kind }) });
+              n = n$192;
+              const [, args$193] = $std_list.push({ b: args, x: "ptr " + $r199 });
+              args = args$193;
             } else {
-              const [, args$173] = $std_list.push({ b: args, x: "ptr null" });
-              args = args$173;
+              const [, args$194] = $std_list.push({ b: args, x: "ptr null" });
+              args = args$194;
             }
           }
         }
@@ -2262,7 +2380,7 @@ export function main_call({ n, ctx, entry, spec }) {
         emit_line({ n: n, line: "%code = call i32 @onus_finish(ptr %result)" });
         emit_line({ n: n, line: "ret i32 %code" });
         return [{ tag: "Ok", value: true }, n];
-        break $m176$match;
+        break $m197$match;
       }
       $rt.unreachable();
     }
@@ -2273,16 +2391,16 @@ export function main_call({ n, ctx, entry, spec }) {
 }
 
 export function or_empty({ o }) {
-  const $m180 = o;
-  $m180$match: {
-    if ($m180.tag === "Some") {
-      const value = $m180.value;
+  const $m201 = o;
+  $m201$match: {
+    if ($m201.tag === "Some") {
+      const value = $m201.value;
       return value;
-      break $m180$match;
+      break $m201$match;
     }
-    if ($m180.tag === "None") {
+    if ($m201.tag === "None") {
       return "";
-      break $m180$match;
+      break $m201$match;
     }
     $rt.unreachable();
   }
@@ -2298,12 +2416,12 @@ export function root_kind({ roots, name }) {
 }
 
 export function root_call({ n, kind }) {
-  const [$r183, n$174] = new_tmp({ n: n });
-  n = n$174;
-  const r = $r183;
-  const [$r184, n$175] = c_string({ n: n, x: kind });
-  n = n$175;
-  const label_text = $r184;
+  const [$r204, n$195] = new_tmp({ n: n });
+  n = n$195;
+  const r = $r204;
+  const [$r205, n$196] = c_string({ n: n, x: kind });
+  n = n$196;
+  const label_text = $r205;
   emit_line({ n: n, line: r + " = call ptr @onus_root(ptr " + label_text + ")" });
   return [r, n];
 }
@@ -2312,28 +2430,28 @@ export function decoder_fn({ fuel, n, ctx, d }) {
   if (fuel === 0) {
     return [{ tag: "Err", error: "out of fuel" }, n];
   }
-  n = { ...n, counter: $rt.int.add(n.counter, 1, $ob99) };
+  n = { ...n, counter: $rt.int.add(n.counter, 1, $ob101) };
   const name = "@\"decode$" + s({ i: n.counter }) + "\"";
   declare_sig({ n: n, sig: "declare i64 @onus_sql_column(ptr, ptr, i64)" });
   const saved = save_fn({ n: n });
-  const [, n$176] = begin_fn({ n: n });
-  n = n$176;
+  const [, n$197] = begin_fn({ n: n });
+  n = n$197;
   n = { ...n, fn_ret: "ptr" };
-  const [$r188, n$177] = decoder_body({ fuel: $rt.int.sub(fuel, 1, $ob100), n: n, ctx: ctx, d: d, name: name });
-  n = n$177;
-  const r = $r188;
-  const [, n$178] = restore_fn({ n: n, sv: saved });
-  n = n$178;
-  const $m189 = r;
-  $m189$match: {
-    if ($m189.tag === "Ok") {
+  const [$r209, n$198] = decoder_body({ fuel: $rt.int.sub(fuel, 1, $ob102), n: n, ctx: ctx, d: d, name: name });
+  n = n$198;
+  const r = $r209;
+  const [, n$199] = restore_fn({ n: n, sv: saved });
+  n = n$199;
+  const $m210 = r;
+  $m210$match: {
+    if ($m210.tag === "Ok") {
       skip({  });
-      break $m189$match;
+      break $m210$match;
     }
-    if ($m189.tag === "Err") {
-      const error = $m189.error;
+    if ($m210.tag === "Err") {
+      const error = $m210.error;
       return [{ tag: "Err", error: error }, n];
-      break $m189$match;
+      break $m210$match;
     }
     $rt.unreachable();
   }
@@ -2345,44 +2463,44 @@ export function decoder_body({ fuel, n, ctx, d, name }) {
     if (fuel === 0) {
       return [{ tag: "Err", error: "out of fuel" }, n];
     }
-    let rec_def = $rt.int.neg(1, $ob101);
-    const $m193 = $types.strip({ t: d.ty });
-    $m193$match: {
-      if ($m193.tag === "RecordT") {
-        const def = $m193.def;
+    let rec_def = $rt.int.neg(1, $ob103);
+    const $m214 = $types.strip({ t: d.ty });
+    $m214$match: {
+      if ($m214.tag === "RecordT") {
+        const def = $m214.def;
         rec_def = def;
-        break $m193$match;
+        break $m214$match;
       }
       if (true) {
         return [{ tag: "Err", error: "a row decoder for a non-record" }, n];
-        break $m193$match;
+        break $m214$match;
       }
       $rt.unreachable();
     }
     const fs = fields_of({ ctx: ctx, owner: rec_def });
-    const [$r195, n$179] = new_tmp({ n: n });
-    n = n$179;
-    const obj = $r195;
+    const [$r216, n$200] = new_tmp({ n: n });
+    n = n$200;
+    const obj = $r216;
     emit_line({ n: n, line: obj + " = call ptr @onus_alloc(i64 " + s({ i: slots_size({ k: $std_list.len({ xs: fs }) }) }) + ")" });
     for (const f of d.fields) {
       const idx = slot_index({ fields: fs, name: f.name });
-      const [$r196, n$180] = new_tmp({ n: n });
-      n = n$180;
-      const slot = $r196;
-      const [$r197, n$181] = text_global({ n: n, x: f.name });
-      n = n$181;
-      const column = $r197;
+      const [$r217, n$201] = new_tmp({ n: n });
+      n = n$201;
+      const slot = $r217;
+      const [$r218, n$202] = text_global({ n: n, x: f.name });
+      n = n$202;
+      const column = $r218;
       emit_line({ n: n, line: slot + " = call i64 @onus_sql_column(ptr %raw, ptr " + column + ", i64 " + s({ i: column_kind({ kind: f.kind }) }) + ")" });
-      const [, n$182] = store_slot({ n: n, obj: obj, idx: idx, slot: slot });
-      n = n$182;
+      const [, n$203] = store_slot({ n: n, obj: obj, idx: idx, slot: slot });
+      n = n$203;
     }
-    const [$r198, n$183] = alloc_local({ n: n, name: d.it_name, t: "ptr", ty: d.ty });
-    n = n$183;
-    const ptr = $r198;
+    const [$r219, n$204] = alloc_local({ n: n, name: d.it_name, t: "ptr", ty: d.ty });
+    n = n$204;
+    const ptr = $r219;
     emit_line({ n: n, line: "store ptr " + obj + ", ptr " + ptr });
-    const [$r199, n$184] = block_stmts({ fuel: $rt.int.sub(fuel, 1, $ob102), n: n, ctx: ctx, b: d.checks });
-    n = n$184;
-    $rt.unwrap($r199);
+    const [$r220, n$205] = block_stmts({ fuel: $rt.int.sub(fuel, 1, $ob104), n: n, ctx: ctx, b: d.checks });
+    n = n$205;
+    $rt.unwrap($r220);
     if (!n.terminated) {
       emit_line({ n: n, line: "ret ptr " + obj });
     }
@@ -2417,9 +2535,9 @@ export function block_stmts({ fuel, n, ctx, b }) {
     }
     for (const st of b) {
       if (!n.terminated) {
-        const [$r202, n$185] = stmt_ir({ fuel: $rt.int.sub(fuel, 1, $ob103), n: n, ctx: ctx, st: st });
-        n = n$185;
-        $rt.unwrap($r202);
+        const [$r223, n$206] = stmt_ir({ fuel: $rt.int.sub(fuel, 1, $ob105), n: n, ctx: ctx, st: st });
+        n = n$206;
+        $rt.unwrap($r223);
       }
     }
     return [{ tag: "Ok", value: undefined }, n];
@@ -2438,521 +2556,521 @@ export function stmt_ir({ fuel, n, ctx, st }) {
     if (fuel === 0) {
       return [{ tag: "Err", error: "out of fuel" }, n];
     }
-    const $m206 = st;
-    $m206$match: {
-      if ($m206.tag === "Let") {
-        const name = $m206.name;
-        const ty = $m206.ty;
-        const value = $m206.value;
+    const $m227 = st;
+    $m227$match: {
+      if ($m227.tag === "Let") {
+        const name = $m227.name;
+        const ty = $m227.ty;
+        const value = $m227.value;
         const t = $rt.unwrap(ll_of({ ctx: ctx, t: ty }));
-        const [$r207, n$186] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob104), n: n, ctx: ctx, e: value });
-        n = n$186;
-        const ev = $rt.unwrap($r207);
-        const [$r208, n$187] = coerce_to({ n: n, v: ev, to: t });
-        n = n$187;
-        const v = $r208;
-        const [$r209, n$188] = alloc_local({ n: n, name: name, t: t, ty: ty });
-        n = n$188;
-        const ptr = $r209;
+        const [$r228, n$207] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob106), n: n, ctx: ctx, e: value });
+        n = n$207;
+        const ev = $rt.unwrap($r228);
+        const [$r229, n$208] = coerce_to({ n: n, v: ev, to: t });
+        n = n$208;
+        const v = $r229;
+        const [$r230, n$209] = alloc_local({ n: n, name: name, t: t, ty: ty });
+        n = n$209;
+        const ptr = $r230;
         emit_line({ n: n, line: "store " + t + " " + v.v + ", ptr " + ptr });
         return [{ tag: "Ok", value: undefined }, n];
-        break $m206$match;
+        break $m227$match;
       }
-      if ($m206.tag === "Assign") {
-        const name = $m206.name;
-        const value = $m206.value;
+      if ($m227.tag === "Assign") {
+        const name = $m227.name;
+        const value = $m227.value;
         const local = $rt.unwrap(local_of({ n: n, name: name }));
-        const [$r211, n$189] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob105), n: n, ctx: ctx, e: value });
-        n = n$189;
-        const ev = $rt.unwrap($r211);
-        const [$r212, n$190] = coerce_to({ n: n, v: ev, to: local.t });
-        n = n$190;
-        const v = $r212;
+        const [$r232, n$210] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob107), n: n, ctx: ctx, e: value });
+        n = n$210;
+        const ev = $rt.unwrap($r232);
+        const [$r233, n$211] = coerce_to({ n: n, v: ev, to: local.t });
+        n = n$211;
+        const v = $r233;
         emit_line({ n: n, line: "store " + local.t + " " + v.v + ", ptr " + local.ptr });
         return [{ tag: "Ok", value: undefined }, n];
-        break $m206$match;
+        break $m227$match;
       }
-      if ($m206.tag === "Return") {
-        const value = $m206.value;
+      if ($m227.tag === "Return") {
+        const value = $m227.value;
         if (n.fn_ret === "void") {
           emit_line({ n: n, line: "ret void" });
           n = { ...n, terminated: true };
           return [{ tag: "Ok", value: undefined }, n];
         }
-        const [$r216, n$191] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob106), n: n, ctx: ctx, e: value });
-        n = n$191;
-        const ev = $rt.unwrap($r216);
-        const [$r217, n$192] = coerce_to({ n: n, v: ev, to: n.fn_ret });
-        n = n$192;
-        const v = $r217;
+        const [$r237, n$212] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob108), n: n, ctx: ctx, e: value });
+        n = n$212;
+        const ev = $rt.unwrap($r237);
+        const [$r238, n$213] = coerce_to({ n: n, v: ev, to: n.fn_ret });
+        n = n$213;
+        const v = $r238;
         emit_line({ n: n, line: "ret " + v.t + " " + v.v });
         n = { ...n, terminated: true };
         return [{ tag: "Ok", value: undefined }, n];
-        break $m206$match;
+        break $m227$match;
       }
-      if ($m206.tag === "If") {
-        const cond = $m206.cond;
-        const then_block = $m206.then_block;
-        const else_block = $m206.else_block;
-        const [$r220, n$193] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob107), n: n, ctx: ctx, e: cond });
-        n = n$193;
-        const cv = $rt.unwrap($r220);
-        const [$r221, n$194] = coerce_to({ n: n, v: cv, to: "i1" });
-        n = n$194;
-        const c = $r221;
-        const [$r222, n$195] = new_label({ n: n, prefix: "then" });
-        n = n$195;
-        const then_l = $r222;
-        const [$r223, n$196] = new_label({ n: n, prefix: "else" });
-        n = n$196;
-        const else_l = $r223;
-        const [$r224, n$197] = new_label({ n: n, prefix: "endif" });
-        n = n$197;
-        const end_l = $r224;
+      if ($m227.tag === "If") {
+        const cond = $m227.cond;
+        const then_block = $m227.then_block;
+        const else_block = $m227.else_block;
+        const [$r241, n$214] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob109), n: n, ctx: ctx, e: cond });
+        n = n$214;
+        const cv = $rt.unwrap($r241);
+        const [$r242, n$215] = coerce_to({ n: n, v: cv, to: "i1" });
+        n = n$215;
+        const c = $r242;
+        const [$r243, n$216] = new_label({ n: n, prefix: "then" });
+        n = n$216;
+        const then_l = $r243;
+        const [$r244, n$217] = new_label({ n: n, prefix: "else" });
+        n = n$217;
+        const else_l = $r244;
+        const [$r245, n$218] = new_label({ n: n, prefix: "endif" });
+        n = n$218;
+        const end_l = $r245;
         let target = else_l;
         if (else_block.tag === "None") {
           target = end_l;
         }
-        const [, n$198] = cond_br({ n: n, cond: c.v, then_l: then_l, else_l: target });
-        n = n$198;
-        const [, n$199] = start_block({ n: n, name: then_l });
-        n = n$199;
-        const [$r225, n$200] = block_stmts({ fuel: $rt.int.sub(fuel, 1, $ob108), n: n, ctx: ctx, b: then_block });
-        n = n$200;
-        $rt.unwrap($r225);
-        const [, n$201] = br({ n: n, target: end_l });
-        n = n$201;
-        const $m226 = else_block;
-        $m226$match: {
-          if ($m226.tag === "Some") {
-            const value = $m226.value;
-            const [, n$202] = start_block({ n: n, name: else_l });
-            n = n$202;
-            const [$r227, n$203] = block_stmts({ fuel: $rt.int.sub(fuel, 1, $ob109), n: n, ctx: ctx, b: value });
-            n = n$203;
-            $rt.unwrap($r227);
-            const [, n$204] = br({ n: n, target: end_l });
-            n = n$204;
-            break $m226$match;
+        const [, n$219] = cond_br({ n: n, cond: c.v, then_l: then_l, else_l: target });
+        n = n$219;
+        const [, n$220] = start_block({ n: n, name: then_l });
+        n = n$220;
+        const [$r246, n$221] = block_stmts({ fuel: $rt.int.sub(fuel, 1, $ob110), n: n, ctx: ctx, b: then_block });
+        n = n$221;
+        $rt.unwrap($r246);
+        const [, n$222] = br({ n: n, target: end_l });
+        n = n$222;
+        const $m247 = else_block;
+        $m247$match: {
+          if ($m247.tag === "Some") {
+            const value = $m247.value;
+            const [, n$223] = start_block({ n: n, name: else_l });
+            n = n$223;
+            const [$r248, n$224] = block_stmts({ fuel: $rt.int.sub(fuel, 1, $ob111), n: n, ctx: ctx, b: value });
+            n = n$224;
+            $rt.unwrap($r248);
+            const [, n$225] = br({ n: n, target: end_l });
+            n = n$225;
+            break $m247$match;
           }
-          if ($m226.tag === "None") {
+          if ($m247.tag === "None") {
             skip({  });
-            break $m226$match;
+            break $m247$match;
           }
           $rt.unreachable();
         }
-        const [, n$205] = start_block({ n: n, name: end_l });
-        n = n$205;
+        const [, n$226] = start_block({ n: n, name: end_l });
+        n = n$226;
         return [{ tag: "Ok", value: undefined }, n];
-        break $m206$match;
+        break $m227$match;
       }
-      if ($m206.tag === "Match") {
-        const tmp = $m206.tmp;
-        const ty = $m206.ty;
-        const scrutinee = $m206.scrutinee;
-        const arms = $m206.arms;
+      if ($m227.tag === "Match") {
+        const tmp = $m227.tmp;
+        const ty = $m227.ty;
+        const scrutinee = $m227.scrutinee;
+        const arms = $m227.arms;
         const t = $rt.unwrap(ll_of({ ctx: ctx, t: ty }));
-        const [$r229, n$206] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob110), n: n, ctx: ctx, e: scrutinee });
-        n = n$206;
-        const sv = $rt.unwrap($r229);
-        const [$r230, n$207] = coerce_to({ n: n, v: sv, to: t });
-        n = n$207;
-        const v = $r230;
-        const [$r231, n$208] = alloc_local({ n: n, name: tmp, t: t, ty: ty });
-        n = n$208;
-        const ptr = $r231;
+        const [$r250, n$227] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob112), n: n, ctx: ctx, e: scrutinee });
+        n = n$227;
+        const sv = $rt.unwrap($r250);
+        const [$r251, n$228] = coerce_to({ n: n, v: sv, to: t });
+        n = n$228;
+        const v = $r251;
+        const [$r252, n$229] = alloc_local({ n: n, name: tmp, t: t, ty: ty });
+        n = n$229;
+        const ptr = $r252;
         emit_line({ n: n, line: "store " + t + " " + v.v + ", ptr " + ptr });
-        const [$r232, n$209] = new_label({ n: n, prefix: "endmatch" });
-        n = n$209;
-        const end_l = $r232;
+        const [$r253, n$230] = new_label({ n: n, prefix: "endmatch" });
+        n = n$230;
+        const end_l = $r253;
         for (const arm of arms) {
-          const [$r233, n$210] = new_label({ n: n, prefix: "arm" });
-          n = n$210;
-          const body_l = $r233;
-          const [$r234, n$211] = new_label({ n: n, prefix: "next" });
-          n = n$211;
-          const next_l = $r234;
-          const $m235 = arm.pattern_test;
-          $m235$match: {
-            if ($m235.tag === "Some") {
-              const value = $m235.value;
-              const [$r236, n$212] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob111), n: n, ctx: ctx, e: value });
-              n = n$212;
-              const tv = $rt.unwrap($r236);
-              const [$r237, n$213] = coerce_to({ n: n, v: tv, to: "i1" });
-              n = n$213;
-              const c = $r237;
-              const [, n$214] = cond_br({ n: n, cond: c.v, then_l: body_l, else_l: next_l });
-              n = n$214;
-              break $m235$match;
+          const [$r254, n$231] = new_label({ n: n, prefix: "arm" });
+          n = n$231;
+          const body_l = $r254;
+          const [$r255, n$232] = new_label({ n: n, prefix: "next" });
+          n = n$232;
+          const next_l = $r255;
+          const $m256 = arm.pattern_test;
+          $m256$match: {
+            if ($m256.tag === "Some") {
+              const value = $m256.value;
+              const [$r257, n$233] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob113), n: n, ctx: ctx, e: value });
+              n = n$233;
+              const tv = $rt.unwrap($r257);
+              const [$r258, n$234] = coerce_to({ n: n, v: tv, to: "i1" });
+              n = n$234;
+              const c = $r258;
+              const [, n$235] = cond_br({ n: n, cond: c.v, then_l: body_l, else_l: next_l });
+              n = n$235;
+              break $m256$match;
             }
-            if ($m235.tag === "None") {
-              const [, n$215] = br({ n: n, target: body_l });
-              n = n$215;
-              break $m235$match;
+            if ($m256.tag === "None") {
+              const [, n$236] = br({ n: n, target: body_l });
+              n = n$236;
+              break $m256$match;
             }
             $rt.unreachable();
           }
-          const [, n$216] = start_block({ n: n, name: body_l });
-          n = n$216;
+          const [, n$237] = start_block({ n: n, name: body_l });
+          n = n$237;
           for (const bd of arm.bindings) {
             const bt = $rt.unwrap(ll_of({ ctx: ctx, t: bd.ty }));
-            const [$r238, n$217] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob112), n: n, ctx: ctx, e: bd.value });
-            n = n$217;
-            const bev = $rt.unwrap($r238);
-            const [$r239, n$218] = coerce_to({ n: n, v: bev, to: bt });
-            n = n$218;
-            const bv = $r239;
-            const [$r240, n$219] = alloc_local({ n: n, name: bd.name, t: bt, ty: bd.ty });
-            n = n$219;
-            const bp = $r240;
+            const [$r259, n$238] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob114), n: n, ctx: ctx, e: bd.value });
+            n = n$238;
+            const bev = $rt.unwrap($r259);
+            const [$r260, n$239] = coerce_to({ n: n, v: bev, to: bt });
+            n = n$239;
+            const bv = $r260;
+            const [$r261, n$240] = alloc_local({ n: n, name: bd.name, t: bt, ty: bd.ty });
+            n = n$240;
+            const bp = $r261;
             emit_line({ n: n, line: "store " + bt + " " + bv.v + ", ptr " + bp });
           }
-          const $m241 = arm.guard;
-          $m241$match: {
-            if ($m241.tag === "Some") {
-              const value = $m241.value;
-              const [$r242, n$220] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob113), n: n, ctx: ctx, e: value });
-              n = n$220;
-              const gv = $rt.unwrap($r242);
-              const [$r243, n$221] = coerce_to({ n: n, v: gv, to: "i1" });
-              n = n$221;
-              const g = $r243;
-              const [$r244, n$222] = new_label({ n: n, prefix: "guarded" });
-              n = n$222;
-              const guarded_l = $r244;
-              const [, n$223] = cond_br({ n: n, cond: g.v, then_l: guarded_l, else_l: next_l });
-              n = n$223;
-              const [, n$224] = start_block({ n: n, name: guarded_l });
-              n = n$224;
-              break $m241$match;
+          const $m262 = arm.guard;
+          $m262$match: {
+            if ($m262.tag === "Some") {
+              const value = $m262.value;
+              const [$r263, n$241] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob115), n: n, ctx: ctx, e: value });
+              n = n$241;
+              const gv = $rt.unwrap($r263);
+              const [$r264, n$242] = coerce_to({ n: n, v: gv, to: "i1" });
+              n = n$242;
+              const g = $r264;
+              const [$r265, n$243] = new_label({ n: n, prefix: "guarded" });
+              n = n$243;
+              const guarded_l = $r265;
+              const [, n$244] = cond_br({ n: n, cond: g.v, then_l: guarded_l, else_l: next_l });
+              n = n$244;
+              const [, n$245] = start_block({ n: n, name: guarded_l });
+              n = n$245;
+              break $m262$match;
             }
-            if ($m241.tag === "None") {
+            if ($m262.tag === "None") {
               skip({  });
-              break $m241$match;
+              break $m262$match;
             }
             $rt.unreachable();
           }
-          const [$r245, n$225] = block_stmts({ fuel: $rt.int.sub(fuel, 1, $ob114), n: n, ctx: ctx, b: arm.body });
-          n = n$225;
-          $rt.unwrap($r245);
-          const [, n$226] = br({ n: n, target: end_l });
-          n = n$226;
-          const [, n$227] = start_block({ n: n, name: next_l });
-          n = n$227;
+          const [$r266, n$246] = block_stmts({ fuel: $rt.int.sub(fuel, 1, $ob116), n: n, ctx: ctx, b: arm.body });
+          n = n$246;
+          $rt.unwrap($r266);
+          const [, n$247] = br({ n: n, target: end_l });
+          n = n$247;
+          const [, n$248] = start_block({ n: n, name: next_l });
+          n = n$248;
         }
         emit_line({ n: n, line: "call void @onus_unreachable()" });
         emit_line({ n: n, line: "unreachable" });
         n = { ...n, terminated: true };
-        const [, n$228] = start_block({ n: n, name: end_l });
-        n = n$228;
-        return [{ tag: "Ok", value: undefined }, n];
-        break $m206$match;
-      }
-      if ($m206.tag === "Loop") {
-        const cond = $m206.cond;
-        const body = $m206.body;
-        const [$r248, n$229] = new_label({ n: n, prefix: "loop" });
-        n = n$229;
-        const cond_l = $r248;
-        const [$r249, n$230] = new_label({ n: n, prefix: "body" });
-        n = n$230;
-        const body_l = $r249;
-        const [$r250, n$231] = new_label({ n: n, prefix: "endloop" });
-        n = n$231;
-        const end_l = $r250;
-        const [, n$232] = br({ n: n, target: cond_l });
-        n = n$232;
-        const [, n$233] = start_block({ n: n, name: cond_l });
-        n = n$233;
-        const [$r251, n$234] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob115), n: n, ctx: ctx, e: cond });
-        n = n$234;
-        const cv = $rt.unwrap($r251);
-        const [$r252, n$235] = coerce_to({ n: n, v: cv, to: "i1" });
-        n = n$235;
-        const c = $r252;
-        const [, n$236] = cond_br({ n: n, cond: c.v, then_l: body_l, else_l: end_l });
-        n = n$236;
-        const [, n$237] = start_block({ n: n, name: body_l });
-        n = n$237;
-        const [$r253, n$238] = block_stmts({ fuel: $rt.int.sub(fuel, 1, $ob116), n: n, ctx: ctx, b: body });
-        n = n$238;
-        $rt.unwrap($r253);
-        const [, n$239] = br({ n: n, target: cond_l });
-        n = n$239;
-        const [, n$240] = start_block({ n: n, name: end_l });
-        n = n$240;
-        return [{ tag: "Ok", value: undefined }, n];
-        break $m206$match;
-      }
-      if ($m206.tag === "ForRange") {
-        const name = $m206.name;
-        const lo = $m206.lo;
-        const hi = $m206.hi;
-        const body = $m206.body;
-        const [$r255, n$241] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob117), n: n, ctx: ctx, e: lo });
-        n = n$241;
-        const lov = $rt.unwrap($r255);
-        const [$r256, n$242] = coerce_to({ n: n, v: lov, to: "i64" });
-        n = n$242;
-        const lo_v = $r256;
-        const [$r257, n$243] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob118), n: n, ctx: ctx, e: hi });
-        n = n$243;
-        const hiv = $rt.unwrap($r257);
-        const [$r258, n$244] = coerce_to({ n: n, v: hiv, to: "i64" });
-        n = n$244;
-        const hi_v = $r258;
-        const [$r259, n$245] = alloc_local({ n: n, name: name, t: "i64", ty: prim_int({  }) });
-        n = n$245;
-        const ptr = $r259;
-        emit_line({ n: n, line: "store i64 " + lo_v.v + ", ptr " + ptr });
-        const [$r260, n$246] = new_label({ n: n, prefix: "for" });
-        n = n$246;
-        const cond_l = $r260;
-        const [$r261, n$247] = new_label({ n: n, prefix: "body" });
-        n = n$247;
-        const body_l = $r261;
-        const [$r262, n$248] = new_label({ n: n, prefix: "endfor" });
-        n = n$248;
-        const end_l = $r262;
-        const [, n$249] = br({ n: n, target: cond_l });
+        const [, n$249] = start_block({ n: n, name: end_l });
         n = n$249;
-        const [, n$250] = start_block({ n: n, name: cond_l });
+        return [{ tag: "Ok", value: undefined }, n];
+        break $m227$match;
+      }
+      if ($m227.tag === "Loop") {
+        const cond = $m227.cond;
+        const body = $m227.body;
+        const [$r269, n$250] = new_label({ n: n, prefix: "loop" });
         n = n$250;
-        const [$r263, n$251] = new_tmp({ n: n });
+        const cond_l = $r269;
+        const [$r270, n$251] = new_label({ n: n, prefix: "body" });
         n = n$251;
-        const i = $r263;
-        emit_line({ n: n, line: i + " = load i64, ptr " + ptr });
-        const [$r264, n$252] = new_tmp({ n: n });
+        const body_l = $r270;
+        const [$r271, n$252] = new_label({ n: n, prefix: "endloop" });
         n = n$252;
-        const c = $r264;
-        emit_line({ n: n, line: c + " = icmp slt i64 " + i + ", " + hi_v.v });
-        const [, n$253] = cond_br({ n: n, cond: c, then_l: body_l, else_l: end_l });
+        const end_l = $r271;
+        const [, n$253] = br({ n: n, target: cond_l });
         n = n$253;
-        const [, n$254] = start_block({ n: n, name: body_l });
+        const [, n$254] = start_block({ n: n, name: cond_l });
         n = n$254;
-        const [$r265, n$255] = block_stmts({ fuel: $rt.int.sub(fuel, 1, $ob119), n: n, ctx: ctx, b: body });
+        const [$r272, n$255] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob117), n: n, ctx: ctx, e: cond });
         n = n$255;
-        $rt.unwrap($r265);
+        const cv = $rt.unwrap($r272);
+        const [$r273, n$256] = coerce_to({ n: n, v: cv, to: "i1" });
+        n = n$256;
+        const c = $r273;
+        const [, n$257] = cond_br({ n: n, cond: c.v, then_l: body_l, else_l: end_l });
+        n = n$257;
+        const [, n$258] = start_block({ n: n, name: body_l });
+        n = n$258;
+        const [$r274, n$259] = block_stmts({ fuel: $rt.int.sub(fuel, 1, $ob118), n: n, ctx: ctx, b: body });
+        n = n$259;
+        $rt.unwrap($r274);
+        const [, n$260] = br({ n: n, target: cond_l });
+        n = n$260;
+        const [, n$261] = start_block({ n: n, name: end_l });
+        n = n$261;
+        return [{ tag: "Ok", value: undefined }, n];
+        break $m227$match;
+      }
+      if ($m227.tag === "ForRange") {
+        const name = $m227.name;
+        const lo = $m227.lo;
+        const hi = $m227.hi;
+        const body = $m227.body;
+        const [$r276, n$262] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob119), n: n, ctx: ctx, e: lo });
+        n = n$262;
+        const lov = $rt.unwrap($r276);
+        const [$r277, n$263] = coerce_to({ n: n, v: lov, to: "i64" });
+        n = n$263;
+        const lo_v = $r277;
+        const [$r278, n$264] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob120), n: n, ctx: ctx, e: hi });
+        n = n$264;
+        const hiv = $rt.unwrap($r278);
+        const [$r279, n$265] = coerce_to({ n: n, v: hiv, to: "i64" });
+        n = n$265;
+        const hi_v = $r279;
+        const [$r280, n$266] = alloc_local({ n: n, name: name, t: "i64", ty: prim_int({  }) });
+        n = n$266;
+        const ptr = $r280;
+        emit_line({ n: n, line: "store i64 " + lo_v.v + ", ptr " + ptr });
+        const [$r281, n$267] = new_label({ n: n, prefix: "for" });
+        n = n$267;
+        const cond_l = $r281;
+        const [$r282, n$268] = new_label({ n: n, prefix: "body" });
+        n = n$268;
+        const body_l = $r282;
+        const [$r283, n$269] = new_label({ n: n, prefix: "endfor" });
+        n = n$269;
+        const end_l = $r283;
+        const [, n$270] = br({ n: n, target: cond_l });
+        n = n$270;
+        const [, n$271] = start_block({ n: n, name: cond_l });
+        n = n$271;
+        const [$r284, n$272] = new_tmp({ n: n });
+        n = n$272;
+        const i = $r284;
+        emit_line({ n: n, line: i + " = load i64, ptr " + ptr });
+        const [$r285, n$273] = new_tmp({ n: n });
+        n = n$273;
+        const c = $r285;
+        emit_line({ n: n, line: c + " = icmp slt i64 " + i + ", " + hi_v.v });
+        const [, n$274] = cond_br({ n: n, cond: c, then_l: body_l, else_l: end_l });
+        n = n$274;
+        const [, n$275] = start_block({ n: n, name: body_l });
+        n = n$275;
+        const [$r286, n$276] = block_stmts({ fuel: $rt.int.sub(fuel, 1, $ob121), n: n, ctx: ctx, b: body });
+        n = n$276;
+        $rt.unwrap($r286);
         if (!n.terminated) {
-          const [$r266, n$256] = new_tmp({ n: n });
-          n = n$256;
-          const cur = $r266;
+          const [$r287, n$277] = new_tmp({ n: n });
+          n = n$277;
+          const cur = $r287;
           emit_line({ n: n, line: cur + " = load i64, ptr " + ptr });
-          const [$r267, n$257] = new_tmp({ n: n });
-          n = n$257;
-          const next = $r267;
+          const [$r288, n$278] = new_tmp({ n: n });
+          n = n$278;
+          const next = $r288;
           emit_line({ n: n, line: next + " = add i64 " + cur + ", 1" });
           emit_line({ n: n, line: "store i64 " + next + ", ptr " + ptr });
         }
-        const [, n$258] = br({ n: n, target: cond_l });
-        n = n$258;
-        const [, n$259] = start_block({ n: n, name: end_l });
-        n = n$259;
+        const [, n$279] = br({ n: n, target: cond_l });
+        n = n$279;
+        const [, n$280] = start_block({ n: n, name: end_l });
+        n = n$280;
         return [{ tag: "Ok", value: undefined }, n];
-        break $m206$match;
+        break $m227$match;
       }
-      if ($m206.tag === "ForEach") {
-        const name = $m206.name;
-        const ty = $m206.ty;
-        const list = $m206.list;
-        const body = $m206.body;
-        const [$r269, n$260] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob120), n: n, ctx: ctx, e: list });
-        n = n$260;
-        const lv = $rt.unwrap($r269);
-        const [$r270, n$261] = coerce_to({ n: n, v: lv, to: "ptr" });
-        n = n$261;
-        const list_v = $r270;
-        const [$r271, n$262] = new_tmp({ n: n });
-        n = n$262;
-        const len = $r271;
+      if ($m227.tag === "ForEach") {
+        const name = $m227.name;
+        const ty = $m227.ty;
+        const list = $m227.list;
+        const body = $m227.body;
+        const [$r290, n$281] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob122), n: n, ctx: ctx, e: list });
+        n = n$281;
+        const lv = $rt.unwrap($r290);
+        const [$r291, n$282] = coerce_to({ n: n, v: lv, to: "ptr" });
+        n = n$282;
+        const list_v = $r291;
+        const [$r292, n$283] = new_tmp({ n: n });
+        n = n$283;
+        const len = $r292;
         emit_line({ n: n, line: len + " = call i64 @onus_rt_list_len(ptr " + list_v.v + ")" });
-        const [$r272, n$263] = alloc_local({ n: n, name: "$idx", t: "i64", ty: prim_int({  }) });
-        n = n$263;
-        const idx = $r272;
+        const [$r293, n$284] = alloc_local({ n: n, name: "$idx", t: "i64", ty: prim_int({  }) });
+        n = n$284;
+        const idx = $r293;
         emit_line({ n: n, line: "store i64 0, ptr " + idx });
         const et = $rt.unwrap(ll_of({ ctx: ctx, t: ty }));
-        const [$r273, n$264] = alloc_local({ n: n, name: name, t: et, ty: ty });
-        n = n$264;
-        const elem = $r273;
-        const [$r274, n$265] = new_label({ n: n, prefix: "foreach" });
-        n = n$265;
-        const cond_l = $r274;
-        const [$r275, n$266] = new_label({ n: n, prefix: "body" });
-        n = n$266;
-        const body_l = $r275;
-        const [$r276, n$267] = new_label({ n: n, prefix: "endforeach" });
-        n = n$267;
-        const end_l = $r276;
-        const [, n$268] = br({ n: n, target: cond_l });
-        n = n$268;
-        const [, n$269] = start_block({ n: n, name: cond_l });
-        n = n$269;
-        const [$r277, n$270] = new_tmp({ n: n });
-        n = n$270;
-        const i = $r277;
+        const [$r294, n$285] = alloc_local({ n: n, name: name, t: et, ty: ty });
+        n = n$285;
+        const elem = $r294;
+        const [$r295, n$286] = new_label({ n: n, prefix: "foreach" });
+        n = n$286;
+        const cond_l = $r295;
+        const [$r296, n$287] = new_label({ n: n, prefix: "body" });
+        n = n$287;
+        const body_l = $r296;
+        const [$r297, n$288] = new_label({ n: n, prefix: "endforeach" });
+        n = n$288;
+        const end_l = $r297;
+        const [, n$289] = br({ n: n, target: cond_l });
+        n = n$289;
+        const [, n$290] = start_block({ n: n, name: cond_l });
+        n = n$290;
+        const [$r298, n$291] = new_tmp({ n: n });
+        n = n$291;
+        const i = $r298;
         emit_line({ n: n, line: i + " = load i64, ptr " + idx });
-        const [$r278, n$271] = new_tmp({ n: n });
-        n = n$271;
-        const c = $r278;
+        const [$r299, n$292] = new_tmp({ n: n });
+        n = n$292;
+        const c = $r299;
         emit_line({ n: n, line: c + " = icmp slt i64 " + i + ", " + len });
-        const [, n$272] = cond_br({ n: n, cond: c, then_l: body_l, else_l: end_l });
-        n = n$272;
-        const [, n$273] = start_block({ n: n, name: body_l });
-        n = n$273;
-        const [$r279, n$274] = new_tmp({ n: n });
-        n = n$274;
-        const slot = $r279;
+        const [, n$293] = cond_br({ n: n, cond: c, then_l: body_l, else_l: end_l });
+        n = n$293;
+        const [, n$294] = start_block({ n: n, name: body_l });
+        n = n$294;
+        const [$r300, n$295] = new_tmp({ n: n });
+        n = n$295;
+        const slot = $r300;
         emit_line({ n: n, line: slot + " = call i64 @onus_rt_list_get(ptr " + list_v.v + ", i64 " + i + ")" });
-        const [$r280, n$275] = from_slot({ n: n, slot: slot, t: et });
-        n = n$275;
-        const ev = $r280;
+        const [$r301, n$296] = from_slot({ n: n, slot: slot, t: et });
+        n = n$296;
+        const ev = $r301;
         emit_line({ n: n, line: "store " + et + " " + ev.v + ", ptr " + elem });
-        const [$r281, n$276] = new_tmp({ n: n });
-        n = n$276;
-        const next = $r281;
+        const [$r302, n$297] = new_tmp({ n: n });
+        n = n$297;
+        const next = $r302;
         emit_line({ n: n, line: next + " = add i64 " + i + ", 1" });
         emit_line({ n: n, line: "store i64 " + next + ", ptr " + idx });
-        const [$r282, n$277] = block_stmts({ fuel: $rt.int.sub(fuel, 1, $ob121), n: n, ctx: ctx, b: body });
-        n = n$277;
-        $rt.unwrap($r282);
-        const [, n$278] = br({ n: n, target: cond_l });
-        n = n$278;
-        const [, n$279] = start_block({ n: n, name: end_l });
-        n = n$279;
+        const [$r303, n$298] = block_stmts({ fuel: $rt.int.sub(fuel, 1, $ob123), n: n, ctx: ctx, b: body });
+        n = n$298;
+        $rt.unwrap($r303);
+        const [, n$299] = br({ n: n, target: cond_l });
+        n = n$299;
+        const [, n$300] = start_block({ n: n, name: end_l });
+        n = n$300;
         return [{ tag: "Ok", value: undefined }, n];
-        break $m206$match;
+        break $m227$match;
       }
-      if ($m206.tag === "Check") {
-        const cond = $m206.cond;
-        const ob = $m206.ob;
-        const [$r284, n$280] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob122), n: n, ctx: ctx, e: cond });
-        n = n$280;
-        const cv = $rt.unwrap($r284);
-        const [$r285, n$281] = coerce_to({ n: n, v: cv, to: "i1" });
-        n = n$281;
-        const c = $r285;
-        const [$r286, n$282] = new_label({ n: n, prefix: "ok" });
-        n = n$282;
-        const ok_l = $r286;
-        const [$r287, n$283] = new_label({ n: n, prefix: "fail" });
-        n = n$283;
-        const fail_l = $r287;
-        const [, n$284] = cond_br({ n: n, cond: c.v, then_l: ok_l, else_l: fail_l });
-        n = n$284;
-        const [, n$285] = start_block({ n: n, name: fail_l });
-        n = n$285;
-        const [, n$286] = emit_panic({ n: n, ob: ob });
-        n = n$286;
-        const [, n$287] = start_block({ n: n, name: ok_l });
-        n = n$287;
+      if ($m227.tag === "Check") {
+        const cond = $m227.cond;
+        const ob = $m227.ob;
+        const [$r305, n$301] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob124), n: n, ctx: ctx, e: cond });
+        n = n$301;
+        const cv = $rt.unwrap($r305);
+        const [$r306, n$302] = coerce_to({ n: n, v: cv, to: "i1" });
+        n = n$302;
+        const c = $r306;
+        const [$r307, n$303] = new_label({ n: n, prefix: "ok" });
+        n = n$303;
+        const ok_l = $r307;
+        const [$r308, n$304] = new_label({ n: n, prefix: "fail" });
+        n = n$304;
+        const fail_l = $r308;
+        const [, n$305] = cond_br({ n: n, cond: c.v, then_l: ok_l, else_l: fail_l });
+        n = n$305;
+        const [, n$306] = start_block({ n: n, name: fail_l });
+        n = n$306;
+        const [, n$307] = emit_panic({ n: n, ob: ob });
+        n = n$307;
+        const [, n$308] = start_block({ n: n, name: ok_l });
+        n = n$308;
         return [{ tag: "Ok", value: undefined }, n];
-        break $m206$match;
+        break $m227$match;
       }
-      if ($m206.tag === "Assert") {
-        const cond = $m206.cond;
-        const [$r289, n$288] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob123), n: n, ctx: ctx, e: cond });
-        n = n$288;
-        const cv = $rt.unwrap($r289);
-        const [$r290, n$289] = coerce_to({ n: n, v: cv, to: "i1" });
-        n = n$289;
-        const c = $r290;
-        const [$r291, n$290] = new_label({ n: n, prefix: "ok" });
-        n = n$290;
-        const ok_l = $r291;
-        const [$r292, n$291] = new_label({ n: n, prefix: "fail" });
-        n = n$291;
-        const fail_l = $r292;
-        const [, n$292] = cond_br({ n: n, cond: c.v, then_l: ok_l, else_l: fail_l });
-        n = n$292;
-        const [, n$293] = start_block({ n: n, name: fail_l });
-        n = n$293;
+      if ($m227.tag === "Assert") {
+        const cond = $m227.cond;
+        const [$r310, n$309] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob125), n: n, ctx: ctx, e: cond });
+        n = n$309;
+        const cv = $rt.unwrap($r310);
+        const [$r311, n$310] = coerce_to({ n: n, v: cv, to: "i1" });
+        n = n$310;
+        const c = $r311;
+        const [$r312, n$311] = new_label({ n: n, prefix: "ok" });
+        n = n$311;
+        const ok_l = $r312;
+        const [$r313, n$312] = new_label({ n: n, prefix: "fail" });
+        n = n$312;
+        const fail_l = $r313;
+        const [, n$313] = cond_br({ n: n, cond: c.v, then_l: ok_l, else_l: fail_l });
+        n = n$313;
+        const [, n$314] = start_block({ n: n, name: fail_l });
+        n = n$314;
         emit_line({ n: n, line: "ret i1 0" });
         n = { ...n, terminated: true };
-        const [, n$294] = start_block({ n: n, name: ok_l });
-        n = n$294;
+        const [, n$315] = start_block({ n: n, name: ok_l });
+        n = n$315;
         return [{ tag: "Ok", value: undefined }, n];
-        break $m206$match;
+        break $m227$match;
       }
-      if ($m206.tag === "ExprStmt") {
-        const expr = $m206.expr;
-        const [$r295, n$295] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob124), n: n, ctx: ctx, e: expr });
-        n = n$295;
-        const ev = $rt.unwrap($r295);
+      if ($m227.tag === "ExprStmt") {
+        const expr = $m227.expr;
+        const [$r316, n$316] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob126), n: n, ctx: ctx, e: expr });
+        n = n$316;
+        const ev = $rt.unwrap($r316);
         return [{ tag: "Ok", value: undefined }, n];
-        break $m206$match;
+        break $m227$match;
       }
-      if ($m206.tag === "CallInout") {
-        const result_target = $m206.result_target;
-        const call = $m206.call;
-        const [$r297, n$296] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob125), n: n, ctx: ctx, e: call });
-        n = n$296;
-        const v = $rt.unwrap($r297);
-        const $m298 = result_target;
-        $m298$match: {
-          if ($m298.tag === "Some") {
-            const value = $m298.value;
+      if ($m227.tag === "CallInout") {
+        const result_target = $m227.result_target;
+        const call = $m227.call;
+        const [$r318, n$317] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob127), n: n, ctx: ctx, e: call });
+        n = n$317;
+        const v = $rt.unwrap($r318);
+        const $m319 = result_target;
+        $m319$match: {
+          if ($m319.tag === "Some") {
+            const value = $m319.value;
             const t = $rt.unwrap(ll_of({ ctx: ctx, t: value.ty }));
-            const [$r299, n$297] = alloc_local({ n: n, name: value.name, t: t, ty: value.ty });
-            n = n$297;
-            const ptr = $r299;
-            const [$r300, n$298] = coerce_to({ n: n, v: v, to: t });
-            n = n$298;
-            const cv = $r300;
+            const [$r320, n$318] = alloc_local({ n: n, name: value.name, t: t, ty: value.ty });
+            n = n$318;
+            const ptr = $r320;
+            const [$r321, n$319] = coerce_to({ n: n, v: v, to: t });
+            n = n$319;
+            const cv = $r321;
             emit_line({ n: n, line: "store " + t + " " + cv.v + ", ptr " + ptr });
-            break $m298$match;
+            break $m319$match;
           }
-          if ($m298.tag === "None") {
+          if ($m319.tag === "None") {
             skip({  });
-            break $m298$match;
+            break $m319$match;
           }
           $rt.unreachable();
         }
         return [{ tag: "Ok", value: undefined }, n];
-        break $m206$match;
+        break $m227$match;
       }
-      if ($m206.tag === "Unreachable") {
+      if ($m227.tag === "Unreachable") {
         emit_line({ n: n, line: "call void @onus_unreachable()" });
         emit_line({ n: n, line: "unreachable" });
         n = { ...n, terminated: true };
         return [{ tag: "Ok", value: undefined }, n];
-        break $m206$match;
+        break $m227$match;
       }
-      if ($m206.tag === "Comment") {
-        const text = $m206.text;
+      if ($m227.tag === "Comment") {
+        const text = $m227.text;
         emit_line({ n: n, line: "; " + text });
         return [{ tag: "Ok", value: undefined }, n];
-        break $m206$match;
+        break $m227$match;
       }
-      if ($m206.tag === "Reject") {
-        const cond = $m206.cond;
-        const column = $m206.column;
-        const [$r305, n$299] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob126), n: n, ctx: ctx, e: cond });
-        n = n$299;
-        const cv = $rt.unwrap($r305);
-        const [$r306, n$300] = coerce_to({ n: n, v: cv, to: "i1" });
-        n = n$300;
-        const c = $r306;
-        const [$r307, n$301] = new_label({ n: n, prefix: "accept" });
-        n = n$301;
-        const ok_l = $r307;
-        const [$r308, n$302] = new_label({ n: n, prefix: "reject" });
-        n = n$302;
-        const fail_l = $r308;
-        const [, n$303] = cond_br({ n: n, cond: c.v, then_l: ok_l, else_l: fail_l });
-        n = n$303;
-        const [, n$304] = start_block({ n: n, name: fail_l });
-        n = n$304;
-        const [$r309, n$305] = text_global({ n: n, x: column });
-        n = n$305;
-        const col = $r309;
+      if ($m227.tag === "Reject") {
+        const cond = $m227.cond;
+        const column = $m227.column;
+        const [$r326, n$320] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob128), n: n, ctx: ctx, e: cond });
+        n = n$320;
+        const cv = $rt.unwrap($r326);
+        const [$r327, n$321] = coerce_to({ n: n, v: cv, to: "i1" });
+        n = n$321;
+        const c = $r327;
+        const [$r328, n$322] = new_label({ n: n, prefix: "accept" });
+        n = n$322;
+        const ok_l = $r328;
+        const [$r329, n$323] = new_label({ n: n, prefix: "reject" });
+        n = n$323;
+        const fail_l = $r329;
+        const [, n$324] = cond_br({ n: n, cond: c.v, then_l: ok_l, else_l: fail_l });
+        n = n$324;
+        const [, n$325] = start_block({ n: n, name: fail_l });
+        n = n$325;
+        const [$r330, n$326] = text_global({ n: n, x: column });
+        n = n$326;
+        const col = $r330;
         emit_line({ n: n, line: "store ptr " + col + ", ptr %column" });
         emit_line({ n: n, line: "ret ptr null" });
         n = { ...n, terminated: true };
-        const [, n$306] = start_block({ n: n, name: ok_l });
-        n = n$306;
+        const [, n$327] = start_block({ n: n, name: ok_l });
+        n = n$327;
         return [{ tag: "Ok", value: undefined }, n];
-        break $m206$match;
+        break $m227$match;
       }
       $rt.unreachable();
     }
@@ -2963,16 +3081,16 @@ export function stmt_ir({ fuel, n, ctx, st }) {
 }
 
 export function local_of({ n, name }) {
-  const $m312 = $std_map.find({ d: n.locals, key: name });
-  $m312$match: {
-    if ($m312.tag === "Some") {
-      const value = $m312.value;
+  const $m333 = $std_map.find({ d: n.locals, key: name });
+  $m333$match: {
+    if ($m333.tag === "Some") {
+      const value = $m333.value;
       return { tag: "Ok", value: value };
-      break $m312$match;
+      break $m333$match;
     }
-    if ($m312.tag === "None") {
+    if ($m333.tag === "None") {
       return { tag: "Err", error: "unknown local " + name };
-      break $m312$match;
+      break $m333$match;
     }
     $rt.unreachable();
   }
@@ -2983,553 +3101,558 @@ export function expr_val({ fuel, n, ctx, e }) {
     if (fuel === 0) {
       return [{ tag: "Err", error: "out of fuel" }, n];
     }
-    const $m316 = e;
-    $m316$match: {
-      if ($m316.tag === "IntE") {
-        const v = $m316.v;
+    const $m337 = e;
+    $m337$match: {
+      if ($m337.tag === "IntE") {
+        const v = $m337.v;
         return [{ tag: "Ok", value: val({ v: s({ i: v }), t: "i64" }) }, n];
-        break $m316$match;
+        break $m337$match;
       }
-      if ($m316.tag === "FloatE") {
-        const v = $m316.v;
+      if ($m337.tag === "FloatE") {
+        const v = $m337.v;
         return [{ tag: "Ok", value: val({ v: double_literal({ v: v }), t: "double" }) }, n];
-        break $m316$match;
+        break $m337$match;
       }
-      if ($m316.tag === "TextE") {
-        const v = $m316.v;
-        const [$r319, n$307] = text_global({ n: n, x: v });
-        n = n$307;
-        return [{ tag: "Ok", value: val({ v: $r319, t: "ptr" }) }, n];
-        break $m316$match;
+      if ($m337.tag === "TextE") {
+        const v = $m337.v;
+        const [$r340, n$328] = text_global({ n: n, x: v });
+        n = n$328;
+        return [{ tag: "Ok", value: val({ v: $r340, t: "ptr" }) }, n];
+        break $m337$match;
       }
-      if ($m316.tag === "BoolE") {
-        const v = $m316.v;
+      if ($m337.tag === "BoolE") {
+        const v = $m337.v;
         return [{ tag: "Ok", value: val({ v: bool_text({ b: v }), t: "i1" }) }, n];
-        break $m316$match;
+        break $m337$match;
       }
-      if ($m316.tag === "UnitE") {
+      if ($m337.tag === "UnitE") {
         return [{ tag: "Ok", value: val({ v: "0", t: "i64" }) }, n];
-        break $m316$match;
+        break $m337$match;
       }
-      if ($m316.tag === "Local") {
-        const name = $m316.name;
+      if ($m337.tag === "Local") {
+        const name = $m337.name;
         const local = $rt.unwrap(local_of({ n: n, name: name }));
-        const [$r323, n$308] = new_tmp({ n: n });
-        n = n$308;
-        const r = $r323;
+        const [$r344, n$329] = new_tmp({ n: n });
+        n = n$329;
+        const r = $r344;
         emit_line({ n: n, line: r + " = load " + local.t + ", ptr " + local.ptr });
         return [{ tag: "Ok", value: val({ v: r, t: local.t }) }, n];
-        break $m316$match;
+        break $m337$match;
       }
-      if ($m316.tag === "Global") {
-        const def = $m316.def;
-        const ty = $m316.ty;
+      if ($m337.tag === "Global") {
+        const def = $m337.def;
+        const ty = $m337.ty;
         const t = $rt.unwrap(ll_of({ ctx: ctx, t: ty }));
         const module = $context.module_name({ ctx: ctx, id: def.mod });
         if ($std_map.contains({ d: n.lazy_consts, key: def.id }) || aggregate_const({ n: n, target_def: def.id })) {
-          const [$r325, n$309] = new_tmp({ n: n });
-          n = n$309;
-          const slot = $r325;
+          const [$r346, n$330] = new_tmp({ n: n });
+          n = n$330;
+          const slot = $r346;
           emit_line({ n: n, line: slot + " = call i64 " + getter_name({ module: module, name: def.name }) + "()" });
-          const [$r326, n$310] = from_slot({ n: n, slot: slot, t: t });
-          n = n$310;
-          return [{ tag: "Ok", value: $r326 }, n];
+          const [$r347, n$331] = from_slot({ n: n, slot: slot, t: t });
+          n = n$331;
+          return [{ tag: "Ok", value: $r347 }, n];
         }
-        const [$r328, n$311] = new_tmp({ n: n });
-        n = n$311;
-        const r = $r328;
+        const [$r349, n$332] = new_tmp({ n: n });
+        n = n$332;
+        const r = $r349;
         emit_line({ n: n, line: r + " = load " + t + ", ptr " + fn_name({ module: module, name: def.name }) });
         return [{ tag: "Ok", value: val({ v: r, t: t }) }, n];
-        break $m316$match;
+        break $m337$match;
       }
-      if ($m316.tag === "Call") {
-        const target = $m316.target;
-        const sig = $m316.sig;
-        const consts = $m316.consts;
-        const args = $m316.args;
-        const ty = $m316.ty;
-        const decoder = $m316.decoder;
-        const [$r330, n$312] = call_val({ fuel: $rt.int.sub(fuel, 1, $ob127), n: n, ctx: ctx, target: target, sig: sig, consts: consts, args: args, ty: ty, decoder: decoder });
-        n = n$312;
-        return [$r330, n];
-        break $m316$match;
+      if ($m337.tag === "Call") {
+        const target = $m337.target;
+        const sig = $m337.sig;
+        const consts = $m337.consts;
+        const args = $m337.args;
+        const ty = $m337.ty;
+        const decoder = $m337.decoder;
+        const targs = $m337.targs;
+        const [$r351, n$333] = call_val({ fuel: $rt.int.sub(fuel, 1, $ob129), n: n, ctx: ctx, target: target, sig: sig, consts: consts, args: args, ty: ty, decoder: decoder, targs: targs });
+        n = n$333;
+        return [$r351, n];
+        break $m337$match;
       }
-      if ($m316.tag === "RecordE") {
-        const def = $m316.def;
-        const fields = $m316.fields;
+      if ($m337.tag === "RecordE") {
+        const def = $m337.def;
+        const fields = $m337.fields;
         const fs = fields_of({ ctx: ctx, owner: def.id });
-        const [$r331, n$313] = new_tmp({ n: n });
-        n = n$313;
-        const obj = $r331;
+        const [$r352, n$334] = new_tmp({ n: n });
+        n = n$334;
+        const obj = $r352;
         emit_line({ n: n, line: obj + " = call ptr @onus_alloc(i64 " + s({ i: slots_size({ k: $std_list.len({ xs: fs }) }) }) + ")" });
         for (const f of fields) {
           const idx = slot_index({ fields: fs, name: f.name });
-          const [$r332, n$314] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob128), n: n, ctx: ctx, e: f.value });
-          n = n$314;
-          const fv = $rt.unwrap($r332);
-          const [$r333, n$315] = to_slot({ n: n, v: fv });
-          n = n$315;
-          const slot = $r333;
-          const [, n$316] = store_slot({ n: n, obj: obj, idx: idx, slot: slot });
-          n = n$316;
+          const [$r353, n$335] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob130), n: n, ctx: ctx, e: f.value });
+          n = n$335;
+          const fv = $rt.unwrap($r353);
+          const [$r354, n$336] = to_slot({ n: n, v: fv });
+          n = n$336;
+          const slot = $r354;
+          const [, n$337] = store_slot({ n: n, obj: obj, idx: idx, slot: slot });
+          n = n$337;
         }
         return [{ tag: "Ok", value: val({ v: obj, t: "ptr" }) }, n];
-        break $m316$match;
+        break $m337$match;
       }
-      if ($m316.tag === "VariantE") {
-        const def = $m316.def;
-        const fields = $m316.fields;
+      if ($m337.tag === "VariantE") {
+        const def = $m337.def;
+        const fields = $m337.fields;
         const fs = fields_of({ ctx: ctx, owner: def.id });
-        const [$r335, n$317] = new_tmp({ n: n });
-        n = n$317;
-        const obj = $r335;
-        emit_line({ n: n, line: obj + " = call ptr @onus_alloc(i64 " + s({ i: $rt.int.mul(8, $rt.int.add(1, $std_list.len({ xs: fs }), $ob129), $ob130) }) + ")" });
-        const [, n$318] = store_slot({ n: n, obj: obj, idx: 0, slot: variant_tag({ ctx: ctx, parent: def.parent, variant: def.id }) });
-        n = n$318;
+        const [$r356, n$338] = new_tmp({ n: n });
+        n = n$338;
+        const obj = $r356;
+        emit_line({ n: n, line: obj + " = call ptr @onus_alloc(i64 " + s({ i: $rt.int.mul(8, $rt.int.add(1, $std_list.len({ xs: fs }), $ob131), $ob132) }) + ")" });
+        const [, n$339] = store_slot({ n: n, obj: obj, idx: 0, slot: variant_tag({ ctx: ctx, parent: def.parent, variant: def.id }) });
+        n = n$339;
         for (const f of fields) {
           const idx = slot_index({ fields: fs, name: f.name });
-          const [$r336, n$319] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob131), n: n, ctx: ctx, e: f.value });
-          n = n$319;
-          const fv = $rt.unwrap($r336);
-          const [$r337, n$320] = to_slot({ n: n, v: fv });
-          n = n$320;
-          const slot = $r337;
-          const [, n$321] = store_slot({ n: n, obj: obj, idx: $rt.int.add(1, idx, $ob132), slot: slot });
-          n = n$321;
+          const [$r357, n$340] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob133), n: n, ctx: ctx, e: f.value });
+          n = n$340;
+          const fv = $rt.unwrap($r357);
+          const [$r358, n$341] = to_slot({ n: n, v: fv });
+          n = n$341;
+          const slot = $r358;
+          const [, n$342] = store_slot({ n: n, obj: obj, idx: $rt.int.add(1, idx, $ob134), slot: slot });
+          n = n$342;
         }
         return [{ tag: "Ok", value: val({ v: obj, t: "ptr" }) }, n];
-        break $m316$match;
+        break $m337$match;
       }
-      if ($m316.tag === "Update") {
-        const base = $m316.base;
-        const def = $m316.def;
-        const fields = $m316.fields;
+      if ($m337.tag === "Update") {
+        const base = $m337.base;
+        const def = $m337.def;
+        const fields = $m337.fields;
         const fs = fields_of({ ctx: ctx, owner: def.id });
-        const [$r339, n$322] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob133), n: n, ctx: ctx, e: base });
-        n = n$322;
-        const bv = $rt.unwrap($r339);
-        const [$r340, n$323] = coerce_to({ n: n, v: bv, to: "ptr" });
-        n = n$323;
-        const base_v = $r340;
-        const [$r341, n$324] = new_tmp({ n: n });
-        n = n$324;
-        const obj = $r341;
+        const [$r360, n$343] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob135), n: n, ctx: ctx, e: base });
+        n = n$343;
+        const bv = $rt.unwrap($r360);
+        const [$r361, n$344] = coerce_to({ n: n, v: bv, to: "ptr" });
+        n = n$344;
+        const base_v = $r361;
+        const [$r362, n$345] = new_tmp({ n: n });
+        n = n$345;
+        const obj = $r362;
         emit_line({ n: n, line: obj + " = call ptr @onus_alloc(i64 " + s({ i: slots_size({ k: $std_list.len({ xs: fs }) }) }) + ")" });
-        const $hi342 = $std_list.len({ xs: fs });
-        for (let i = 0; i < $hi342; i++) {
-          const [$r343, n$325] = load_slot({ n: n, obj: base_v.v, idx: i });
-          n = n$325;
-          const slot = $r343;
-          const [, n$326] = store_slot({ n: n, obj: obj, idx: i, slot: slot });
-          n = n$326;
+        const $hi363 = $std_list.len({ xs: fs });
+        for (let i = 0; i < $hi363; i++) {
+          const [$r364, n$346] = load_slot({ n: n, obj: base_v.v, idx: i });
+          n = n$346;
+          const slot = $r364;
+          const [, n$347] = store_slot({ n: n, obj: obj, idx: i, slot: slot });
+          n = n$347;
         }
         for (const f of fields) {
           const idx = slot_index({ fields: fs, name: f.name });
-          const [$r344, n$327] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob134), n: n, ctx: ctx, e: f.value });
-          n = n$327;
-          const fv = $rt.unwrap($r344);
-          const [$r345, n$328] = to_slot({ n: n, v: fv });
-          n = n$328;
-          const slot = $r345;
-          const [, n$329] = store_slot({ n: n, obj: obj, idx: idx, slot: slot });
-          n = n$329;
+          const [$r365, n$348] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob136), n: n, ctx: ctx, e: f.value });
+          n = n$348;
+          const fv = $rt.unwrap($r365);
+          const [$r366, n$349] = to_slot({ n: n, v: fv });
+          n = n$349;
+          const slot = $r366;
+          const [, n$350] = store_slot({ n: n, obj: obj, idx: idx, slot: slot });
+          n = n$350;
         }
         return [{ tag: "Ok", value: val({ v: obj, t: "ptr" }) }, n];
-        break $m316$match;
+        break $m337$match;
       }
-      if ($m316.tag === "FieldE") {
-        const object = $m316.object;
-        const name = $m316.name;
-        const ty = $m316.ty;
-        const owner = $m316.owner;
-        const [$r347, n$330] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob135), n: n, ctx: ctx, e: object });
-        n = n$330;
-        const ov = $rt.unwrap($r347);
-        const [$r348, n$331] = coerce_to({ n: n, v: ov, to: "ptr" });
-        n = n$331;
-        const obj = $r348;
-        const $m349 = owner;
-        $m349$match: {
-          if ($m349.tag === "None") {
+      if ($m337.tag === "FieldE") {
+        const object = $m337.object;
+        const name = $m337.name;
+        const ty = $m337.ty;
+        const owner = $m337.owner;
+        const [$r368, n$351] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob137), n: n, ctx: ctx, e: object });
+        n = n$351;
+        const ov = $rt.unwrap($r368);
+        const [$r369, n$352] = coerce_to({ n: n, v: ov, to: "ptr" });
+        n = n$352;
+        const obj = $r369;
+        const $m370 = owner;
+        $m370$match: {
+          if ($m370.tag === "None") {
             return [{ tag: "Err", error: "field access on a value of unknown shape" }, n];
-            break $m349$match;
+            break $m370$match;
           }
-          if ($m349.tag === "Some") {
-            const value = $m349.value;
+          if ($m370.tag === "Some") {
+            const value = $m370.value;
             const fs = fields_of({ ctx: ctx, owner: value.id });
             const idx = slot_index({ fields: fs, name: name });
             let base = 0;
             if (value.kind.tag === "Variant") {
               base = 1;
             }
-            const [$r351, n$332] = load_slot({ n: n, obj: obj.v, idx: $rt.int.add(base, idx, $ob136) });
-            n = n$332;
-            const slot = $r351;
+            const [$r372, n$353] = load_slot({ n: n, obj: obj.v, idx: $rt.int.add(base, idx, $ob138) });
+            n = n$353;
+            const slot = $r372;
             const t = $rt.unwrap(ll_of({ ctx: ctx, t: ty }));
-            const [$r352, n$333] = from_slot({ n: n, slot: slot, t: t });
-            n = n$333;
-            return [{ tag: "Ok", value: $r352 }, n];
-            break $m349$match;
+            const [$r373, n$354] = from_slot({ n: n, slot: slot, t: t });
+            n = n$354;
+            return [{ tag: "Ok", value: $r373 }, n];
+            break $m370$match;
           }
           $rt.unreachable();
         }
-        break $m316$match;
+        break $m337$match;
       }
-      if ($m316.tag === "ListE") {
-        const elems = $m316.elems;
-        const [$r354, n$334] = new_tmp({ n: n });
-        n = n$334;
-        const list = $r354;
+      if ($m337.tag === "ListE") {
+        const elems = $m337.elems;
+        const [$r375, n$355] = new_tmp({ n: n });
+        n = n$355;
+        const list = $r375;
         emit_line({ n: n, line: list + " = call ptr @onus_rt_list_new(i64 " + s({ i: $std_list.len({ xs: elems }) }) + ")" });
-        const $hi355 = $std_list.len({ xs: elems });
-        for (let i = 0; i < $hi355; i++) {
-          const [$r356, n$335] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob137), n: n, ctx: ctx, e: $std_list.get({ xs: elems, i: i }) });
-          n = n$335;
-          const xv = $rt.unwrap($r356);
-          const [$r357, n$336] = to_slot({ n: n, v: xv });
-          n = n$336;
-          const slot = $r357;
+        const $hi376 = $std_list.len({ xs: elems });
+        for (let i = 0; i < $hi376; i++) {
+          const [$r377, n$356] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob139), n: n, ctx: ctx, e: $std_list.get({ xs: elems, i: i }) });
+          n = n$356;
+          const xv = $rt.unwrap($r377);
+          const [$r378, n$357] = to_slot({ n: n, v: xv });
+          n = n$357;
+          const slot = $r378;
           emit_line({ n: n, line: "call void @onus_rt_list_set(ptr " + list + ", i64 " + s({ i: i }) + ", i64 " + slot + ")" });
         }
         return [{ tag: "Ok", value: val({ v: list, t: "ptr" }) }, n];
-        break $m316$match;
+        break $m337$match;
       }
-      if ($m316.tag === "Concat") {
-        const left = $m316.left;
-        const right = $m316.right;
-        const is_text = $m316.is_text;
-        const [$r359, n$337] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob138), n: n, ctx: ctx, e: left });
-        n = n$337;
-        const lv = $rt.unwrap($r359);
-        const [$r360, n$338] = coerce_to({ n: n, v: lv, to: "ptr" });
-        n = n$338;
-        const l = $r360;
-        const [$r361, n$339] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob139), n: n, ctx: ctx, e: right });
-        n = n$339;
-        const rv = $rt.unwrap($r361);
-        const [$r362, n$340] = coerce_to({ n: n, v: rv, to: "ptr" });
-        n = n$340;
-        const r = $r362;
-        const [$r363, n$341] = new_tmp({ n: n });
-        n = n$341;
-        const out = $r363;
+      if ($m337.tag === "Concat") {
+        const left = $m337.left;
+        const right = $m337.right;
+        const is_text = $m337.is_text;
+        const [$r380, n$358] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob140), n: n, ctx: ctx, e: left });
+        n = n$358;
+        const lv = $rt.unwrap($r380);
+        const [$r381, n$359] = coerce_to({ n: n, v: lv, to: "ptr" });
+        n = n$359;
+        const l = $r381;
+        const [$r382, n$360] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob141), n: n, ctx: ctx, e: right });
+        n = n$360;
+        const rv = $rt.unwrap($r382);
+        const [$r383, n$361] = coerce_to({ n: n, v: rv, to: "ptr" });
+        n = n$361;
+        const r = $r383;
+        const [$r384, n$362] = new_tmp({ n: n });
+        n = n$362;
+        const out = $r384;
         let fn_text = "onus_rt_list_concat";
         if (is_text) {
           fn_text = "onus_rt_text_concat";
         }
         emit_line({ n: n, line: out + " = call ptr @" + fn_text + "(ptr " + l.v + ", ptr " + r.v + ")" });
         return [{ tag: "Ok", value: val({ v: out, t: "ptr" }) }, n];
-        break $m316$match;
+        break $m337$match;
       }
-      if ($m316.tag === "IntOp") {
-        const op = $m316.op;
-        const left = $m316.left;
-        const right = $m316.right;
-        const ob = $m316.ob;
-        const [$r365, n$342] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob140), n: n, ctx: ctx, e: left });
-        n = n$342;
-        const lv = $rt.unwrap($r365);
-        const [$r366, n$343] = coerce_to({ n: n, v: lv, to: "i64" });
-        n = n$343;
-        const l = $r366;
-        const [$r367, n$344] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob141), n: n, ctx: ctx, e: right });
-        n = n$344;
-        const rv = $rt.unwrap($r367);
-        const [$r368, n$345] = coerce_to({ n: n, v: rv, to: "i64" });
-        n = n$345;
-        const r = $r368;
-        const [$r369, n$346] = int_op({ n: n, op: op, l: l, r: r, ob: ob });
-        n = n$346;
-        return [{ tag: "Ok", value: $r369 }, n];
-        break $m316$match;
+      if ($m337.tag === "IntOp") {
+        const op = $m337.op;
+        const left = $m337.left;
+        const right = $m337.right;
+        const ob = $m337.ob;
+        const [$r386, n$363] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob142), n: n, ctx: ctx, e: left });
+        n = n$363;
+        const lv = $rt.unwrap($r386);
+        const [$r387, n$364] = coerce_to({ n: n, v: lv, to: "i64" });
+        n = n$364;
+        const l = $r387;
+        const [$r388, n$365] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob143), n: n, ctx: ctx, e: right });
+        n = n$365;
+        const rv = $rt.unwrap($r388);
+        const [$r389, n$366] = coerce_to({ n: n, v: rv, to: "i64" });
+        n = n$366;
+        const r = $r389;
+        const [$r390, n$367] = int_op({ n: n, op: op, l: l, r: r, ob: ob });
+        n = n$367;
+        return [{ tag: "Ok", value: $r390 }, n];
+        break $m337$match;
       }
-      if ($m316.tag === "FloatOp") {
-        const op = $m316.op;
-        const left = $m316.left;
-        const right = $m316.right;
-        const [$r371, n$347] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob142), n: n, ctx: ctx, e: left });
-        n = n$347;
-        const lv = $rt.unwrap($r371);
-        const [$r372, n$348] = coerce_to({ n: n, v: lv, to: "double" });
-        n = n$348;
-        const l = $r372;
-        const [$r373, n$349] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob143), n: n, ctx: ctx, e: right });
-        n = n$349;
-        const rv = $rt.unwrap($r373);
-        const [$r374, n$350] = coerce_to({ n: n, v: rv, to: "double" });
-        n = n$350;
-        const r = $r374;
-        const [$r375, n$351] = new_tmp({ n: n });
-        n = n$351;
-        const out = $r375;
+      if ($m337.tag === "FloatOp") {
+        const op = $m337.op;
+        const left = $m337.left;
+        const right = $m337.right;
+        const [$r392, n$368] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob144), n: n, ctx: ctx, e: left });
+        n = n$368;
+        const lv = $rt.unwrap($r392);
+        const [$r393, n$369] = coerce_to({ n: n, v: lv, to: "double" });
+        n = n$369;
+        const l = $r393;
+        const [$r394, n$370] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob145), n: n, ctx: ctx, e: right });
+        n = n$370;
+        const rv = $rt.unwrap($r394);
+        const [$r395, n$371] = coerce_to({ n: n, v: rv, to: "double" });
+        n = n$371;
+        const r = $r395;
+        const [$r396, n$372] = new_tmp({ n: n });
+        n = n$372;
+        const out = $r396;
         emit_line({ n: n, line: out + " = " + float_op_name({ op: op }) + " double " + l.v + ", " + r.v });
         return [{ tag: "Ok", value: val({ v: out, t: "double" }) }, n];
-        break $m316$match;
+        break $m337$match;
       }
-      if ($m316.tag === "Neg") {
-        const operand = $m316.operand;
-        const is_float = $m316.is_float;
-        const ob = $m316.ob;
+      if ($m337.tag === "Neg") {
+        const operand = $m337.operand;
+        const is_float = $m337.is_float;
+        const ob = $m337.ob;
         if (is_float) {
-          const [$r377, n$352] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob144), n: n, ctx: ctx, e: operand });
-          n = n$352;
-          const ov = $rt.unwrap($r377);
-          const [$r378, n$353] = coerce_to({ n: n, v: ov, to: "double" });
-          n = n$353;
-          const v = $r378;
-          const [$r379, n$354] = new_tmp({ n: n });
-          n = n$354;
-          const out = $r379;
+          const [$r398, n$373] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob146), n: n, ctx: ctx, e: operand });
+          n = n$373;
+          const ov = $rt.unwrap($r398);
+          const [$r399, n$374] = coerce_to({ n: n, v: ov, to: "double" });
+          n = n$374;
+          const v = $r399;
+          const [$r400, n$375] = new_tmp({ n: n });
+          n = n$375;
+          const out = $r400;
           emit_line({ n: n, line: out + " = fneg double " + v.v });
           return [{ tag: "Ok", value: val({ v: out, t: "double" }) }, n];
         }
-        const [$r381, n$355] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob145), n: n, ctx: ctx, e: operand });
-        n = n$355;
-        const ov = $rt.unwrap($r381);
-        const [$r382, n$356] = coerce_to({ n: n, v: ov, to: "i64" });
-        n = n$356;
-        const v = $r382;
-        const [$r383, n$357] = int_op({ n: n, op: "-", l: val({ v: "0", t: "i64" }), r: v, ob: ob });
-        n = n$357;
-        return [{ tag: "Ok", value: $r383 }, n];
-        break $m316$match;
+        const [$r402, n$376] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob147), n: n, ctx: ctx, e: operand });
+        n = n$376;
+        const ov = $rt.unwrap($r402);
+        const [$r403, n$377] = coerce_to({ n: n, v: ov, to: "i64" });
+        n = n$377;
+        const v = $r403;
+        const [$r404, n$378] = int_op({ n: n, op: "-", l: val({ v: "0", t: "i64" }), r: v, ob: ob });
+        n = n$378;
+        return [{ tag: "Ok", value: $r404 }, n];
+        break $m337$match;
       }
-      if ($m316.tag === "Cmp") {
-        const op = $m316.op;
-        const left = $m316.left;
-        const right = $m316.right;
-        const is_float = $m316.is_float;
-        const [$r385, n$358] = new_tmp({ n: n });
-        n = n$358;
-        const out = $r385;
+      if ($m337.tag === "Cmp") {
+        const op = $m337.op;
+        const left = $m337.left;
+        const right = $m337.right;
+        const is_float = $m337.is_float;
+        const [$r406, n$379] = new_tmp({ n: n });
+        n = n$379;
+        const out = $r406;
         if (is_float) {
-          const [$r386, n$359] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob146), n: n, ctx: ctx, e: left });
-          n = n$359;
-          const lv = $rt.unwrap($r386);
-          const [$r387, n$360] = coerce_to({ n: n, v: lv, to: "double" });
-          n = n$360;
-          const l = $r387;
-          const [$r388, n$361] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob147), n: n, ctx: ctx, e: right });
-          n = n$361;
-          const rv = $rt.unwrap($r388);
-          const [$r389, n$362] = coerce_to({ n: n, v: rv, to: "double" });
-          n = n$362;
-          const r = $r389;
+          const [$r407, n$380] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob148), n: n, ctx: ctx, e: left });
+          n = n$380;
+          const lv = $rt.unwrap($r407);
+          const [$r408, n$381] = coerce_to({ n: n, v: lv, to: "double" });
+          n = n$381;
+          const l = $r408;
+          const [$r409, n$382] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob149), n: n, ctx: ctx, e: right });
+          n = n$382;
+          const rv = $rt.unwrap($r409);
+          const [$r410, n$383] = coerce_to({ n: n, v: rv, to: "double" });
+          n = n$383;
+          const r = $r410;
           emit_line({ n: n, line: out + " = fcmp " + fcmp_name({ op: op }) + " double " + l.v + ", " + r.v });
         } else {
-          const [$r390, n$363] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob148), n: n, ctx: ctx, e: left });
-          n = n$363;
-          const lv = $rt.unwrap($r390);
-          const [$r391, n$364] = coerce_to({ n: n, v: lv, to: "i64" });
-          n = n$364;
-          const l = $r391;
-          const [$r392, n$365] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob149), n: n, ctx: ctx, e: right });
-          n = n$365;
-          const rv = $rt.unwrap($r392);
-          const [$r393, n$366] = coerce_to({ n: n, v: rv, to: "i64" });
-          n = n$366;
-          const r = $r393;
+          const [$r411, n$384] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob150), n: n, ctx: ctx, e: left });
+          n = n$384;
+          const lv = $rt.unwrap($r411);
+          const [$r412, n$385] = coerce_to({ n: n, v: lv, to: "i64" });
+          n = n$385;
+          const l = $r412;
+          const [$r413, n$386] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob151), n: n, ctx: ctx, e: right });
+          n = n$386;
+          const rv = $rt.unwrap($r413);
+          const [$r414, n$387] = coerce_to({ n: n, v: rv, to: "i64" });
+          n = n$387;
+          const r = $r414;
           emit_line({ n: n, line: out + " = icmp " + icmp_name({ op: op }) + " i64 " + l.v + ", " + r.v });
         }
         return [{ tag: "Ok", value: val({ v: out, t: "i1" }) }, n];
-        break $m316$match;
+        break $m337$match;
       }
-      if ($m316.tag === "Eq") {
-        const left = $m316.left;
-        const right = $m316.right;
-        const ty = $m316.ty;
-        const negate = $m316.negate;
-        const [$r395, n$367] = eq_val({ fuel: $rt.int.sub(fuel, 1, $ob150), n: n, ctx: ctx, left: left, right: right, ty: ty, negate: negate });
-        n = n$367;
-        return [$r395, n];
-        break $m316$match;
+      if ($m337.tag === "Eq") {
+        const left = $m337.left;
+        const right = $m337.right;
+        const ty = $m337.ty;
+        const negate = $m337.negate;
+        const [$r416, n$388] = eq_val({ fuel: $rt.int.sub(fuel, 1, $ob152), n: n, ctx: ctx, left: left, right: right, ty: ty, negate: negate });
+        n = n$388;
+        return [$r416, n];
+        break $m337$match;
       }
-      if ($m316.tag === "Not") {
-        const operand = $m316.operand;
-        const [$r396, n$368] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob151), n: n, ctx: ctx, e: operand });
-        n = n$368;
-        const ov = $rt.unwrap($r396);
-        const [$r397, n$369] = coerce_to({ n: n, v: ov, to: "i1" });
-        n = n$369;
-        const v = $r397;
-        const [$r398, n$370] = new_tmp({ n: n });
-        n = n$370;
-        const out = $r398;
+      if ($m337.tag === "Not") {
+        const operand = $m337.operand;
+        const [$r417, n$389] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob153), n: n, ctx: ctx, e: operand });
+        n = n$389;
+        const ov = $rt.unwrap($r417);
+        const [$r418, n$390] = coerce_to({ n: n, v: ov, to: "i1" });
+        n = n$390;
+        const v = $r418;
+        const [$r419, n$391] = new_tmp({ n: n });
+        n = n$391;
+        const out = $r419;
         emit_line({ n: n, line: out + " = xor i1 " + v.v + ", 1" });
         return [{ tag: "Ok", value: val({ v: out, t: "i1" }) }, n];
-        break $m316$match;
+        break $m337$match;
       }
-      if ($m316.tag === "And") {
-        const operands = $m316.operands;
-        const [$r400, n$371] = short_circuit({ fuel: $rt.int.sub(fuel, 1, $ob152), n: n, ctx: ctx, operands: operands, is_and: true });
-        n = n$371;
-        return [$r400, n];
-        break $m316$match;
+      if ($m337.tag === "And") {
+        const operands = $m337.operands;
+        const [$r421, n$392] = short_circuit({ fuel: $rt.int.sub(fuel, 1, $ob154), n: n, ctx: ctx, operands: operands, is_and: true });
+        n = n$392;
+        return [$r421, n];
+        break $m337$match;
       }
-      if ($m316.tag === "Or") {
-        const operands = $m316.operands;
-        const [$r401, n$372] = short_circuit({ fuel: $rt.int.sub(fuel, 1, $ob153), n: n, ctx: ctx, operands: operands, is_and: false });
-        n = n$372;
-        return [$r401, n];
-        break $m316$match;
+      if ($m337.tag === "Or") {
+        const operands = $m337.operands;
+        const [$r422, n$393] = short_circuit({ fuel: $rt.int.sub(fuel, 1, $ob155), n: n, ctx: ctx, operands: operands, is_and: false });
+        n = n$393;
+        return [$r422, n];
+        break $m337$match;
       }
-      if ($m316.tag === "Implies") {
-        const left = $m316.left;
-        const right = $m316.right;
-        const [$r403, n$373] = short_circuit({ fuel: $rt.int.sub(fuel, 1, $ob154), n: n, ctx: ctx, operands: [{ tag: "Not", operand: left }, right], is_and: false });
-        n = n$373;
-        return [$r403, n];
-        break $m316$match;
+      if ($m337.tag === "Implies") {
+        const left = $m337.left;
+        const right = $m337.right;
+        const [$r424, n$394] = short_circuit({ fuel: $rt.int.sub(fuel, 1, $ob156), n: n, ctx: ctx, operands: [{ tag: "Not", operand: left }, right], is_and: false });
+        n = n$394;
+        return [$r424, n];
+        break $m337$match;
       }
-      if ($m316.tag === "IsVariant") {
-        const subject = $m316.subject;
-        const variant = $m316.variant;
-        const ty = $m316.ty;
-        const [$r404, n$374] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob155), n: n, ctx: ctx, e: subject });
-        n = n$374;
-        const sv = $rt.unwrap($r404);
-        const [$r405, n$375] = coerce_to({ n: n, v: sv, to: "ptr" });
-        n = n$375;
-        const subject_v = $r405;
+      if ($m337.tag === "IsVariant") {
+        const subject = $m337.subject;
+        const variant = $m337.variant;
+        const ty = $m337.ty;
+        const [$r425, n$395] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob157), n: n, ctx: ctx, e: subject });
+        n = n$395;
+        const sv = $rt.unwrap($r425);
+        const [$r426, n$396] = coerce_to({ n: n, v: sv, to: "ptr" });
+        n = n$396;
+        const subject_v = $r426;
         let parent = union_def_of({ t: ty });
         if (parent.tag === "None") {
           parent = variant.parent;
         }
-        const [$r406, n$376] = load_slot({ n: n, obj: subject_v.v, idx: 0 });
-        n = n$376;
-        const tag = $r406;
-        const [$r407, n$377] = new_tmp({ n: n });
-        n = n$377;
-        const out = $r407;
+        const [$r427, n$397] = load_slot({ n: n, obj: subject_v.v, idx: 0 });
+        n = n$397;
+        const tag = $r427;
+        const [$r428, n$398] = new_tmp({ n: n });
+        n = n$398;
+        const out = $r428;
         emit_line({ n: n, line: out + " = icmp eq i64 " + tag + ", " + variant_tag({ ctx: ctx, parent: parent, variant: variant.id }) });
         return [{ tag: "Ok", value: val({ v: out, t: "i1" }) }, n];
-        break $m316$match;
+        break $m337$match;
       }
-      if ($m316.tag === "Try") {
-        const operand = $m316.operand;
-        const option = $m316.option;
-        const outer_option = $m316.outer_option;
-        const else_clause = $m316.else_clause;
-        const raw = $m316.raw;
-        const ty = $m316.ty;
-        const [$r409, n$378] = try_val({ fuel: $rt.int.sub(fuel, 1, $ob156), n: n, ctx: ctx, operand: operand, option: option, outer_option: outer_option, else_clause: else_clause, raw: raw, ty: ty });
-        n = n$378;
-        return [$r409, n];
-        break $m316$match;
+      if ($m337.tag === "Try") {
+        const operand = $m337.operand;
+        const option = $m337.option;
+        const outer_option = $m337.outer_option;
+        const else_clause = $m337.else_clause;
+        const raw = $m337.raw;
+        const ty = $m337.ty;
+        const [$r430, n$399] = try_val({ fuel: $rt.int.sub(fuel, 1, $ob158), n: n, ctx: ctx, operand: operand, option: option, outer_option: outer_option, else_clause: else_clause, raw: raw, ty: ty });
+        n = n$399;
+        return [$r430, n];
+        break $m337$match;
       }
-      if ($m316.tag === "Checked") {
-        const value = $m316.value;
-        const it_name = $m316.it_name;
-        const ty = $m316.ty;
-        const checks = $m316.checks;
+      if ($m337.tag === "Checked") {
+        const value = $m337.value;
+        const it_name = $m337.it_name;
+        const ty = $m337.ty;
+        const checks = $m337.checks;
         const t = $rt.unwrap(ll_of({ ctx: ctx, t: ty }));
-        const [$r410, n$379] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob157), n: n, ctx: ctx, e: value });
-        n = n$379;
-        const cv = $rt.unwrap($r410);
-        const [$r411, n$380] = coerce_to({ n: n, v: cv, to: t });
-        n = n$380;
-        const v = $r411;
-        const [$r412, n$381] = alloc_local({ n: n, name: it_name, t: t, ty: ty });
-        n = n$381;
-        const ptr = $r412;
+        const [$r431, n$400] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob159), n: n, ctx: ctx, e: value });
+        n = n$400;
+        const cv = $rt.unwrap($r431);
+        const [$r432, n$401] = coerce_to({ n: n, v: cv, to: t });
+        n = n$401;
+        const v = $r432;
+        const [$r433, n$402] = alloc_local({ n: n, name: it_name, t: t, ty: ty });
+        n = n$402;
+        const ptr = $r433;
         emit_line({ n: n, line: "store " + t + " " + v.v + ", ptr " + ptr });
-        const [$r413, n$382] = block_stmts({ fuel: $rt.int.sub(fuel, 1, $ob158), n: n, ctx: ctx, b: checks });
-        n = n$382;
-        $rt.unwrap($r413);
+        const [$r434, n$403] = block_stmts({ fuel: $rt.int.sub(fuel, 1, $ob160), n: n, ctx: ctx, b: checks });
+        n = n$403;
+        $rt.unwrap($r434);
         return [{ tag: "Ok", value: v }, n];
-        break $m316$match;
+        break $m337$match;
       }
-      if ($m316.tag === "ConstE") {
-        const value = $m316.value;
-        const [$r415, n$383] = const_arg({ n: n, ctx: ctx, c: value });
-        n = n$383;
-        return [$r415, n];
-        break $m316$match;
+      if ($m337.tag === "ConstE") {
+        const value = $m337.value;
+        const [$r436, n$404] = const_arg({ n: n, ctx: ctx, c: value });
+        n = n$404;
+        return [$r436, n];
+        break $m337$match;
       }
-      if ($m316.tag === "ValueE") {
-        const value = $m316.value;
-        const $m416 = value;
-        $m416$match: {
-          if ($m416.tag === "IntV") {
-            const v = $m416.v;
+      if ($m337.tag === "ValueE") {
+        const value = $m337.value;
+        const $m437 = value;
+        $m437$match: {
+          if ($m437.tag === "IntV") {
+            const v = $m437.v;
             return [{ tag: "Ok", value: val({ v: s({ i: v }), t: "i64" }) }, n];
-            break $m416$match;
+            break $m437$match;
           }
-          if ($m416.tag === "DurationV") {
-            const v = $m416.v;
+          if ($m437.tag === "DurationV") {
+            const v = $m437.v;
             return [{ tag: "Ok", value: val({ v: s({ i: v }), t: "i64" }) }, n];
-            break $m416$match;
+            break $m437$match;
           }
-          if ($m416.tag === "BoolV") {
-            const v = $m416.v;
+          if ($m437.tag === "BoolV") {
+            const v = $m437.v;
             return [{ tag: "Ok", value: val({ v: bool_text({ b: v }), t: "i1" }) }, n];
-            break $m416$match;
+            break $m437$match;
           }
-          if ($m416.tag === "FloatV") {
-            const v = $m416.v;
+          if ($m437.tag === "FloatV") {
+            const v = $m437.v;
             return [{ tag: "Ok", value: val({ v: double_literal({ v: v }), t: "double" }) }, n];
-            break $m416$match;
+            break $m437$match;
           }
-          if ($m416.tag === "TextV") {
-            const v = $m416.v;
-            const [$r421, n$384] = text_global({ n: n, x: v });
-            n = n$384;
-            return [{ tag: "Ok", value: val({ v: $r421, t: "ptr" }) }, n];
-            break $m416$match;
+          if ($m437.tag === "TextV") {
+            const v = $m437.v;
+            const [$r442, n$405] = text_global({ n: n, x: v });
+            n = n$405;
+            return [{ tag: "Ok", value: val({ v: $r442, t: "ptr" }) }, n];
+            break $m437$match;
           }
           if (true) {
-            const [$r423, n$385] = const_val({ fuel: $rt.int.sub(fuel, 1, $ob159), n: n, ctx: ctx, x: value });
-            n = n$385;
-            return [$r423, n];
-            break $m416$match;
+            const [$r444, n$406] = const_val({ fuel: $rt.int.sub(fuel, 1, $ob161), n: n, ctx: ctx, x: value });
+            n = n$406;
+            return [$r444, n];
+            break $m437$match;
           }
           $rt.unreachable();
         }
-        break $m316$match;
+        break $m337$match;
       }
-      if ($m316.tag === "FnRef") {
+      if ($m337.tag === "FnRef") {
         return [{ tag: "Err", error: "function values and closures" }, n];
-        break $m316$match;
+        break $m337$match;
       }
-      if ($m316.tag === "CallValue") {
+      if ($m337.tag === "CallValue") {
         return [{ tag: "Err", error: "function values and closures" }, n];
-        break $m316$match;
+        break $m337$match;
       }
-      if ($m316.tag === "Closure") {
+      if ($m337.tag === "Closure") {
         return [{ tag: "Err", error: "function values and closures" }, n];
-        break $m316$match;
+        break $m337$match;
       }
-      if ($m316.tag === "DictE") {
+      if ($m337.tag === "DictE") {
         return [{ tag: "Err", error: "interfaces" }, n];
-        break $m316$match;
+        break $m337$match;
       }
-      if ($m316.tag === "DictParamE") {
+      if ($m337.tag === "DictParamE") {
         return [{ tag: "Err", error: "interfaces" }, n];
-        break $m316$match;
+        break $m337$match;
       }
-      if ($m316.tag === "Quantifier") {
+      if ($m337.tag === "Quantifier") {
         return [{ tag: "Err", error: "quantifiers evaluated at runtime" }, n];
-        break $m316$match;
+        break $m337$match;
       }
-      if ($m316.tag === "Recover") {
-        const body = $m316.body;
-        const value = $m316.value;
-        const [$r430, n$386] = recover_val({ fuel: $rt.int.sub(fuel, 1, $ob160), n: n, ctx: ctx, body: body, result_expr: value });
-        n = n$386;
-        return [$r430, n];
-        break $m316$match;
+      if ($m337.tag === "Recover") {
+        const body = $m337.body;
+        const value = $m337.value;
+        const [$r451, n$407] = recover_val({ fuel: $rt.int.sub(fuel, 1, $ob162), n: n, ctx: ctx, body: body, result_expr: value });
+        n = n$407;
+        return [$r451, n];
+        break $m337$match;
       }
-      if ($m316.tag === "Fake") {
+      if ($m337.tag === "Fake") {
         return [{ tag: "Err", error: "`fake`" }, n];
-        break $m316$match;
+        break $m337$match;
       }
-      if ($m316.tag === "TypeInfoE") {
-        return [{ tag: "Ok", value: val({ v: "null", t: "ptr" }) }, n];
-        break $m316$match;
+      if ($m337.tag === "TypeInfoE") {
+        const name = $m337.name;
+        const fields = $m337.fields;
+        const [$r453, n$408] = typeinfo_obj({ n: n, name: name, fields: fields });
+        n = n$408;
+        return [{ tag: "Ok", value: $r453 }, n];
+        break $m337$match;
       }
-      if ($m316.tag === "Snapshot") {
+      if ($m337.tag === "Snapshot") {
         return [{ tag: "Err", error: "`old(...)` in a checked postcondition" }, n];
-        break $m316$match;
+        break $m337$match;
       }
       $rt.unreachable();
     }
@@ -3582,58 +3705,58 @@ export function icmp_name({ op }) {
 }
 
 export function const_arg({ n, ctx, c }) {
-  const $m434 = c;
-  $m434$match: {
-    if ($m434.tag === "IntV") {
-      const v = $m434.v;
+  const $m456 = c;
+  $m456$match: {
+    if ($m456.tag === "IntV") {
+      const v = $m456.v;
       return [{ tag: "Ok", value: val({ v: s({ i: v }), t: "i64" }) }, n];
-      break $m434$match;
+      break $m456$match;
     }
-    if ($m434.tag === "DurationV") {
-      const v = $m434.v;
+    if ($m456.tag === "DurationV") {
+      const v = $m456.v;
       return [{ tag: "Ok", value: val({ v: s({ i: v }), t: "i64" }) }, n];
-      break $m434$match;
+      break $m456$match;
     }
-    if ($m434.tag === "BoolV") {
-      const v = $m434.v;
+    if ($m456.tag === "BoolV") {
+      const v = $m456.v;
       return [{ tag: "Ok", value: val({ v: bool_text({ b: v }), t: "i1" }) }, n];
-      break $m434$match;
+      break $m456$match;
     }
-    if ($m434.tag === "FloatV") {
-      const v = $m434.v;
+    if ($m456.tag === "FloatV") {
+      const v = $m456.v;
       return [{ tag: "Ok", value: val({ v: double_literal({ v: v }), t: "double" }) }, n];
-      break $m434$match;
+      break $m456$match;
     }
-    if ($m434.tag === "TextV") {
-      const v = $m434.v;
-      const [$r439, n$387] = text_global({ n: n, x: v });
-      n = n$387;
-      return [{ tag: "Ok", value: val({ v: $r439, t: "ptr" }) }, n];
-      break $m434$match;
+    if ($m456.tag === "TextV") {
+      const v = $m456.v;
+      const [$r461, n$409] = text_global({ n: n, x: v });
+      n = n$409;
+      return [{ tag: "Ok", value: val({ v: $r461, t: "ptr" }) }, n];
+      break $m456$match;
     }
-    if ($m434.tag === "VariantV") {
-      const def = $m434.def;
+    if ($m456.tag === "VariantV") {
+      const def = $m456.def;
       const parent = $context.get_def({ ctx: ctx, id: def }).parent;
-      const [$r441, n$388] = new_tmp({ n: n });
-      n = n$388;
-      const obj = $r441;
+      const [$r463, n$410] = new_tmp({ n: n });
+      n = n$410;
+      const obj = $r463;
       emit_line({ n: n, line: obj + " = call ptr @onus_alloc(i64 8)" });
-      const [, n$389] = store_slot({ n: n, obj: obj, idx: 0, slot: variant_tag({ ctx: ctx, parent: parent, variant: def }) });
-      n = n$389;
+      const [, n$411] = store_slot({ n: n, obj: obj, idx: 0, slot: variant_tag({ ctx: ctx, parent: parent, variant: def }) });
+      n = n$411;
       return [{ tag: "Ok", value: val({ v: obj, t: "ptr" }) }, n];
-      break $m434$match;
+      break $m456$match;
     }
-    if ($m434.tag === "UnitV") {
+    if ($m456.tag === "UnitV") {
       return [{ tag: "Err", error: "unit type arguments" }, n];
-      break $m434$match;
+      break $m456$match;
     }
-    if ($m434.tag === "SymV") {
+    if ($m456.tag === "SymV") {
       return [{ tag: "Err", error: "sym type arguments" }, n];
-      break $m434$match;
+      break $m456$match;
     }
-    if ($m434.tag === "ErrorV") {
+    if ($m456.tag === "ErrorV") {
       return [{ tag: "Err", error: "error type arguments" }, n];
-      break $m434$match;
+      break $m456$match;
     }
     $rt.unreachable();
   }
@@ -3649,51 +3772,51 @@ export function eq_val({ fuel, n, ctx, left, right, ty, negate }) {
       return [{ tag: "Err", error: "equality on a value of a type parameter" }, n];
     }
     if (!(st.tag === "Prim")) {
-      const [$r448, n$390] = eq_fn_of({ fuel: $rt.int.sub(fuel, 1, $ob161), n: n, ctx: ctx, ty: st });
-      n = n$390;
-      const cmp = $rt.unwrap($r448);
-      const [$r449, n$391] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob162), n: n, ctx: ctx, e: left });
-      n = n$391;
-      const lv = $rt.unwrap($r449);
-      const [$r450, n$392] = to_slot({ n: n, v: lv });
-      n = n$392;
-      const l = $r450;
-      const [$r451, n$393] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob163), n: n, ctx: ctx, e: right });
-      n = n$393;
-      const rv = $rt.unwrap($r451);
-      const [$r452, n$394] = to_slot({ n: n, v: rv });
-      n = n$394;
-      const r = $r452;
-      const [$r453, n$395] = new_tmp({ n: n });
-      n = n$395;
-      const same = $r453;
+      const [$r470, n$412] = eq_fn_of({ fuel: $rt.int.sub(fuel, 1, $ob163), n: n, ctx: ctx, ty: st });
+      n = n$412;
+      const cmp = $rt.unwrap($r470);
+      const [$r471, n$413] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob164), n: n, ctx: ctx, e: left });
+      n = n$413;
+      const lv = $rt.unwrap($r471);
+      const [$r472, n$414] = to_slot({ n: n, v: lv });
+      n = n$414;
+      const l = $r472;
+      const [$r473, n$415] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob165), n: n, ctx: ctx, e: right });
+      n = n$415;
+      const rv = $rt.unwrap($r473);
+      const [$r474, n$416] = to_slot({ n: n, v: rv });
+      n = n$416;
+      const r = $r474;
+      const [$r475, n$417] = new_tmp({ n: n });
+      n = n$417;
+      const same = $r475;
       emit_line({ n: n, line: same + " = call i1 " + cmp + "(i64 " + l + ", i64 " + r + ")" });
       if (!negate) {
         return [{ tag: "Ok", value: val({ v: same, t: "i1" }) }, n];
       }
-      const [$r455, n$396] = new_tmp({ n: n });
-      n = n$396;
-      const out = $r455;
+      const [$r477, n$418] = new_tmp({ n: n });
+      n = n$418;
+      const out = $r477;
       emit_line({ n: n, line: out + " = xor i1 " + same + ", true" });
       return [{ tag: "Ok", value: val({ v: out, t: "i1" }) }, n];
     }
     const name = $types.prim_name({ t: st });
-    const [$r457, n$397] = new_tmp({ n: n });
-    n = n$397;
-    const out = $r457;
+    const [$r479, n$419] = new_tmp({ n: n });
+    n = n$419;
+    const out = $r479;
     if (name === "Float") {
-      const [$r458, n$398] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob164), n: n, ctx: ctx, e: left });
-      n = n$398;
-      const lv = $rt.unwrap($r458);
-      const [$r459, n$399] = coerce_to({ n: n, v: lv, to: "double" });
-      n = n$399;
-      const l = $r459;
-      const [$r460, n$400] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob165), n: n, ctx: ctx, e: right });
-      n = n$400;
-      const rv = $rt.unwrap($r460);
-      const [$r461, n$401] = coerce_to({ n: n, v: rv, to: "double" });
-      n = n$401;
-      const r = $r461;
+      const [$r480, n$420] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob166), n: n, ctx: ctx, e: left });
+      n = n$420;
+      const lv = $rt.unwrap($r480);
+      const [$r481, n$421] = coerce_to({ n: n, v: lv, to: "double" });
+      n = n$421;
+      const l = $r481;
+      const [$r482, n$422] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob167), n: n, ctx: ctx, e: right });
+      n = n$422;
+      const rv = $rt.unwrap($r482);
+      const [$r483, n$423] = coerce_to({ n: n, v: rv, to: "double" });
+      n = n$423;
+      const r = $r483;
       let pred = "oeq";
       if (negate) {
         pred = "une";
@@ -3702,21 +3825,21 @@ export function eq_val({ fuel, n, ctx, left, right, ty, negate }) {
       return [{ tag: "Ok", value: val({ v: out, t: "i1" }) }, n];
     }
     if (name === "Text") {
-      const [$r463, n$402] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob166), n: n, ctx: ctx, e: left });
-      n = n$402;
-      const lv = $rt.unwrap($r463);
-      const [$r464, n$403] = coerce_to({ n: n, v: lv, to: "ptr" });
-      n = n$403;
-      const l = $r464;
-      const [$r465, n$404] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob167), n: n, ctx: ctx, e: right });
-      n = n$404;
-      const rv = $rt.unwrap($r465);
-      const [$r466, n$405] = coerce_to({ n: n, v: rv, to: "ptr" });
-      n = n$405;
-      const r = $r466;
-      const [$r467, n$406] = new_tmp({ n: n });
-      n = n$406;
-      const eq = $r467;
+      const [$r485, n$424] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob168), n: n, ctx: ctx, e: left });
+      n = n$424;
+      const lv = $rt.unwrap($r485);
+      const [$r486, n$425] = coerce_to({ n: n, v: lv, to: "ptr" });
+      n = n$425;
+      const l = $r486;
+      const [$r487, n$426] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob169), n: n, ctx: ctx, e: right });
+      n = n$426;
+      const rv = $rt.unwrap($r487);
+      const [$r488, n$427] = coerce_to({ n: n, v: rv, to: "ptr" });
+      n = n$427;
+      const r = $r488;
+      const [$r489, n$428] = new_tmp({ n: n });
+      n = n$428;
+      const eq = $r489;
       emit_line({ n: n, line: eq + " = call i1 @onus_rt_text_eq(ptr " + l.v + ", ptr " + r.v + ")" });
       if (negate) {
         emit_line({ n: n, line: out + " = xor i1 " + eq + ", 1" });
@@ -3725,18 +3848,18 @@ export function eq_val({ fuel, n, ctx, left, right, ty, negate }) {
       }
       return [{ tag: "Ok", value: val({ v: out, t: "i1" }) }, n];
     }
-    const [$r469, n$407] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob168), n: n, ctx: ctx, e: left });
-    n = n$407;
-    const lv = $rt.unwrap($r469);
-    const [$r470, n$408] = to_slot({ n: n, v: lv });
-    n = n$408;
-    const l = $r470;
-    const [$r471, n$409] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob169), n: n, ctx: ctx, e: right });
-    n = n$409;
-    const rv = $rt.unwrap($r471);
-    const [$r472, n$410] = to_slot({ n: n, v: rv });
-    n = n$410;
-    const r = $r472;
+    const [$r491, n$429] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob170), n: n, ctx: ctx, e: left });
+    n = n$429;
+    const lv = $rt.unwrap($r491);
+    const [$r492, n$430] = to_slot({ n: n, v: lv });
+    n = n$430;
+    const l = $r492;
+    const [$r493, n$431] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob171), n: n, ctx: ctx, e: right });
+    n = n$431;
+    const rv = $rt.unwrap($r493);
+    const [$r494, n$432] = to_slot({ n: n, v: rv });
+    n = n$432;
+    const r = $r494;
     let pred = "eq";
     if (negate) {
       pred = "ne";
@@ -3756,62 +3879,62 @@ export function recover_val({ fuel, n, ctx, body, result_expr }) {
   const names = $std_list.finish({ b: n.local_order });
   let captured = $std_list.builder({  });
   for (const name of names) {
-    const $m475 = $std_map.find({ d: n.locals, key: name });
-    $m475$match: {
-      if ($m475.tag === "Some") {
-        const value = $m475.value;
-        const [, captured$411] = $std_list.push({ b: captured, x: value });
-        captured = captured$411;
-        break $m475$match;
+    const $m497 = $std_map.find({ d: n.locals, key: name });
+    $m497$match: {
+      if ($m497.tag === "Some") {
+        const value = $m497.value;
+        const [, captured$433] = $std_list.push({ b: captured, x: value });
+        captured = captured$433;
+        break $m497$match;
       }
-      if ($m475.tag === "None") {
+      if ($m497.tag === "None") {
         skip({  });
-        break $m475$match;
+        break $m497$match;
       }
       $rt.unreachable();
     }
   }
   const infos = $std_list.finish({ b: captured });
-  n = { ...n, counter: $rt.int.add(n.counter, 1, $ob170) };
+  n = { ...n, counter: $rt.int.add(n.counter, 1, $ob172) };
   const name = "@\"recover$" + s({ i: n.counter }) + "\"";
   declare_sig({ n: n, sig: "declare ptr @onus_recover(ptr, ptr)" });
   const saved = save_fn({ n: n });
-  const [, n$412] = begin_fn({ n: n });
-  n = n$412;
+  const [, n$434] = begin_fn({ n: n });
+  n = n$434;
   n = { ...n, fn_ret: "i64" };
-  const [$r478, n$413] = recover_body({ fuel: $rt.int.sub(fuel, 1, $ob171), n: n, ctx: ctx, names: names, infos: infos, body: body, result_expr: result_expr, name: name });
-  n = n$413;
-  const r = $r478;
-  const [, n$414] = restore_fn({ n: n, sv: saved });
-  n = n$414;
-  const $m479 = r;
-  $m479$match: {
-    if ($m479.tag === "Ok") {
+  const [$r500, n$435] = recover_body({ fuel: $rt.int.sub(fuel, 1, $ob173), n: n, ctx: ctx, names: names, infos: infos, body: body, result_expr: result_expr, name: name });
+  n = n$435;
+  const r = $r500;
+  const [, n$436] = restore_fn({ n: n, sv: saved });
+  n = n$436;
+  const $m501 = r;
+  $m501$match: {
+    if ($m501.tag === "Ok") {
       skip({  });
-      break $m479$match;
+      break $m501$match;
     }
-    if ($m479.tag === "Err") {
-      const error = $m479.error;
+    if ($m501.tag === "Err") {
+      const error = $m501.error;
       return [{ tag: "Err", error: error }, n];
-      break $m479$match;
+      break $m501$match;
     }
     $rt.unreachable();
   }
-  const [$r481, n$415] = new_tmp({ n: n });
-  n = n$415;
-  const env = $r481;
+  const [$r503, n$437] = new_tmp({ n: n });
+  n = n$437;
+  const env = $r503;
   emit_line({ n: n, line: env + " = call ptr @onus_alloc(i64 " + s({ i: slots_size({ k: $std_list.len({ xs: infos }) }) }) + ")" });
-  const $hi482 = $std_list.len({ xs: infos });
-  for (let i = 0; i < $hi482; i++) {
-    const [$r483, n$416] = new_tmp({ n: n });
-    n = n$416;
-    const p = $r483;
+  const $hi504 = $std_list.len({ xs: infos });
+  for (let i = 0; i < $hi504; i++) {
+    const [$r505, n$438] = new_tmp({ n: n });
+    n = n$438;
+    const p = $r505;
     emit_line({ n: n, line: p + " = getelementptr ptr, ptr " + env + ", i64 " + s({ i: i }) });
     emit_line({ n: n, line: "store ptr " + $std_list.get({ xs: infos, i: i }).ptr + ", ptr " + p });
   }
-  const [$r484, n$417] = new_tmp({ n: n });
-  n = n$417;
-  const out = $r484;
+  const [$r506, n$439] = new_tmp({ n: n });
+  n = n$439;
+  const out = $r506;
   emit_line({ n: n, line: out + " = call ptr @onus_recover(ptr " + name + ", ptr " + env + ")" });
   return [{ tag: "Ok", value: val({ v: out, t: "ptr" }) }, n];
 }
@@ -3821,31 +3944,31 @@ export function recover_body({ fuel, n, ctx, names, infos, body, result_expr, na
     if (fuel === 0) {
       return [{ tag: "Err", error: "out of fuel" }, n];
     }
-    const $hi487 = $std_list.len({ xs: infos });
-    for (let i = 0; i < $hi487; i++) {
-      const [$r488, n$418] = new_tmp({ n: n });
-      n = n$418;
-      const p = $r488;
+    const $hi509 = $std_list.len({ xs: infos });
+    for (let i = 0; i < $hi509; i++) {
+      const [$r510, n$440] = new_tmp({ n: n });
+      n = n$440;
+      const p = $r510;
       emit_line({ n: n, line: p + " = getelementptr ptr, ptr %env, i64 " + s({ i: i }) });
-      const [$r489, n$419] = new_tmp({ n: n });
-      n = n$419;
-      const ptr = $r489;
+      const [$r511, n$441] = new_tmp({ n: n });
+      n = n$441;
+      const ptr = $r511;
       emit_line({ n: n, line: ptr + " = load ptr, ptr " + p });
       const info = $std_list.get({ xs: infos, i: i });
       if (i < $std_list.len({ xs: names })) {
         set_local({ n: n, name: $std_list.get({ xs: names, i: i }), l: { ptr: ptr, t: info.t, ty: info.ty } });
       }
     }
-    const [$r491, n$420] = block_stmts({ fuel: $rt.int.sub(fuel, 1, $ob172), n: n, ctx: ctx, b: body });
-    n = n$420;
-    $rt.unwrap($r491);
+    const [$r513, n$442] = block_stmts({ fuel: $rt.int.sub(fuel, 1, $ob174), n: n, ctx: ctx, b: body });
+    n = n$442;
+    $rt.unwrap($r513);
     if (!n.terminated) {
-      const [$r492, n$421] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob173), n: n, ctx: ctx, e: result_expr });
-      n = n$421;
-      const rv = $rt.unwrap($r492);
-      const [$r493, n$422] = to_slot({ n: n, v: rv });
-      n = n$422;
-      const v = $r493;
+      const [$r514, n$443] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob175), n: n, ctx: ctx, e: result_expr });
+      n = n$443;
+      const rv = $rt.unwrap($r514);
+      const [$r515, n$444] = to_slot({ n: n, v: rv });
+      n = n$444;
+      const v = $r515;
       emit_line({ n: n, line: "ret i64 " + v });
     }
     finish_fn({ n: n, header: "define i64 " + name + "(ptr %env) {" });
@@ -3862,47 +3985,47 @@ export function eq_fn_of({ fuel, n, ctx, ty }) {
   }
   const st = $types.strip({ t: ty });
   const key = $typecheck.show({ ctx: ctx, t: st });
-  const $m496 = $std_map.find({ d: n.eq_fns, key: key });
-  $m496$match: {
-    if ($m496.tag === "Some") {
-      const value = $m496.value;
+  const $m518 = $std_map.find({ d: n.eq_fns, key: key });
+  $m518$match: {
+    if ($m518.tag === "Some") {
+      const value = $m518.value;
       return [{ tag: "Ok", value: value }, n];
-      break $m496$match;
+      break $m518$match;
     }
-    if ($m496.tag === "None") {
+    if ($m518.tag === "None") {
       skip({  });
-      break $m496$match;
+      break $m518$match;
     }
     $rt.unreachable();
   }
-  n = { ...n, counter: $rt.int.add(n.counter, 1, $ob174) };
+  n = { ...n, counter: $rt.int.add(n.counter, 1, $ob176) };
   const name = "@\"eq$" + s({ i: n.counter }) + "\"";
   let eq_fns = n.eq_fns;
-  const [, eq_fns$423] = $std_map.set({ d: eq_fns, key: key, value: name });
-  eq_fns = eq_fns$423;
+  const [, eq_fns$445] = $std_map.set({ d: eq_fns, key: key, value: name });
+  eq_fns = eq_fns$445;
   const saved = save_fn({ n: n });
-  const [, n$424] = begin_fn({ n: n });
-  n = n$424;
+  const [, n$446] = begin_fn({ n: n });
+  n = n$446;
   n = { ...n, fn_ret: "i1" };
-  const [$r500, n$425] = eq_slots({ fuel: $rt.int.sub(fuel, 1, $ob175), n: n, ctx: ctx, ty: st, a: "%a", b: "%b" });
-  n = n$425;
-  const r = $r500;
+  const [$r522, n$447] = eq_slots({ fuel: $rt.int.sub(fuel, 1, $ob177), n: n, ctx: ctx, ty: st, a: "%a", b: "%b" });
+  n = n$447;
+  const r = $r522;
   if (r.tag === "Ok") {
     emit_line({ n: n, line: "ret i1 " + ok_text({ r: r }) });
     finish_fn({ n: n, header: "define i1 " + name + "(i64 %a, i64 %b) {" });
   }
-  const [, n$426] = restore_fn({ n: n, sv: saved });
-  n = n$426;
-  const $m501 = r;
-  $m501$match: {
-    if ($m501.tag === "Ok") {
+  const [, n$448] = restore_fn({ n: n, sv: saved });
+  n = n$448;
+  const $m523 = r;
+  $m523$match: {
+    if ($m523.tag === "Ok") {
       skip({  });
-      break $m501$match;
+      break $m523$match;
     }
-    if ($m501.tag === "Err") {
-      const error = $m501.error;
+    if ($m523.tag === "Err") {
+      const error = $m523.error;
       return [{ tag: "Err", error: error }, n];
-      break $m501$match;
+      break $m523$match;
     }
     $rt.unreachable();
   }
@@ -3910,16 +4033,16 @@ export function eq_fn_of({ fuel, n, ctx, ty }) {
 }
 
 export function ok_text({ r }) {
-  const $m504 = r;
-  $m504$match: {
-    if ($m504.tag === "Ok") {
-      const value = $m504.value;
+  const $m526 = r;
+  $m526$match: {
+    if ($m526.tag === "Ok") {
+      const value = $m526.value;
       return value;
-      break $m504$match;
+      break $m526$match;
     }
-    if ($m504.tag === "Err") {
+    if ($m526.tag === "Err") {
       return "";
-      break $m504$match;
+      break $m526$match;
     }
     $rt.unreachable();
   }
@@ -3931,30 +4054,30 @@ export function eq_slots({ fuel, n, ctx, ty, a, b }) {
       return [{ tag: "Err", error: "out of fuel" }, n];
     }
     const st = $types.strip({ t: ty });
-    const [$r506, n$427] = new_tmp({ n: n });
-    n = n$427;
-    const out = $r506;
-    const $m507 = st;
-    $m507$match: {
-      if ($m507.tag === "Prim") {
-        const name = $m507.name;
+    const [$r528, n$449] = new_tmp({ n: n });
+    n = n$449;
+    const out = $r528;
+    const $m529 = st;
+    $m529$match: {
+      if ($m529.tag === "Prim") {
+        const name = $m529.name;
         if (name === "Float") {
-          const [$r508, n$428] = from_slot({ n: n, slot: a, t: "double" });
-          n = n$428;
-          const fa = $r508;
-          const [$r509, n$429] = from_slot({ n: n, slot: b, t: "double" });
-          n = n$429;
-          const fb = $r509;
+          const [$r530, n$450] = from_slot({ n: n, slot: a, t: "double" });
+          n = n$450;
+          const fa = $r530;
+          const [$r531, n$451] = from_slot({ n: n, slot: b, t: "double" });
+          n = n$451;
+          const fb = $r531;
           emit_line({ n: n, line: out + " = fcmp oeq double " + fa.v + ", " + fb.v });
           return [{ tag: "Ok", value: out }, n];
         }
         if (name === "Text") {
-          const [$r511, n$430] = from_slot({ n: n, slot: a, t: "ptr" });
-          n = n$430;
-          const pa = $r511;
-          const [$r512, n$431] = from_slot({ n: n, slot: b, t: "ptr" });
-          n = n$431;
-          const pb = $r512;
+          const [$r533, n$452] = from_slot({ n: n, slot: a, t: "ptr" });
+          n = n$452;
+          const pa = $r533;
+          const [$r534, n$453] = from_slot({ n: n, slot: b, t: "ptr" });
+          n = n$453;
+          const pb = $r534;
           emit_line({ n: n, line: out + " = call i1 @onus_rt_text_eq(ptr " + pa.v + ", ptr " + pb.v + ")" });
           return [{ tag: "Ok", value: out }, n];
         }
@@ -3963,144 +4086,144 @@ export function eq_slots({ fuel, n, ctx, ty, a, b }) {
           return [{ tag: "Ok", value: out }, n];
         }
         return [{ tag: "Err", error: "equality on `" + name + "` values" }, n];
-        break $m507$match;
+        break $m529$match;
       }
-      if ($m507.tag === "RecordT") {
-        const def = $m507.def;
-        const args = $m507.args;
+      if ($m529.tag === "RecordT") {
+        const def = $m529.def;
+        const args = $m529.args;
         const subst = subst_of({ ctx: ctx, def: def, args: args });
-        const [$r516, n$432] = from_slot({ n: n, slot: a, t: "ptr" });
-        n = n$432;
-        const pa = $r516;
-        const [$r517, n$433] = from_slot({ n: n, slot: b, t: "ptr" });
-        n = n$433;
-        const pb = $r517;
+        const [$r538, n$454] = from_slot({ n: n, slot: a, t: "ptr" });
+        n = n$454;
+        const pa = $r538;
+        const [$r539, n$455] = from_slot({ n: n, slot: b, t: "ptr" });
+        n = n$455;
+        const pb = $r539;
         let acc = { tag: "None" };
         const fs = fields_of({ ctx: ctx, owner: def });
-        const $hi519 = $std_list.len({ xs: fs });
-        for (let i = 0; i < $hi519; i++) {
+        const $hi541 = $std_list.len({ xs: fs });
+        for (let i = 0; i < $hi541; i++) {
           const ft = $types.substitute({ t: $std_list.get({ xs: fs, i: i }).ty, subst: subst });
-          const [$r520, n$434] = load_slot({ n: n, obj: pa.v, idx: i });
-          n = n$434;
-          const sa = $r520;
-          const [$r521, n$435] = load_slot({ n: n, obj: pb.v, idx: i });
-          n = n$435;
-          const sb = $r521;
-          const [$r522, n$436] = eq_field({ fuel: $rt.int.sub(fuel, 1, $ob176), n: n, ctx: ctx, ty: ft, a: sa, b: sb });
-          n = n$436;
-          const e = $rt.unwrap($r522);
-          const [$r523, n$437] = conj({ n: n, acc: acc, e: e });
-          n = n$437;
-          acc = { tag: "Some", value: $r523 };
+          const [$r542, n$456] = load_slot({ n: n, obj: pa.v, idx: i });
+          n = n$456;
+          const sa = $r542;
+          const [$r543, n$457] = load_slot({ n: n, obj: pb.v, idx: i });
+          n = n$457;
+          const sb = $r543;
+          const [$r544, n$458] = eq_field({ fuel: $rt.int.sub(fuel, 1, $ob178), n: n, ctx: ctx, ty: ft, a: sa, b: sb });
+          n = n$458;
+          const e = $rt.unwrap($r544);
+          const [$r545, n$459] = conj({ n: n, acc: acc, e: e });
+          n = n$459;
+          acc = { tag: "Some", value: $r545 };
         }
-        const $m525 = acc;
-        $m525$match: {
-          if ($m525.tag === "Some") {
-            const value = $m525.value;
+        const $m547 = acc;
+        $m547$match: {
+          if ($m547.tag === "Some") {
+            const value = $m547.value;
             emit_line({ n: n, line: out + " = and i1 " + value + ", true" });
-            break $m525$match;
+            break $m547$match;
           }
-          if ($m525.tag === "None") {
+          if ($m547.tag === "None") {
             emit_line({ n: n, line: out + " = icmp eq i1 true, true" });
-            break $m525$match;
+            break $m547$match;
           }
           $rt.unreachable();
         }
         return [{ tag: "Ok", value: out }, n];
-        break $m507$match;
+        break $m529$match;
       }
-      if ($m507.tag === "UnionT") {
-        const def = $m507.def;
-        const args = $m507.args;
+      if ($m529.tag === "UnionT") {
+        const def = $m529.def;
+        const args = $m529.args;
         const subst = subst_of({ ctx: ctx, def: def, args: args });
-        const [$r527, n$438] = from_slot({ n: n, slot: a, t: "ptr" });
-        n = n$438;
-        const pa = $r527;
-        const [$r528, n$439] = from_slot({ n: n, slot: b, t: "ptr" });
-        n = n$439;
-        const pb = $r528;
-        const [$r529, n$440] = load_slot({ n: n, obj: pa.v, idx: 0 });
-        n = n$440;
-        const ta = $r529;
-        const [$r530, n$441] = load_slot({ n: n, obj: pb.v, idx: 0 });
-        n = n$441;
-        const tb = $r530;
-        const [$r531, n$442] = new_tmp({ n: n });
-        n = n$442;
-        const same_tag = $r531;
+        const [$r549, n$460] = from_slot({ n: n, slot: a, t: "ptr" });
+        n = n$460;
+        const pa = $r549;
+        const [$r550, n$461] = from_slot({ n: n, slot: b, t: "ptr" });
+        n = n$461;
+        const pb = $r550;
+        const [$r551, n$462] = load_slot({ n: n, obj: pa.v, idx: 0 });
+        n = n$462;
+        const ta = $r551;
+        const [$r552, n$463] = load_slot({ n: n, obj: pb.v, idx: 0 });
+        n = n$463;
+        const tb = $r552;
+        const [$r553, n$464] = new_tmp({ n: n });
+        n = n$464;
+        const same_tag = $r553;
         emit_line({ n: n, line: same_tag + " = icmp eq i64 " + ta + ", " + tb });
-        const [$r532, n$443] = new_label({ n: n, prefix: "eqsw" });
-        n = n$443;
-        const dispatch = $r532;
-        const [$r533, n$444] = new_label({ n: n, prefix: "eqno" });
-        n = n$444;
-        const differ = $r533;
-        const [$r534, n$445] = new_label({ n: n, prefix: "eqdone" });
-        n = n$445;
-        const done = $r534;
-        const [, n$446] = cond_br({ n: n, cond: same_tag, then_l: dispatch, else_l: differ });
-        n = n$446;
-        const [, n$447] = start_block({ n: n, name: dispatch });
-        n = n$447;
+        const [$r554, n$465] = new_label({ n: n, prefix: "eqsw" });
+        n = n$465;
+        const dispatch = $r554;
+        const [$r555, n$466] = new_label({ n: n, prefix: "eqno" });
+        n = n$466;
+        const differ = $r555;
+        const [$r556, n$467] = new_label({ n: n, prefix: "eqdone" });
+        n = n$467;
+        const done = $r556;
+        const [, n$468] = cond_br({ n: n, cond: same_tag, then_l: dispatch, else_l: differ });
+        n = n$468;
+        const [, n$469] = start_block({ n: n, name: dispatch });
+        n = n$469;
         const vs = variants_of({ ctx: ctx, union_def: def });
         let labels = $std_list.builder({  });
         for (const v of vs) {
-          const [$r535, n$448] = new_label({ n: n, prefix: "eqv" });
-          n = n$448;
-          const [, labels$449] = $std_list.push({ b: labels, x: $r535 });
-          labels = labels$449;
+          const [$r557, n$470] = new_label({ n: n, prefix: "eqv" });
+          n = n$470;
+          const [, labels$471] = $std_list.push({ b: labels, x: $r557 });
+          labels = labels$471;
         }
         const label_list = $std_list.finish({ b: labels });
         let cases = "";
-        const $hi536 = $std_list.len({ xs: vs });
-        for (let i = 0; i < $hi536; i++) {
+        const $hi558 = $std_list.len({ xs: vs });
+        for (let i = 0; i < $hi558; i++) {
           cases = cases + " i64 " + s({ i: variant_index({ ctx: ctx, union_def: def, variant: $std_list.get({ xs: vs, i: i }) }) }) + ", label %" + label_at({ labels: label_list, i: i, fallback: differ });
         }
         emit_line({ n: n, line: "switch i64 " + ta + ", label %" + differ + " [" + cases + " ]" });
         n = { ...n, terminated: true };
         let incoming = $std_list.builder({  });
-        const $hi538 = $std_list.len({ xs: vs });
-        for (let i = 0; i < $hi538; i++) {
-          const [, n$450] = start_block({ n: n, name: label_at({ labels: label_list, i: i, fallback: differ }) });
-          n = n$450;
+        const $hi560 = $std_list.len({ xs: vs });
+        for (let i = 0; i < $hi560; i++) {
+          const [, n$472] = start_block({ n: n, name: label_at({ labels: label_list, i: i, fallback: differ }) });
+          n = n$472;
           let acc = { tag: "None" };
           const fs = fields_of({ ctx: ctx, owner: $std_list.get({ xs: vs, i: i }) });
-          const $hi540 = $std_list.len({ xs: fs });
-          for (let j = 0; j < $hi540; j++) {
+          const $hi562 = $std_list.len({ xs: fs });
+          for (let j = 0; j < $hi562; j++) {
             const ft = $types.substitute({ t: $std_list.get({ xs: fs, i: j }).ty, subst: subst });
-            const [$r541, n$451] = load_slot({ n: n, obj: pa.v, idx: $rt.int.add(1, j, $ob177) });
-            n = n$451;
-            const sa = $r541;
-            const [$r542, n$452] = load_slot({ n: n, obj: pb.v, idx: $rt.int.add(1, j, $ob178) });
-            n = n$452;
-            const sb = $r542;
-            const [$r543, n$453] = eq_field({ fuel: $rt.int.sub(fuel, 1, $ob179), n: n, ctx: ctx, ty: ft, a: sa, b: sb });
-            n = n$453;
-            const e = $rt.unwrap($r543);
-            const [$r544, n$454] = conj({ n: n, acc: acc, e: e });
-            n = n$454;
-            acc = { tag: "Some", value: $r544 };
+            const [$r563, n$473] = load_slot({ n: n, obj: pa.v, idx: $rt.int.add(1, j, $ob179) });
+            n = n$473;
+            const sa = $r563;
+            const [$r564, n$474] = load_slot({ n: n, obj: pb.v, idx: $rt.int.add(1, j, $ob180) });
+            n = n$474;
+            const sb = $r564;
+            const [$r565, n$475] = eq_field({ fuel: $rt.int.sub(fuel, 1, $ob181), n: n, ctx: ctx, ty: ft, a: sa, b: sb });
+            n = n$475;
+            const e = $rt.unwrap($r565);
+            const [$r566, n$476] = conj({ n: n, acc: acc, e: e });
+            n = n$476;
+            acc = { tag: "Some", value: $r566 };
           }
-          const [, incoming$455] = $std_list.push({ b: incoming, x: "[ " + or_true({ o: acc }) + ", %" + n.block + " ]" });
-          incoming = incoming$455;
-          const [, n$456] = br({ n: n, target: done });
-          n = n$456;
+          const [, incoming$477] = $std_list.push({ b: incoming, x: "[ " + or_true({ o: acc }) + ", %" + n.block + " ]" });
+          incoming = incoming$477;
+          const [, n$478] = br({ n: n, target: done });
+          n = n$478;
         }
-        const [, n$457] = start_block({ n: n, name: differ });
-        n = n$457;
-        const [, incoming$458] = $std_list.push({ b: incoming, x: "[ false, %" + n.block + " ]" });
-        incoming = incoming$458;
-        const [, n$459] = br({ n: n, target: done });
-        n = n$459;
-        const [, n$460] = start_block({ n: n, name: done });
-        n = n$460;
+        const [, n$479] = start_block({ n: n, name: differ });
+        n = n$479;
+        const [, incoming$480] = $std_list.push({ b: incoming, x: "[ false, %" + n.block + " ]" });
+        incoming = incoming$480;
+        const [, n$481] = br({ n: n, target: done });
+        n = n$481;
+        const [, n$482] = start_block({ n: n, name: done });
+        n = n$482;
         emit_line({ n: n, line: out + " = phi i1 " + $std_text.join({ parts: $std_list.finish({ b: incoming }), sep: ", " }) });
         return [{ tag: "Ok", value: out }, n];
-        break $m507$match;
+        break $m529$match;
       }
-      if ($m507.tag === "Opaque") {
-        const def = $m507.def;
-        const args = $m507.args;
+      if ($m529.tag === "Opaque") {
+        const def = $m529.def;
+        const args = $m529.args;
         const q = $context.qualified_name({ ctx: ctx, id: def });
         let elem = { tag: "None" };
         if ($std_list.len({ xs: args }) > 0) {
@@ -4110,26 +4233,26 @@ export function eq_slots({ fuel, n, ctx, ty, a, b }) {
           return [{ tag: "Err", error: "equality on `" + $context.get_def({ ctx: ctx, id: def }).name + "` values" }, n];
         }
         declare_sig({ n: n, sig: "declare i1 @onus_rt_list_eq(ptr, ptr, ptr)" });
-        const [$r549, n$461] = eq_fn_of({ fuel: $rt.int.sub(fuel, 1, $ob180), n: n, ctx: ctx, ty: or_int_type({ o: elem }) });
-        n = n$461;
-        const cmp = $rt.unwrap($r549);
-        const [$r550, n$462] = from_slot({ n: n, slot: a, t: "ptr" });
-        n = n$462;
-        const pa = $r550;
-        const [$r551, n$463] = from_slot({ n: n, slot: b, t: "ptr" });
-        n = n$463;
-        const pb = $r551;
+        const [$r571, n$483] = eq_fn_of({ fuel: $rt.int.sub(fuel, 1, $ob182), n: n, ctx: ctx, ty: or_int_type({ o: elem }) });
+        n = n$483;
+        const cmp = $rt.unwrap($r571);
+        const [$r572, n$484] = from_slot({ n: n, slot: a, t: "ptr" });
+        n = n$484;
+        const pa = $r572;
+        const [$r573, n$485] = from_slot({ n: n, slot: b, t: "ptr" });
+        n = n$485;
+        const pb = $r573;
         emit_line({ n: n, line: out + " = call i1 @onus_rt_list_eq(ptr " + pa.v + ", ptr " + pb.v + ", ptr " + cmp + ")" });
         return [{ tag: "Ok", value: out }, n];
-        break $m507$match;
+        break $m529$match;
       }
-      if ($m507.tag === "ParamT") {
+      if ($m529.tag === "ParamT") {
         return [{ tag: "Err", error: "equality on a value of a type parameter" }, n];
-        break $m507$match;
+        break $m529$match;
       }
       if (true) {
         return [{ tag: "Err", error: "equality on `" + $typecheck.show({ ctx: ctx, t: st }) + "` values" }, n];
-        break $m507$match;
+        break $m529$match;
       }
       $rt.unreachable();
     }
@@ -4146,16 +4269,16 @@ export function eq_field({ fuel, n, ctx, ty, a, b }) {
     }
     const st = $types.strip({ t: ty });
     if (st.tag === "Prim") {
-      const [$r556, n$464] = eq_slots({ fuel: $rt.int.sub(fuel, 1, $ob181), n: n, ctx: ctx, ty: st, a: a, b: b });
-      n = n$464;
-      return [$r556, n];
+      const [$r578, n$486] = eq_slots({ fuel: $rt.int.sub(fuel, 1, $ob183), n: n, ctx: ctx, ty: st, a: a, b: b });
+      n = n$486;
+      return [$r578, n];
     }
-    const [$r557, n$465] = eq_fn_of({ fuel: $rt.int.sub(fuel, 1, $ob182), n: n, ctx: ctx, ty: st });
-    n = n$465;
-    const cmp = $rt.unwrap($r557);
-    const [$r558, n$466] = new_tmp({ n: n });
-    n = n$466;
-    const out = $r558;
+    const [$r579, n$487] = eq_fn_of({ fuel: $rt.int.sub(fuel, 1, $ob184), n: n, ctx: ctx, ty: st });
+    n = n$487;
+    const cmp = $rt.unwrap($r579);
+    const [$r580, n$488] = new_tmp({ n: n });
+    n = n$488;
+    const out = $r580;
     emit_line({ n: n, line: out + " = call i1 " + cmp + "(i64 " + a + ", i64 " + b + ")" });
     return [{ tag: "Ok", value: out }, n];
   } catch ($e) {
@@ -4165,16 +4288,16 @@ export function eq_field({ fuel, n, ctx, ty, a, b }) {
 }
 
 export function type_arg_type({ a }) {
-  const $m560 = a;
-  $m560$match: {
-    if ($m560.tag === "TypeA") {
-      const ty = $m560.ty;
+  const $m582 = a;
+  $m582$match: {
+    if ($m582.tag === "TypeA") {
+      const ty = $m582.ty;
       return { tag: "Some", value: ty };
-      break $m560$match;
+      break $m582$match;
     }
     if (true) {
       return { tag: "None" };
-      break $m560$match;
+      break $m582$match;
     }
     $rt.unreachable();
   }
@@ -4188,52 +4311,52 @@ export function label_at({ labels, i, fallback }) {
 }
 
 export function or_int_type({ o }) {
-  const $m563 = o;
-  $m563$match: {
-    if ($m563.tag === "Some") {
-      const value = $m563.value;
+  const $m585 = o;
+  $m585$match: {
+    if ($m585.tag === "Some") {
+      const value = $m585.value;
       return value;
-      break $m563$match;
+      break $m585$match;
     }
-    if ($m563.tag === "None") {
+    if ($m585.tag === "None") {
       return { tag: "Prim", name: "Int" };
-      break $m563$match;
+      break $m585$match;
     }
     $rt.unreachable();
   }
 }
 
 export function or_true({ o }) {
-  const $m565 = o;
-  $m565$match: {
-    if ($m565.tag === "Some") {
-      const value = $m565.value;
+  const $m587 = o;
+  $m587$match: {
+    if ($m587.tag === "Some") {
+      const value = $m587.value;
       return value;
-      break $m565$match;
+      break $m587$match;
     }
-    if ($m565.tag === "None") {
+    if ($m587.tag === "None") {
       return "true";
-      break $m565$match;
+      break $m587$match;
     }
     $rt.unreachable();
   }
 }
 
 export function conj({ n, acc, e }) {
-  const $m566 = acc;
-  $m566$match: {
-    if ($m566.tag === "None") {
+  const $m588 = acc;
+  $m588$match: {
+    if ($m588.tag === "None") {
       return [e, n];
-      break $m566$match;
+      break $m588$match;
     }
-    if ($m566.tag === "Some") {
-      const value = $m566.value;
-      const [$r567, n$467] = new_tmp({ n: n });
-      n = n$467;
-      const both = $r567;
+    if ($m588.tag === "Some") {
+      const value = $m588.value;
+      const [$r589, n$489] = new_tmp({ n: n });
+      n = n$489;
+      const both = $r589;
       emit_line({ n: n, line: both + " = and i1 " + value + ", " + e });
       return [both, n];
-      break $m566$match;
+      break $m588$match;
     }
     $rt.unreachable();
   }
@@ -4244,49 +4367,49 @@ export function short_circuit({ fuel, n, ctx, operands, is_and }) {
     if (fuel === 0) {
       return [{ tag: "Err", error: "out of fuel" }, n];
     }
-    const [$r569, n$468] = new_label({ n: n, prefix: "sc" });
-    n = n$468;
-    const end_l = $r569;
+    const [$r591, n$490] = new_label({ n: n, prefix: "sc" });
+    n = n$490;
+    const end_l = $r591;
     let incoming = $std_list.builder({  });
     const count = $std_list.len({ xs: operands });
     for (let i = 0; i < count; i++) {
-      const [$r570, n$469] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob183), n: n, ctx: ctx, e: $std_list.get({ xs: operands, i: i }) });
-      n = n$469;
-      const ov = $rt.unwrap($r570);
-      const [$r571, n$470] = coerce_to({ n: n, v: ov, to: "i1" });
-      n = n$470;
-      const v = $r571;
-      if (i === $rt.int.sub(count, 1, $ob184)) {
-        const [, incoming$471] = $std_list.push({ b: incoming, x: "[ " + v.v + ", %" + n.block + " ]" });
-        incoming = incoming$471;
-        const [, n$472] = br({ n: n, target: end_l });
-        n = n$472;
+      const [$r592, n$491] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob185), n: n, ctx: ctx, e: $std_list.get({ xs: operands, i: i }) });
+      n = n$491;
+      const ov = $rt.unwrap($r592);
+      const [$r593, n$492] = coerce_to({ n: n, v: ov, to: "i1" });
+      n = n$492;
+      const v = $r593;
+      if (i === $rt.int.sub(count, 1, $ob186)) {
+        const [, incoming$493] = $std_list.push({ b: incoming, x: "[ " + v.v + ", %" + n.block + " ]" });
+        incoming = incoming$493;
+        const [, n$494] = br({ n: n, target: end_l });
+        n = n$494;
       } else {
-        const [$r572, n$473] = new_label({ n: n, prefix: "scnext" });
-        n = n$473;
-        const next_l = $r572;
+        const [$r594, n$495] = new_label({ n: n, prefix: "scnext" });
+        n = n$495;
+        const next_l = $r594;
         let short = "1";
         if (is_and) {
           short = "0";
         }
-        const [, incoming$474] = $std_list.push({ b: incoming, x: "[ " + short + ", %" + n.block + " ]" });
-        incoming = incoming$474;
+        const [, incoming$496] = $std_list.push({ b: incoming, x: "[ " + short + ", %" + n.block + " ]" });
+        incoming = incoming$496;
         if (is_and) {
-          const [, n$475] = cond_br({ n: n, cond: v.v, then_l: next_l, else_l: end_l });
-          n = n$475;
+          const [, n$497] = cond_br({ n: n, cond: v.v, then_l: next_l, else_l: end_l });
+          n = n$497;
         } else {
-          const [, n$476] = cond_br({ n: n, cond: v.v, then_l: end_l, else_l: next_l });
-          n = n$476;
+          const [, n$498] = cond_br({ n: n, cond: v.v, then_l: end_l, else_l: next_l });
+          n = n$498;
         }
-        const [, n$477] = start_block({ n: n, name: next_l });
-        n = n$477;
+        const [, n$499] = start_block({ n: n, name: next_l });
+        n = n$499;
       }
     }
-    const [, n$478] = start_block({ n: n, name: end_l });
-    n = n$478;
-    const [$r573, n$479] = new_tmp({ n: n });
-    n = n$479;
-    const out = $r573;
+    const [, n$500] = start_block({ n: n, name: end_l });
+    n = n$500;
+    const [$r595, n$501] = new_tmp({ n: n });
+    n = n$501;
+    const out = $r595;
     emit_line({ n: n, line: out + " = phi i1 " + $std_text.join({ parts: $std_list.finish({ b: incoming }), sep: ", " }) });
     return [{ tag: "Ok", value: val({ v: out, t: "i1" }) }, n];
   } catch ($e) {
@@ -4296,37 +4419,37 @@ export function short_circuit({ fuel, n, ctx, operands, is_and }) {
 }
 
 export function int_op({ n, op, l, r, ob }) {
-  const [$r575, n$480] = new_tmp({ n: n });
-  n = n$480;
-  const out = $r575;
+  const [$r597, n$502] = new_tmp({ n: n });
+  n = n$502;
+  const out = $r597;
   if (op === "/" || op === "%") {
-    const $m576 = ob;
-    $m576$match: {
-      if ($m576.tag === "Some") {
-        const value = $m576.value;
-        const [$r577, n$481] = new_tmp({ n: n });
-        n = n$481;
-        const zero = $r577;
+    const $m598 = ob;
+    $m598$match: {
+      if ($m598.tag === "Some") {
+        const value = $m598.value;
+        const [$r599, n$503] = new_tmp({ n: n });
+        n = n$503;
+        const zero = $r599;
         emit_line({ n: n, line: zero + " = icmp eq i64 " + r.v + ", 0" });
-        const [$r578, n$482] = new_label({ n: n, prefix: "divok" });
-        n = n$482;
-        const ok_l = $r578;
-        const [$r579, n$483] = new_label({ n: n, prefix: "divfail" });
-        n = n$483;
-        const fail_l = $r579;
-        const [, n$484] = cond_br({ n: n, cond: zero, then_l: fail_l, else_l: ok_l });
-        n = n$484;
-        const [, n$485] = start_block({ n: n, name: fail_l });
-        n = n$485;
-        const [, n$486] = emit_panic({ n: n, ob: value });
-        n = n$486;
-        const [, n$487] = start_block({ n: n, name: ok_l });
-        n = n$487;
-        break $m576$match;
+        const [$r600, n$504] = new_label({ n: n, prefix: "divok" });
+        n = n$504;
+        const ok_l = $r600;
+        const [$r601, n$505] = new_label({ n: n, prefix: "divfail" });
+        n = n$505;
+        const fail_l = $r601;
+        const [, n$506] = cond_br({ n: n, cond: zero, then_l: fail_l, else_l: ok_l });
+        n = n$506;
+        const [, n$507] = start_block({ n: n, name: fail_l });
+        n = n$507;
+        const [, n$508] = emit_panic({ n: n, ob: value });
+        n = n$508;
+        const [, n$509] = start_block({ n: n, name: ok_l });
+        n = n$509;
+        break $m598$match;
       }
-      if ($m576.tag === "None") {
+      if ($m598.tag === "None") {
         skip({  });
-        break $m576$match;
+        break $m598$match;
       }
       $rt.unreachable();
     }
@@ -4337,40 +4460,40 @@ export function int_op({ n, op, l, r, ob }) {
     emit_line({ n: n, line: out + " = " + inst + " i64 " + l.v + ", " + r.v });
     return [val({ v: out, t: "i64" }), n];
   }
-  const $m580 = ob;
-  $m580$match: {
-    if ($m580.tag === "None") {
+  const $m602 = ob;
+  $m602$match: {
+    if ($m602.tag === "None") {
       emit_line({ n: n, line: out + " = " + plain_op({ op: op }) + " i64 " + l.v + ", " + r.v });
       return [val({ v: out, t: "i64" }), n];
-      break $m580$match;
+      break $m602$match;
     }
-    if ($m580.tag === "Some") {
-      const value = $m580.value;
-      const [$r581, n$488] = new_tmp({ n: n });
-      n = n$488;
-      const pair = $r581;
+    if ($m602.tag === "Some") {
+      const value = $m602.value;
+      const [$r603, n$510] = new_tmp({ n: n });
+      n = n$510;
+      const pair = $r603;
       emit_line({ n: n, line: pair + " = call { i64, i1 } @llvm." + overflow_op({ op: op }) + ".with.overflow.i64(i64 " + l.v + ", i64 " + r.v + ")" });
       emit_line({ n: n, line: out + " = extractvalue { i64, i1 } " + pair + ", 0" });
-      const [$r582, n$489] = new_tmp({ n: n });
-      n = n$489;
-      const overflow = $r582;
+      const [$r604, n$511] = new_tmp({ n: n });
+      n = n$511;
+      const overflow = $r604;
       emit_line({ n: n, line: overflow + " = extractvalue { i64, i1 } " + pair + ", 1" });
-      const [$r583, n$490] = new_label({ n: n, prefix: "arith" });
-      n = n$490;
-      const ok_l = $r583;
-      const [$r584, n$491] = new_label({ n: n, prefix: "overflow" });
-      n = n$491;
-      const fail_l = $r584;
-      const [, n$492] = cond_br({ n: n, cond: overflow, then_l: fail_l, else_l: ok_l });
-      n = n$492;
-      const [, n$493] = start_block({ n: n, name: fail_l });
-      n = n$493;
-      const [, n$494] = emit_panic({ n: n, ob: value });
-      n = n$494;
-      const [, n$495] = start_block({ n: n, name: ok_l });
-      n = n$495;
+      const [$r605, n$512] = new_label({ n: n, prefix: "arith" });
+      n = n$512;
+      const ok_l = $r605;
+      const [$r606, n$513] = new_label({ n: n, prefix: "overflow" });
+      n = n$513;
+      const fail_l = $r606;
+      const [, n$514] = cond_br({ n: n, cond: overflow, then_l: fail_l, else_l: ok_l });
+      n = n$514;
+      const [, n$515] = start_block({ n: n, name: fail_l });
+      n = n$515;
+      const [, n$516] = emit_panic({ n: n, ob: value });
+      n = n$516;
+      const [, n$517] = start_block({ n: n, name: ok_l });
+      n = n$517;
       return [val({ v: out, t: "i64" }), n];
-      break $m580$match;
+      break $m602$match;
     }
     $rt.unreachable();
   }
@@ -4396,20 +4519,20 @@ export function overflow_op({ op }) {
   return "smul";
 }
 
-export function call_val({ fuel, n, ctx, target, sig, consts, args, ty, decoder }) {
+export function call_val({ fuel, n, ctx, target, sig, consts, args, ty, decoder, targs }) {
   try {
     if (fuel === 0) {
       return [{ tag: "Err", error: "out of fuel" }, n];
     }
-    const $m586 = target;
-    $m586$match: {
-      if ($m586.tag === "DictTarget") {
+    const $m608 = target;
+    $m608$match: {
+      if ($m608.tag === "DictTarget") {
         return [{ tag: "Err", error: "interface dispatch through a dictionary" }, n];
-        break $m586$match;
+        break $m608$match;
       }
-      if ($m586.tag === "FnTarget") {
-        const def = $m586.def;
-        const name = $m586.name;
+      if ($m608.tag === "FnTarget") {
+        const def = $m608.def;
+        const name = $m608.name;
         $rt.unwrap(require_native({ n: n, ctx: ctx, def: def }));
         const ret_ll = $rt.unwrap(ll_of({ ctx: ctx, t: ty }));
         let call_args = $std_list.builder({  });
@@ -4418,114 +4541,121 @@ export function call_val({ fuel, n, ctx, target, sig, consts, args, ty, decoder 
           const parts = $std_text.split({ t: q, sep: "." });
           const cname = "@onus_" + $std_text.join({ parts: $std_list.slice({ xs: parts, from: 1, to: $std_list.len({ xs: parts }) }), sep: "_" });
           let param_types = $std_list.builder({  });
-          for (const c of consts) {
-            const [$r588, n$496] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob185), n: n, ctx: ctx, e: c });
-            n = n$496;
-            const cv = $rt.unwrap($r588);
-            const [$r589, n$497] = to_slot({ n: n, v: cv });
-            n = n$497;
-            const slot = $r589;
-            const [, call_args$498] = $std_list.push({ b: call_args, x: "i64 " + slot });
-            call_args = call_args$498;
-            const [, param_types$499] = $std_list.push({ b: param_types, x: "i64" });
-            param_types = param_types$499;
+          if (is_keyed_map_fn({ q: q })) {
+            const kind = $rt.unwrap(key_kind({ ctx: ctx, targs: targs }));
+            const [, call_args$518] = $std_list.push({ b: call_args, x: "i64 " + s({ i: kind }) });
+            call_args = call_args$518;
+            const [, param_types$519] = $std_list.push({ b: param_types, x: "i64" });
+            param_types = param_types$519;
           }
-          const $hi590 = $std_list.len({ xs: sig.params });
-          for (let i = 0; i < $hi590; i++) {
+          for (const c of consts) {
+            const [$r610, n$520] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob187), n: n, ctx: ctx, e: c });
+            n = n$520;
+            const cv = $rt.unwrap($r610);
+            const [$r611, n$521] = to_slot({ n: n, v: cv });
+            n = n$521;
+            const slot = $r611;
+            const [, call_args$522] = $std_list.push({ b: call_args, x: "i64 " + slot });
+            call_args = call_args$522;
+            const [, param_types$523] = $std_list.push({ b: param_types, x: "i64" });
+            param_types = param_types$523;
+          }
+          const $hi612 = $std_list.len({ xs: sig.params });
+          for (let i = 0; i < $hi612; i++) {
             if (i < $std_list.len({ xs: args })) {
               const p = $std_list.get({ xs: sig.params, i: i });
               const a = $std_list.get({ xs: args, i: i });
               if (p.is_inout) {
                 const addr = $rt.unwrap(address_of({ n: n, a: a }));
-                const [, call_args$500] = $std_list.push({ b: call_args, x: "ptr " + addr });
-                call_args = call_args$500;
-                const [, param_types$501] = $std_list.push({ b: param_types, x: "ptr" });
-                param_types = param_types$501;
+                const [, call_args$524] = $std_list.push({ b: call_args, x: "ptr " + addr });
+                call_args = call_args$524;
+                const [, param_types$525] = $std_list.push({ b: param_types, x: "ptr" });
+                param_types = param_types$525;
               } else {
-                const [$r591, n$502] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob186), n: n, ctx: ctx, e: a });
-                n = n$502;
-                const av = $rt.unwrap($r591);
-                const [$r592, n$503] = to_slot({ n: n, v: av });
-                n = n$503;
-                const slot = $r592;
-                const [, call_args$504] = $std_list.push({ b: call_args, x: "i64 " + slot });
-                call_args = call_args$504;
-                const [, param_types$505] = $std_list.push({ b: param_types, x: "i64" });
-                param_types = param_types$505;
+                const [$r613, n$526] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob188), n: n, ctx: ctx, e: a });
+                n = n$526;
+                const av = $rt.unwrap($r613);
+                const [$r614, n$527] = to_slot({ n: n, v: av });
+                n = n$527;
+                const slot = $r614;
+                const [, call_args$528] = $std_list.push({ b: call_args, x: "i64 " + slot });
+                call_args = call_args$528;
+                const [, param_types$529] = $std_list.push({ b: param_types, x: "i64" });
+                param_types = param_types$529;
               }
             }
           }
-          const $m593 = decoder;
-          $m593$match: {
-            if ($m593.tag === "Some") {
-              const value = $m593.value;
-              const [$r594, n$506] = decoder_fn({ fuel: $rt.int.sub(fuel, 1, $ob187), n: n, ctx: ctx, d: value });
-              n = n$506;
-              const dfn = $rt.unwrap($r594);
-              const [$r595, n$507] = new_tmp({ n: n });
-              n = n$507;
-              const slot = $r595;
+          const $m615 = decoder;
+          $m615$match: {
+            if ($m615.tag === "Some") {
+              const value = $m615.value;
+              const [$r616, n$530] = decoder_fn({ fuel: $rt.int.sub(fuel, 1, $ob189), n: n, ctx: ctx, d: value });
+              n = n$530;
+              const dfn = $rt.unwrap($r616);
+              const [$r617, n$531] = new_tmp({ n: n });
+              n = n$531;
+              const slot = $r617;
               emit_line({ n: n, line: slot + " = ptrtoint ptr " + dfn + " to i64" });
-              const [, call_args$508] = $std_list.push({ b: call_args, x: "i64 " + slot });
-              call_args = call_args$508;
-              const [, param_types$509] = $std_list.push({ b: param_types, x: "i64" });
-              param_types = param_types$509;
-              break $m593$match;
+              const [, call_args$532] = $std_list.push({ b: call_args, x: "i64 " + slot });
+              call_args = call_args$532;
+              const [, param_types$533] = $std_list.push({ b: param_types, x: "i64" });
+              param_types = param_types$533;
+              break $m615$match;
             }
-            if ($m593.tag === "None") {
+            if ($m615.tag === "None") {
               skip({  });
-              break $m593$match;
+              break $m615$match;
             }
             $rt.unreachable();
           }
           declare_sig({ n: n, sig: "declare i64 " + cname + "(" + $std_text.join({ parts: $std_list.finish({ b: param_types }), sep: ", " }) + ")" });
-          const [$r596, n$510] = new_tmp({ n: n });
-          n = n$510;
-          const out = $r596;
+          const [$r618, n$534] = new_tmp({ n: n });
+          n = n$534;
+          const out = $r618;
           emit_line({ n: n, line: out + " = call i64 " + cname + "(" + $std_text.join({ parts: $std_list.finish({ b: call_args }), sep: ", " }) + ")" });
-          const [$r597, n$511] = from_slot({ n: n, slot: out, t: ret_ll });
-          n = n$511;
-          return [{ tag: "Ok", value: $r597 }, n];
+          const [$r619, n$535] = from_slot({ n: n, slot: out, t: ret_ll });
+          n = n$535;
+          return [{ tag: "Ok", value: $r619 }, n];
         }
         const module = $context.module_name({ ctx: ctx, id: def.mod });
         for (const c of consts) {
-          const [$r599, n$512] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob188), n: n, ctx: ctx, e: c });
-          n = n$512;
-          const cv = $rt.unwrap($r599);
-          const [, call_args$513] = $std_list.push({ b: call_args, x: cv.t + " " + cv.v });
-          call_args = call_args$513;
+          const [$r621, n$536] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob190), n: n, ctx: ctx, e: c });
+          n = n$536;
+          const cv = $rt.unwrap($r621);
+          const [, call_args$537] = $std_list.push({ b: call_args, x: cv.t + " " + cv.v });
+          call_args = call_args$537;
         }
-        const $hi600 = $std_list.len({ xs: sig.params });
-        for (let i = 0; i < $hi600; i++) {
+        const $hi622 = $std_list.len({ xs: sig.params });
+        for (let i = 0; i < $hi622; i++) {
           if (i < $std_list.len({ xs: args })) {
             const p = $std_list.get({ xs: sig.params, i: i });
             const a = $std_list.get({ xs: args, i: i });
             if (p.is_inout) {
               const addr = $rt.unwrap(address_of({ n: n, a: a }));
-              const [, call_args$514] = $std_list.push({ b: call_args, x: "ptr " + addr });
-              call_args = call_args$514;
+              const [, call_args$538] = $std_list.push({ b: call_args, x: "ptr " + addr });
+              call_args = call_args$538;
             } else {
-              const [$r601, n$515] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob189), n: n, ctx: ctx, e: a });
-              n = n$515;
-              const av = $rt.unwrap($r601);
+              const [$r623, n$539] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob191), n: n, ctx: ctx, e: a });
+              n = n$539;
+              const av = $rt.unwrap($r623);
               const pt = $rt.unwrap(ll_of({ ctx: ctx, t: p.ty }));
-              const [$r602, n$516] = coerce_to({ n: n, v: av, to: pt });
-              n = n$516;
-              const v = $r602;
-              const [, call_args$517] = $std_list.push({ b: call_args, x: v.t + " " + v.v });
-              call_args = call_args$517;
+              const [$r624, n$540] = coerce_to({ n: n, v: av, to: pt });
+              n = n$540;
+              const v = $r624;
+              const [, call_args$541] = $std_list.push({ b: call_args, x: v.t + " " + v.v });
+              call_args = call_args$541;
             }
           }
         }
         const callee_ret = $rt.unwrap(ll_of({ ctx: ctx, t: sig.ret }));
-        const [$r603, n$518] = new_tmp({ n: n });
-        n = n$518;
-        const out = $r603;
+        const [$r625, n$542] = new_tmp({ n: n });
+        n = n$542;
+        const out = $r625;
         emit_line({ n: n, line: out + " = call " + callee_ret + " " + fn_name({ module: module, name: name }) + "(" + $std_text.join({ parts: $std_list.finish({ b: call_args }), sep: ", " }) + ")" });
-        const [$r604, n$519] = coerce_to({ n: n, v: val({ v: out, t: callee_ret }), to: ret_ll });
-        n = n$519;
-        return [{ tag: "Ok", value: $r604 }, n];
-        break $m586$match;
+        const [$r626, n$543] = coerce_to({ n: n, v: val({ v: out, t: callee_ret }), to: ret_ll });
+        n = n$543;
+        return [{ tag: "Ok", value: $r626 }, n];
+        break $m608$match;
       }
       $rt.unreachable();
     }
@@ -4535,22 +4665,53 @@ export function call_val({ fuel, n, ctx, target, sig, consts, args, ty, decoder 
   }
 }
 
+export function is_keyed_map_fn({ q }) {
+  return q === "std.map.get" || q === "std.map.put" || q === "std.map.set" || q === "std.map.find" || q === "std.map.contains" || q === "std.map.remove";
+}
+
+export function key_kind({ ctx, targs }) {
+  if ($std_list.len({ xs: targs }) === 0) {
+    return { tag: "Err", error: "a `Dict` whose key type is not known at the call" };
+  }
+  const $m629 = $std_list.get({ xs: targs, i: 0 });
+  $m629$match: {
+    if ($m629.tag === "TypeA") {
+      const ty = $m629.ty;
+      const st = $types.strip({ t: ty });
+      const name = $types.prim_name({ t: st });
+      if (st.tag === "Prim" && (name === "Int" || name === "Duration" || name === "Bool" || name === "Unit")) {
+        return { tag: "Ok", value: 0 };
+      }
+      if (st.tag === "Prim" && name === "Text") {
+        return { tag: "Ok", value: 1 };
+      }
+      return { tag: "Err", error: "`Dict` keys of type `" + $typecheck.show({ ctx: ctx, t: st }) + "` (only Int, Duration, Bool, Unit and Text keys are native in v0)" };
+      break $m629$match;
+    }
+    if (true) {
+      return { tag: "Err", error: "a `Dict` whose key type is not known at the call" };
+      break $m629$match;
+    }
+    $rt.unreachable();
+  }
+}
+
 export function address_of({ n, a }) {
   try {
-    const $m606 = a;
-    $m606$match: {
-      if ($m606.tag === "Local") {
-        const name = $m606.name;
+    const $m634 = a;
+    $m634$match: {
+      if ($m634.tag === "Local") {
+        const name = $m634.name;
         const local = $rt.unwrap(local_of({ n: n, name: name }));
         if (local.t !== "i64" && local.t !== "ptr") {
           return { tag: "Err", error: "`inout` arguments of type " + local.t };
         }
         return { tag: "Ok", value: local.ptr };
-        break $m606$match;
+        break $m634$match;
       }
       if (true) {
         return { tag: "Err", error: "an `inout` argument that is not a variable" };
-        break $m606$match;
+        break $m634$match;
       }
       $rt.unreachable();
     }
@@ -4565,106 +4726,106 @@ export function try_val({ fuel, n, ctx, operand, option, outer_option, else_clau
     if (fuel === 0) {
       return [{ tag: "Err", error: "out of fuel" }, n];
     }
-    const [$r611, n$520] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob190), n: n, ctx: ctx, e: operand });
-    n = n$520;
-    const ov = $rt.unwrap($r611);
-    const [$r612, n$521] = coerce_to({ n: n, v: ov, to: "ptr" });
-    n = n$521;
-    const operand_v = $r612;
-    const [$r613, n$522] = load_slot({ n: n, obj: operand_v.v, idx: 0 });
-    n = n$522;
-    const tag = $r613;
-    const [$r614, n$523] = new_tmp({ n: n });
-    n = n$523;
-    const is_ok = $r614;
+    const [$r639, n$544] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob192), n: n, ctx: ctx, e: operand });
+    n = n$544;
+    const ov = $rt.unwrap($r639);
+    const [$r640, n$545] = coerce_to({ n: n, v: ov, to: "ptr" });
+    n = n$545;
+    const operand_v = $r640;
+    const [$r641, n$546] = load_slot({ n: n, obj: operand_v.v, idx: 0 });
+    n = n$546;
+    const tag = $r641;
+    const [$r642, n$547] = new_tmp({ n: n });
+    n = n$547;
+    const is_ok = $r642;
     emit_line({ n: n, line: is_ok + " = icmp eq i64 " + tag + ", 0" });
-    const [$r615, n$524] = new_label({ n: n, prefix: "tryok" });
-    n = n$524;
-    const ok_l = $r615;
-    const [$r616, n$525] = new_label({ n: n, prefix: "tryfail" });
-    n = n$525;
-    const fail_l = $r616;
-    const [, n$526] = cond_br({ n: n, cond: is_ok, then_l: ok_l, else_l: fail_l });
-    n = n$526;
-    const [, n$527] = start_block({ n: n, name: fail_l });
-    n = n$527;
+    const [$r643, n$548] = new_label({ n: n, prefix: "tryok" });
+    n = n$548;
+    const ok_l = $r643;
+    const [$r644, n$549] = new_label({ n: n, prefix: "tryfail" });
+    n = n$549;
+    const fail_l = $r644;
+    const [, n$550] = cond_br({ n: n, cond: is_ok, then_l: ok_l, else_l: fail_l });
+    n = n$550;
+    const [, n$551] = start_block({ n: n, name: fail_l });
+    n = n$551;
     if (raw) {
       let else_value = { tag: "BoolE", v: false };
-      const $m618 = else_clause;
-      $m618$match: {
-        if ($m618.tag === "Some") {
-          const value = $m618.value;
+      const $m646 = else_clause;
+      $m646$match: {
+        if ($m646.tag === "Some") {
+          const value = $m646.value;
           else_value = value.value;
-          break $m618$match;
+          break $m646$match;
         }
-        if ($m618.tag === "None") {
+        if ($m646.tag === "None") {
           skip({  });
-          break $m618$match;
+          break $m646$match;
         }
         $rt.unreachable();
       }
-      const [$r619, n$528] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob191), n: n, ctx: ctx, e: else_value });
-      n = n$528;
-      const ev = $rt.unwrap($r619);
-      const [$r620, n$529] = coerce_to({ n: n, v: ev, to: "i1" });
-      n = n$529;
-      const v = $r620;
+      const [$r647, n$552] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob193), n: n, ctx: ctx, e: else_value });
+      n = n$552;
+      const ev = $rt.unwrap($r647);
+      const [$r648, n$553] = coerce_to({ n: n, v: ev, to: "i1" });
+      n = n$553;
+      const v = $r648;
       emit_line({ n: n, line: "ret i1 " + v.v });
     } else {
-      const $m621 = else_clause;
-      $m621$match: {
-        if ($m621.tag === "None") {
+      const $m649 = else_clause;
+      $m649$match: {
+        if ($m649.tag === "None") {
           if (option && !outer_option) {
             return [{ tag: "Err", error: "`try` on an Option inside a function returning Result without an `else`" }, n];
           }
           emit_line({ n: n, line: "ret ptr " + operand_v.v });
-          break $m621$match;
+          break $m649$match;
         }
-        if ($m621.tag === "Some") {
-          const value = $m621.value;
+        if ($m649.tag === "Some") {
+          const value = $m649.value;
           if (value.name.tag === "Some") {
             const et = $rt.unwrap(ll_of({ ctx: ctx, t: value.error_type }));
-            const [$r623, n$530] = load_slot({ n: n, obj: operand_v.v, idx: 1 });
-            n = n$530;
-            const err_slot = $r623;
-            const [$r624, n$531] = from_slot({ n: n, slot: err_slot, t: et });
-            n = n$531;
-            const err = $r624;
-            const [$r625, n$532] = alloc_local({ n: n, name: or_empty({ o: value.name }), t: et, ty: value.error_type });
-            n = n$532;
-            const ptr = $r625;
+            const [$r651, n$554] = load_slot({ n: n, obj: operand_v.v, idx: 1 });
+            n = n$554;
+            const err_slot = $r651;
+            const [$r652, n$555] = from_slot({ n: n, slot: err_slot, t: et });
+            n = n$555;
+            const err = $r652;
+            const [$r653, n$556] = alloc_local({ n: n, name: or_empty({ o: value.name }), t: et, ty: value.error_type });
+            n = n$556;
+            const ptr = $r653;
             emit_line({ n: n, line: "store " + et + " " + err.v + ", ptr " + ptr });
           }
-          const [$r626, n$533] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob192), n: n, ctx: ctx, e: value.value });
-          n = n$533;
-          const cv = $rt.unwrap($r626);
-          const [$r627, n$534] = to_slot({ n: n, v: cv });
-          n = n$534;
-          const converted = $r627;
-          const [$r628, n$535] = new_tmp({ n: n });
-          n = n$535;
-          const res = $r628;
+          const [$r654, n$557] = expr_val({ fuel: $rt.int.sub(fuel, 1, $ob194), n: n, ctx: ctx, e: value.value });
+          n = n$557;
+          const cv = $rt.unwrap($r654);
+          const [$r655, n$558] = to_slot({ n: n, v: cv });
+          n = n$558;
+          const converted = $r655;
+          const [$r656, n$559] = new_tmp({ n: n });
+          n = n$559;
+          const res = $r656;
           emit_line({ n: n, line: res + " = call ptr @onus_alloc(i64 16)" });
-          const [, n$536] = store_slot({ n: n, obj: res, idx: 0, slot: "1" });
-          n = n$536;
-          const [, n$537] = store_slot({ n: n, obj: res, idx: 1, slot: converted });
-          n = n$537;
+          const [, n$560] = store_slot({ n: n, obj: res, idx: 0, slot: "1" });
+          n = n$560;
+          const [, n$561] = store_slot({ n: n, obj: res, idx: 1, slot: converted });
+          n = n$561;
           emit_line({ n: n, line: "ret ptr " + res });
-          break $m621$match;
+          break $m649$match;
         }
         $rt.unreachable();
       }
     }
     n = { ...n, terminated: true };
-    const [, n$538] = start_block({ n: n, name: ok_l });
-    n = n$538;
-    const [$r630, n$539] = load_slot({ n: n, obj: operand_v.v, idx: 1 });
-    n = n$539;
-    const payload = $r630;
+    const [, n$562] = start_block({ n: n, name: ok_l });
+    n = n$562;
+    const [$r658, n$563] = load_slot({ n: n, obj: operand_v.v, idx: 1 });
+    n = n$563;
+    const payload = $r658;
     const t = $rt.unwrap(ll_of({ ctx: ctx, t: ty }));
-    const [$r631, n$540] = from_slot({ n: n, slot: payload, t: t });
-    n = n$540;
-    return [{ tag: "Ok", value: $r631 }, n];
+    const [$r659, n$564] = from_slot({ n: n, slot: payload, t: t });
+    n = n$564;
+    return [{ tag: "Ok", value: $r659 }, n];
   } catch ($e) {
     if ($e instanceof $rt.EarlyReturn) return [$e.value, n];
     throw $e;
@@ -4673,138 +4834,157 @@ export function try_val({ fuel, n, ctx, operand, option, outer_option, else_clau
 
 export function emit_native({ ctx, modules, entry, opts }) {
   try {
-    let n = new_n({ modules: modules, entry: entry, sql: opts.sql, host_js: host_js_claim({ ctx: ctx }) });
-    const reach = reachable({ n: n });
-    for (const m of modules) {
-      for (const item of m.items) {
-        const $m633 = item;
-        $m633$match: {
-          if ($m633.tag === "FnItem") {
-            const f = $m633.f;
-            if ($std_map.contains({ d: reach, key: f.def.id })) {
-              const [, n$541] = fn_item({ n: n, ctx: ctx, m: m, f: f });
-              n = n$541;
-            }
-            break $m633$match;
+    const specialised = $specialise.specialise({ ctx: ctx, modules: modules });
+    let entry_sp = { tag: "None" };
+    const $m662 = entry;
+    $m662$match: {
+      if ($m662.tag === "Some") {
+        const value = $m662.value;
+        for (const m of specialised) {
+          if (m.mod.name === value.mod.name) {
+            entry_sp = { tag: "Some", value: m };
           }
-          if ($m633.tag === "ImplItem") {
-            const fns = $m633.fns;
+        }
+        break $m662$match;
+      }
+      if ($m662.tag === "None") {
+        skip({  });
+        break $m662$match;
+      }
+      $rt.unreachable();
+    }
+    let n = new_n({ modules: specialised, entry: entry_sp, sql: opts.sql, host_js: host_js_claim({ ctx: ctx }) });
+    const reach = reachable({ n: n, ctx: ctx });
+    for (const m of specialised) {
+      for (const item of m.items) {
+        const $m664 = item;
+        $m664$match: {
+          if ($m664.tag === "FnItem") {
+            const f = $m664.f;
+            if ($std_map.contains({ d: reach, key: fn_name({ module: m.mod.name, name: f.name }) })) {
+              const [, n$565] = fn_item({ n: n, ctx: ctx, m: m, f: f });
+              n = n$565;
+            }
+            break $m664$match;
+          }
+          if ($m664.tag === "ImplItem") {
+            const fns = $m664.fns;
             for (const f of fns) {
-              if ($std_map.contains({ d: reach, key: f.def.id })) {
-                const [, n$542] = fn_item({ n: n, ctx: ctx, m: m, f: f });
-                n = n$542;
+              if ($std_map.contains({ d: reach, key: fn_name({ module: m.mod.name, name: f.name }) })) {
+                const [, n$566] = fn_item({ n: n, ctx: ctx, m: m, f: f });
+                n = n$566;
               }
             }
-            break $m633$match;
+            break $m664$match;
           }
-          if ($m633.tag === "ConstItem") {
-            const def = $m633.def;
-            const ty = $m633.ty;
-            const value = $m633.value;
-            if ($std_map.contains({ d: reach, key: def.id })) {
-              const [, n$543] = const_item({ n: n, ctx: ctx, m: m, def: def, ty: ty, init: value });
-              n = n$543;
+          if ($m664.tag === "ConstItem") {
+            const def = $m664.def;
+            const ty = $m664.ty;
+            const value = $m664.value;
+            if ($std_map.contains({ d: reach, key: fn_name({ module: m.mod.name, name: def.name }) })) {
+              const [, n$567] = const_item({ n: n, ctx: ctx, m: m, def: def, ty: ty, init: value });
+              n = n$567;
             }
-            break $m633$match;
+            break $m664$match;
           }
           if (true) {
             skip({  });
-            break $m633$match;
+            break $m664$match;
           }
           $rt.unreachable();
         }
       }
-      const $m634 = m.tests;
-      $m634$match: {
-        if ($m634.tag === "Some") {
-          const value = $m634.value;
+      const $m665 = m.tests;
+      $m665$match: {
+        if ($m665.tag === "Some") {
+          const value = $m665.value;
           if (!m.mod.is_std) {
             for (const ex of value.examples) {
-              const [, n$544] = example_fn({ n: n, ctx: ctx, m: m, name: ex.name, body: ex.body });
-              n = n$544;
+              const [, n$568] = example_fn({ n: n, ctx: ctx, m: m, name: ex.name, body: ex.body });
+              n = n$568;
             }
           }
-          break $m634$match;
+          break $m665$match;
         }
-        if ($m634.tag === "None") {
+        if ($m665.tag === "None") {
           skip({  });
-          break $m634$match;
+          break $m665$match;
         }
         $rt.unreachable();
       }
     }
     let has_main = false;
-    const $m635 = entry;
-    $m635$match: {
-      if ($m635.tag === "Some") {
-        const value = $m635.value;
+    const $m666 = entry;
+    $m666$match: {
+      if ($m666.tag === "Some") {
+        const value = $m666.value;
         has_main = value.main.tag === "Some";
-        break $m635$match;
+        break $m666$match;
       }
-      if ($m635.tag === "None") {
+      if ($m666.tag === "None") {
         skip({  });
-        break $m635$match;
+        break $m666$match;
       }
       $rt.unreachable();
     }
-    const [$r636, n$545] = main_fn({ n: n, ctx: ctx });
-    n = n$545;
-    $rt.unwrap($r636);
+    const [$r667, n$569] = main_fn({ n: n, ctx: ctx });
+    n = n$569;
+    $rt.unwrap($r667);
     let head = $std_list.builder({  });
-    const [, head$546] = $std_list.push({ b: head, x: "; Generated by onus (native target). Do not edit." });
-    head = head$546;
+    const [, head$570] = $std_list.push({ b: head, x: "; Generated by onus (native target). Do not edit." });
+    head = head$570;
     for (const g of $std_list.finish({ b: n.globals })) {
-      const [, head$547] = $std_list.push({ b: head, x: g });
-      head = head$547;
+      const [, head$571] = $std_list.push({ b: head, x: g });
+      head = head$571;
     }
     for (const d of sort_texts({ xs: $std_map.keys({ d: n.declared }) })) {
-      const [, head$548] = $std_list.push({ b: head, x: d });
-      head = head$548;
+      const [, head$572] = $std_list.push({ b: head, x: d });
+      head = head$572;
     }
-    const [, head$549] = $std_list.push({ b: head, x: "declare void @onus_panic(ptr, ptr, ptr, ptr)" });
-    head = head$549;
-    const [, head$550] = $std_list.push({ b: head, x: "declare void @onus_unreachable()" });
-    head = head$550;
-    const [, head$551] = $std_list.push({ b: head, x: "declare ptr @onus_alloc(i64)" });
-    head = head$551;
-    const [, head$552] = $std_list.push({ b: head, x: "declare ptr @onus_rt_text_concat(ptr, ptr)" });
-    head = head$552;
-    const [, head$553] = $std_list.push({ b: head, x: "declare i1 @onus_rt_text_eq(ptr, ptr)" });
-    head = head$553;
-    const [, head$554] = $std_list.push({ b: head, x: "declare ptr @onus_rt_list_new(i64)" });
-    head = head$554;
-    const [, head$555] = $std_list.push({ b: head, x: "declare i64 @onus_rt_list_len(ptr)" });
-    head = head$555;
-    const [, head$556] = $std_list.push({ b: head, x: "declare i64 @onus_rt_list_get(ptr, i64)" });
-    head = head$556;
-    const [, head$557] = $std_list.push({ b: head, x: "declare void @onus_rt_list_set(ptr, i64, i64)" });
-    head = head$557;
-    const [, head$558] = $std_list.push({ b: head, x: "declare ptr @onus_rt_list_concat(ptr, ptr)" });
-    head = head$558;
-    const [, head$559] = $std_list.push({ b: head, x: "declare ptr @onus_args(i32, ptr)" });
-    head = head$559;
-    const [, head$560] = $std_list.push({ b: head, x: "declare i32 @onus_start(i32, ptr)" });
-    head = head$560;
-    const [, head$561] = $std_list.push({ b: head, x: "declare i32 @onus_finish(ptr)" });
-    head = head$561;
-    const [, head$562] = $std_list.push({ b: head, x: "declare void @onus_report_example(ptr, i1)" });
-    head = head$562;
-    const [, head$563] = $std_list.push({ b: head, x: "declare i32 @onus_examples_done()" });
-    head = head$563;
-    const [, head$564] = $std_list.push({ b: head, x: "declare ptr @onus_root(ptr)" });
-    head = head$564;
-    const [, head$565] = $std_list.push({ b: head, x: "declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)" });
-    head = head$565;
-    const [, head$566] = $std_list.push({ b: head, x: "declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)" });
-    head = head$566;
-    const [, head$567] = $std_list.push({ b: head, x: "declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)" });
-    head = head$567;
-    const [, head$568] = $std_list.push({ b: head, x: "" });
-    head = head$568;
+    const [, head$573] = $std_list.push({ b: head, x: "declare void @onus_panic(ptr, ptr, ptr, ptr)" });
+    head = head$573;
+    const [, head$574] = $std_list.push({ b: head, x: "declare void @onus_unreachable()" });
+    head = head$574;
+    const [, head$575] = $std_list.push({ b: head, x: "declare ptr @onus_alloc(i64)" });
+    head = head$575;
+    const [, head$576] = $std_list.push({ b: head, x: "declare ptr @onus_rt_text_concat(ptr, ptr)" });
+    head = head$576;
+    const [, head$577] = $std_list.push({ b: head, x: "declare i1 @onus_rt_text_eq(ptr, ptr)" });
+    head = head$577;
+    const [, head$578] = $std_list.push({ b: head, x: "declare ptr @onus_rt_list_new(i64)" });
+    head = head$578;
+    const [, head$579] = $std_list.push({ b: head, x: "declare i64 @onus_rt_list_len(ptr)" });
+    head = head$579;
+    const [, head$580] = $std_list.push({ b: head, x: "declare i64 @onus_rt_list_get(ptr, i64)" });
+    head = head$580;
+    const [, head$581] = $std_list.push({ b: head, x: "declare void @onus_rt_list_set(ptr, i64, i64)" });
+    head = head$581;
+    const [, head$582] = $std_list.push({ b: head, x: "declare ptr @onus_rt_list_concat(ptr, ptr)" });
+    head = head$582;
+    const [, head$583] = $std_list.push({ b: head, x: "declare ptr @onus_args(i32, ptr)" });
+    head = head$583;
+    const [, head$584] = $std_list.push({ b: head, x: "declare i32 @onus_start(i32, ptr)" });
+    head = head$584;
+    const [, head$585] = $std_list.push({ b: head, x: "declare i32 @onus_finish(ptr)" });
+    head = head$585;
+    const [, head$586] = $std_list.push({ b: head, x: "declare void @onus_report_example(ptr, i1)" });
+    head = head$586;
+    const [, head$587] = $std_list.push({ b: head, x: "declare i32 @onus_examples_done()" });
+    head = head$587;
+    const [, head$588] = $std_list.push({ b: head, x: "declare ptr @onus_root(ptr)" });
+    head = head$588;
+    const [, head$589] = $std_list.push({ b: head, x: "declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)" });
+    head = head$589;
+    const [, head$590] = $std_list.push({ b: head, x: "declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)" });
+    head = head$590;
+    const [, head$591] = $std_list.push({ b: head, x: "declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)" });
+    head = head$591;
+    const [, head$592] = $std_list.push({ b: head, x: "" });
+    head = head$592;
     let names = $std_list.builder({  });
     for (const ex of $std_list.finish({ b: n.examples })) {
-      const [, names$569] = $std_list.push({ b: names, x: ex.name });
-      names = names$569;
+      const [, names$593] = $std_list.push({ b: names, x: ex.name });
+      names = names$593;
     }
     return { tag: "Ok", value: { ll: $std_text.join({ parts: $std_list.finish({ b: head }), sep: "\n" }) + "\n" + $std_text.join({ parts: $std_list.finish({ b: n.fns }), sep: "\n" }), unsupported: $std_list.finish({ b: n.unsupported }), has_main: has_main, examples: $std_list.finish({ b: names }) } };
   } catch ($e) {

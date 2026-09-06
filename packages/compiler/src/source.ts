@@ -43,7 +43,10 @@ export function makeSourceFile(id: FileId, path: string, text: string): SourceFi
 }
 
 /**
- * Maps an offset to a 1-based line and column.
+ * Maps an offset to a 1-based line and column. A column counts code points
+ * (§13; docs/CHANGES.md item 176), not the UTF-16 units of the offset, so
+ * that the reports agree with the compiler in Onus, whose offsets are code
+ * points.
  * Preconditions: `0 <= offset <= file.text.length`. Offsets past the end map to the last line.
  * Effects: none.
  */
@@ -58,7 +61,12 @@ export function lineColOf(file: SourceFile, offset: number): LineCol {
     else hi = mid - 1;
   }
   const lineStart = starts[lo] ?? 0;
-  return { line: lo + 1, col: offset - lineStart + 1 };
+  let col = 1;
+  for (let i = lineStart; i < offset && i < file.text.length; i++) {
+    const c = file.text.charCodeAt(i);
+    if (c < 0xdc00 || c > 0xdfff) col += 1;
+  }
+  return { line: lo + 1, col };
 }
 
 /**

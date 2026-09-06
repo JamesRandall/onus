@@ -7,6 +7,8 @@ import values
 import ir
 import typecheck
 import claimcheck
+import specialise
+import lowerir
 
 -- The native emitter (impl spec §6, M11; language spec §19; `codegen/native.ts`):
 -- renders the target-neutral form of `ir.onus` as LLVM IR text for `clang` to
@@ -26,9 +28,10 @@ import claimcheck
 --
 -- Programs reaching a construct outside the v0 native subset are refused with
 -- `E0800 primitive unavailable on target` (§19.1): closures and function
--- values, interfaces, quantifiers at runtime, `fake`, `TypeInfo`, `old(...)`,
--- structural equality on type parameters, `Map`, `Bytes`, `sql` without
--- libpq, and `Text` operations that need grapheme tables.
+-- values, interfaces, quantifiers at runtime, `fake`, `old(...)`, `Spec`
+-- values, and `sql` without libpq. `Text`, `Bytes`, `TypeInfo`, `Map` and
+-- `Dict` are complete: the runtime carries the Unicode 16.0 tables
+-- (docs/CHANGES.md item 175).
 --
 -- A construct the native backend does not compile in v0, at the definition that uses it.
 pub record Unsupported {
@@ -490,7 +493,10 @@ fn ll_of(ctx: context.Context, t: types.Type) -> Result[Text, Text] may alloc {
     if name == "Text" or name == "TypeInfo" {
       return Ok(value: "ptr")
     }
-    if name == "Bytes" or name == "Spec" {
+    if name == "Bytes" {
+      return Ok(value: "ptr")
+    }
+    if name == "Spec" {
       return Err(error: "`" ++ name ++ "` values")
     }
     return Ok(value: "i64")
@@ -500,7 +506,7 @@ fn ll_of(ctx: context.Context, t: types.Type) -> Result[Text, Text] may alloc {
   | types.Capability(_, _, _) -> return Ok(value: "ptr")
   | types.Opaque(def, _) -> {
     let q: Text = context.qualified_name(ctx: ctx, id: def)
-    if q == "std.list.List" or q == "std.list.Builder" or q == "std.grid.Grid" or q == "std.sql.Select" or q == "std.sql.Param" or q == "std.sql.Statement" {
+    if q == "std.list.List" or q == "std.list.Builder" or q == "std.grid.Grid" or q == "std.sql.Select" or q == "std.sql.Param" or q == "std.sql.Statement" or q == "std.map.Map" or q == "std.map.Dict" {
       return Ok(value: "ptr")
     }
     return Err(error: "`" ++ context.get_def(ctx: ctx, id: def).name ++ "` values")
@@ -634,6 +640,92 @@ fn text_global(n: inout N, x: Text) -> Text may mutate, alloc {
   var texts: Dict[Text, Text] = n.texts
   Map.set(d: inout texts, key: x, value: name)
   return name
+}
+
+-- A `Bytes` constant: the text layout, a length then the bytes (§19.1).
+fn bytes_global(n: inout N, bytes: List[Int]) -> Text may mutate, alloc {
+  n = { n with text_count: n.text_count + 1 }
+  let name: Text = "@byt" ++ s(i: n.text_count)
+  let arr: Text = "[" ++ s(i: List.len(xs: bytes) + 1) ++ " x i8]"
+  var out: Builder[Text] = List.builder()
+  for b: Int in bytes {
+    if 0 <= b and b <= 255 {
+      push_byte(out: inout out, b: b)
+    }
+  }
+  push_global(
+    n: n,
+    line: name ++ " = private unnamed_addr constant { i64, " ++ arr ++ " } { i64 " ++ s(
+      i: List.len(xs: bytes)
+    ) ++ ", " ++ arr ++ " c\"" ++ Text.join(parts: List.finish(b: out), sep: "") ++ "\\00\" }"
+  )
+  return name
+}
+
+-- A `TypeInfo` value: a two-slot object of the type's name and its `Field` records, as `std.typeinfo` reads it (§19.1).
+fn typeinfo_obj(n: inout N, name: Text, fields: List[ir.TypeInfoField]) -> Val may mutate, alloc {
+  let list: Text = new_tmp(n: inout n)
+  emit_line(
+    n: n,
+    line: list ++ " = call ptr @onus_rt_list_new(i64 " ++ s(i: List.len(xs: fields)) ++ ")"
+  )
+  for i: Int in 0 ..< List.len(xs: fields) {
+    let f: ir.TypeInfoField = List.get(xs: fields, i: i)
+    let rec: Text = new_tmp(n: inout n)
+    emit_line(n: n, line: rec ++ " = call ptr @onus_alloc(i64 16)")
+    let fname: Text = to_slot(n: inout n, v: val(v: text_global(n: inout n, x: f.name), t: "ptr"))
+    store_slot(n: inout n, obj: rec, idx: 0, slot: fname)
+    let tname: Text = to_slot(
+      n: inout n,
+      v: val(v: text_global(n: inout n, x: f.type_name), t: "ptr")
+    )
+    store_slot(n: inout n, obj: rec, idx: 1, slot: tname)
+    let rslot: Text = to_slot(n: inout n, v: val(v: rec, t: "ptr"))
+    emit_line(
+      n: n,
+      line: "call void @onus_rt_list_set(ptr " ++ list ++ ", i64 " ++ s(
+        i: i
+      ) ++ ", i64 " ++ rslot ++ ")"
+    )
+  }
+  let obj: Text = new_tmp(n: inout n)
+  emit_line(n: n, line: obj ++ " = call ptr @onus_alloc(i64 16)")
+  let nslot: Text = to_slot(n: inout n, v: val(v: text_global(n: inout n, x: name), t: "ptr"))
+  store_slot(n: inout n, obj: obj, idx: 0, slot: nslot)
+  let lslot: Text = to_slot(n: inout n, v: val(v: list, t: "ptr"))
+  store_slot(n: inout n, obj: obj, idx: 1, slot: lslot)
+  return val(v: obj, t: "ptr")
+}
+
+-- A compile-time `TypeInfo` value, laid out like the expression form.
+fn typeinfo_owner(
+  n: inout N,
+  ctx: context.Context,
+  owner: defs.TypeOwner
+) -> Val may mutate, alloc {
+  match owner with
+  | defs.PrimOwner(name) -> return typeinfo_obj(n: inout n, name: name, fields: [])
+  | defs.DefOwner(def) -> {
+    var fs: Builder[ir.TypeInfoField] = List.builder()
+    match Map.find(d: ctx.fields, key: def) with
+    | Some(value) -> {
+      for f: types.FieldInfo in value {
+        List.push(
+          b: inout fs,
+          x: ir.TypeInfoField {
+            name: f.name,
+            type_name: lowerir.type_slug(fuel: 1000, ctx: ctx, t: f.ty)
+          }
+        )
+      }
+    }
+    | None -> skip()
+    return typeinfo_obj(
+      n: inout n,
+      name: context.get_def(ctx: ctx, id: def).name,
+      fields: List.finish(b: fs)
+    )
+  }
 }
 
 fn emit_panic(n: inout N, ob: ir.ObRef) -> Unit may mutate, alloc {
@@ -879,8 +971,10 @@ fn const_val(
     }
     return Ok(value: val(v: obj, t: "ptr"))
   }
-  | values.BytesV(_) -> return Err(error: "`bytes` compile-time values")
-  | values.TypeInfoV(_) -> return Err(error: "`typeinfo` compile-time values")
+  | values.BytesV(bytes) -> return Ok(
+    value: val(v: bytes_global(n: inout n, bytes: bytes), t: "ptr")
+  )
+  | values.TypeInfoV(owner) -> return Ok(value: typeinfo_owner(n: inout n, ctx: ctx, owner: owner))
 }
 
 fn literal_of(e: ir.Expr) -> Option[values.Value] {
@@ -934,7 +1028,8 @@ fn aggregate_const(n: N, target_def: Int) -> Bool may alloc {
 -- -----------------------------------------------------------------------------
 fn visit_block(
   fuel: Int where it >= 0,
-  queue: inout List[Int],
+  ctx: context.Context,
+  queue: inout List[Text],
   b: List[ir.Stmt]
 ) -> Unit may mutate, alloc
   decreases fuel
@@ -943,14 +1038,15 @@ fn visit_block(
     return Unit
   }
   for st: ir.Stmt in b {
-    visit_stmt(fuel: fuel - 1, queue: inout queue, st: st)
+    visit_stmt(fuel: fuel - 1, ctx: ctx, queue: inout queue, st: st)
   }
   return Unit
 }
 
 fn visit_stmt(
   fuel: Int where it >= 0,
-  queue: inout List[Int],
+  ctx: context.Context,
+  queue: inout List[Text],
   st: ir.Stmt
 ) -> Unit may mutate, alloc
   decreases fuel
@@ -959,57 +1055,58 @@ fn visit_stmt(
     return Unit
   }
   match st with
-  | ir.Let(_, _, _, value) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: value)
-  | ir.Assign(_, _, value) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: value)
-  | ir.Return(value) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: value)
-  | ir.ExprStmt(expr) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: expr)
+  | ir.Let(_, _, _, value) -> visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: value)
+  | ir.Assign(_, _, value) -> visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: value)
+  | ir.Return(value) -> visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: value)
+  | ir.ExprStmt(expr) -> visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: expr)
   | ir.If(cond, then_block, else_block) -> {
-    visit_expr(fuel: fuel - 1, queue: inout queue, e: cond)
-    visit_block(fuel: fuel - 1, queue: inout queue, b: then_block)
+    visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: cond)
+    visit_block(fuel: fuel - 1, ctx: ctx, queue: inout queue, b: then_block)
     match else_block with
-    | Some(value) -> visit_block(fuel: fuel - 1, queue: inout queue, b: value)
+    | Some(value) -> visit_block(fuel: fuel - 1, ctx: ctx, queue: inout queue, b: value)
     | None -> skip()
   }
   | ir.Match(_, _, scrutinee, arms) -> {
-    visit_expr(fuel: fuel - 1, queue: inout queue, e: scrutinee)
+    visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: scrutinee)
     for a: ir.Arm in arms {
       match a.pattern_test with
-      | Some(value) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: value)
+      | Some(value) -> visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: value)
       | None -> skip()
       for bd: ir.Binding in a.bindings {
-        visit_expr(fuel: fuel - 1, queue: inout queue, e: bd.value)
+        visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: bd.value)
       }
       match a.guard with
-      | Some(value) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: value)
+      | Some(value) -> visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: value)
       | None -> skip()
-      visit_block(fuel: fuel - 1, queue: inout queue, b: a.body)
+      visit_block(fuel: fuel - 1, ctx: ctx, queue: inout queue, b: a.body)
     }
   }
   | ir.Loop(cond, body) -> {
-    visit_expr(fuel: fuel - 1, queue: inout queue, e: cond)
-    visit_block(fuel: fuel - 1, queue: inout queue, b: body)
+    visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: cond)
+    visit_block(fuel: fuel - 1, ctx: ctx, queue: inout queue, b: body)
   }
   | ir.ForRange(_, lo, hi, body) -> {
-    visit_expr(fuel: fuel - 1, queue: inout queue, e: lo)
-    visit_expr(fuel: fuel - 1, queue: inout queue, e: hi)
-    visit_block(fuel: fuel - 1, queue: inout queue, b: body)
+    visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: lo)
+    visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: hi)
+    visit_block(fuel: fuel - 1, ctx: ctx, queue: inout queue, b: body)
   }
   | ir.ForEach(_, _, list, body) -> {
-    visit_expr(fuel: fuel - 1, queue: inout queue, e: list)
-    visit_block(fuel: fuel - 1, queue: inout queue, b: body)
+    visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: list)
+    visit_block(fuel: fuel - 1, ctx: ctx, queue: inout queue, b: body)
   }
-  | ir.Check(cond, _) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: cond)
-  | ir.Assert(cond) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: cond)
-  | ir.CallInout(_, call, _) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: call)
+  | ir.Check(cond, _) -> visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: cond)
+  | ir.Assert(cond) -> visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: cond)
+  | ir.CallInout(_, call, _) -> visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: call)
   | ir.Unreachable -> skip()
   | ir.Comment(_) -> skip()
-  | ir.Reject(cond, _) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: cond)
+  | ir.Reject(cond, _) -> visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: cond)
   return Unit
 }
 
 fn visit_exprs(
   fuel: Int where it >= 0,
-  queue: inout List[Int],
+  ctx: context.Context,
+  queue: inout List[Text],
   es: List[ir.Expr]
 ) -> Unit may mutate, alloc
   decreases fuel
@@ -1018,14 +1115,15 @@ fn visit_exprs(
     return Unit
   }
   for e: ir.Expr in es {
-    visit_expr(fuel: fuel - 1, queue: inout queue, e: e)
+    visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: e)
   }
   return Unit
 }
 
 fn visit_inits(
   fuel: Int where it >= 0,
-  queue: inout List[Int],
+  ctx: context.Context,
+  queue: inout List[Text],
   fields: List[ir.FieldInit]
 ) -> Unit may mutate, alloc
   decreases fuel
@@ -1034,126 +1132,170 @@ fn visit_inits(
     return Unit
   }
   for f: ir.FieldInit in fields {
-    visit_expr(fuel: fuel - 1, queue: inout queue, e: f.value)
+    visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: f.value)
   }
   return Unit
 }
 
-fn visit_expr(fuel: Int where it >= 0, queue: inout List[Int], e: ir.Expr) -> Unit may mutate, alloc
+fn visit_expr(
+  fuel: Int where it >= 0,
+  ctx: context.Context,
+  queue: inout List[Text],
+  e: ir.Expr
+) -> Unit may mutate, alloc
   decreases fuel
 {
   if fuel == 0 {
     return Unit
   }
   match e with
-  | ir.Call(target, _, dicts, consts, args, _, _) -> {
+  | ir.Call(target, _, dicts, consts, args, _, _, _) -> {
     match target with
-    | ir.FnTarget(def, _) -> queue = queue ++ [def.id]
-    | ir.DictTarget(dict, _) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: dict)
-    visit_exprs(fuel: fuel - 1, queue: inout queue, es: dicts)
-    visit_exprs(fuel: fuel - 1, queue: inout queue, es: consts)
-    visit_exprs(fuel: fuel - 1, queue: inout queue, es: args)
+    | ir.FnTarget(def, name) -> queue = queue ++ [
+      fn_name(module: context.module_name(ctx: ctx, id: def.mod), name: name)
+    ]
+    | ir.DictTarget(dict, _) -> visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: dict)
+    visit_exprs(fuel: fuel - 1, ctx: ctx, queue: inout queue, es: dicts)
+    visit_exprs(fuel: fuel - 1, ctx: ctx, queue: inout queue, es: consts)
+    visit_exprs(fuel: fuel - 1, ctx: ctx, queue: inout queue, es: args)
   }
-  | ir.FnRef(def, _, _) -> queue = queue ++ [def.id]
-  | ir.Global(def, _) -> queue = queue ++ [def.id]
+  | ir.FnRef(def, name, _) -> queue = queue ++ [
+    fn_name(module: context.module_name(ctx: ctx, id: def.mod), name: name)
+  ]
+  | ir.Global(def, _) -> queue = queue ++ [
+    fn_name(module: context.module_name(ctx: ctx, id: def.mod), name: def.name)
+  ]
   | ir.CallValue(callee, _, args, _) -> {
-    visit_expr(fuel: fuel - 1, queue: inout queue, e: callee)
-    visit_exprs(fuel: fuel - 1, queue: inout queue, es: args)
+    visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: callee)
+    visit_exprs(fuel: fuel - 1, ctx: ctx, queue: inout queue, es: args)
   }
-  | ir.RecordE(_, _, fields) -> visit_inits(fuel: fuel - 1, queue: inout queue, fields: fields)
-  | ir.VariantE(_, _, fields) -> visit_inits(fuel: fuel - 1, queue: inout queue, fields: fields)
-  | ir.Fake(_, fields, _) -> visit_inits(fuel: fuel - 1, queue: inout queue, fields: fields)
+  | ir.RecordE(_, _, fields) -> visit_inits(
+    fuel: fuel - 1,
+    ctx: ctx,
+    queue: inout queue,
+    fields: fields
+  )
+  | ir.VariantE(_, _, fields) -> visit_inits(
+    fuel: fuel - 1,
+    ctx: ctx,
+    queue: inout queue,
+    fields: fields
+  )
+  | ir.Fake(_, fields, _) -> visit_inits(
+    fuel: fuel - 1,
+    ctx: ctx,
+    queue: inout queue,
+    fields: fields
+  )
   | ir.Update(base, _, _, fields) -> {
-    visit_expr(fuel: fuel - 1, queue: inout queue, e: base)
-    visit_inits(fuel: fuel - 1, queue: inout queue, fields: fields)
+    visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: base)
+    visit_inits(fuel: fuel - 1, ctx: ctx, queue: inout queue, fields: fields)
   }
-  | ir.FieldE(object, _, _, _) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: object)
-  | ir.Not(operand) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: operand)
-  | ir.Snapshot(value, _) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: value)
-  | ir.ListE(elems, _) -> visit_exprs(fuel: fuel - 1, queue: inout queue, es: elems)
-  | ir.And(operands) -> visit_exprs(fuel: fuel - 1, queue: inout queue, es: operands)
-  | ir.Or(operands) -> visit_exprs(fuel: fuel - 1, queue: inout queue, es: operands)
+  | ir.FieldE(object, _, _, _) -> visit_expr(
+    fuel: fuel - 1,
+    ctx: ctx,
+    queue: inout queue,
+    e: object
+  )
+  | ir.Not(operand) -> visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: operand)
+  | ir.Snapshot(value, _) -> visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: value)
+  | ir.ListE(elems, _) -> visit_exprs(fuel: fuel - 1, ctx: ctx, queue: inout queue, es: elems)
+  | ir.And(operands) -> visit_exprs(fuel: fuel - 1, ctx: ctx, queue: inout queue, es: operands)
+  | ir.Or(operands) -> visit_exprs(fuel: fuel - 1, ctx: ctx, queue: inout queue, es: operands)
   | ir.Concat(left, right, _, _) -> {
-    visit_expr(fuel: fuel - 1, queue: inout queue, e: left)
-    visit_expr(fuel: fuel - 1, queue: inout queue, e: right)
+    visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: left)
+    visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: right)
   }
   | ir.IntOp(_, left, right, _) -> {
-    visit_expr(fuel: fuel - 1, queue: inout queue, e: left)
-    visit_expr(fuel: fuel - 1, queue: inout queue, e: right)
+    visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: left)
+    visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: right)
   }
   | ir.FloatOp(_, left, right) -> {
-    visit_expr(fuel: fuel - 1, queue: inout queue, e: left)
-    visit_expr(fuel: fuel - 1, queue: inout queue, e: right)
+    visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: left)
+    visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: right)
   }
   | ir.Cmp(_, left, right, _) -> {
-    visit_expr(fuel: fuel - 1, queue: inout queue, e: left)
-    visit_expr(fuel: fuel - 1, queue: inout queue, e: right)
+    visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: left)
+    visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: right)
   }
   | ir.Eq(left, right, _, _, _) -> {
-    visit_expr(fuel: fuel - 1, queue: inout queue, e: left)
-    visit_expr(fuel: fuel - 1, queue: inout queue, e: right)
+    visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: left)
+    visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: right)
   }
   | ir.Implies(left, right) -> {
-    visit_expr(fuel: fuel - 1, queue: inout queue, e: left)
-    visit_expr(fuel: fuel - 1, queue: inout queue, e: right)
+    visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: left)
+    visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: right)
   }
-  | ir.Neg(operand, _, _) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: operand)
-  | ir.IsVariant(subject, _, _) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: subject)
+  | ir.Neg(operand, _, _) -> visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: operand)
+  | ir.IsVariant(subject, _, _) -> visit_expr(
+    fuel: fuel - 1,
+    ctx: ctx,
+    queue: inout queue,
+    e: subject
+  )
   | ir.Try(operand, _, _, else_clause, _, _) -> {
-    visit_expr(fuel: fuel - 1, queue: inout queue, e: operand)
+    visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: operand)
     match else_clause with
-    | Some(value) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: value.value)
+    | Some(value) -> visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: value.value)
     | None -> skip()
   }
   | ir.Recover(body, value, _) -> {
-    visit_block(fuel: fuel - 1, queue: inout queue, b: body)
-    visit_expr(fuel: fuel - 1, queue: inout queue, e: value)
+    visit_block(fuel: fuel - 1, ctx: ctx, queue: inout queue, b: body)
+    visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: value)
   }
   | ir.Quantifier(_, _, _, domain, where_, body) -> {
     match domain with
     | ir.RangeD(lo, hi) -> {
-      visit_expr(fuel: fuel - 1, queue: inout queue, e: lo)
-      visit_expr(fuel: fuel - 1, queue: inout queue, e: hi)
+      visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: lo)
+      visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: hi)
     }
-    | ir.ListD(expr) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: expr)
-    | ir.OkListD(expr) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: expr)
+    | ir.ListD(expr) -> visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: expr)
+    | ir.OkListD(expr) -> visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: expr)
     | ir.BoolsD -> skip()
     match where_ with
-    | Some(value) -> visit_expr(fuel: fuel - 1, queue: inout queue, e: value)
+    | Some(value) -> visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: value)
     | None -> skip()
-    visit_expr(fuel: fuel - 1, queue: inout queue, e: body)
+    visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: body)
   }
   | ir.Closure(_, _, entry_checks, body, _) -> {
-    visit_block(fuel: fuel - 1, queue: inout queue, b: entry_checks)
-    visit_block(fuel: fuel - 1, queue: inout queue, b: body)
+    visit_block(fuel: fuel - 1, ctx: ctx, queue: inout queue, b: entry_checks)
+    visit_block(fuel: fuel - 1, ctx: ctx, queue: inout queue, b: body)
   }
   | ir.Checked(value, _, _, checks) -> {
-    visit_expr(fuel: fuel - 1, queue: inout queue, e: value)
-    visit_block(fuel: fuel - 1, queue: inout queue, b: checks)
+    visit_expr(fuel: fuel - 1, ctx: ctx, queue: inout queue, e: value)
+    visit_block(fuel: fuel - 1, ctx: ctx, queue: inout queue, b: checks)
   }
   | _ -> skip()
   return Unit
 }
 
 -- Definitions reachable from the entry's `main` and the non-library examples, over calls, function references and constants.
-fn reachable(n: N) -> Dict[Int, Bool] may alloc, mutate {
-  var by_def: Dict[Int, ir.Fn] = Map.dict()
-  var consts: Dict[Int, ir.Expr] = Map.dict()
+fn reachable(n: N, ctx: context.Context) -> Dict[Text, Bool] may alloc, mutate {
+  var by_name: Dict[Text, ir.Fn] = Map.dict()
+  var consts: Dict[Text, ir.Expr] = Map.dict()
   for m: ir.Module in n.modules {
     for item: ir.Item in m.items {
       match item with
-      | ir.FnItem(f) -> Map.set(d: inout by_def, key: f.def.id, value: f)
+      | ir.FnItem(f) -> Map.set(
+        d: inout by_name,
+        key: fn_name(module: m.mod.name, name: f.name),
+        value: f
+      )
       | ir.ImplItem(_, _, _, _, fns, _) -> {
         for f: ir.Fn in fns {
-          Map.set(d: inout by_def, key: f.def.id, value: f)
+          Map.set(d: inout by_name, key: fn_name(module: m.mod.name, name: f.name), value: f)
         }
       }
-      | ir.ConstItem(def, _, value) -> Map.set(d: inout consts, key: def.id, value: value)
+      | ir.ConstItem(def, _, value) -> Map.set(
+        d: inout consts,
+        key: fn_name(module: m.mod.name, name: def.name),
+        value: value
+      )
       | _ -> skip()
     }
   }
-  var seen: Dict[Int, Bool] = Map.dict()
-  var queue: List[Int] = []
+  var seen: Dict[Text, Bool] = Map.dict()
+  var queue: List[Text] = []
   match n.entry with
   | Some(value) -> {
     if value.main is Some {
@@ -1162,7 +1304,7 @@ fn reachable(n: N) -> Dict[Int, Bool] may alloc, mutate {
         match item with
         | ir.FnItem(f) -> {
           if not found and f.def.name == "main" {
-            queue = queue ++ [f.def.id]
+            queue = queue ++ [fn_name(module: value.mod.name, name: f.name)]
             found = true
           }
         }
@@ -1176,7 +1318,7 @@ fn reachable(n: N) -> Dict[Int, Bool] may alloc, mutate {
     | Some(value) -> {
       if not m.mod.is_std {
         for ex: ir.Example in value.examples {
-          visit_block(fuel: max_depth, queue: inout queue, b: ex.body)
+          visit_block(fuel: max_depth, ctx: ctx, queue: inout queue, b: ex.body)
         }
       }
     }
@@ -1188,18 +1330,18 @@ fn reachable(n: N) -> Dict[Int, Bool] may alloc, mutate {
     decreases steps
   {
     steps = steps - 1
-    let d: Int = List.get(xs: queue, i: List.len(xs: queue) - 1)
+    let d: Text = List.get(xs: queue, i: List.len(xs: queue) - 1)
     queue = List.slice(xs: queue, from: 0, to: List.len(xs: queue) - 1)
     if not Map.contains(d: seen, key: d) {
       Map.set(d: inout seen, key: d, value: true)
-      match Map.find(d: by_def, key: d) with
+      match Map.find(d: by_name, key: d) with
       | Some(value) -> {
-        visit_block(fuel: max_depth, queue: inout queue, b: value.entry_checks)
-        visit_block(fuel: max_depth, queue: inout queue, b: fn_body(f: value))
+        visit_block(fuel: max_depth, ctx: ctx, queue: inout queue, b: value.entry_checks)
+        visit_block(fuel: max_depth, ctx: ctx, queue: inout queue, b: fn_body(f: value))
       }
       | None -> skip()
       match Map.find(d: consts, key: d) with
-      | Some(value) -> visit_expr(fuel: max_depth, queue: inout queue, e: value)
+      | Some(value) -> visit_expr(fuel: max_depth, ctx: ctx, queue: inout queue, e: value)
       | None -> skip()
     }
   }
@@ -1998,7 +2140,7 @@ fn expr_val(
     )
     return Ok(value: val(v: r, t: t))
   }
-  | ir.Call(target, sig, _, consts, args, ty, decoder) -> return call_val(
+  | ir.Call(target, sig, _, consts, args, ty, decoder, targs) -> return call_val(
     fuel: fuel - 1,
     n: inout n,
     ctx: ctx,
@@ -2007,7 +2149,8 @@ fn expr_val(
     consts: consts,
     args: args,
     ty: ty,
-    decoder: decoder
+    decoder: decoder,
+    targs: targs
   )
   | ir.RecordE(def, _, fields) -> {
     let fs: List[types.FieldInfo] = fields_of(ctx: ctx, owner: def.id)
@@ -2265,7 +2408,9 @@ fn expr_val(
     result_expr: value
   )
   | ir.Fake(_, _, _) -> return Err(error: "`fake`")
-  | ir.TypeInfoE(_, _) -> return Ok(value: val(v: "null", t: "ptr"))
+  | ir.TypeInfoE(name, fields) -> return Ok(
+    value: typeinfo_obj(n: inout n, name: name, fields: fields)
+  )
   | ir.Snapshot(_, _) -> return Err(error: "`old(...)` in a checked postcondition")
 }
 
@@ -2886,7 +3031,8 @@ fn call_val(
   consts: List[ir.Expr],
   args: List[ir.Expr],
   ty: types.Type,
-  decoder: Option[ir.Decoder]
+  decoder: Option[ir.Decoder],
+  targs: List[types.TypeArg]
 ) -> Result[Val, Text] may mutate, alloc
   decreases fuel
 {
@@ -2908,6 +3054,12 @@ fn call_val(
         sep: "_"
       )
       var param_types: Builder[Text] = List.builder()
+      if is_keyed_map_fn(q: q) {
+        -- A keyed map operation takes the key kind first (§19.1): how the runtime hashes and compares keys.
+        let kind: Int = try key_kind(ctx: ctx, targs: targs)
+        List.push(b: inout call_args, x: "i64 " ++ s(i: kind))
+        List.push(b: inout param_types, x: "i64")
+      }
       for c: ir.Expr in consts {
         let cv: Val = try expr_val(fuel: fuel - 1, n: inout n, ctx: ctx, e: c)
         let slot: Text = to_slot(n: inout n, v: cv)
@@ -2987,6 +3139,39 @@ fn call_val(
     )
     return Ok(value: coerce_to(n: inout n, v: val(v: out, t: callee_ret), to: ret_ll))
   }
+}
+
+-- The `std.map` operations that take a key, and so its kind.
+fn is_keyed_map_fn(q: Text) -> Bool {
+  return q == "std.map.get" or q == "std.map.put" or q == "std.map.set" or q == "std.map.find" or q == "std.map.contains" or q == "std.map.remove"
+}
+
+-- How the runtime hashes and compares a `Dict` key: 0 as a slot, 1 as text bytes; Err for other key types (§19.1).
+fn key_kind(
+  ctx: context.Context,
+  targs: List[types.TypeArg]
+) -> Result[Int, Text] may alloc, mutate {
+  if List.len(xs: targs) == 0 {
+    return Err(error: "a `Dict` whose key type is not known at the call")
+  }
+  match List.get(xs: targs, i: 0) with
+  | types.TypeA(ty) -> {
+    let st: types.Type = types.strip(t: ty)
+    let name: Text = types.prim_name(t: st)
+    if st is types.Prim and (name == "Int" or name == "Duration" or name == "Bool" or name == "Unit") {
+      return Ok(value: 0)
+    }
+    if st is types.Prim and name == "Text" {
+      return Ok(value: 1)
+    }
+    return Err(
+      error: "`Dict` keys of type `" ++ typecheck.show(
+        ctx: ctx,
+        t: st
+      ) ++ "` (only Int, Duration, Bool, Unit and Text keys are native in v0)"
+    )
+  }
+  | _ -> return Err(error: "a `Dict` whose key type is not known at the call")
 }
 
 -- The address of an `inout` argument's slot: the local's storage, whose element type must be the slot type.
@@ -3087,25 +3272,42 @@ pub fn emit_native(
   entry: Option[ir.Module],
   opts: Options
 ) -> Result[Program, Text] may alloc, mutate {
-  var n: N = new_n(modules: modules, entry: entry, sql: opts.sql, host_js: host_js_claim(ctx: ctx))
-  let reach: Dict[Int, Bool] = reachable(n: n)
-  for m: ir.Module in modules {
+  -- Generic code is compiled per instantiation (impl spec §6.1): the specialised modules replace the lowering's.
+  let specialised: List[ir.Module] = specialise.specialise(ctx: ctx, modules: modules)
+  var entry_sp: Option[ir.Module] = None
+  match entry with
+  | Some(value) -> {
+    for m: ir.Module in specialised {
+      if m.mod.name == value.mod.name {
+        entry_sp = Some(value: m)
+      }
+    }
+  }
+  | None -> skip()
+  var n: N = new_n(
+    modules: specialised,
+    entry: entry_sp,
+    sql: opts.sql,
+    host_js: host_js_claim(ctx: ctx)
+  )
+  let reach: Dict[Text, Bool] = reachable(n: n, ctx: ctx)
+  for m: ir.Module in specialised {
     for item: ir.Item in m.items {
       match item with
       | ir.FnItem(f) -> {
-        if Map.contains(d: reach, key: f.def.id) {
+        if Map.contains(d: reach, key: fn_name(module: m.mod.name, name: f.name)) {
           fn_item(n: inout n, ctx: ctx, m: m, f: f)
         }
       }
       | ir.ImplItem(_, _, _, _, fns, _) -> {
         for f: ir.Fn in fns {
-          if Map.contains(d: reach, key: f.def.id) {
+          if Map.contains(d: reach, key: fn_name(module: m.mod.name, name: f.name)) {
             fn_item(n: inout n, ctx: ctx, m: m, f: f)
           }
         }
       }
       | ir.ConstItem(def, ty, value) -> {
-        if Map.contains(d: reach, key: def.id) {
+        if Map.contains(d: reach, key: fn_name(module: m.mod.name, name: def.name)) {
           const_item(n: inout n, ctx: ctx, m: m, def: def, ty: ty, init: value)
         }
       }

@@ -1,8 +1,6 @@
 module std.bytes
-import std.host
 
 pub const intrinsic fn len(b: Bytes) -> Int where it >= 0
-  claims host.js
 
 pub intrinsic fn get(
   b: Bytes,
