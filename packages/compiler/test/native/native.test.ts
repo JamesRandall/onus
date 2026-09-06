@@ -103,6 +103,24 @@ describe.skipIf(clang === null)('native target (§19)', () => {
     expect(r.status).toBe(0);
   }, 120000);
 
+  it('`io.time` is a calendar time in milliseconds on both targets (item 190)', () => {
+    const out = fresh('time');
+    const entry = join(repoRoot, 'packages', 'compiler', 'test', 'native', 'time_native.onus');
+    const ctx = checked(entry);
+    const js = emitAll(ctx, { outDir: out, ts: false });
+    if (js.launcher === null) throw new Error('js build failed');
+    const jsRun = spawnSync(process.execPath, [js.launcher], { encoding: 'utf8' });
+    expect(jsRun.stdout).toBe('ok\n');
+    expect(jsRun.status).toBe(0);
+    const native = buildNative(ctx, { outDir: out });
+    expect(ctx.sink.all().map((d) => toText(ctx, d))).toEqual([]);
+    if (native.exe === null) throw new Error('native build failed');
+    const r = spawnSync(native.exe, [], { encoding: 'utf8' });
+    expect(r.stderr).toBe('');
+    expect(r.stdout).toBe('ok\n');
+    expect(r.status).toBe(0);
+  }, 120000);
+
   it('`io.exec` hands the child the standard streams on both targets', () => {
     const out = fresh('exec');
     const entry = join(repoRoot, 'packages', 'compiler', 'test', 'native', 'exec_native.onus');

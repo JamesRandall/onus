@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Context } from '../../src/context.js';
@@ -211,13 +211,16 @@ describe('the command line in Onus (M15.4)', () => {
     expect(last(r.onus.stdout)).toBe(last(r.ts.stdout));
     expect(readFileSync(join(cwd.onus, '.onus', 'ledger', 'coverage.json'), 'utf8')).toBe(readFileSync(join(cwd.ts, '.onus', 'ledger', 'coverage.json'), 'utf8'));
     expect(readFileSync(join(cwd.ts, '.onus', 'ledger', 'coverage.json'), 'utf8')).not.toBe('{}\n');
-    // A program without tests, and the switches that still need the TypeScript compiler.
-    const none = { ts: fresh('test-none-ts'), onus: fresh('test-none-onus') };
-    for (const d of [none.ts, none.onus]) writeFileSync(join(d, 'plain.onus'), 'pub fn twice(x: Int) -> Int {\n  return 2 * x\n}\n');
-    agree(both(['test', 'plain.onus', '--out', 'out'], none));
+    // A program without tests, and the switch that still needs the TypeScript compiler.
+    const plain = { ts: fresh('test-none-ts'), onus: fresh('test-none-onus') };
+    for (const d of [plain.ts, plain.onus]) writeFileSync(join(d, 'plain.onus'), 'pub fn twice(x: Int) -> Int {\n  return 2 * x\n}\n');
+    agree(both(['test', 'plain.onus', '--out', 'out'], plain));
     expect(both(['test', 'primitives.onus', '--out', 'out', '--target', 'wasm'], cwd).onus.status).toBe(2);
     expect(both(['test', 'primitives.onus', '--mutate'], cwd).onus.status).toBe(2);
-    expect(both(['test', 'primitives.onus', '--assumptions'], cwd).onus.status).toBe(2);
+    // A program with no verify block: nothing to verify, on both (item 191).
+    const none = both(['test', 'primitives.onus', '--assumptions', '--out', 'out'], cwd);
+    agree(none);
+    expect(none.ts.stdout).toContain('0 assumptions verified against local: 0 passed, 0 failed');
     expect(both(['test'], cwd).onus.status).toBe(2);
   }, 600000);
 
@@ -233,6 +236,40 @@ describe('the command line in Onus (M15.4)', () => {
     expect(a.ts.status, a.ts.stdout + a.ts.stderr).toBe(0);
     expect(a.ts.stdout).toContain(' (js)\n');
   }, 900000);
+
+  /** The checkout example copied into two fresh directories, without its review page and any previous output. */
+  function stagedCheckout(name: string): { ts: string; onus: string } {
+    const dirs = { ts: fresh(`${name}-ts`), onus: fresh(`${name}-onus`) };
+    const source = join(repoRoot, 'examples/checkout');
+    for (const d of [dirs.ts, dirs.onus]) cpSync(source, d, { recursive: true, filter: (p) => !/\/(review|out|\.onus)(\/|$)/.test(relative(source, p) === '' ? '' : `/${relative(source, p)}`) });
+    return dirs;
+  }
+
+  it('test --assumptions: the verify blocks of checkout against its environment, and the ledger (item 191)', () => {
+    const cwd = stagedCheckout('assume');
+    // Two bare file names in the working directory share its root (the loader's rule of item 180, for every entry).
+    agree(both(['check', 'checkout.onus', 'test_env.onus'], cwd));
+    const r = both(['test', 'checkout.onus', '--assumptions', '--out', 'out'], cwd);
+    agree(r);
+    expect(r.ts.status, r.ts.stdout + r.ts.stderr).toBe(0);
+    expect(r.ts.stdout).toContain('1 assumption verified against local: 1 passed, 0 failed');
+    expect(readFileSync(join(cwd.onus, 'out', 'run_assumptions.js'), 'utf8')).toBe(readFileSync(join(cwd.ts, 'out', 'run_assumptions.js'), 'utf8'));
+    const ledger = (d: string): Record<string, Record<string, string>> => JSON.parse(readFileSync(join(d, '.onus', 'ledger', 'assumptions.json'), 'utf8'));
+    const undated = (l: Record<string, Record<string, string>>): Record<string, Record<string, string>> => Object.fromEntries(Object.entries(l).map(([k, v]) => [k, { ...v, at: '' }]));
+    expect(undated(ledger(cwd.onus))).toEqual(undated(ledger(cwd.ts)));
+    expect(Object.keys(ledger(cwd.onus)).length).toBe(1);
+    for (const rec of Object.values(ledger(cwd.onus))) expect(rec.at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    // The environment named on the command line, and a second run merging into the ledger it left.
+    agree(both(['test', 'checkout.onus', '--assumptions', '--env', 'test_env.onus', '--out', 'out'], cwd));
+    expect(Object.keys(ledger(cwd.onus)).length).toBe(1);
+    // Without an environment, the verify parameter has no source: E0603 on both.
+    const none = stagedCheckout('assume-none');
+    for (const d of [none.ts, none.onus]) rmSync(join(d, 'onus.json'));
+    const e = both(['test', 'checkout.onus', '--assumptions', '--out', 'out'], none);
+    agree(e);
+    expect(e.ts.status).toBe(1);
+    expect(e.ts.stdout).toContain('E0603');
+  }, 600000);
 
   it.skipIf(clang === null)('the released compiler needs no repository: no --stdlib, no --runtime, no node on the path (item 180)', () => {
     const native = buildNative(ctx, { outDir: fresh('release-build') });

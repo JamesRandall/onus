@@ -45,6 +45,12 @@ export function now(clock: Clock): number {
   return Math.round(performance.now() * 1_000_000);
 }
 
+/** `io.time`: whole milliseconds since the Unix epoch, UTC (docs/CHANGES.md item 190). */
+export function time(clock: Clock): number {
+  void clock;
+  return Date.now();
+}
+
 export class Clock extends Capability {
   private constructor() {
     super('io.Clock');

@@ -49,8 +49,14 @@ pub fn name_of(m: ast.Module) -> Text may alloc, mutate {
   return qname_text(q: m.name)
 }
 
+-- The file of module `name` under `root`; under the working directory, the
+-- relative path alone (item 191).
 fn path_for(root: Text, name: Text) -> Text may alloc {
-  return root ++ "/" ++ Text.replace(t: name, from: ".", to: "/") ++ ".onus"
+  let rel: Text = Text.replace(t: name, from: ".", to: "/") ++ ".onus"
+  if root == "." {
+    return rel
+  }
+  return root ++ "/" ++ rel
 }
 
 fn is_std_name(name: Text) -> Bool {
@@ -254,7 +260,8 @@ fn root_for(path: Text, suffix: Text, root: Option[Text]) -> Option[Text] may al
     return None
   }
   | Some(value) -> {
-    if path == value ++ suffix {
+    -- Under the working directory a bare file name is at its root too (item 191).
+    if path == value ++ suffix or (value == "." and "/" ++ path == suffix) {
       return root
     }
     return None

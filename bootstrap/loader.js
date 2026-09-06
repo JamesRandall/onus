@@ -13,13 +13,13 @@ import * as $report from "./report.js";
 import * as $std_io from "./std/io.js";
 import * as $bundle from "./bundle.js";
 
-const $ob1 = { kind: "overflow", text: "i + 1 within Int", at: "self/loader.onus:151:9", def: "first_difference" };
-const $ob2 = { kind: "overflow", text: "i + 1 within Int", at: "self/loader.onus:190:22", def: "canonical" };
-const $ob3 = { kind: "overflow", text: "List.len(xs: parts) - 1 within Int", at: "self/loader.onus:238:33", def: "last_segment" };
-const $ob4 = { kind: "overflow", text: "Text.count(t: path) - Text.count(t: suffix) within Int", at: "self/loader.onus:251:49", def: "root_for" };
-const $ob5 = { kind: "overflow", text: "id + 1 within Int", at: "self/loader.onus:309:34", def: "register" };
-const $ob6 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/loader.onus:523:15", def: "visit" };
-const $ob7 = { kind: "overflow", text: "ctx.module_count + 1 within Int", at: "self/loader.onus:649:15", def: "load" };
+const $ob1 = { kind: "overflow", text: "i + 1 within Int", at: "self/loader.onus:157:9", def: "first_difference" };
+const $ob2 = { kind: "overflow", text: "i + 1 within Int", at: "self/loader.onus:196:22", def: "canonical" };
+const $ob3 = { kind: "overflow", text: "List.len(xs: parts) - 1 within Int", at: "self/loader.onus:244:33", def: "last_segment" };
+const $ob4 = { kind: "overflow", text: "Text.count(t: path) - Text.count(t: suffix) within Int", at: "self/loader.onus:257:49", def: "root_for" };
+const $ob5 = { kind: "overflow", text: "id + 1 within Int", at: "self/loader.onus:316:34", def: "register" };
+const $ob6 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/loader.onus:530:15", def: "visit" };
+const $ob7 = { kind: "overflow", text: "ctx.module_count + 1 within Int", at: "self/loader.onus:656:15", def: "load" };
 export const prelude_modules = ["std.results", "std.option", "std.list", "std.grid", "std.map", "std.int", "std.float", "std.text", "std.bool", "std.bytes", "std.duration", "std.check", "std.typeinfo"];
 
 export const max_edges = 10000000;
@@ -38,7 +38,11 @@ export function name_of({ m }) {
 }
 
 export function path_for({ root, name }) {
-  return root + "/" + $std_text.replace({ t: name, from: ".", to: "/" }) + ".onus";
+  const rel = $std_text.replace({ t: name, from: ".", to: "/" }) + ".onus";
+  if (root === ".") {
+    return rel;
+  }
+  return root + "/" + rel;
 }
 
 export function is_std_name({ name }) {
@@ -228,7 +232,7 @@ export function root_for({ path, suffix, root }) {
     }
     if ($m20.tag === "Some") {
       const value = $m20.value;
-      if (path === value + suffix) {
+      if (path === value + suffix || value === "." && "/" + path === suffix) {
         return root;
       }
       return { tag: "None" };

@@ -4,6 +4,10 @@ export function now({ clock }) {
   return $rt.io.now(clock);
 }
 
+export function time({ clock }) {
+  return $rt.io.time(clock);
+}
+
 export function create({ files, path }) {
   return $rt.io.create(files, path);
 }

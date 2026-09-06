@@ -1845,6 +1845,74 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     and indices, as throughout `self/`). Fixed point reached from
     `bootstrap/`, native stage agrees; promoted.
 
+190. **A calendar time: `io.time` (§19.1; an M15.6 language change).**
+    `io.time(clock: io.Clock) -> Int may io.clock, nondet` is the calendar
+    time as whole milliseconds since 1970-01-01T00:00:00 UTC, an `Int` that
+    is exact on every target (item 99 is why it is milliseconds in an `Int`
+    and not nanoseconds in a `Duration`); `io.now` (item 183) stays the
+    monotonic reading for timing. `onus test --assumptions` needs it to
+    date the ledger's `last_verified` records (§20.3), which the TypeScript
+    command line takes from the host's clock, and the checker's age rule on
+    those records (`test.max_assumption_age_days`, item 90), which the
+    compiler in Onus has not enforced for want of a clock
+    (`self/ledger.onus`), can follow. The JavaScript runtime returns the
+    host's epoch milliseconds; the C runtime reads `CLOCK_REALTIME`.
+    Neither compiler changes: the intrinsic is declared in `std.io` and
+    both emitters map it as they map every primitive. Fixture:
+    `test/native/time_native.onus`, a `main` whose reading lies between
+    2020 and 2100 and whose two readings are ordered, run on both targets.
+    Process: through the skill with the chain's native stage and the native
+    differentials; `self/bundle.onus` regenerated; no `self/` module
+    changes, so there are no review artefacts beyond the bundle; `self/`
+    does not use `io.time` in this change.
+
+191. **`onus test --assumptions` in Onus (M15.6; §20.2, §20.3, §20.6).**
+    `self/assumptions.onus` (new; `codegen/assumptions.ts`),
+    `self/config.onus` (new; `config.ts`: `onus.json`'s `test.env`,
+    `test.target` and `test.max_assumption_age_days`, with the defaults)
+    and `self/cli.onus` provide `onus test <entry> --assumptions [--env
+    <test module>]`: the entry and the environment module (`--env`, else
+    `onus.json`'s `test.env` under the root) are loaded and checked through
+    paths; the environment's producers are its public zero-parameter
+    functions returning a capability; every module is emitted with its
+    `verify` blocks as functions; a verify parameter with neither a
+    producer nor a root capability of `std.io` is `E0603`; the launcher
+    `run_assumptions.js` is written as the TypeScript one is, byte for
+    byte, and run under `node` through `io.run` (an hour's timeout, where
+    the TypeScript command line has none); its outcomes are printed one per
+    line and recorded in `.onus/ledger/assumptions.json` under the calendar
+    time of the run, `io.time` (item 190) formatted as `Date.toISOString`
+    prints it (`assumptions.iso_of_millis`, pinned by an example on four
+    dates); the ledger keeps the records of earlier runs, in file order.
+    The command line's `main` takes `io.Clock` for it. Two loader fixes
+    the port exposed, in both compilers so the differential stays
+    meaningful: a second bare file name (`onus check checkout.onus
+    test_env.onus`) is at the working directory's root like the first
+    (item 180 covered the first alone, `loader.root_for`), and the inferred
+    root is the entry's directory as the entry names it, so imported files
+    are reported the way the entry was given (`vendor/payments.onus`, not
+    `./vendor/payments.onus` and not the absolute path the TypeScript
+    loader used to print for a relative entry). Fixtures:
+    `test/self/cli.test.ts` gains `test --assumptions` on the checkout
+    example staged in a fresh directory: standard output and status
+    identical, the launcher byte for byte, the ledger equal but for the
+    time, the time in the ISO form; the environment named with `--env`
+    and a second run over the ledger the first left; without `onus.json`,
+    `E0603` on both, identical; and the two-bare-files `check`. Review
+    artefacts under `.onus/changes/191/`: the interface diff of `cli` is
+    `test_assumptions`, `config_env_path`, `module_at_path`,
+    `file_id_of`, `module_of_file` and `copy_record` added, `main` and
+    `test_command` taking `clock: io.Clock` and claiming `io.clock`, and
+    the module comment and usage text changed; `loader` has no interface
+    change; the ledger delta is `cli` 48 → 54 obligations (29 proved, 25
+    checked: a refinement proved, four counter representations and
+    overflows checked), `loader` unchanged, `config` new with 1 (checked,
+    a representation) and `assumptions` new with 81 (45 proved, 36
+    checked: the representation and overflow obligations of the date
+    arithmetic and of counters, and the four example assertions, which run
+    rather than prove). Fixed point reached from `bootstrap/`, native
+    stage agrees; promoted. `--mutate` is next (item 192).
+
 ### Deferred, not changed
 
 - Decided 2026-09-06, to apply in M15.5: generics compile natively by

@@ -30,7 +30,7 @@ The bet is that trusting model-written code is not solved by a language alone. I
 
 | Part | Owns | Reduces | Status, {{< param statusDate >}} |
 |---|---|---|---|
-| Language and compiler | every claim: types, contracts, effects, capabilities, paths | review to reading interfaces | built; being rewritten in Onus |
+| Language and compiler | every claim: types, contracts, effects, capabilities, paths | review to reading interfaces | built; written in Onus and building itself natively; `test --assumptions`, `test --mutate`, `review`, `next` and `loop` still run from the TypeScript compiler |
 | The loop | function bodies | prompting to writing a task | built |
 | The ledger | what each obligation rests on | "what am I trusting" to a list | built |
 | Review tool | rendering the ledger; decisions | reading diffs to reading claims | built; promotion not yet |
@@ -40,7 +40,7 @@ The bet is that trusting model-written code is not solved by a language alone. I
 | Telemetry | which checked obligations fire, and how often | guessing which contracts to tighten | not specified |
 | Registry | published interface documents, versioned | trusting a dependency by reading its code | not specified |
 
-**Language and compiler.** The [specification](/spec/) is the contract between the person and the model: pure by default, every effect in the signature, every obligation in one of three states. The compiler is the only checker; there is no linter and no warning level. It exists in TypeScript, and is being rewritten in Onus stage by stage, each stage differential-tested against the TypeScript compiler over the whole fixture suite until the last stage reaches a fixed point.
+**Language and compiler.** The [specification](/spec/) is the contract between the person and the model: pure by default, every effect in the signature, every obligation in one of three states. The compiler is the only checker; there is no linter and no warning level. It is written in Onus and builds itself from its own source for the native target. It was ported stage by stage from a TypeScript compiler, each stage differential-tested against it over the whole fixture suite until the port reached a fixed point; the TypeScript compiler is kept, frozen, as the oracle until the last of the toolchain is ported, then removed.
 
 **The loop.** The [loop](/spec/loop/) turns a task into a change. It assembles the model's context from compiler output, never from source; runs generate, check, classify until green; and never edits a claim. If a contract cannot be met, it stops and proposes. It is the only part of the environment that talks to a model.
 

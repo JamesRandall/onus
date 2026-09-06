@@ -1,0 +1,32 @@
+{{- /* /examples/ — the three worked examples as cards, each with the ledger numbers from the review output checked in beside it. The example pages themselves live under /spec/, since they are §18 of the specification. */ -}}
+{{ define "main" }}
+<div class="wrap">
+  <article class="prose wide">
+    <h1 class="page-title">{{ .Title }}</h1>
+    {{- with .Params.lede }}<p class="lede">{{ . | markdownify }}</p>{{ end }}
+    {{ .Content }}
+  </article>
+  <div class="cards">
+    {{- range (where site.RegularPages "Layout" "example").ByWeight }}
+    {{- $ex := .Params.example -}}
+    {{- $ref := "no review output committed yet" -}}
+    {{- with resources.Get (printf "examples/%s/review/review.json" $ex) -}}
+      {{- $r := .Content | transform.Unmarshal -}}
+      {{- $pr := 0 }}{{ $ch := 0 }}{{ $as := 0 -}}
+      {{- range $r.modules }}{{ range .items }}{{ $pr = add $pr .obligations.proved }}{{ $ch = add $ch .obligations.checked }}{{ $as = add $as .obligations.assumed }}{{ end }}{{ end -}}
+      {{- $ref = printf "%d proved · %d checked · %d assumed" (int $pr) (int $ch) (int $as) -}}
+      {{- with $r.paths }}{{ $ref = printf "%s · %d path%s" $ref (len .) (cond (eq (len .) 1) "" "s") }}{{ end -}}
+    {{- end }}
+    <a class="card" href="{{ .RelPermalink }}"><h3>{{ .Title }}</h3><p>{{ .Params.lede | markdownify }}</p><span class="ref">{{ $ref }}</span></a>
+    {{- end }}
+  </div>
+  <article class="prose wide">
+    <h2>Further on</h2>
+    <ul>
+      <li><a href="{{ "/status/" | relURL }}#the-three-worked-examples">Status</a> — the same ledgers as numbers, with the date each was written.</li>
+      <li>The review pages the compiler wrote, served unchanged: <a href="{{ "/review/mandelbrot/" | relURL }}">Mandelbrot</a>, <a href="{{ "/review/reporting/" | relURL }}">monthly report</a>, <a href="{{ "/review/checkout/" | relURL }}">checkout</a>.</li>
+      <li><a href="{{ "/spec/" | relURL }}#18-worked-examples">Specification §18</a> — the examples as the specification describes them.</li>
+    </ul>
+  </article>
+</div>
+{{ end }}

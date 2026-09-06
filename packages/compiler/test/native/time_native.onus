@@ -1,0 +1,25 @@
+module time_native
+import std.io
+
+-- `io.time` on both targets (docs/CHANGES.md item 190): the calendar time
+-- in whole milliseconds since the epoch, so a reading falls between 2020
+-- and 2100, and two readings are ordered; the output is the same on both
+-- targets.
+pub fn main(
+  args: List[Text],
+  console: io.Console,
+  clock: io.Clock
+) -> Result[Unit, io.Error] may io.file, io.clock, nondet, alloc {
+  let first: Int = io.time(clock: clock)
+  let second: Int = io.time(clock: clock)
+  if first < 1577836800000 or first >= 4102444800000 {
+    io.print(console: console, text: "not a calendar time\n")
+    return Err(error: Other(detail: "time"))
+  }
+  if second < first {
+    io.print(console: console, text: "went backwards\n")
+    return Err(error: Other(detail: "time"))
+  }
+  io.print(console: console, text: "ok\n")
+  return Ok(value: Unit)
+}

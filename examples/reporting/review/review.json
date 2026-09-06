@@ -1,0 +1,649 @@
+{
+  "generated": {
+    "tool": "onus review",
+    "at": "2026-09-06T17:42:53.703Z"
+  },
+  "entry": "reporting",
+  "modules": [
+    {
+      "module": "reporting",
+      "hash": "b3:42f573747d462115453bfdcd0b1ad6dec87d076b3230d33d46d1ca6e78765619",
+      "imports": [
+        "std.sql",
+        "std.io",
+        "app.config"
+      ],
+      "items": [
+        {
+          "effects": [],
+          "claims": [],
+          "contracts": [],
+          "examples": [],
+          "properties": [],
+          "assumes": [],
+          "recovers": [],
+          "obligations": {
+            "proved": 0,
+            "checked": 0,
+            "assumed": 0,
+            "failed": 0
+          },
+          "at": {
+            "file": "examples/reporting/reporting.onus",
+            "span": [
+              [
+                6,
+                1
+              ],
+              [
+                9,
+                2
+              ]
+            ]
+          },
+          "kind": "record",
+          "name": "MonthlyTotal",
+          "visibility": "private",
+          "signature": "record MonthlyTotal {\n  month: Text\n  total_pence: Int where it >= 0\n}"
+        },
+        {
+          "effects": [],
+          "claims": [],
+          "contracts": [],
+          "examples": [],
+          "properties": [],
+          "assumes": [],
+          "recovers": [],
+          "obligations": {
+            "proved": 0,
+            "checked": 0,
+            "assumed": 0,
+            "failed": 0
+          },
+          "at": {
+            "file": "examples/reporting/reporting.onus",
+            "span": [
+              [
+                11,
+                1
+              ],
+              [
+                14,
+                27
+              ]
+            ]
+          },
+          "kind": "union",
+          "name": "AppError",
+          "visibility": "private",
+          "signature": "union AppError =\n  | Config of detail: config.Error\n  | Storage of detail: sql.Error\n  | Io of detail: io.Error"
+        },
+        {
+          "effects": [
+            "sql.read",
+            "alloc"
+          ],
+          "claims": [],
+          "contracts": [
+            {
+              "kind": "ensures",
+              "text": "forall t: MonthlyTotal in result: t.total_pence >= 0",
+              "pinned": false,
+              "status": "proved",
+              "sites": 1
+            }
+          ],
+          "examples": [],
+          "properties": [],
+          "assumes": [],
+          "recovers": [],
+          "obligations": {
+            "proved": 4,
+            "checked": 0,
+            "assumed": 0,
+            "failed": 0
+          },
+          "at": {
+            "file": "examples/reporting/reporting.onus",
+            "span": [
+              [
+                16,
+                1
+              ],
+              [
+                27,
+                2
+              ]
+            ]
+          },
+          "kind": "fn",
+          "name": "monthly_totals",
+          "visibility": "pub",
+          "signature": "fn monthly_totals(\n  db: sql.Db[ReadOnly, schema: \"orders\"],\n  year: Int where 2000 <= it and it <= 2100\n) -> Result[List[MonthlyTotal], sql.Error] may sql.read, alloc"
+        },
+        {
+          "effects": [
+            "io.env",
+            "io.file",
+            "io.net",
+            "sql.read",
+            "alloc"
+          ],
+          "claims": [],
+          "contracts": [],
+          "examples": [],
+          "properties": [],
+          "assumes": [],
+          "recovers": [],
+          "obligations": {
+            "proved": 1,
+            "checked": 0,
+            "assumed": 0,
+            "failed": 0
+          },
+          "at": {
+            "file": "examples/reporting/reporting.onus",
+            "span": [
+              [
+                30,
+                1
+              ],
+              [
+                51,
+                2
+              ]
+            ]
+          },
+          "kind": "fn",
+          "name": "main",
+          "visibility": "pub",
+          "signature": "fn main(\n  args: List[Text],\n  env: io.Env,\n  files: io.Files,\n  net: io.Net\n) -> Result[Unit, AppError] may io.env, io.file, io.net, sql.read, alloc"
+        },
+        {
+          "effects": [],
+          "claims": [],
+          "contracts": [],
+          "examples": [],
+          "properties": [],
+          "assumes": [],
+          "recovers": [],
+          "obligations": {
+            "proved": 0,
+            "checked": 0,
+            "assumed": 0,
+            "failed": 0
+          },
+          "at": {
+            "file": "examples/reporting/reporting.onus",
+            "span": [
+              [
+                53,
+                1
+              ],
+              [
+                56,
+                40
+              ]
+            ]
+          },
+          "kind": "path",
+          "name": "monthly_report",
+          "visibility": "private",
+          "signature": "path monthly_report\n  entry monthly_totals\n  effects <= { sql.read, alloc }\n  forbid { sql.write, io.net, io.file }"
+        }
+      ],
+      "assumes": [],
+      "recovers": [],
+      "sealed_types": [],
+      "test_module": false,
+      "obligations": {
+        "proved": 5,
+        "checked": 0,
+        "assumed": 0,
+        "failed": 0
+      },
+      "ledger": [
+        {
+          "kind": "representation",
+          "text": "year within ±2^53 - 1",
+          "def": "monthly_totals",
+          "status": "proved",
+          "by": "z3",
+          "pinned": false,
+          "at": {
+            "file": "examples/reporting/reporting.onus",
+            "span": [
+              [
+                18,
+                3
+              ],
+              [
+                18,
+                44
+              ]
+            ]
+          }
+        },
+        {
+          "kind": "requires",
+          "text": "parse_select(text: text) is Ok",
+          "def": "monthly_totals",
+          "status": "proved",
+          "by": "const evaluator",
+          "pinned": true,
+          "at": {
+            "file": "examples/reporting/reporting.onus",
+            "span": [
+              [
+                23,
+                40
+              ],
+              [
+                25,
+                51
+              ]
+            ]
+          }
+        },
+        {
+          "kind": "requires",
+          "text": "columns_match(text: text, record: row) is Ok",
+          "def": "monthly_totals",
+          "status": "proved",
+          "by": "const evaluator",
+          "pinned": true,
+          "at": {
+            "file": "examples/reporting/reporting.onus",
+            "span": [
+              [
+                23,
+                40
+              ],
+              [
+                25,
+                51
+              ]
+            ]
+          }
+        },
+        {
+          "kind": "ensures",
+          "text": "forall t: MonthlyTotal in result: t.total_pence >= 0",
+          "def": "monthly_totals",
+          "status": "proved",
+          "by": "z3",
+          "pinned": false,
+          "at": {
+            "file": "examples/reporting/reporting.onus",
+            "span": [
+              [
+                26,
+                3
+              ],
+              [
+                26,
+                44
+              ]
+            ]
+          }
+        },
+        {
+          "kind": "refinement",
+          "text": "2000 <= it and it <= 2100",
+          "def": "main",
+          "status": "proved",
+          "by": "z3",
+          "pinned": false,
+          "at": {
+            "file": "examples/reporting/reporting.onus",
+            "span": [
+              [
+                43,
+                71
+              ],
+              [
+                43,
+                75
+              ]
+            ]
+          }
+        }
+      ],
+      "obligation_coverage": {
+        "proved": 4,
+        "checked": 0,
+        "checked_exercised": 0,
+        "assumptions": 0,
+        "assumptions_verifiable": 0,
+        "assumptions_verified": 0,
+        "mutations_detected": 0,
+        "mutations_surviving": 0
+      }
+    },
+    {
+      "module": "app.config",
+      "hash": "b3:88d2c3fb7927c6bb48cd383580347fcf37c56281205e21557ebc629a8c865c92",
+      "imports": [
+        "std.io"
+      ],
+      "items": [
+        {
+          "effects": [],
+          "claims": [],
+          "contracts": [],
+          "examples": [],
+          "properties": [],
+          "assumes": [],
+          "recovers": [],
+          "obligations": {
+            "proved": 0,
+            "checked": 0,
+            "assumed": 0,
+            "failed": 0
+          },
+          "at": {
+            "file": "examples/reporting/app/config.onus",
+            "span": [
+              [
+                4,
+                1
+              ],
+              [
+                6,
+                2
+              ]
+            ]
+          },
+          "kind": "record",
+          "name": "Config",
+          "visibility": "pub",
+          "signature": "pub record Config {\n  reporting_dsn: Text\n}"
+        },
+        {
+          "effects": [],
+          "claims": [],
+          "contracts": [],
+          "examples": [],
+          "properties": [],
+          "assumes": [],
+          "recovers": [],
+          "obligations": {
+            "proved": 0,
+            "checked": 0,
+            "assumed": 0,
+            "failed": 0
+          },
+          "at": {
+            "file": "examples/reporting/app/config.onus",
+            "span": [
+              [
+                8,
+                1
+              ],
+              [
+                9,
+                25
+              ]
+            ]
+          },
+          "kind": "union",
+          "name": "Error",
+          "visibility": "pub",
+          "signature": "pub union Error =\n  | Missing of key: Text"
+        },
+        {
+          "effects": [
+            "io.env",
+            "alloc"
+          ],
+          "claims": [],
+          "contracts": [],
+          "examples": [],
+          "properties": [],
+          "assumes": [],
+          "recovers": [],
+          "obligations": {
+            "proved": 0,
+            "checked": 0,
+            "assumed": 0,
+            "failed": 0
+          },
+          "at": {
+            "file": "examples/reporting/app/config.onus",
+            "span": [
+              [
+                11,
+                1
+              ],
+              [
+                15,
+                2
+              ]
+            ]
+          },
+          "kind": "fn",
+          "name": "load",
+          "visibility": "pub",
+          "signature": "fn load(env: io.Env) -> Result[Config, Error] may io.env, alloc"
+        }
+      ],
+      "assumes": [],
+      "recovers": [],
+      "sealed_types": [],
+      "test_module": false,
+      "obligations": {
+        "proved": 0,
+        "checked": 0,
+        "assumed": 0,
+        "failed": 0
+      },
+      "ledger": [],
+      "obligation_coverage": {
+        "proved": 0,
+        "checked": 0,
+        "checked_exercised": 0,
+        "assumptions": 0,
+        "assumptions_verifiable": 0,
+        "assumptions_verified": 0,
+        "mutations_detected": 0,
+        "mutations_surviving": 0
+      }
+    }
+  ],
+  "sources": {
+    "reporting": "module reporting\nimport std.sql\nimport std.io\nimport app.config\n\nrecord MonthlyTotal {\n  month: Text\n  total_pence: Int where it >= 0\n}\n\nunion AppError =\n  | Config of detail: config.Error\n  | Storage of detail: sql.Error\n  | Io of detail: io.Error\n\npub fn monthly_totals(\n  db: sql.Db[ReadOnly, schema: \"orders\"],\n  year: Int where 2000 <= it and it <= 2100\n) -> Result[List[MonthlyTotal], sql.Error] may sql.read, alloc\n  ensures forall t: MonthlyTotal in result: t.total_pence >= 0\n{\n  -- text is a const parameter (§3.8.1): std.sql's own parse_select runs at check time and rejects anything but a single SELECT.\n  let stmt: sql.Select[MonthlyTotal] = sql.select[\n    text: \"select to_char(created, 'YYYY-MM') as month, sum(amount_pence) as total_pence from orders where extract(year from created) = $1 group by 1 order by 1\"\n  ](params: [sql.int(x: year)], row: MonthlyTotal)\n  return sql.query(db: db, statement: stmt)\n}\n\n-- Root capabilities are supplied by the runtime to main and nowhere else (§8.3).\npub fn main(\n  args: List[Text],\n  env: io.Env,\n  files: io.Files,\n  net: io.Net\n) -> Result[Unit, AppError] may io.env, io.file, io.net, sql.read, alloc {\n  let cfg: config.Config = try config.load(env: env) else e: Config(detail: e)\n  let reporting: sql.Db[ReadOnly] = try sql.connect(\n    net: net,\n    dsn: cfg.reporting_dsn,\n    mode: ReadOnly\n  ) else e: Storage(detail: e)\n  let orders: sql.Db[ReadOnly, schema: \"orders\"] = sql.restrict(db: reporting, schema: \"orders\")\n  let rows: List[MonthlyTotal] = try monthly_totals(db: orders, year: 2026)\n    else e: Storage(detail: e)\n  let out: io.File = try io.create(files: files, path: \"report.csv\") else e: Io(detail: e)\n  for row: MonthlyTotal in rows {\n    try io.write(file: out, text: row.month ++ \",\" ++ Int.to_text(x: row.total_pence) ++ \"\\n\")\n      else e: Io(detail: e)\n  }\n  return Ok(value: Unit)\n}\n\npath monthly_report\n  entry monthly_totals\n  effects <= { sql.read, alloc }\n  forbid { sql.write, io.net, io.file }\n",
+    "app.config": "module app.config\nimport std.io\n\npub record Config {\n  reporting_dsn: Text\n}\n\npub union Error =\n  | Missing of key: Text\n\npub fn load(env: io.Env) -> Result[Config, Error] may io.env, alloc {\n  match io.get_env(env: env, name: \"REPORTING_DSN\") with\n  | Some(value) -> return Ok(value: Config { reporting_dsn: value })\n  | None -> return Err(error: Missing(key: \"REPORTING_DSN\"))\n}\n"
+  },
+  "paths": [
+    {
+      "path": "monthly_report",
+      "entry": "reporting.monthly_totals",
+      "reachable": [
+        "reporting.monthly_totals",
+        "std.sql.select",
+        "std.sql.int",
+        "std.sql.query"
+      ],
+      "effects": {
+        "bound": [
+          "alloc",
+          "sql.read"
+        ],
+        "forbid": [
+          "io.file",
+          "io.net",
+          "sql.write"
+        ],
+        "actual": [
+          "alloc",
+          "sql.read"
+        ]
+      },
+      "claims": {
+        "required": [],
+        "satisfied": true
+      },
+      "assumes": [],
+      "obligations": {
+        "proved": 4,
+        "checked": 0,
+        "assumed": 0,
+        "failed": 0,
+        "checked_at": []
+      },
+      "unresolvable_calls": [],
+      "capabilities": [],
+      "graph": {
+        "nodes": [
+          {
+            "id": "reporting.monthly_totals",
+            "module": "reporting",
+            "kind": "entry",
+            "effects": [
+              "alloc",
+              "sql.read"
+            ],
+            "claims": [],
+            "obligations": {
+              "proved": 4,
+              "checked": 0,
+              "assumed": 0,
+              "failed": 0
+            },
+            "assumes": 0,
+            "recovers": 0,
+            "unresolvable": 0
+          },
+          {
+            "id": "std.sql.select",
+            "module": "std.sql",
+            "kind": "intrinsic",
+            "effects": [],
+            "claims": [],
+            "obligations": {
+              "proved": 0,
+              "checked": 0,
+              "assumed": 0,
+              "failed": 0
+            },
+            "assumes": 0,
+            "recovers": 0,
+            "unresolvable": 0
+          },
+          {
+            "id": "std.sql.int",
+            "module": "std.sql",
+            "kind": "intrinsic",
+            "effects": [],
+            "claims": [],
+            "obligations": {
+              "proved": 0,
+              "checked": 0,
+              "assumed": 0,
+              "failed": 0
+            },
+            "assumes": 0,
+            "recovers": 0,
+            "unresolvable": 0
+          },
+          {
+            "id": "std.sql.query",
+            "module": "std.sql",
+            "kind": "intrinsic",
+            "effects": [
+              "alloc",
+              "sql.read"
+            ],
+            "claims": [],
+            "obligations": {
+              "proved": 0,
+              "checked": 0,
+              "assumed": 0,
+              "failed": 0
+            },
+            "assumes": 0,
+            "recovers": 0,
+            "unresolvable": 0
+          }
+        ],
+        "edges": [
+          {
+            "from": "reporting.monthly_totals",
+            "to": "std.sql.select",
+            "effects": [],
+            "at": "reporting.monthly_totals:23:40"
+          },
+          {
+            "from": "reporting.monthly_totals",
+            "to": "std.sql.int",
+            "effects": [],
+            "at": "reporting.monthly_totals:25:14"
+          },
+          {
+            "from": "reporting.monthly_totals",
+            "to": "std.sql.query",
+            "effects": [
+              "alloc",
+              "sql.read"
+            ],
+            "at": "reporting.monthly_totals:26:10"
+          }
+        ]
+      },
+      "gates": [],
+      "recovers": [],
+      "ledger": [
+        {
+          "kind": "representation",
+          "text": "year within ±2^53 - 1",
+          "def": "reporting.monthly_totals",
+          "status": "proved",
+          "by": "z3",
+          "pinned": false,
+          "at": "examples/reporting/reporting.onus:18:3"
+        },
+        {
+          "kind": "requires",
+          "text": "parse_select(text: text) is Ok",
+          "def": "reporting.monthly_totals",
+          "status": "proved",
+          "by": "const evaluator",
+          "pinned": true,
+          "at": "examples/reporting/reporting.onus:23:40"
+        },
+        {
+          "kind": "requires",
+          "text": "columns_match(text: text, record: row) is Ok",
+          "def": "reporting.monthly_totals",
+          "status": "proved",
+          "by": "const evaluator",
+          "pinned": true,
+          "at": "examples/reporting/reporting.onus:23:40"
+        },
+        {
+          "kind": "ensures",
+          "text": "forall t: MonthlyTotal in result: t.total_pence >= 0",
+          "def": "reporting.monthly_totals",
+          "status": "proved",
+          "by": "z3",
+          "pinned": false,
+          "at": "examples/reporting/reporting.onus:26:3"
+        }
+      ],
+      "obligation_coverage": {
+        "proved": 3,
+        "checked": 0,
+        "checked_exercised": 0,
+        "assumptions": 0,
+        "assumptions_verifiable": 0,
+        "assumptions_verified": 0,
+        "mutations_detected": 0,
+        "mutations_surviving": 0
+      },
+      "ok": true
+    }
+  ],
+  "diagnostics": [],
+  "diff": null,
+  "changes": []
+}

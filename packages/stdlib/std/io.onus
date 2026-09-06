@@ -22,6 +22,10 @@ pub capability Clock
 -- resolution, which two readings compare and subtract; not a calendar time.
 pub intrinsic fn now(clock: Clock) -> Duration may io.clock, nondet
 
+-- The calendar time: whole milliseconds since 1970-01-01T00:00:00 UTC, an Int
+-- that is exact on every target. For dating a record; `now` is for timing.
+pub intrinsic fn time(clock: Clock) -> Int may io.clock, nondet
+
 pub capability File
   grants io.file
 

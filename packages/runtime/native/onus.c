@@ -457,6 +457,14 @@ onus_slot onus_io_now(onus_slot clock) {
   return (ts.tv_sec - clock_origin.tv_sec) * 1000000000LL + (ts.tv_nsec - clock_origin.tv_nsec);
 }
 
+/* io.time: whole milliseconds since the Unix epoch, UTC (docs/CHANGES.md item 190). */
+onus_slot onus_io_time(onus_slot clock) {
+  (void)clock;
+  struct timespec ts;
+  clock_gettime(CLOCK_REALTIME, &ts);
+  return (onus_slot)ts.tv_sec * 1000LL + ts.tv_nsec / 1000000LL;
+}
+
 onus_list *onus_args(int argc, char **argv) {
   onus_list *xs = onus_rt_list_new(argc > 1 ? argc - 1 : 0);
   for (int i = 1; i < argc; i++) xs->slots[i - 1] = ptr_slot(onus_text_from(argv[i], (int64_t)strlen(argv[i])));

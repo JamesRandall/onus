@@ -98,7 +98,9 @@ export function loadPass(ctx: Context): void {
         );
         continue;
       }
-      if (root === null) root = abs.slice(0, abs.length - suffix.length);
+      // The root as the entry path names it, so that imported files are reported the way the entry was given
+      // (a bare name lives in the working directory, docs/CHANGES.md items 180 and 191).
+      if (root === null) root = f.path.endsWith(suffix) ? f.path.slice(0, f.path.length - suffix.length) : '.';
     }
     entries.push({ file: f, module: parsed.module, isStd });
   }

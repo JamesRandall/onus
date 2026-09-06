@@ -24,11 +24,11 @@ The site is a view over the repository, not a copy of it. `hugo.yaml` mounts:
 | `/spec/mandelbrot/` etc. | `examples/*/*.onus`, with the ledger from `examples/*/review/review.json` |
 | `/compared/` | `docs/onus-lang.org/comparison.md` |
 | the ledger on the home page and `/status/` | `examples/checkout/review/review.json`, `examples/mandelbrot/review/review.json` |
-| `/review/checkout/`, `/review/mandelbrot/` | the review pages `onus review` wrote, unchanged |
+| `/review/checkout/`, `/review/mandelbrot/`, `/review/reporting/` | the review pages `onus review` wrote, unchanged |
 
 Those files carry no front matter; titles and ordering come from the `cascade` block in `hugo.yaml`. `<!-- changed: … -->` notes in the documents are rendered as visible margin notes.
 
-Hand-written pages live in `content/`: the home page (`layouts/home.html`), `practice.md`, `environment.md`, `status.md` and the concept pages under `concepts/`. The plan they follow is `docs/onus-lang.org/site-map.md`.
+Hand-written pages live in `content/`: the home page (`layouts/home.html`), `practice.md`, `environment.md`, `status.md`, the concept pages under `concepts/` and the examples index (`examples/_index.md`, which lists the example pages under `/spec/` with their ledger numbers). The plan they follow is `docs/onus-lang.org/site-map.md`.
 
 ## Onus source on the site
 

@@ -19,7 +19,7 @@ params:
   specVersion: v0
   # Fallback only; the footer reads the specification's last commit date from git when available.
   specLastChanged: 2026-09-05
-  statusDate: 2026-09-05
+  statusDate: 2026-09-06
 
 markup:
   goldmark:
@@ -46,6 +46,9 @@ menus:
     - name: Specification
       pageRef: /spec
       weight: 30
+    - name: Examples
+      pageRef: /examples
+      weight: 35
     - name: Environment
       pageRef: /environment
       weight: 40
@@ -120,3 +123,5 @@ module:
       target: static/review/checkout
     - source: ../examples/mandelbrot/review
       target: static/review/mandelbrot
+    - source: ../examples/reporting/review
+      target: static/review/reporting

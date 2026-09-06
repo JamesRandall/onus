@@ -22,19 +22,23 @@ import obligations
 import ledger
 import bundle
 import testcmd
+import defs
+import tables
+import assumptions
+import config
 import jsemit
 
 -- The `onus` command line in Onus (impl spec §2, M15.4; `cli/main.ts`):
--- `check`, `fmt`, `build`, `run`, `test` (examples, properties and laws;
--- docs/CHANGES.md item 189), `interface` and `path`. `test --assumptions`,
--- `test --mutate`, `review`, `loop` and `next` stay with the TypeScript `onus`
--- until M15.6 completes.
+-- `check`, `fmt`, `build`, `run`, `test` (examples, properties and laws,
+-- docs/CHANGES.md item 189; `--assumptions`, item 191), `interface` and
+-- `path`. `test --mutate`, `review`, `loop` and `next` stay with the
+-- TypeScript `onus` until M15.6 completes.
 --
 -- Exit status, as the TypeScript command line reports it (docs/CHANGES.md
 -- item 187): 0 success, 1 diagnostics (or a breaking interface, or a native
 -- build that failed), 2 usage or I/O failure, and for `run` the program's own,
 -- since `run` hands the program the terminal through `io.exec`.
-pub const usage: Text = "usage:\n  onus check <file.onus>... [--json] [--root <dir>] [--stdlib <dir>] [--to <pass>] [--budget <ms>] [--ledger] [--no-cache]\n      report every diagnostic; exit 1 if any. Passes: parse, canonical, load, resolve, types, consteval, effects, contracts, claims, capabilities, verify, paths\n  onus fmt <file.onus>... [--stdout]\n      rewrite files in canonical form\n  onus build <entry.onus> [--out <dir>] [--emit js|ir] [--target js|native|wasm] [--root <dir>] [--stdlib <dir>] [--runtime <path>]\n      check, then emit JavaScript for every module into <dir> (default: <entry dir>/out); --target native compiles\n      an executable with clang into <dir>/native (§19); --emit ir prints the target-neutral form\n  onus run <entry.onus> [--out <dir>] [--target js|native|wasm] [-- args...]\n      build, then run the entry module's main\n  onus test <entry.onus> [--out <dir>] [--target js|native|all] [--root <dir>] [--stdlib <dir>]\n      build, then run the generated example, property and law tests (§20.6); --target all runs the examples on\n      both targets and reports any disagreement as E0801 (§19.5); --assumptions and --mutate wait on later changes\n  onus interface <file.onus> [--json] [--diff <old-interface.json>] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]\n      check, then print the entry module's interface: canonical source with bodies elided, or the §11.1 JSON;\n      with --diff, the changes since a previous interface document (§11.1, §15.1)\n  onus path <file.onus> [<name>] [--json] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]\n      check, then print the §9.1 report of the entry module's paths (or of the named one)\n  onus --version\n      print the compiler's version\n  review, loop and next: run the TypeScript `onus` until M15.6 completes\nThe standard library is --stdlib or ONUS_STDLIB, else the one the compiler carries; the runtime for build and run is --runtime or ONUS_RUNTIME, else the one the compiler carries, written beside the program.\n"
+pub const usage: Text = "usage:\n  onus check <file.onus>... [--json] [--root <dir>] [--stdlib <dir>] [--to <pass>] [--budget <ms>] [--ledger] [--no-cache]\n      report every diagnostic; exit 1 if any. Passes: parse, canonical, load, resolve, types, consteval, effects, contracts, claims, capabilities, verify, paths\n  onus fmt <file.onus>... [--stdout]\n      rewrite files in canonical form\n  onus build <entry.onus> [--out <dir>] [--emit js|ir] [--target js|native|wasm] [--root <dir>] [--stdlib <dir>] [--runtime <path>]\n      check, then emit JavaScript for every module into <dir> (default: <entry dir>/out); --target native compiles\n      an executable with clang into <dir>/native (§19); --emit ir prints the target-neutral form\n  onus run <entry.onus> [--out <dir>] [--target js|native|wasm] [-- args...]\n      build, then run the entry module's main\n  onus test <entry.onus> [--out <dir>] [--target js|native|all] [--root <dir>] [--stdlib <dir>]\n      build, then run the generated example, property and law tests (§20.6); --target all runs the examples on\n      both targets and reports any disagreement as E0801 (§19.5); --mutate waits on a later change\n  onus test <entry.onus> --assumptions [--env <test module>] [--out <dir>] [--root <dir>] [--stdlib <dir>]\n      run every verify block against capabilities from the environment module and record the results in .onus/ledger/ (§20.2–§20.3)\n  onus interface <file.onus> [--json] [--diff <old-interface.json>] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]\n      check, then print the entry module's interface: canonical source with bodies elided, or the §11.1 JSON;\n      with --diff, the changes since a previous interface document (§11.1, §15.1)\n  onus path <file.onus> [<name>] [--json] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]\n      check, then print the §9.1 report of the entry module's paths (or of the named one)\n  onus --version\n      print the compiler's version\n  review, loop and next: run the TypeScript `onus` until M15.6 completes\nThe standard library is --stdlib or ONUS_STDLIB, else the one the compiler carries; the runtime for build and run is --runtime or ONUS_RUNTIME, else the one the compiler carries, written beside the program.\n"
 
 pub const passes: List[Text] = [
   "parse",
@@ -437,7 +441,7 @@ fn failure_status(console: io.Console, e: io.Error) -> Int may io.file, alloc {
     if detail == "diagnostics" or detail == "native build failed" or detail == "breaking" {
       return 1
     }
-    if detail == "usage" or detail == "unknown pass" or detail == "--emit ts" or detail == "--emit" or detail == "--target" or detail == "no main" or detail == "not a module" or detail == "not an interface document" or detail == "no such path" or detail == "--assumptions" or detail == "--mutate" {
+    if detail == "usage" or detail == "unknown pass" or detail == "--emit ts" or detail == "--emit" or detail == "--target" or detail == "no main" or detail == "not a module" or detail == "not an interface document" or detail == "no such path" or detail == "--assumptions" or detail == "--mutate" or detail == "launcher" {
       return 2
     }
     io.eprint(console: console, text: "onus: " ++ detail ++ "\n")
@@ -662,8 +666,9 @@ fn test_command(
   files: io.Files,
   console: io.Console,
   process: io.Process,
-  env: io.Env
-) -> Result[Int, io.Error] may io.file, io.env, nondet, alloc, mutate {
+  env: io.Env,
+  clock: io.Clock
+) -> Result[Int, io.Error] may io.file, io.env, io.clock, nondet, alloc, mutate {
   if List.len(xs: args.files) == 0 {
     return Err(error: usage_failure(console: console))
   }
@@ -674,18 +679,22 @@ fn test_command(
     )
     return Err(error: Other(detail: "--mutate"))
   }
-  if flag(args: args, name: "assumptions") {
-    io.eprint(
-      console: console,
-      text: "onus test: --assumptions runs with the TypeScript `onus` until M15.6 completes\n"
-    )
-    return Err(error: Other(detail: "--assumptions"))
-  }
   let entry: Text = List.get(xs: args.files, i: 0)
   let target: Text = value_or(args: args, name: "target", fallback: "js")
   if target != "js" and target != "native" and target != "all" {
     io.eprint(console: console, text: "onus: --target takes js, native or all\n")
     return Err(error: Other(detail: "--target"))
+  }
+  if flag(args: args, name: "assumptions") {
+    return test_assumptions(
+      args: args,
+      entry: entry,
+      files: files,
+      console: console,
+      process: process,
+      env: env,
+      clock: clock
+    )
   }
   let s: Setup = setup(args: args, files: files, env: env)
   var ctx: context.Context = s.ctx
@@ -820,6 +829,193 @@ fn test_command(
     }
     return Ok(value: 0)
   }
+}
+
+-- `onus test --assumptions` (§20.2, §20.3, §20.6; item 191): every verify
+-- block against the environment module's capabilities, the outcomes printed
+-- and recorded in the ledger under the calendar time of the run.
+fn test_assumptions(
+  args: Args,
+  entry: Text,
+  files: io.Files,
+  console: io.Console,
+  process: io.Process,
+  env: io.Env,
+  clock: io.Clock
+) -> Result[Int, io.Error] may io.file, io.env, io.clock, nondet, alloc, mutate {
+  let s: Setup = setup(args: args, files: files, env: env)
+  var ctx: context.Context = s.ctx
+  let cfg: config.Config = config.read_config(files: files, root: s.root)
+  var env_path: Option[Text] = value(args: args, name: "env")
+  if env_path is None {
+    env_path = config_env_path(cfg: cfg, root: s.root)
+  }
+  var paths: List[Text] = [entry]
+  match env_path with
+  | Some(value) -> paths = [entry, value]
+  | None -> skip()
+  try read_entries(ctx: inout ctx, files: files, paths: paths)
+  let out_dir: Text = value_or(
+    args: args,
+    name: "out",
+    fallback: nativebuild.dir_of(path: entry) ++ "/out"
+  )
+  let rt: RuntimeChoice = runtime_choice(args: args, env: env)
+  check.run_passes(
+    ctx: inout ctx,
+    to: 11,
+    files: files,
+    console: console,
+    process: process,
+    vopts: s.vopts
+  )
+  let tab: Dict[Int, loc.LineTable] = loc.line_tables(ctx: ctx)
+  let as_json: Bool = flag(args: args, name: "json")
+  if not context.clean(ctx: ctx) {
+    emit_diagnostics(ctx: ctx, console: console, tab: tab, as_json: as_json)
+    return Err(error: Other(detail: "diagnostics"))
+  }
+  let env_module: Option[defs.ModuleRecord] = module_at_path(ctx: ctx, path: env_path)
+  let p: assumptions.Plan = assumptions.plan(ctx: ctx, env: env_module)
+  if rt.bundled {
+    try build.write_bundled_runtime(files: files, out_dir: out_dir)
+  }
+  let built: build.Built = try build.emit_all(
+    ctx: ctx,
+    files: files,
+    opts: build.Options {
+      out_dir: out_dir,
+      runtime: rt.runtime,
+      verify_all: true,
+      negate_guard: None
+    }
+  )
+  if not assumptions.check(ctx: inout ctx, p: p, emitted: built.emitted) {
+    emit_diagnostics(ctx: ctx, console: console, tab: tab, as_json: as_json)
+    return Err(error: Other(detail: "diagnostics"))
+  }
+  let launcher: Text = try assumptions.write_launcher(
+    ctx: ctx,
+    files: files,
+    out_dir: out_dir,
+    emitted: built.emitted,
+    p: p,
+    runtime: rt.runtime
+  )
+  let run: io.Output = try io.run(
+    process: process,
+    program: "node",
+    args: [launcher],
+    stdin: "",
+    timeout_ms: 3600000
+  )
+  if run.status != 0 {
+    io.eprint(console: console, text: "onus test: the assumptions launcher failed\n" ++ run.stderr)
+    return Err(error: Other(detail: "launcher"))
+  }
+  let outcomes: List[assumptions.Outcome] = assumptions.parse_outcomes(text: run.stdout)
+  let verify_target: Text = value_or(args: args, name: "target", fallback: cfg.target)
+  let at: Text = assumptions.iso_of_millis(ms: io.time(clock: clock))
+  var led: Dict[Text, tables.VerificationRecord] = Map.dict()
+  for key: Text in Map.keys(d: ctx.assumptions) {
+    copy_record(from: ctx.assumptions, to: inout led, key: key)
+  }
+  var failed: Int = 0
+  for o: assumptions.Outcome in outcomes {
+    Map.set(
+      d: inout led,
+      key: o.key,
+      value: tables.VerificationRecord {
+        at: at,
+        target: verify_target,
+        outcome: o.outcome,
+        claim: o.claim,
+        def: o.def
+      }
+    )
+    if o.outcome == "failed" {
+      failed = failed + 1
+    }
+    var detail: Text = ""
+    if o.detail != "" {
+      detail = " (" ++ o.detail ++ ")"
+    }
+    io.print(
+      console: console,
+      text: pad(t: o.outcome, n: 7) ++ " " ++ o.def ++ ": " ++ o.claim ++ detail ++ "\n"
+    )
+  }
+  try assumptions.write_ledger(files: files, dir: s.root ++ "/.onus/ledger", led: led)
+  let n: Int = List.len(xs: outcomes)
+  var plural: Text = "s"
+  if n == 1 {
+    plural = ""
+  }
+  io.print(
+    console: console,
+    text: Int.to_text(
+      x: n
+    ) ++ " assumption" ++ plural ++ " verified against " ++ verify_target ++ ": " ++ Int.to_text(
+      x: n - failed
+    ) ++ " passed, " ++ Int.to_text(x: failed) ++ " failed\n"
+  )
+  if failed > 0 {
+    return Ok(value: 1)
+  }
+  return Ok(value: 0)
+}
+
+-- The environment module of `onus.json`, relative to the root, as the TypeScript command line joins the two.
+fn config_env_path(cfg: config.Config, root: Text) -> Option[Text] may alloc {
+  match cfg.env with
+  | None -> return None
+  | Some(value) -> {
+    if root == "." {
+      return Some(value: value)
+    }
+    return Some(value: root ++ "/" ++ value)
+  }
+}
+
+fn module_at_path(
+  ctx: context.Context,
+  path: Option[Text]
+) -> Option[defs.ModuleRecord] may alloc, mutate {
+  match path with
+  | None -> return None
+  | Some(value) -> return module_of_file(ctx: ctx, file: file_id_of(ctx: ctx, path: value))
+}
+
+fn file_id_of(ctx: context.Context, path: Text) -> Int may alloc, mutate {
+  for f: report.SourceFile in List.finish(b: ctx.files) {
+    if f.path == path {
+      return f.id
+    }
+  }
+  return -1
+}
+
+fn module_of_file(ctx: context.Context, file: Int) -> Option[defs.ModuleRecord] may alloc, mutate {
+  if file < 0 {
+    return None
+  }
+  for m: defs.ModuleRecord in Map.values(d: ctx.modules) {
+    if m.file == file {
+      return Some(value: m)
+    }
+  }
+  return None
+}
+
+fn copy_record(
+  from: Dict[Text, tables.VerificationRecord],
+  to: inout Dict[Text, tables.VerificationRecord],
+  key: Text
+) -> Unit may alloc, mutate {
+  match Map.find(d: from, key: key) with
+  | Some(value) -> Map.set(d: inout to, key: key, value: value)
+  | None -> skip()
+  return Unit
 }
 
 fn js_flag(d: Dict[Text, Bool], key: Text) -> Bool {
@@ -969,8 +1165,9 @@ pub fn main(
   files: io.Files,
   console: io.Console,
   process: io.Process,
-  env: io.Env
-) -> Result[Int, io.Error] may io.file, io.env, nondet, alloc, mutate {
+  env: io.Env,
+  clock: io.Clock
+) -> Result[Int, io.Error] may io.file, io.env, io.clock, nondet, alloc, mutate {
   let a: Args = parse_args(argv: args)
   if flag(args: a, name: "version") {
     io.print(console: console, text: "onus " ++ bundle.version ++ "\n")
@@ -1014,7 +1211,14 @@ pub fn main(
       return Ok(
         value: exit_status_of(
           console: console,
-          r: test_command(args: a, files: files, console: console, process: process, env: env)
+          r: test_command(
+            args: a,
+            files: files,
+            console: console,
+            process: process,
+            env: env,
+            clock: clock
+          )
         )
       )
     }

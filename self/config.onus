@@ -1,0 +1,65 @@
+module config
+import std.io
+import json
+
+-- Repository settings (`onus.json` at the project root): the test target and
+-- environment (§20.6; `config.ts`). There is no other configuration file.
+pub record Config {
+  -- The `test module` file that constructs capabilities for `verify` blocks, relative to the root.
+  env: Option[Text]
+  target: Text
+  -- A passing verification older than this no longer satisfies `policy verified_assumptions_only`.
+  max_assumption_age_days: Int
+}
+
+pub fn defaults() -> Config {
+  return Config { env: None, target: "local", max_assumption_age_days: 7 }
+}
+
+-- Reads `<root>/onus.json`, falling back to the defaults for anything absent
+-- or malformed.
+pub fn read_config(files: io.Files, root: Text) -> Config may io.file, alloc, mutate {
+  match io.read(files: files, path: root ++ "/onus.json") with
+  | Err(_) -> return defaults()
+  | Ok(value) -> return config_of_text(text: value)
+}
+
+fn config_of_text(text: Text) -> Config may alloc, mutate {
+  match json.parse(t: text) with
+  | None -> return defaults()
+  | Some(value) -> return config_of_json(j: json.at(j: value, key: "test"))
+}
+
+-- The `test` object's fields, each falling back to its default when absent or of another type.
+fn config_of_json(j: json.Json) -> Config may alloc {
+  let d: Config = defaults()
+  var env: Option[Text] = None
+  if is_string(j: json.at(j: j, key: "env")) {
+    env = Some(value: json.str_at(j: j, key: "env"))
+  }
+  var target: Text = d.target
+  if is_string(j: json.at(j: j, key: "target")) {
+    target = json.str_at(j: j, key: "target")
+  }
+  var days: Int = d.max_assumption_age_days
+  match days_of(j: json.at(j: j, key: "max_assumption_age_days")) with
+  | Some(value) -> days = value
+  | None -> skip()
+  return Config { env: env, target: target, max_assumption_age_days: days }
+}
+
+fn is_string(j: json.Json) -> Bool {
+  match j with
+  | json.JString(_) -> return true
+  | _ -> return false
+}
+
+fn days_of(j: json.Json) -> Option[Int] may alloc {
+  match j with
+  | json.JNumber(text) -> return Int.parse(t: text)
+  | _ -> return None
+}
+
+fn skip() -> Unit {
+  return Unit
+}

@@ -1,0 +1,392 @@
+module assumptions
+import std.io
+import ast
+import context
+import defs
+import types
+import report
+import json
+import ir
+import jsemit
+import build
+import tables
+
+-- `onus test --assumptions` (§20.2, §20.6; `codegen/assumptions.ts`): each
+-- `verify` block runs with capabilities the environment supplies. The
+-- environment is a `test module` whose public zero-parameter functions return
+-- capabilities (typically `fake`s); root capabilities of `std.io` come from
+-- the runtime when the environment does not provide them. A verify parameter
+-- with no source is E0603.
+pub record Plan {
+  env: Option[defs.ModuleRecord]
+  -- Capability definition → the environment function producing it.
+  producers: Dict[Int, Int]
+}
+
+-- One verification result as the launcher prints it.
+pub record Outcome {
+  key: Text
+  claim: Text
+  def: Text
+  at: Text
+  outcome: Text
+  detail: Text
+}
+
+fn skip() -> Unit {
+  return Unit
+}
+
+fn is_root(name: Text) -> Bool {
+  return name == "std.io.Files" or name == "std.io.Env" or name == "std.io.Net" or name == "std.io.Clock"
+}
+
+-- The environment's producers: public zero-parameter functions returning a capability.
+pub fn plan(ctx: context.Context, env: Option[defs.ModuleRecord]) -> Plan may alloc, mutate {
+  var producers: Dict[Int, Int] = Map.dict()
+  match env with
+  | None -> skip()
+  | Some(value) -> {
+    for item: ast.Item in value.tree.items {
+      match item with
+      | ast.FnItem(decl) -> note_producer(
+        ctx: ctx,
+        m: value,
+        decl: decl,
+        producers: inout producers
+      )
+      | _ -> skip()
+    }
+  }
+  return Plan { env: env, producers: producers }
+}
+
+fn note_producer(
+  ctx: context.Context,
+  m: defs.ModuleRecord,
+  decl: ast.FnDecl,
+  producers: inout Dict[Int, Int]
+) -> Unit may alloc, mutate {
+  if not decl.vis.is_pub or List.len(xs: decl.params) > 0 {
+    return Unit
+  }
+  match Map.find(
+    d: ctx.def_of,
+    key: defs.node_key(file: m.file, tag: defs.tag_item, span: decl.span)
+  ) with
+  | None -> skip()
+  | Some(value) -> note_signature(ctx: ctx, producer: value, producers: inout producers)
+  return Unit
+}
+
+fn note_signature(
+  ctx: context.Context,
+  producer: Int,
+  producers: inout Dict[Int, Int]
+) -> Unit may alloc, mutate {
+  match Map.find(d: ctx.signatures, key: producer) with
+  | None -> skip()
+  | Some(value) -> {
+    match types.strip(t: value.ret) with
+    | types.Capability(def, _, _) -> {
+      if not Map.contains(d: producers, key: def) {
+        Map.set(d: inout producers, key: def, value: producer)
+      }
+    }
+    | _ -> skip()
+  }
+  return Unit
+}
+
+fn env_name(p: Plan) -> Text {
+  match p.env with
+  | Some(value) -> return value.name
+  | None -> return ""
+}
+
+fn producer_of(p: Plan, capability: Int) -> Int {
+  match Map.find(d: p.producers, key: capability) with
+  | Some(value) -> return value
+  | None -> return -1
+}
+
+fn last_segment(name: Text) -> Text may alloc {
+  let parts: List[Text] = Text.split(t: name, sep: ".")
+  return List.get(xs: parts, i: List.len(xs: parts) - 1)
+}
+
+-- Checks that every verify parameter has a source: an environment producer or
+-- a root capability. Reports E0603 for each that has none.
+pub fn check(
+  ctx: inout context.Context,
+  p: Plan,
+  emitted: List[jsemit.Emitted]
+) -> Bool may alloc, mutate {
+  var ok: Bool = true
+  for m: jsemit.Emitted in emitted {
+    for v: jsemit.VerifyEmit in m.verifies {
+      for param: ir.VerifyParam in v.params {
+        let cap: Text = context.qualified_name(ctx: ctx, id: param.capability)
+        if not (Map.contains(d: p.producers, key: param.capability) or is_root(name: cap)) {
+          ok = false
+          var where_text: Text = "; give one with a `test module` (onus.json `test.env` or --env)"
+          if p.env is Some {
+            where_text = " in `" ++ env_name(p: p) ++ "`"
+          }
+          context.report(
+            ctx: inout ctx,
+            d: report.diagnostic(
+              code: "E0603",
+              file: m.mod.file,
+              span: param.at_span,
+              def_name: Some(value: last_segment(name: v.def)),
+              detail: "no environment function returns `" ++ cap ++ "` for verify parameter `" ++ param.name ++ "`" ++ where_text
+            )
+          )
+        }
+      }
+    }
+  }
+  return ok
+}
+
+-- The alias of module `name` in the launcher, importing it on first use.
+fn import_of(
+  lines: inout Builder[Text],
+  alias: inout Dict[Text, Text],
+  name: Text
+) -> Text may alloc, mutate {
+  match Map.find(d: alias, key: name) with
+  | Some(value) -> return value
+  | None -> {
+    let a: Text = "$m" ++ Int.to_text(x: Map.count(d: alias))
+    Map.set(d: inout alias, key: name, value: a)
+    List.push(
+      b: inout lines,
+      x: "import * as " ++ a ++ " from " ++ json.quote(
+        t: "./" ++ Text.join(parts: Text.split(t: name, sep: "."), sep: "/") ++ ".js"
+      ) ++ ";"
+    )
+    return a
+  }
+}
+
+-- How the launcher constructs one verify parameter: the environment's producer, or the runtime's root.
+fn argument(
+  ctx: context.Context,
+  p: Plan,
+  param: ir.VerifyParam,
+  lines: inout Builder[Text],
+  alias: inout Dict[Text, Text]
+) -> Text may alloc, mutate {
+  let producer: Int = producer_of(p: p, capability: param.capability)
+  if producer >= 0 and p.env is Some {
+    let env_alias: Text = import_of(lines: inout lines, alias: inout alias, name: env_name(p: p))
+    return param.name ++ ": " ++ env_alias ++ "." ++ context.get_def(
+      ctx: ctx,
+      id: producer
+    ).name ++ "()"
+  }
+  return param.name ++ ": $rt.io." ++ context.get_def(
+    ctx: ctx,
+    id: param.capability
+  ).name ++ ".root()"
+}
+
+-- Writes `run_assumptions.js` into `out_dir`: constructs each parameter and
+-- runs every verify function, printing one JSON array of outcomes. Requires
+-- that `check` passed.
+pub fn write_launcher(
+  ctx: context.Context,
+  files: io.Files,
+  out_dir: Text,
+  emitted: List[jsemit.Emitted],
+  p: Plan,
+  runtime: Text
+) -> Result[Text, io.Error] may io.file, alloc, mutate {
+  var lines: Builder[Text] = List.builder()
+  List.push(
+    b: inout lines,
+    x: "// Generated by onus: runs every verify block against the environment (§20.2)."
+  )
+  List.push(b: inout lines, x: "import * as $rt from " ++ json.quote(t: runtime) ++ ";")
+  var alias: Dict[Text, Text] = Map.dict()
+  var calls: Builder[Text] = List.builder()
+  for m: jsemit.Emitted in emitted {
+    for v: jsemit.VerifyEmit in m.verifies {
+      let mod: Text = import_of(lines: inout lines, alias: inout alias, name: m.mod.name)
+      var args: Builder[Text] = List.builder()
+      for param: ir.VerifyParam in v.params {
+        List.push(
+          b: inout args,
+          x: argument(ctx: ctx, p: p, param: param, lines: inout lines, alias: inout alias)
+        )
+      }
+      let info: json.Json = json.JObject(
+        fields: [
+          json.field(key: "key", value: json.text(t: v.key)),
+          json.field(key: "claim", value: json.text(t: v.claim)),
+          json.field(key: "def", value: json.text(t: v.def)),
+          json.field(key: "at", value: json.text(t: v.at))
+        ]
+      )
+      List.push(
+        b: inout calls,
+        x: "run(" ++ json.compact(
+          j: info
+        ) ++ ", () => " ++ mod ++ "." ++ v.name ++ "({ " ++ Text.join(
+          parts: List.finish(b: args),
+          sep: ", "
+        ) ++ " }));"
+      )
+    }
+  }
+  List.push(b: inout lines, x: "const results = [];")
+  List.push(b: inout lines, x: "function run(info, f) {")
+  List.push(b: inout lines, x: "  try {")
+  List.push(b: inout lines, x: "    const ok = f() === true;")
+  List.push(
+    b: inout lines,
+    x: "    results.push({ ...info, result: ok ? 'passed' : 'failed', detail: ok ? '' : 'the block yielded false' });"
+  )
+  List.push(b: inout lines, x: "  } catch (e) {")
+  List.push(
+    b: inout lines,
+    x: "    results.push({ ...info, result: 'failed', detail: e instanceof Error ? e.message : String(e) });"
+  )
+  List.push(b: inout lines, x: "  }")
+  List.push(b: inout lines, x: "}")
+  for c: Text in List.finish(b: calls) {
+    List.push(b: inout lines, x: c)
+  }
+  List.push(b: inout lines, x: "process.stdout.write(JSON.stringify(results) + '\\n');")
+  List.push(b: inout lines, x: "$rt.io.closeAll();")
+  let path: Text = out_dir ++ "/run_assumptions.js"
+  try build.write_file(
+    files: files,
+    path: path,
+    text: Text.join(parts: List.finish(b: lines), sep: "\n") ++ "\n"
+  )
+  return Ok(value: path)
+}
+
+-- Parses the launcher's output: the JSON array on its last line, keeping every
+-- object with a key and a result of `passed` or `failed`.
+pub fn parse_outcomes(text: Text) -> List[Outcome] may alloc, mutate {
+  let lines: List[Text] = Text.split(t: Text.trim(t: text), sep: "\n")
+  let last: Text = List.get(xs: lines, i: List.len(xs: lines) - 1)
+  match json.parse(t: last) with
+  | None -> return []
+  | Some(value) -> return outcomes_of(j: value)
+}
+
+fn outcomes_of(j: json.Json) -> List[Outcome] may alloc, mutate {
+  var out: Builder[Outcome] = List.builder()
+  for x: json.Json in json.list_of(j: j) {
+    let verdict: Text = json.str_at(j: x, key: "result")
+    if json.has(j: x, key: "key") and (verdict == "passed" or verdict == "failed") {
+      List.push(
+        b: inout out,
+        x: Outcome {
+          key: json.str_at(j: x, key: "key"),
+          claim: json.str_at(j: x, key: "claim"),
+          def: json.str_at(j: x, key: "def"),
+          at: json.str_at(j: x, key: "at"),
+          outcome: verdict,
+          detail: json.str_at(j: x, key: "detail")
+        }
+      )
+    }
+  }
+  return List.finish(b: out)
+}
+
+-- Writes the assumption ledger (§20.3) to `<dir>/assumptions.json`, creating the directory.
+pub fn write_ledger(
+  files: io.Files,
+  dir: Text,
+  led: Dict[Text, tables.VerificationRecord]
+) -> Result[Unit, io.Error] may io.file, alloc, mutate {
+  var fields: Builder[json.Field] = List.builder()
+  for key: Text in Map.keys(d: led) {
+    match Map.find(d: led, key: key) with
+    | Some(value) -> List.push(
+      b: inout fields,
+      x: json.field(key: key, value: record_json(r: value))
+    )
+    | None -> skip()
+  }
+  try io.mkdir(files: files, path: dir)
+  try build.write_file(
+    files: files,
+    path: dir ++ "/assumptions.json",
+    text: json.pretty(j: json.JObject(fields: List.finish(b: fields))) ++ "\n"
+  )
+  return Ok(value: Unit)
+}
+
+fn record_json(r: tables.VerificationRecord) -> json.Json may alloc {
+  return json.JObject(
+    fields: [
+      json.field(key: "at", value: json.text(t: r.at)),
+      json.field(key: "target", value: json.text(t: r.target)),
+      json.field(key: "result", value: json.text(t: r.outcome)),
+      json.field(key: "claim", value: json.text(t: r.claim)),
+      json.field(key: "def", value: json.text(t: r.def))
+    ]
+  )
+}
+
+-- Calendar time as `Date.toISOString` prints it: `YYYY-MM-DDTHH:MM:SS.mmmZ`
+-- for whole milliseconds since 1970-01-01T00:00:00 UTC (the civil-date
+-- computation of Hinnant's "chrono-compatible low-level date algorithms").
+pub fn iso_of_millis(ms: Int) -> Text may alloc {
+  var t: Int = ms
+  if t < 0 {
+    t = 0
+  }
+  let days: Int = t / 86400000
+  let rem: Int = t - days * 86400000
+  let z: Int = days + 719468
+  let era: Int = z / 146097
+  let doe: Int = z - era * 146097
+  let yoe: Int = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
+  let doy: Int = doe - (365 * yoe + yoe / 4 - yoe / 100)
+  let mp: Int = (5 * doy + 2) / 153
+  let day: Int = doy - (153 * mp + 2) / 5 + 1
+  var month: Int = mp - 9
+  if mp < 10 {
+    month = mp + 3
+  }
+  var year: Int = yoe + era * 400
+  if month <= 2 {
+    year = year + 1
+  }
+  let hours: Int = rem / 3600000
+  let minutes: Int = (rem - hours * 3600000) / 60000
+  let seconds: Int = (rem - hours * 3600000 - minutes * 60000) / 1000
+  let millis: Int = rem - hours * 3600000 - minutes * 60000 - seconds * 1000
+  return padded(n: year, width: 4) ++ "-" ++ padded(n: month, width: 2) ++ "-" ++ padded(
+    n: day,
+    width: 2
+  ) ++ "T" ++ padded(n: hours, width: 2) ++ ":" ++ padded(n: minutes, width: 2) ++ ":" ++ padded(
+    n: seconds,
+    width: 2
+  ) ++ "." ++ padded(n: millis, width: 3) ++ "Z"
+}
+
+fn padded(n: Int, width: Int) -> Text may alloc {
+  let digits: Text = Int.to_text(x: n)
+  let short: Int = width - Text.count(t: digits)
+  if short <= 0 {
+    return digits
+  }
+  return Text.repeat(t: "0", n: short) ++ digits
+}
+
+example iso_times {
+  iso_of_millis(ms: 0) == "1970-01-01T00:00:00.000Z"
+  iso_of_millis(ms: 1757183000123) == "2025-09-06T18:23:20.123Z"
+  iso_of_millis(ms: 951782400000) == "2000-02-29T00:00:00.000Z"
+  iso_of_millis(ms: 4102444799999) == "2099-12-31T23:59:59.999Z"
+}

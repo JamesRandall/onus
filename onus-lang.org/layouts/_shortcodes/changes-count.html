@@ -1,0 +1,2 @@
+{{- /* {{< changes-count >}} — the number of numbered entries in docs/CHANGES.md, counted at build time so the status page never carries a stale figure. */ -}}
+{{- with resources.Get "docs/CHANGES.md" }}{{ len (findRE `(?m)^[0-9]+\. ` .Content) }}{{ else }}{{ errorf "changes-count: docs/CHANGES.md not found" }}{{ end -}}
