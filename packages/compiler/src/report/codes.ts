@@ -79,6 +79,7 @@ export const CODES = {
   E0342: 'precondition not established',
   E0343: 'checked obligation in a function without panic',
   E0344: 'structural measure not shown to decrease',
+  E0345: 'polymorphic recursion',
   E0410: 'unresolvable call on path',
   E0411: 'path effect bound and forbid clause are inconsistent',
   E0412: 'path effect bound exceeded',

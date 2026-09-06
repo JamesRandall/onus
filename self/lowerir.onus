@@ -838,9 +838,11 @@ fn fn_decl_sig(
   match measure_clause with
   | Some(value) -> {
     measure_key = key(l: l, tag: defs.tag_sig, span: value.span)
+    -- A structural measure (a record, union or list, §5.1) is proved by the verifier or refused (E0344); only a numeric measure is ever checked at runtime.
+    let numeric: Bool = is_int_like(t: type_of_expr(l: l, ctx: ctx, e: value.expr))
     for i: Int in 0 ..< ctx.obligation_count {
       let o: obligations.Obligation = context.get_obligation(ctx: ctx, id: i)
-      if o.def == def.id and o.kind is obligations.Decreases and (o.callee is Some or o.at == measure_key) and not is_proved(
+      if numeric and o.def == def.id and o.kind is obligations.Decreases and (o.callee is Some or o.at == measure_key) and not is_proved(
         o: o
       ) {
         measured = true
@@ -2820,6 +2822,13 @@ fn decreases_check(
   let src: Int = or_neg(o: o.source)
   let clause: Option[ast.Contract] = Map.find(d: ctx.contract_nodes, key: src)
   if clause is None {
+    return args
+  }
+  var clause_numeric: Bool = false
+  match clause with
+  | Some(value) -> clause_numeric = is_int_like(t: type_of_expr(l: l, ctx: ctx, e: value.expr))
+  | None -> skip()
+  if not clause_numeric {
     return args
   }
   var bound: Builder[ir.Expr] = List.builder()

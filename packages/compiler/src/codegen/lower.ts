@@ -17,6 +17,7 @@
  *   - `example`/`property`/`law` bodies become assertion blocks; `verify`
  *     blocks become Bool-yielding assertion functions.
  */
+import { isIntLike } from '../contracts/pass.js';
 import { calleeOf } from '../claims/calls.js';
 import type { Context } from '../context.js';
 import type { Obligation } from '../contracts/obligations.js';
@@ -335,7 +336,10 @@ class Lowerer {
       });
     }
     const measureClause = f.contracts.find((c) => c.clause === 'decreases') ?? null;
-    const measured = measureClause !== null && this.ctx.contracts.obligations.some((o) => o.def === def.id && o.kind === 'decreases' && (o.callee !== null || o.at === measureClause.id) && o.status !== 'proved');
+    // A structural measure (a record, union or list, §5.1) is proved by the verifier or refused (E0344); only a numeric measure is ever checked at runtime.
+    const measureType = measureClause === null ? undefined : this.ctx.types.exprTypes.get(measureClause.expr.id);
+    const numericMeasure = measureType !== undefined && isIntLike(measureType);
+    const measured = measureClause !== null && numericMeasure && this.ctx.contracts.obligations.some((o) => o.def === def.id && o.kind === 'decreases' && (o.callee !== null || o.at === measureClause.id) && o.status !== 'proved');
     this.fn = { inout: params.filter((p) => p.inout).map((p) => p.name), ret: sig.ret, ensures: f.contracts.filter((c) => c.clause === 'ensures'), def, dicts: new Map(dictParams.map((d) => [d.def, d.name])), result: null, measure: measured ? '$measure' : null };
     const entry: IrStmt[] = this.collect(() => this.entryChecks(sig, f.contracts, def.name));
     if (measureClause !== null && measured) {
@@ -863,6 +867,8 @@ class Lowerer {
     const measure = this.fn?.measure ?? null;
     const clause = ob === undefined || ob.source === null ? null : this.t.node(ob.source);
     if (ob === undefined || measure === null || clause === null || clause.kind !== 'Contract') return [...args];
+    const calleeMeasureType = this.ctx.types.exprTypes.get(clause.expr.id);
+    if (calleeMeasureType === undefined || !isIntLike(calleeMeasureType)) return [...args];
     const bound: IrExpr[] = [];
     const subst = new Map<DefId, IrExpr>();
     sig.params.forEach((p, i) => {

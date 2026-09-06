@@ -1339,14 +1339,53 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     record is now current; its age is not checked, because `io.Clock` has no
     reading primitive — the third candidate for the process.
 
+### 2026-09-06 — polymorphic recursion (M15.5, the first change through the process)
+
+171. **Polymorphic recursion is `E0345` (spec §3.6).** A generic function
+    calling itself, directly or through other generic functions, at an
+    instantiation that places one of its own type parameters inside a type
+    constructor (`depth[T]` calling `depth[Pair[T]]`) needs an unbounded set
+    of instantiations, which the native target's monomorphisation (impl spec
+    §6.1) cannot compile; Rust and Go reject it likewise. The types pass
+    builds the instantiation graph after every module — a node per (generic
+    function, type parameter); for a call in `f` to a generic `g` passing
+    `τ` for `g`'s parameter `Q`, an edge from `(f, P)` to `(g, Q)` for each
+    type parameter `P` of `f` occurring in `τ`, expansive when `τ` is not
+    `P` itself — and reports an expansive edge whose target reaches its
+    source, once per call, on every target. What is lost is nested data
+    types whose type encodes a shape invariant; Onus states those as
+    contracts. Fixtures: `test/checker/e0345_polymorphic_recursion.onus`
+    (the nested `Nest[T]`) and `test/checker/ok_generic_recursion.onus`
+    (recursion at the same type, mutual recursion between generics, generic
+    code calling generics at concrete types, and `Tree[T]`). Made in both
+    compilers: the process's freeze of the TypeScript compiler starts when
+    M15.7's fixture runner exists, since until then the fixture suite and
+    the differentials run over the TypeScript library (the skill's text is
+    corrected). Review artefacts: the interface diff of `self/typecheck.onus`
+    is `+ fn polymorphic_recursion`, compatible; the ledger delta of the
+    module is 23 obligations added, none removed, no status changed — 12
+    proved (10 measures, the rest refinements and a loop invariant) and 11
+    checked, all of them `representation` and `overflow` obligations, which
+    v0 checks at runtime by rule (§6.1). `self/codes.onus` changed in the
+    body of `title` only.
+172. **A structural measure is never a runtime check.** Found by the
+    accepting fixture above under `--emit ts`: when a function's `decreases`
+    measure is a record, union or list and its obligations are not yet
+    final (a pipeline stopped before verification, as the TypeScript-oracle
+    test stops), both lowerings emitted `$measure` as an `Int` local and a
+    `<` check against it at each recursive call, which `tsc --strict` refuses
+    and which at runtime would compare aggregates. The verifier settles a
+    structural measure as proved or as `E0344`; only a numeric measure
+    (`Int` or `Duration`, §5.1) is ever checked at runtime, so
+    `codegen/lower.ts` and `self/lowerir.onus` now emit the measure local
+    and the checks only for numeric measures. Product output is unchanged:
+    after verification a structural measure has no unproved obligation.
+
 ### Deferred, not changed
 
 - Decided 2026-09-06, to apply in M15.5: generics compile natively by
-  monomorphisation (impl spec §6.1), and polymorphic recursion becomes a
-  checker error on every target, with a new code in the types range, the
-  `Nest[T]`/`depth[T]` program as its fixture and a §3 sentence in the spec,
-  made through the language-change process before the native lowering relies
-  on it. The checker accepts it today.
+  monomorphisation (impl spec §6.1). The rule it needs, polymorphic recursion
+  as a checker error, is item 171 (applied the same day).
 - Noted 2026-09-06, not scheduled: definitional unfolding of proved-terminating
   functions in the verifier (impl spec §12), so that a shape invariant stated as
   a recursive predicate can be proved where a nested type would have enforced

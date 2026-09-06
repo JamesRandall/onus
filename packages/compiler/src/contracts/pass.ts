@@ -301,7 +301,8 @@ function isExpr(n: A.Node): n is A.Expr {
 }
 
 /** Whether a measure is numeric (`Int` or `Duration`) rather than structural. */
-function isIntLike(t: Type): boolean {
+/** Whether `t` is `Int` or `Duration` (under refinements): the measures that are numbers rather than structures (§5.1). Effects: none. */
+export function isIntLike(t: Type): boolean {
   const s = stripRefinements(t);
   return s.k === 'prim' && (s.name === 'Int' || s.name === 'Duration');
 }

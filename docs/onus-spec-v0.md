@@ -322,7 +322,7 @@ Rules:
 - An `impl` may not declare effects beyond those in the interface signature. An interface that wants to admit allocating or effectful implementations declares the effect (as `Codec` does with `alloc`) or is effect-polymorphic (`fn f(x: T) -> U may e`).
 - There is no overloading and no ad-hoc polymorphism outside interfaces.
 
-Type parameters are declared with their constraints: `fn sort[T: Ord](xs: List[T]) -> List[T] may alloc`.
+Type parameters are declared with their constraints: `fn sort[T: Ord](xs: List[T]) -> List[T] may alloc`. A generic function may call itself, directly or through other generic functions, only at its own type parameters: an instantiation that places one of its type parameters inside a type constructor — `depth[T]` calling `depth[Pair[T]]`, polymorphic recursion — is `E0345`, on every target, because the set of instantiations it needs is unbounded and a target that specialises generic code cannot compile it (§19.3). A nested data type states its shape as contracts instead (§5). <!-- changed: 2026-09-06, docs/CHANGES.md item 171 — generics compile natively by monomorphisation (impl spec §6.1) -->
 
 ### 3.7 Function values and closures
 

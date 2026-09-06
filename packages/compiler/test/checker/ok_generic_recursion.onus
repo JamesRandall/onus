@@ -1,0 +1,52 @@
+module ok_generic_recursion
+
+-- Recursion at the same type, mutual recursion between generic functions at
+-- the same instantiation, generic code calling generics at concrete types,
+-- and a regular recursive type: none of it is polymorphic recursion (§3.6).
+union Tree[T] =
+  | Leaf of v: T
+  | Node of left: Tree[T], right: Tree[T]
+
+fn size[T](t: Tree[T]) -> Int where it >= 1
+  decreases t
+{
+  match t with
+  | Leaf(v) -> return 1
+  | Node(left, right) -> return size(t: left) + size(t: right)
+}
+
+fn even_len[T](xs: List[T]) -> Bool may alloc
+  decreases List.len(xs: xs)
+{
+  if List.len(xs: xs) == 0 {
+    return true
+  }
+  return odd_len(xs: List.slice(xs: xs, from: 1, to: List.len(xs: xs)))
+}
+
+fn odd_len[T](xs: List[T]) -> Bool may alloc
+  decreases List.len(xs: xs)
+{
+  if List.len(xs: xs) == 0 {
+    return false
+  }
+  return even_len(xs: List.slice(xs: xs, from: 1, to: List.len(xs: xs)))
+}
+
+fn first_or[T](xs: List[T], fallback: T) -> T {
+  if List.len(xs: xs) == 0 {
+    return fallback
+  }
+  return List.get(xs: xs, i: 0)
+}
+
+fn labels[T](xs: List[T]) -> List[Text] may alloc {
+  let n: Int = List.len(xs: xs)
+  return [first_or(xs: ["a", "b"], fallback: "none"), Int.to_text(x: n)]
+}
+
+example shapes {
+  size(t: Node(left: Leaf(v: 1), right: Leaf(v: 2))) == 2
+  even_len(xs: [1, 2])
+  labels(xs: [true]) == ["a", "1"]
+}

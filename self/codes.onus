@@ -187,6 +187,9 @@ pub fn title(code: Text) -> Text {
   if code == "E0344" {
     return "structural measure not shown to decrease"
   }
+  if code == "E0345" {
+    return "polymorphic recursion"
+  }
   if code == "E0410" {
     return "unresolvable call on path"
   }

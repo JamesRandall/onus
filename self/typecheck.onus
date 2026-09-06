@@ -1,6 +1,7 @@
 module typecheck
 import ast
 import parser
+import walk
 import comments
 import report
 import defs
@@ -4834,6 +4835,284 @@ fn process_pending(ck: inout Checker, ctx: inout context.Context) -> Unit may mu
 
 -- Entry ------------------------------------------------------------------------------------
 -- Pass 4: elaborates every signature and checks every body. Reports E0310 and E0321–E0341, E0111, E0330.
+-- Polymorphic recursion (§3.6): a generic function calling itself, directly
+-- or through other generic functions, at an instantiation that places one of
+-- its own type parameters inside a type constructor. Over the instantiation
+-- graph — a node per (generic function, type parameter); for a call in `f` to
+-- a generic `g` passing `t` for `g`'s parameter `Q`, an edge from `(f, P)` to
+-- `(g, Q)` for each type parameter `P` of `f` occurring in `t`, expansive when
+-- `t` is not `P` itself — an expansive edge whose target reaches its source
+-- is E0345, reported once per call, in definition order.
+-- Preconditions: every module's items are checked, so every call to a generic
+-- function has its instantiation recorded.
+-- Effects: reports E0345.
+fn polymorphic_recursion(ctx: inout context.Context) -> Unit may mutate, alloc {
+  var adjacency: Dict[Text, List[Text]] = Map.dict()
+  var edges: Builder[Expansive] = List.builder()
+  for id: Int in 0 ..< context.def_count(ctx: ctx) {
+    let f: defs.Def = context.get_def(ctx: ctx, id: id)
+    if f.kind is defs.Fn {
+      let params: List[Int] = type_param_defs(ctx: ctx, owner: f.id)
+      if List.len(xs: params) > 0 {
+        match f.node with
+        | defs.FnNode(decl) -> {
+          match decl.body with
+          | Some(value) -> collect_edges(
+            ctx: ctx,
+            f: f,
+            params: params,
+            body: value,
+            adjacency: inout adjacency,
+            edges: inout edges
+          )
+          | None -> skip()
+        }
+        | _ -> skip()
+      }
+    }
+  }
+  var reported: Dict[Int, Bool] = Map.dict()
+  for e: Expansive in List.finish(b: edges) {
+    if not Map.contains(d: reported, key: e.call_key) and reaches(
+      adjacency: adjacency,
+      start: e.to,
+      target: e.from
+    ) {
+      Map.set(d: inout reported, key: e.call_key, value: true)
+      let caller: Text = context.get_def(ctx: ctx, id: e.caller).name
+      context.report(
+        ctx: inout ctx,
+        d: report.diagnostic(
+          code: "E0345",
+          file: e.file,
+          span: e.span,
+          def_name: Some(value: caller),
+          detail: "`" ++ caller ++ "` calls `" ++ context.get_def(
+            ctx: ctx,
+            id: e.callee
+          ).name ++ "` at `" ++ show(
+            ctx: ctx,
+            t: e.arg
+          ) ++ "`, which wraps its type parameter `" ++ context.get_def(
+            ctx: ctx,
+            id: e.param
+          ).name ++ "`, on a cycle back to itself: polymorphic recursion needs an unbounded set of instantiations (§3.6)"
+        )
+      )
+    }
+  }
+  return Unit
+}
+
+-- An expansive edge of the instantiation graph: the call in `caller` that passes `arg` for `callee`'s type parameter, `arg` wrapping `caller`'s parameter `param`.
+record Expansive {
+  from: Text
+  to: Text
+  call_key: Int
+  file: Int
+  span: ast.Span
+  caller: Int
+  callee: Int
+  arg: types.Type
+  param: Int
+}
+
+-- The type parameters (not const or effect parameters) of a definition, in declaration order.
+fn type_param_defs(ctx: context.Context, owner: Int) -> List[Int] may alloc, mutate {
+  var out: Builder[Int] = List.builder()
+  match Map.find(d: ctx.type_params, key: owner) with
+  | Some(value) -> {
+    for p: types.TParamInfo in value {
+      match p with
+      | types.TypeP(def, _) -> List.push(b: inout out, x: def)
+      | _ -> skip()
+    }
+  }
+  | None -> skip()
+  return List.finish(b: out)
+}
+
+-- The definition a call's callee resolves to, when it is a definition.
+fn callee_def(ctx: context.Context, file: Int, callee: ast.Expr) -> Option[Int] {
+  match Map.find(
+    d: ctx.refs,
+    key: defs.node_key(file: file, tag: defs.tag_expr, span: parser.span_of_expr(e: callee))
+  ) with
+  | Some(value) -> {
+    match value with
+    | defs.DefRes(def) -> return Some(value: def)
+    | _ -> return None
+  }
+  | None -> return None
+}
+
+fn instantiation_at(
+  ctx: context.Context,
+  file: Int,
+  span: ast.Span
+) -> List[types.TypeArg] may alloc {
+  match Map.find(
+    d: ctx.instantiations,
+    key: defs.node_key(file: file, tag: defs.tag_expr, span: span)
+  ) with
+  | Some(value) -> return value
+  | None -> return []
+}
+
+fn add_edge(
+  adjacency: inout Dict[Text, List[Text]],
+  from: Text,
+  to: Text
+) -> Unit may mutate, alloc {
+  var list: List[Text] = []
+  match Map.find(d: adjacency, key: from) with
+  | Some(value) -> list = value
+  | None -> skip()
+  Map.set(d: inout adjacency, key: from, value: list ++ [to])
+  return Unit
+}
+
+-- The edges the calls in `body` of the generic function `f` contribute, in walk order.
+fn collect_edges(
+  ctx: context.Context,
+  f: defs.Def,
+  params: List[Int],
+  body: ast.Block,
+  adjacency: inout Dict[Text, List[Text]],
+  edges: inout Builder[Expansive]
+) -> Unit may mutate, alloc {
+  for n: walk.Node in walk.nodes_in_block(b: body, into_verify: true) {
+    match n with
+    | walk.NExpr(e) -> {
+      match e with
+      | ast.Call(callee, _, _, span) -> {
+        match callee_def(ctx: ctx, file: f.file, callee: callee) with
+        | Some(value) -> {
+          let g_params: List[Int] = type_param_defs(ctx: ctx, owner: value)
+          let inst: List[types.TypeArg] = instantiation_at(ctx: ctx, file: f.file, span: span)
+          for i: Int in 0 ..< List.len(xs: g_params) {
+            if i < List.len(xs: inst) {
+              match List.get(xs: inst, i: i) with
+              | types.TypeA(ty) -> {
+                for p: Int in params {
+                  if occurs(t: ty, p: p) {
+                    let from: Text = Int.to_text(x: f.id) ++ ":" ++ Int.to_text(x: p)
+                    let to: Text = Int.to_text(x: value) ++ ":" ++ Int.to_text(
+                      x: List.get(xs: g_params, i: i)
+                    )
+                    add_edge(adjacency: inout adjacency, from: from, to: to)
+                    if not is_param(t: ty, p: p) {
+                      List.push(
+                        b: inout edges,
+                        x: Expansive {
+                          from: from,
+                          to: to,
+                          call_key: defs.node_key(file: f.file, tag: defs.tag_expr, span: span),
+                          file: f.file,
+                          span: span,
+                          caller: f.id,
+                          callee: value,
+                          arg: ty,
+                          param: p
+                        }
+                      )
+                    }
+                  }
+                }
+              }
+              | _ -> skip()
+            }
+          }
+        }
+        | None -> skip()
+      }
+      | _ -> skip()
+    }
+    | _ -> skip()
+  }
+  return Unit
+}
+
+fn is_param(t: types.Type, p: Int) -> Bool {
+  match t with
+  | types.ParamT(def) -> return def == p
+  | _ -> return false
+}
+
+-- Whether the type parameter `p` occurs in `t`.
+fn occurs(t: types.Type, p: Int) -> Bool
+  decreases t
+{
+  match t with
+  | types.ParamT(def) -> return def == p
+  | types.Refined(base, _, _) -> return occurs(t: base, p: p)
+  | types.RecordT(_, args) -> return occurs_args(args: args, p: p)
+  | types.UnionT(_, args) -> return occurs_args(args: args, p: p)
+  | types.Opaque(_, args) -> return occurs_args(args: args, p: p)
+  | types.Capability(_, args, _) -> return occurs_args(args: args, p: p)
+  | types.FnT(params, ret, _) -> return occurs_params(params: params, p: p) or occurs(t: ret, p: p)
+  | _ -> return false
+}
+
+fn occurs_args(args: List[types.TypeArg], p: Int) -> Bool
+  decreases args
+{
+  for a: types.TypeArg in args {
+    match a with
+    | types.TypeA(ty) -> {
+      if occurs(t: ty, p: p) {
+        return true
+      }
+    }
+    | _ -> skip()
+  }
+  return false
+}
+
+fn occurs_params(params: List[types.FnParam], p: Int) -> Bool
+  decreases params
+{
+  for x: types.FnParam in params {
+    if occurs(t: x.ty, p: p) {
+      return true
+    }
+  }
+  return false
+}
+
+-- Whether `target` is reachable from `start` over the edges (trivially when they are the same node).
+fn reaches(adjacency: Dict[Text, List[Text]], start: Text, target: Text) -> Bool may alloc, mutate {
+  if start == target {
+    return true
+  }
+  var seen: Dict[Text, Bool] = Map.dict()
+  Map.set(d: inout seen, key: start, value: true)
+  var queue: List[Text] = [start]
+  var steps: Int where it >= 0 = 100000
+  loop while List.len(xs: queue) > 0 and steps > 0
+    invariant steps >= 0
+    decreases steps
+  {
+    steps = steps - 1
+    let cur: Text = List.get(xs: queue, i: List.len(xs: queue) - 1)
+    queue = List.slice(xs: queue, from: 0, to: List.len(xs: queue) - 1)
+    match Map.find(d: adjacency, key: cur) with
+    | Some(value) -> {
+      for next: Text in value {
+        if next == target {
+          return true
+        }
+        if not Map.contains(d: seen, key: next) {
+          Map.set(d: inout seen, key: next, value: true)
+          queue = queue ++ [next]
+        }
+      }
+    }
+    | None -> skip()
+  }
+  return false
+}
+
 pub fn types_pass(ctx: inout context.Context) -> Unit may mutate, alloc {
   var ck: Checker = new_checker()
   for id: Int in 0 ..< ctx.module_count {
@@ -4861,5 +5140,6 @@ pub fn types_pass(ctx: inout context.Context) -> Unit may mutate, alloc {
     | None -> skip()
   }
   process_pending(ck: inout ck, ctx: inout ctx)
+  polymorphic_recursion(ctx: inout ctx)
   return Unit
 }

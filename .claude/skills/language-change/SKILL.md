@@ -101,14 +101,15 @@ the change is small.
 
 ## While the TypeScript compiler exists
 
-Until M15.4 reaches the fixed point the TypeScript compiler is stage0 and the
-oracle: implement the change in both compilers, and the differential tests
-under `packages/compiler/test/self/` must agree on every source. After the
-fixed point the TypeScript compiler is frozen: no language rule is added to
-it, `bootstrap/` comes from the fixed point, and every later change is made in
-`self/` only. It stays in the tree, with the differential tests, until this
-process has been carried end to end on the compiler in Onus building for the
-native target. Removing it, with a fixture runner in Onus in place of vitest
+Until M15.7 provides the fixture runner in Onus, the fixture suite and the
+differential tests under `packages/compiler/test/self/` run over the
+TypeScript library, so a language change is implemented in both compilers
+and the differentials must agree on every source; `bootstrap/` is stage0 as
+soon as it exists (M15.4 reached the fixed point on 2026-09-06). From M15.7
+the TypeScript compiler is frozen: no language rule is added to it, and every
+later change is made in `self/` only. It stays in the tree, with the
+differential tests, until this process has been carried end to end on the
+compiler in Onus building for the native target. Removing it, with a fixture runner in Onus in place of vitest
 over the TypeScript library, is its own change (M15.7), never a side effect
 of another.
 

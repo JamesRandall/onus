@@ -1,0 +1,37 @@
+module e0345_polymorphic_recursion
+
+record Pair[T] {
+  a: T
+  b: T
+}
+
+-- A nested data type: each level's payload is a pair of the level above's.
+union Nest[T] =
+  | Leaf of v: T
+  | Node of inner: Nest[Pair[T]]
+
+-- `depth[T]` calls `depth[Pair[T]]`: polymorphic recursion (§3.6), which no
+-- finite set of instantiations covers.
+fn depth[T](n: Nest[T]) -> Int
+  decreases n
+{
+  match n with
+  | Leaf(v) -> return 0
+  | Node(inner) -> return 1 + depth(n: inner)
+}
+
+-- Through another generic function: `wrap[T]` calls `count[List[T]]`, which calls `wrap[T]` again.
+fn wrap[T](xs: List[T]) -> Int
+  decreases xs
+{
+  if List.len(xs: xs) == 0 {
+    return 0
+  }
+  return count(xs: [xs])
+}
+
+fn count[T](xs: List[T]) -> Int
+  decreases xs
+{
+  return wrap(xs: xs)
+}

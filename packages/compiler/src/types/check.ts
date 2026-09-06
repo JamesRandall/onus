@@ -11,6 +11,7 @@
  * then from the expected type, then from the arguments. A type parameter
  * that stays unbound is an error: nothing is inferred onto a declaration.
  */
+import { checkPolymorphicRecursion } from './polyrec.js';
 import { evalBasic } from '../consteval/basic.js';
 import type { Context } from '../context.js';
 import { EffectSet, type Effect } from '../effects/set.js';
@@ -64,6 +65,7 @@ type Subst = Map<DefId, TypeArg>;
  */
 export function typesPass(ctx: Context): void {
   new Checker(ctx).run();
+  checkPolymorphicRecursion(ctx);
 }
 
 class Checker {
