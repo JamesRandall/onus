@@ -58,7 +58,11 @@ jobs:
           home=$(mktemp -d)
           cp examples/mandelbrot/mandelbrot.onus "$home/"
           exe=$PWD/dist-native/native/cli
-          bare=$(dirname "$(command -v clang)"):$(dirname "$(command -v z3)"):/usr/bin:/bin
+          # A path holding clang and z3 alone (Homebrew keeps node beside z3), and the system's directories.
+          bin=$(mktemp -d)
+          ln -s "$(command -v clang)" "$bin/clang"
+          ln -s "$(command -v z3)" "$bin/z3"
+          bare=$bin:/usr/bin:/bin
           cd "$home"
           env PATH="$bare" sh -c 'command -v node' && { echo "node is still on the path"; exit 1; }
           test "$(env PATH="$bare" "$exe" --version)" = "onus $version"

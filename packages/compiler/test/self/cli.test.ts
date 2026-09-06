@@ -10,8 +10,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Context } from '../../src/context.js';
 import { runtimeEntry } from '../../src/codegen/build.js';
@@ -198,9 +198,14 @@ describe('the command line in Onus (M15.4)', () => {
     if (native.exe === null) return;
     const home = fresh('release-home');
     writeFileSync(join(home, 'mandelbrot.onus'), readFileSync(join(repoRoot, 'examples/mandelbrot/mandelbrot.onus'), 'utf8'));
-    // A path without node: clang and z3's directories, and the system's.
-    const dirs = [clang, findZ3()?.path ?? null].filter((p): p is string => p !== null).map((p) => dirname(spawnSync('sh', ['-c', `command -v ${p}`], { encoding: 'utf8' }).stdout.trim() || p));
-    const env: NodeJS.ProcessEnv = { ...process.env, PATH: [...dirs, '/usr/bin', '/bin'].join(':') };
+    // A path without node: a directory holding clang and z3 alone (Homebrew keeps node beside z3), and the system's.
+    const bin = fresh('release-bin');
+    for (const tool of [clang, findZ3()?.path ?? null]) {
+      if (tool === null) continue;
+      const resolved = spawnSync('sh', ['-c', `command -v ${tool}`], { encoding: 'utf8' }).stdout.trim() || tool;
+      symlinkSync(resolved, join(bin, basename(tool)));
+    }
+    const env: NodeJS.ProcessEnv = { ...process.env, PATH: [bin, '/usr/bin', '/bin'].join(':') };
     delete env['ONUS_STDLIB'];
     delete env['ONUS_RUNTIME'];
     const run = (args: string[], cwd: string): { stdout: string; stderr: string; status: number | null } => {
