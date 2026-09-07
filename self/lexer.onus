@@ -1,8 +1,8 @@
 module lexer
 import tokens
 
--- The Onus lexer in Onus (spec §2; impl spec M15.1): the same token stream
--- as `packages/compiler/src/lexer/lexer.ts`, positions in code points.
+-- The Onus lexer in Onus (spec §2; impl spec M15.1): the token stream of
+-- docs/grammar-v0.md, positions in code points.
 --   - newlines appear only outside `(`/`[`, never twice running, never
 --     first, never before a continuation token, and once before `eof`;
 --   - comments are kept aside with whether they stand on their own line;

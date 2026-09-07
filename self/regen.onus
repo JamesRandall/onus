@@ -24,8 +24,8 @@ import assumptions
 import codes
 import lexer
 
--- The regeneration loop (docs/onus-loop-v0.md; impl spec M14; `packages/loop`
--- in TypeScript): `onus loop run <task.json>` runs one task to its
+-- The regeneration loop (docs/onus-loop-v0.md; impl spec M14; once
+-- `packages/loop` in TypeScript): `onus loop run <task.json>` runs one task to its
 -- conclusion — intake → prepare → [generate → check → classify]* → conclude —
 -- with the escalation ladder of §4.1, the budgets of §4.2, the proposals of
 -- §5, the changes of §6, the regeneration audits of §8 and the boundaries of

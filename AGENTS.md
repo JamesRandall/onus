@@ -1,6 +1,6 @@
 # AGENTS.md — Onus
 
-Onus is a programming language in which a model writes function bodies, a human reviews contracts, and the compiler is the only checker. This repository is the v0 compiler, runtime, standard library and review tool.
+Onus is a programming language in which a model writes function bodies, a human reviews contracts, and the compiler is the only checker. This repository is the v0 compiler (written in Onus, under `self/`, and carried as the JavaScript it emitted for itself under `bootstrap/`), the runtimes, the standard library and the fixture suite.
 
 ## Read first
 
@@ -22,14 +22,14 @@ This project is also the first test of its own thesis. Work as Onus expects its 
 ## Hard rules
 
 - **No warnings.** Diagnostics are errors. Do not add a severity field, a warning level, or a "lint" concept anywhere.
-- **Structured diagnostics only.** Every user-facing error is a `Diagnostic` object with a code from `report/codes.ts`. Never `console.error` a message to the user. Text rendering is a view over the object.
+- **Structured diagnostics only.** Every user-facing error is a `Diagnostic` record with a code from `self/codes.onus`. Never print a message to the user outside a diagnostic. Text rendering is a view over the record.
 - **Codes are never reused or renumbered.** Add new ones at the end of their range.
-- **No `any`, no `!`, no `as` outside `syntax/ast.ts`.** `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes` stay on.
+- **No `any`, no `!`, no `as`** in the TypeScript that remains (`packages/runtime`). `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes` stay on.
 - **Passes are pure over `Context`.** No module-level mutable state. A pass writes only its own tables.
 - **User errors are diagnostics; exceptions are compiler bugs.** A caught exception becomes `E0999` and gets a fixture.
-- **The AST is immutable after parsing.** Everything else lives in side tables keyed by `NodeId`.
+- **The AST is immutable after parsing.** Everything else lives in side tables keyed by node id.
 - **The printer is the formatter.** There is exactly one canonical form. Never write a second pretty-printer.
-- **The product output is JavaScript, in one step.** `onus build --emit ts` is a fixture-suite oracle only; its output must pass `tsc --strict` with no casts, and a failure there is a codegen bug. Never route users through it.
+- **The product output is JavaScript or a native executable, in one step.** There is no intermediate TypeScript.
 - **No reflection tricks** in the runtime or generated code. No `Proxy`, no `Function` constructor, no property-name string manipulation to reach private state. The `__fake` hook for test modules is the only exception and is gated by a compiler-emitted token.
 - **Obligations are objects** with a status, from milestone 5 on. Never a boolean.
 - **z3 is optional at runtime of the compiler.** Absence degrades every obligation to `checked` with one line on stderr; it is not a diagnostic.
@@ -49,32 +49,33 @@ Prefer the smallest change that resolves the problem. Do not "improve" the langu
 
 See `docs/onus-impl-spec-v0.md` §2. Short version:
 
-- `packages/compiler` — the compiler and CLI (`onus check | build | run | fmt | interface | path | next`)
-- `packages/runtime` — what generated code imports
+- `self/` — the compiler in Onus: every pass, both emitters, the command line (`onus check | build | run | fmt | interface | path | next | review | test | loop`) and the fixture runner (`fixtures.onus`)
+- `bootstrap/` — stage0: the compiler as the JavaScript it emitted for itself at the last fixed point, with its runtime; `node bootstrap/run_cli.js` is `onus`, and the chain (`scripts/bootstrap.sh`) rebuilds it from `self/`
+- `packages/runtime` — what generated JavaScript imports, and the C runtime for the native target
 - `packages/stdlib` — `std.*` written in Onus
-- `packages/review` — the review tool, a static page over the JSON reports (last milestone)
-- `packages/loop` — the regeneration loop of `docs/onus-loop-v0.md` (`onus loop run <task.json>`), which edits bodies only
-- `examples/` — mandelbrot, reporting, checkout: the three worked examples from the spec, used as integration tests from milestone 2 onward
+- `test/` — the fixture suite: one directory per area with a `fixtures.json` manifest (impl spec §10)
+- `docs/schema/` — the JSON schemas of the interface, diagnostic, path, task, change and proposal documents
+- `examples/` — mandelbrot, reporting, checkout: the three worked examples from the spec, used as integration tests
 
 ## Commands
 
 ```
 pnpm install
-pnpm -r build
-pnpm -r test                 # all packages
-pnpm --filter compiler test  # one package
-pnpm onus check <file>       # after build
+pnpm -r build                # the runtime (the compiler needs no build: bootstrap/ runs as is)
+pnpm test                    # the fixture suite under bootstrap/ (scripts/fixtures.sh)
+pnpm onus check <file>       # node bootstrap/run_cli.js
 pnpm onus fmt <file>
+scripts/bootstrap.sh         # the chain: self/ built by bootstrap/ to a fixed point, then natively
 ```
 
-`z3` must be on `PATH` for milestone 6 onward (`brew install z3` / `apt install z3`). Tests that need it are tagged and skipped with a notice if it is missing.
+`z3` must be on `PATH` for verification (`brew install z3` / `apt install z3`) and `clang` for the native target; fixture sections that need one are skipped with a notice when it is missing.
 
 ## Definition of done for a task
 
 - The acceptance tests for the current milestone pass.
 - Every new diagnostic code has a fixture.
 - Every new public function has a signature comment with contracts.
-- `pnpm -r test` and `pnpm -r build` are green.
+- `pnpm -r build`, `scripts/bootstrap.sh` and the fixture suite under its stage2 (`scripts/fixtures.sh`) are green.
 - The summary lists: files changed, spec sections implemented, any spec changes opened, anything deliberately left `checked` rather than `proved` and why.
 
 ## When unsure

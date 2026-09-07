@@ -1,9 +1,9 @@
 # The gates of docs/onus-impl-spec-v0.md and .claude/skills/language-change/SKILL.md
-# on every push and pull request: the packages build, the whole test suite,
-# the bootstrap chain to its fixed point with the native stage, and the self
-# differentials run against the compiler built natively. z3 is installed so
-# obligations are proved as they are locally; the proof caches are kept
-# between runs, keyed by the sources they were computed from.
+# on every push and pull request: the packages build, the bootstrap chain to
+# its fixed point with the native stage, and the fixture suite under the
+# chain's stage2 with the native compiler for the release case. z3 is
+# installed so obligations are proved as they are locally; the proof caches
+# are kept between runs, keyed by the sources they were computed from.
 name: ci
 on:
   push:
@@ -29,14 +29,13 @@ jobs:
         with:
           path: |
             self/.onus/cache
-            packages/compiler/.onus-tmp/cache
-          key: proofs-${{ runner.os }}-${{ hashFiles('self/**/*.onus', 'packages/stdlib/std/*.onus', 'packages/compiler/test/**/*.onus', 'examples/**/*.onus') }}
+            .onus-tmp/fixtures/cache
+          key: proofs-${{ runner.os }}-${{ hashFiles('self/**/*.onus', 'packages/stdlib/std/*.onus', 'test/**/*.onus', 'examples/**/*.onus') }}
           restore-keys: |
             proofs-${{ runner.os }}-
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r build
-      - run: pnpm -r test
       - name: Bootstrap chain, fixed point and native stage
         run: scripts/bootstrap.sh
-      - name: Self differentials against the native compiler
-        run: pnpm --filter compiler test:self-native
+      - name: The fixture suite under stage2, the release case with the native compiler
+        run: ONUS_FIXTURES=.onus-tmp/bootstrap/stage2/run_fixtures.js ONUS_NATIVE_CLI=.onus-tmp/bootstrap/native/native/cli scripts/fixtures.sh

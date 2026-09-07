@@ -16,9 +16,9 @@ the change is small.
 ## Vocabulary
 
 - **stage0** — the last compiler that reached the fixed point, as the
-  JavaScript it emitted for itself (`self/cli.onus` built with `onus build`),
-  under `bootstrap/`, with the runtime it carries beside it. Until `bootstrap/` exists, stage0 is the TypeScript
-  compiler (`pnpm onus`).
+  JavaScript it emitted for itself (`self/cli.onus` and `self/fixtures.onus`
+  built with `onus build`), under `bootstrap/`; `node bootstrap/run_cli.js`
+  is `onus`.
 - **stage1** — `self/` after the change, compiled by stage0.
 - **stage2** — `self/` compiled by stage1. **stage3** — `self/` compiled by stage2.
 - **fixed point** — stage2 and stage3 are byte-identical, file for file.
@@ -39,13 +39,14 @@ the change is small.
   and the spec, and say so in the summary. Never deviate silently
   (`CLAUDE.md`, "Changing the spec"). Prefer the smallest change.
 - A change that needs a new diagnostic code takes the next number at the end
-  of its range in `packages/compiler/src/report/codes.ts`. Codes are never
-  reused or renumbered. `self/codes.onus` is generated from it.
+  of its range in `self/codes.onus` (the catalogue, `all_codes`, and the
+  titles). Codes are never reused or renumbered.
 
 ### 2. Fixtures before code
 
 - One fixture per new or changed diagnostic code, one accepting fixture per
-  new rule, under `packages/compiler/test/<area>/`, before any compiler code.
+  new rule, under `test/<area>/` (the directory's `fixtures.json` says how
+  it is run, impl spec §10), before any compiler code.
 - New syntax gets a canonical-form fixture: the printer is the only formatter
   and there is exactly one canonical form.
 - A rule with no fixture is unfinished. A code with no fixture is unfinished.
@@ -99,13 +100,12 @@ the change is small.
   ONUS_NATIVE_CLI=<out>/native/native/cli scripts/fixtures.sh` (the runner in
   Onus, `self/fixtures.onus`, which the chain builds at every stage; the
   command-line cases run the `run_cli.js` beside the runner, the release case
-  the native compiler), and `pnpm -r test` while vitest exists.
-- The differentials under `packages/compiler/test/self/` pass with the
-  programs of `self/` running natively: `pnpm --filter compiler
-  test:self-native` (`ONUS_SELF_NATIVE=1`), which builds each driver with
-  `onus build --target native` and compares its lexing, parsing, printing,
-  checking, verification, reports, code generation and command line against
-  the TypeScript compiler on every source.
+  the native compiler).
+- The native stage of the chain agrees: the compiler built natively by
+  stage2 rebuilds `self/` for both targets to stage2's outputs, with neither
+  node nor a JavaScript runtime on the path (`scripts/bootstrap.sh` does
+  this after the fixed point), and the release case of the suite runs that
+  native compiler from a bare directory.
 - `self/` verifies clean under stage2, and the review artefacts are
   written: `node scripts/change-review.mjs finish <item>` puts under
   `.onus/changes/<item>/` the interface diff of every snapshotted module
@@ -128,19 +128,14 @@ the change is small.
   where the review artefacts are (`.onus/changes/<item>/`), and anything
   left `checked` and why.
 
-## While the TypeScript compiler exists
+## History
 
-Until M15.7 provides the fixture runner in Onus, the fixture suite and the
-differential tests under `packages/compiler/test/self/` run over the
-TypeScript library, so a language change is implemented in both compilers
-and the differentials must agree on every source; `bootstrap/` is stage0 as
-soon as it exists (M15.4 reached the fixed point on 2026-09-06). From M15.7
-the TypeScript compiler is frozen: no language rule is added to it, and every
-later change is made in `self/` only. It stays in the tree, with the
-differential tests, until this process has been carried end to end on the
-compiler in Onus building for the native target. Removing it, with a fixture runner in Onus in place of vitest
-over the TypeScript library, is its own change (M15.7), never a side effect
-of another.
+Until M15.4 the TypeScript compiler was stage0 and the oracle, and every change
+was made in both compilers with differential tests between them; from the
+fixed point it was frozen, and M15.7 (docs/CHANGES.md items 198–200) replaced
+its test suite with the fixture runner in Onus and removed it. Every change is
+made in `self/` only, and the proof that it is right is the chain, the
+fixtures and the review artefacts above.
 
 ## Never
 
@@ -150,6 +145,4 @@ of another.
   difference by regenerating until it happens to agree.
 - Add a warning, a severity or a lint to make a change easier to land.
 - Land a change with a `self/` obligation that regressed without a reason.
-- Retire or bypass the oracle in the middle of a change.
-- Remove the TypeScript compiler before this process has been exercised on
-  the native compiler in Onus.
+- Edit `bootstrap/` to make a change land: it is only ever the chain's stage2.

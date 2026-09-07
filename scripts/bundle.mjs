@@ -4,8 +4,8 @@
 // constants, so that the compiler built from self/ carries them and needs
 // no repository, --stdlib or --runtime. The version is the root package's.
 //   node scripts/bundle.mjs [out-path]      (default self/bundle.onus)
-// The result is formatted with the TypeScript compiler's `onus fmt`, so
-// packages/compiler must be built. A test regenerates it and compares.
+// The result is formatted with `onus fmt` from bootstrap/ (stage0). A
+// fixture regenerates it and compares (test/cli, `bundle`).
 import { readdirSync, readFileSync, statSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -96,7 +96,7 @@ const lines = [
 const tmp = mkdtempSync(join(tmpdir(), 'onus-bundle-'));
 const draft = join(tmp, 'bundle.onus');
 writeFileSync(draft, lines.join('\n'));
-const fmt = spawnSync(process.execPath, [join(root, 'packages', 'compiler', 'dist', 'cli', 'main.js'), 'fmt', draft], { encoding: 'utf8' });
+const fmt = spawnSync(process.execPath, [join(root, 'bootstrap', 'run_cli.js'), 'fmt', draft], { encoding: 'utf8' });
 if (fmt.status !== 0) {
   process.stderr.write(`bundle: onus fmt failed:\n${fmt.stdout}${fmt.stderr}`);
   process.exit(1);

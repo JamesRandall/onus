@@ -41,7 +41,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: self/.onus/cache
-          key: proofs-${{ runner.os }}-${{ hashFiles('self/**/*.onus', 'packages/stdlib/std/*.onus', 'packages/compiler/test/**/*.onus', 'examples/**/*.onus') }}
+          key: proofs-${{ runner.os }}-${{ hashFiles('self/**/*.onus', 'packages/stdlib/std/*.onus', 'test/**/*.onus', 'examples/**/*.onus') }}
           restore-keys: |
             proofs-${{ runner.os }}-
       - name: The tag names the package's version

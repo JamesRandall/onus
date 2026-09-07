@@ -3,7 +3,8 @@
 # stage0 builds the compiler (`self/cli.onus`, the `onus` command line in
 # Onus) into stage1 with `onus build`, stage1 builds it into stage2, stage2
 # into stage3, and stage2 must equal stage3 file for file. stage0 is
-# bootstrap/ when it exists, otherwise the TypeScript compiler.
+# bootstrap/, the last fixed point (docs/CHANGES.md item 200: the
+# TypeScript compiler that once stood in for it is gone).
 #
 # The native stage (impl spec M15.5): stage2 builds the compiler for the
 # native target, and that executable — with neither node nor TypeScript —
@@ -32,25 +33,25 @@ runner=self/fixtures.onus
 rm -rf "$out"
 mkdir -p "$out"
 
-# stage <n> <launcher of the previous stage, or "ts">
+# stage <n> <launcher of the previous stage>
 stage() {
   local n=$1 prev=$2
   echo "bootstrap: stage$n"
   local e
   for e in "$entry" "$runner"; do
-    if [ "$prev" = ts ]; then
-      node packages/compiler/dist/cli/main.js build "$e" --out "$out/stage$n" --root self --stdlib "$stdlib" --budget "$budget"
-    else
-      if ! node "$prev" build "$e" --out "$out/stage$n" --root self --stdlib "$stdlib" --budget "$budget" > "$out/stage$n.diagnostics"; then
-        echo "bootstrap: stage$n failed on $e:"
-        head -20 "$out/stage$n.diagnostics"
-        exit 1
-      fi
+    if ! node "$prev" build "$e" --out "$out/stage$n" --root self --stdlib "$stdlib" --budget "$budget" > "$out/stage$n.diagnostics"; then
+      echo "bootstrap: stage$n failed on $e:"
+      head -20 "$out/stage$n.diagnostics"
+      exit 1
     fi
   done
 }
 
-if [ -f "$root/bootstrap/run_cli.js" ]; then stage0=$root/bootstrap/run_cli.js; else stage0=ts; fi
+stage0=$root/bootstrap/run_cli.js
+if [ ! -f "$stage0" ]; then
+  echo "bootstrap: no stage0 at $stage0"
+  exit 1
+fi
 stage 1 "$stage0"
 stage 2 "$out/stage1/run_cli.js"
 stage 3 "$out/stage2/run_cli.js"

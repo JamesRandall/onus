@@ -1,6 +1,6 @@
 module ast
 
--- The syntax tree of Onus (spec §2.3; `packages/compiler/src/syntax/ast.ts`)
+-- The syntax tree of Onus (spec §2.3)
 -- for the compiler in Onus. Spans count code points. Field names that are
 -- reserved words in Onus carry a suffix or a prefix (`ty`, `where_`,
 -- `is_pub`).

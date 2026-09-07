@@ -207,7 +207,7 @@ The loop turns a **task** into a **change**: a set of modules whose obligations 
 
 **The one rule:** the loop edits bodies; it never edits claims. Contracts, effects, claims, capabilities, paths, policies and `assume` leaves are the human's. If the loop cannot satisfy a contract, it does not weaken the contract, widen an effect set, or insert an `assume` to get green. It emits a **proposal** — a structured object, never an edit — which appears in the review tool as an interface diff marked *proposed by loop*, with the evidence attached. A human accepts, rejects, or edits. The most common proposal in practice is also the least contentious: `add_example`, when the loop noticed a case the examples don't cover and wants it pinned.
 
-The [full loop specification](/spec/loop/) has the task kinds, the escalation ladder, budgets, regeneration audits, and what the loop is not allowed to touch. It is implemented in `packages/loop`; the [benchmark log](/status/#the-loop) records how models do against it.
+The [full loop specification](/spec/loop/) has the task kinds, the escalation ladder, budgets, regeneration audits, and what the loop is not allowed to touch. It is implemented in the compiler as `onus loop` (`self/regen.onus`); the [benchmark log](/status/#the-loop) records how models do against it.
 
 ## The workbench
 

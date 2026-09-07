@@ -3,8 +3,8 @@ import tokens
 import ast
 
 -- The Onus parser in Onus (spec §2.3; docs/grammar-v0.md; impl spec M15.1):
--- recursive descent over the lexer's stream, the same tree and the same
--- syntax diagnostics as `packages/compiler/src/syntax/parser.ts`.
+-- recursive descent over the lexer's stream to the tree of `ast`, with the
+-- syntax diagnostics of spec §2.3.
 --
 --   - A syntax error is a diagnostic and an `Err(Failed)` result; `try`
 --     propagates it to the nearest recovery point, which skips to the next

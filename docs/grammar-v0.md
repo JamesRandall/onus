@@ -1,6 +1,6 @@
 # Onus grammar as implemented (v0, milestone 1)
 
-This is the grammar the parser in `packages/compiler/src/syntax/parser.ts`
+This is the grammar the parser in `self/parser.onus`
 accepts. It refines the provisional EBNF in `onus-spec-v0.md` §2.3; every
 difference is listed in `CHANGES.md`. The canonical printer accepts exactly
 this grammar and prints the canonical form described at the end.

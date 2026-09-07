@@ -1,12 +1,12 @@
 # Onus — loop benchmark log
 
-A running log of the regeneration loop (`docs/onus-loop-v0.md`, `packages/loop`) against models. Revisit it whenever the loop, the context it assembles, or the models change; every row is one run, and one run is thin evidence, so add rows rather than replacing them.
+A running log of the regeneration loop (`docs/onus-loop-v0.md`, `onus loop`) against models. Revisit it whenever the loop, the context it assembles, or the models change; every row is one run, and one run is thin evidence, so add rows rather than replacing them.
 
 ## How to add rows
 
 ```
 pnpm -r build
-node packages/loop/bench/run.mjs mandelbrot openrouter:deepseek/deepseek-v4-flash claude-code --append docs/BENCHMARK.md
+node scripts/bench.mjs mandelbrot openrouter:deepseek/deepseek-v4-flash claude-code --append docs/BENCHMARK.md
 ```
 
 Keys are read from `.env.local` at the repository root (`OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`). Model specs are `claude-code[:<model>]`, `anthropic[:<model>]`, `openrouter[:<model id>]`. Each run works in a fresh copy of the example under `.onus-tmp/bench/`, where its `change.json` and every prompt and answer remain for reading. The script prints the rows it appends, so a run can also be logged by hand.

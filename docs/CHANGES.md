@@ -2298,6 +2298,40 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     two Postgres sections). Fixed point reached from `bootstrap/`, native
     stage agrees; promoted.
 
+200. **The TypeScript compiler is removed (M15.7, done).** `packages/compiler`,
+    `packages/loop` and `packages/review` are gone with their vitest
+    suites: the compiler is `self/`, and `bootstrap/` — the JavaScript it
+    emitted for itself at the last fixed point — is what runs it
+    (`pnpm onus` is `node bootstrap/run_cli.js`). The fixture suite moved
+    from `packages/compiler/test` to `test/`, manifests and expectations
+    unchanged but for the paths they name (`$dir` kept the pinned outputs
+    as they were; the lowered goldens name `<repo>/test/…`); the JSON
+    schemas of the interface, diagnostic and path documents moved to
+    `docs/schema/`, the loop's to `docs/schema/loop/`; the loop benchmark
+    is `scripts/bench.mjs`, running `onus loop run --json` from
+    `bootstrap/` per model. `pnpm test` is `scripts/fixtures.sh`;
+    `scripts/bootstrap.sh` requires `bootstrap/` as stage0 and has no
+    TypeScript fallback; `scripts/bundle.mjs` formats the bundle with
+    `bootstrap/`; CI builds the runtime, runs the chain, and runs the
+    suite under the chain's stage2 with its native compiler for the
+    release case (the self differentials, which compared the two
+    compilers, are gone with one of them). vitest and fast-check stay as
+    the workspace's dev dependencies because generated tests import them
+    by name (`onus test`); typescript stays for the runtime. The
+    documents follow: `CLAUDE.md` and `AGENTS.md` (the repository map,
+    the commands, the hard rules that named TypeScript files or
+    `--emit ts`, which no longer exists), impl spec §2 (the layout), §10,
+    §11 and M15.7 (done), the skill (stage0, where codes and fixtures
+    live, the acceptance step, and a history note in place of "While the
+    TypeScript compiler exists"), the README, the grammar's and the loop
+    spec's pointers, the website's status and loop pages, and the
+    comments in `self/` that named their TypeScript originals. M15.7's
+    second acceptance — a deliberate change to an emitter in `self/` is
+    caught by the stage comparison before promotion — was exercised by
+    item 194, whose loop-lowering fix first surfaced as a stage
+    difference. Fixed point reached from `bootstrap/`, native stage
+    agrees, the suite under stage2 green; promoted.
+
 ### Deferred, not changed
 
 - Decided 2026-09-06, to apply in M15.5: generics compile natively by

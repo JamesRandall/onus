@@ -1,0 +1,98 @@
+{
+  "sections": [
+    {
+      "kind": "lowered",
+      "golden": "lowered",
+      "sources": [
+        {
+          "name": "features",
+          "path": "features.onus"
+        },
+        {
+          "name": "mandelbrot",
+          "path": "../../examples/mandelbrot/mandelbrot.onus"
+        },
+        {
+          "name": "checkout",
+          "path": "../../examples/checkout/checkout.onus"
+        }
+      ]
+    },
+    {
+      "kind": "examples",
+      "targets": [
+        "js"
+      ],
+      "properties": true,
+      "sources": [
+        "features.onus",
+        "reserved_names.onus",
+        "../../examples/mandelbrot/mandelbrot.onus"
+      ]
+    },
+    {
+      "kind": "builds",
+      "cases": [
+        {
+          "source": "../../examples/reporting/reporting.onus",
+          "files_exist": [
+            "reporting.js"
+          ]
+        },
+        {
+          "source": "../../examples/checkout/checkout.onus",
+          "files_exist": [
+            "checkout.js",
+            "vendor/payments.js"
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "programs",
+      "name": "codegen-js",
+      "cases": [
+        {
+          "source": "violated_requires.onus",
+          "targets": [
+            "js"
+          ],
+          "status": 2,
+          "stderr_contains": [
+            "panic: requires `n > 0` failed at",
+            "violated_requires.onus:5:3 in half"
+          ]
+        },
+        {
+          "source": "../../examples/mandelbrot/mandelbrot.onus",
+          "targets": [
+            "js"
+          ],
+          "stdout_text": "",
+          "file_hashes": {
+            "mandelbrot.pgm": "b3:ee684a7518322545a170cc6ea2ce5e76b48425acbfc38dbf5cda4412094efad6"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "programs",
+      "name": "codegen-native",
+      "requires": [
+        "clang"
+      ],
+      "cases": [
+        {
+          "source": "../../examples/mandelbrot/mandelbrot.onus",
+          "stderr_text": "",
+          "same_files": [
+            "mandelbrot.pgm"
+          ],
+          "file_hashes": {
+            "mandelbrot.pgm": "b3:ee684a7518322545a170cc6ea2ce5e76b48425acbfc38dbf5cda4412094efad6"
+          }
+        }
+      ]
+    }
+  ]
+}

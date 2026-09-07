@@ -17,7 +17,7 @@ Dates are the commit that closed the milestone. The milestone definitions are in
 | M11 native backend via LLVM | <span class="st-done">done</span> | 4 September 2026 |
 | M12 targets complete: `sql` real on both targets, differential testing | <span class="st-done">done</span> — WebAssembly written, untested | 5 September 2026 |
 | M13 contract mutation and obligation coverage | <span class="st-done">done</span> | 5 September 2026 |
-| M14 regeneration loop (`packages/loop`) | <span class="st-done">done</span> — `watch`, production feedback and constrained decoding deferred | 5 September 2026 |
+| M14 regeneration loop (`onus loop`) | <span class="st-done">done</span> — `watch`, production feedback and constrained decoding deferred | 5 September 2026 |
 | M15.0 prerequisites: standard library for a compiler, recursion with proved measures | <span class="st-done">done</span> — native `Map`, `Process` capability and the stack-depth story deferred to the stages that need them | 5 September 2026 |
 | M15.1 front end in Onus | <span class="st-done">done</span> — byte-identical to the TypeScript printer on every source | 5 September 2026 |
 | M15.2 checker in Onus | <span class="st-done">done</span> — identical diagnostics on every source | 5 September 2026 |
