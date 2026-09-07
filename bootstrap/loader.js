@@ -13,13 +13,13 @@ import * as $report from "./report.js";
 import * as $std_io from "./std/io.js";
 import * as $bundle from "./bundle.js";
 
-const $ob1 = { kind: "overflow", text: "i + 1 within Int", at: "self/loader.onus:157:9", def: "first_difference" };
-const $ob2 = { kind: "overflow", text: "i + 1 within Int", at: "self/loader.onus:196:22", def: "canonical" };
-const $ob3 = { kind: "overflow", text: "List.len(xs: parts) - 1 within Int", at: "self/loader.onus:244:33", def: "last_segment" };
-const $ob4 = { kind: "overflow", text: "Text.count(t: path) - Text.count(t: suffix) within Int", at: "self/loader.onus:257:49", def: "root_for" };
-const $ob5 = { kind: "overflow", text: "id + 1 within Int", at: "self/loader.onus:316:34", def: "register" };
-const $ob6 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/loader.onus:530:15", def: "visit" };
-const $ob7 = { kind: "overflow", text: "ctx.module_count + 1 within Int", at: "self/loader.onus:656:15", def: "load" };
+const $ob1 = { kind: "overflow", text: "i + 1 within Int", at: "self/loader.onus:184:9", def: "first_difference" };
+const $ob2 = { kind: "overflow", text: "i + 1 within Int", at: "self/loader.onus:223:22", def: "canonical" };
+const $ob3 = { kind: "overflow", text: "List.len(xs: parts) - 1 within Int", at: "self/loader.onus:271:33", def: "last_segment" };
+const $ob4 = { kind: "overflow", text: "Text.count(t: path) - Text.count(t: suffix) within Int", at: "self/loader.onus:284:49", def: "root_for" };
+const $ob5 = { kind: "overflow", text: "id + 1 within Int", at: "self/loader.onus:343:34", def: "register" };
+const $ob6 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/loader.onus:557:15", def: "visit" };
+const $ob7 = { kind: "overflow", text: "ctx.module_count + 1 within Int", at: "self/loader.onus:683:15", def: "load" };
 export const prelude_modules = ["std.results", "std.option", "std.list", "std.grid", "std.map", "std.int", "std.float", "std.text", "std.bool", "std.bytes", "std.duration", "std.check", "std.typeinfo"];
 
 export const max_edges = 10000000;
@@ -86,6 +86,24 @@ export function syntax_diagnostic({ file, d }) {
 }
 
 export function add_file({ ctx, path, text }) {
+  const n = $std_text.count({ t: text });
+  if (n >= $defs.max_span || $std_list.built({ b: ctx.files }) >= $defs.max_files) {
+    return [{ tag: "None" }, ctx];
+  }
+  const lexed = $lexer.lex({ source: text });
+  const toks = lexed.tokens;
+  let r = { module: { tag: "None" }, diagnostics: [] };
+  let lexable = false;
+  if ($std_list.len({ xs: toks }) >= 1 && $std_list.len({ xs: toks }) <= 100000000) {
+    r = $parser.parse({ toks: toks, source_end: n });
+    lexable = true;
+  }
+  const [$r9, ctx$2] = add_parsed({ ctx: ctx, path: path, text: text, comments: lexed.comments, lex_diagnostics: lexed.diagnostics, r: r, lexable: lexable });
+  ctx = ctx$2;
+  return [$r9, ctx];
+}
+
+export function add_parsed({ ctx, path, text, comments, lex_diagnostics, r, lexable }) {
   const cps = $std_text.code_points({ t: text });
   const n = $std_list.len({ xs: cps });
   if (n >= $defs.max_span || $std_list.built({ b: ctx.files }) >= $defs.max_files) {
@@ -93,66 +111,58 @@ export function add_file({ ctx, path, text }) {
   }
   const id = $std_list.built({ b: ctx.files });
   let fs = ctx.files;
-  const [, fs$2] = $std_list.push({ b: fs, x: { id: id, path: path, text: text, cps: cps } });
-  fs = fs$2;
-  const lexed = $lexer.lex({ source: text });
-  const toks = lexed.tokens;
-  let had_error = false;
-  let parsed = { module: { tag: "None" }, comment_list: lexed.comments };
-  if ($std_list.len({ xs: toks }) >= 1 && $std_list.len({ xs: toks }) <= 100000000) {
-    const r = $parser.parse({ toks: toks, source_end: n });
-    parsed = { module: r.module, comment_list: lexed.comments };
-    for (const d of lexed.diagnostics) {
-      const [, ctx$3] = $context.report({ ctx: ctx, d: syntax_diagnostic({ file: id, d: d }) });
-      ctx = ctx$3;
-      had_error = true;
-    }
-    for (const d of r.diagnostics) {
-      const [, ctx$4] = $context.report({ ctx: ctx, d: syntax_diagnostic({ file: id, d: d }) });
-      ctx = ctx$4;
-      had_error = true;
-    }
-  } else {
+  const [, fs$3] = $std_list.push({ b: fs, x: { id: id, path: path, text: text, cps: cps } });
+  fs = fs$3;
+  let had_error = !lexable;
+  const parsed = { module: r.module, comment_list: comments };
+  for (const d of lex_diagnostics) {
+    const [, ctx$4] = $context.report({ ctx: ctx, d: syntax_diagnostic({ file: id, d: d }) });
+    ctx = ctx$4;
+    had_error = true;
+  }
+  for (const d of r.diagnostics) {
+    const [, ctx$5] = $context.report({ ctx: ctx, d: syntax_diagnostic({ file: id, d: d }) });
+    ctx = ctx$5;
     had_error = true;
   }
   if (had_error) {
     let errs = ctx.syntax_error_files;
-    const [, errs$5] = $std_map.set({ d: errs, key: id, value: true });
-    errs = errs$5;
+    const [, errs$6] = $std_map.set({ d: errs, key: id, value: true });
+    errs = errs$6;
   }
   let table = ctx.parsed;
-  const [, table$6] = $std_map.set({ d: table, key: id, value: parsed });
-  table = table$6;
+  const [, table$7] = $std_map.set({ d: table, key: id, value: parsed });
+  table = table$7;
   return [{ tag: "Some", value: id }, ctx];
 }
 
 export function module_of_file({ ctx, file }) {
-  const $m12 = $std_map.find({ d: ctx.parsed, key: file });
-  $m12$match: {
-    if ($m12.tag === "None") {
+  const $m14 = $std_map.find({ d: ctx.parsed, key: file });
+  $m14$match: {
+    if ($m14.tag === "None") {
       return { tag: "None" };
-      break $m12$match;
+      break $m14$match;
     }
-    if ($m12.tag === "Some") {
-      const value = $m12.value;
+    if ($m14.tag === "Some") {
+      const value = $m14.value;
       return value.module;
-      break $m12$match;
+      break $m14$match;
     }
     $rt.unreachable();
   }
 }
 
 export function comments_of_file({ ctx, file }) {
-  const $m14 = $std_map.find({ d: ctx.parsed, key: file });
-  $m14$match: {
-    if ($m14.tag === "None") {
+  const $m16 = $std_map.find({ d: ctx.parsed, key: file });
+  $m16$match: {
+    if ($m16.tag === "None") {
       return [];
-      break $m14$match;
+      break $m16$match;
     }
-    if ($m14.tag === "Some") {
-      const value = $m14.value;
+    if ($m16.tag === "Some") {
+      const value = $m16.value;
       return value.comment_list;
-      break $m14$match;
+      break $m16$match;
     }
     $rt.unreachable();
   }
@@ -178,34 +188,34 @@ export function canonical({ ctx, file }) {
       return [undefined, ctx];
     }
   }
-  const $m16 = module_of_file({ ctx: ctx, file: file });
-  $m16$match: {
-    if ($m16.tag === "None") {
+  const $m18 = module_of_file({ ctx: ctx, file: file });
+  $m18$match: {
+    if ($m18.tag === "None") {
       return [undefined, ctx];
-      break $m16$match;
+      break $m18$match;
     }
-    if ($m16.tag === "Some") {
-      const value = $m16.value;
+    if ($m18.tag === "Some") {
+      const value = $m18.value;
       const sf = $context.file_at({ ctx: ctx, id: file });
       const tab = $comments.attach({ m: value, comment_list: comments_of_file({ ctx: ctx, file: file }), src: sf.cps });
       const text = $printer.print_module({ m: value, tab: tab });
       let table = ctx.canonical;
-      const [, table$7] = $std_map.set({ d: table, key: file, value: text });
-      table = table$7;
+      const [, table$8] = $std_map.set({ d: table, key: file, value: text });
+      table = table$8;
       let tabs = ctx.comment_tables;
-      const [, tabs$8] = $std_map.set({ d: tabs, key: file, value: tab });
-      tabs = tabs$8;
+      const [, tabs$9] = $std_map.set({ d: tabs, key: file, value: tab });
+      tabs = tabs$9;
       if (text !== sf.text) {
         const i = first_difference({ a: sf.cps, b: $std_text.code_points({ t: text }) });
         let end = $rt.int.add(i, 1, $ob2);
         if (end > $std_list.len({ xs: sf.cps })) {
           end = $std_list.len({ xs: sf.cps });
         }
-        const [, ctx$9] = $context.report({ ctx: ctx, d: $report.diagnostic_repair({ code: "E0001", file: file, span: { start: i, end: end }, detail: "the source differs from its canonical form at this position; `onus fmt` rewrites it", repair: { span: { start: 0, end: $std_list.len({ xs: sf.cps }) }, with_text: text, confidence: "high" } }) });
-        ctx = ctx$9;
+        const [, ctx$10] = $context.report({ ctx: ctx, d: $report.diagnostic_repair({ code: "E0001", file: file, span: { start: i, end: end }, detail: "the source differs from its canonical form at this position; `onus fmt` rewrites it", repair: { span: { start: 0, end: $std_list.len({ xs: sf.cps }) }, with_text: text, confidence: "high" } }) });
+        ctx = ctx$10;
       }
       return [undefined, ctx];
-      break $m16$match;
+      break $m18$match;
     }
     $rt.unreachable();
   }
@@ -218,9 +228,9 @@ export function last_segment({ name }) {
 }
 
 export function root_for({ path, suffix, root }) {
-  const $m20 = root;
-  $m20$match: {
-    if ($m20.tag === "None") {
+  const $m22 = root;
+  $m22$match: {
+    if ($m22.tag === "None") {
       if ("/" + path === suffix) {
         return { tag: "Some", value: "." };
       }
@@ -228,15 +238,15 @@ export function root_for({ path, suffix, root }) {
         return { tag: "Some", value: $std_text.slice({ t: path, from: 0, to: $rt.int.sub($std_text.count({ t: path }), $std_text.count({ t: suffix }), $ob4) }) };
       }
       return { tag: "None" };
-      break $m20$match;
+      break $m22$match;
     }
-    if ($m20.tag === "Some") {
-      const value = $m20.value;
+    if ($m22.tag === "Some") {
+      const value = $m22.value;
       if (path === value + suffix || value === "." && "/" + path === suffix) {
         return root;
       }
       return { tag: "None" };
-      break $m20$match;
+      break $m22$match;
     }
     $rt.unreachable();
   }
@@ -244,19 +254,19 @@ export function root_for({ path, suffix, root }) {
 
 export function entry_candidates({ ctx }) {
   let out = $std_list.builder({  });
-  const $hi25 = $std_list.built({ b: ctx.files });
-  for (let id = 0; id < $hi25; id++) {
-    const $m26 = module_of_file({ ctx: ctx, file: id });
-    $m26$match: {
-      if ($m26.tag === "None") {
+  const $hi27 = $std_list.built({ b: ctx.files });
+  for (let id = 0; id < $hi27; id++) {
+    const $m28 = module_of_file({ ctx: ctx, file: id });
+    $m28$match: {
+      if ($m28.tag === "None") {
         skip({  });
-        break $m26$match;
+        break $m28$match;
       }
-      if ($m26.tag === "Some") {
-        const value = $m26.value;
-        const [, out$10] = $std_list.push({ b: out, x: { file: id, tree: value, is_std: under_stdlib({ ctx: ctx, path: $context.file_at({ ctx: ctx, id: id }).path }) } });
-        out = out$10;
-        break $m26$match;
+      if ($m28.tag === "Some") {
+        const value = $m28.value;
+        const [, out$11] = $std_list.push({ b: out, x: { file: id, tree: value, is_std: under_stdlib({ ctx: ctx, path: $context.file_at({ ctx: ctx, id: id }).path }) } });
+        out = out$11;
+        break $m28$match;
       }
       $rt.unreachable();
     }
@@ -270,105 +280,105 @@ export function skip($args) {
 
 export function register({ ctx, p, pending }) {
   const name = name_of({ m: p.tree });
-  const $m28 = $std_map.find({ d: ctx.by_name, key: name });
-  $m28$match: {
-    if ($m28.tag === "Some") {
-      const value = $m28.value;
+  const $m30 = $std_map.find({ d: ctx.by_name, key: name });
+  $m30$match: {
+    if ($m30.tag === "Some") {
+      const value = $m30.value;
       return [{ tag: "Some", value: value }, ctx, pending];
-      break $m28$match;
+      break $m30$match;
     }
-    if ($m28.tag === "None") {
+    if ($m30.tag === "None") {
       skip({  });
-      break $m28$match;
+      break $m30$match;
     }
     $rt.unreachable();
   }
   if (is_std_name({ name: name }) && !p.is_std) {
-    const [, ctx$11] = $context.report({ ctx: ctx, d: $report.diagnostic({ code: "E0112", file: p.file, span: p.tree.name.span, def_name: { tag: "None" }, detail: "`std.…` names belong to the standard library" }) });
-    ctx = ctx$11;
+    const [, ctx$12] = $context.report({ ctx: ctx, d: $report.diagnostic({ code: "E0112", file: p.file, span: p.tree.name.span, def_name: { tag: "None" }, detail: "`std.…` names belong to the standard library" }) });
+    ctx = ctx$12;
     return [{ tag: "None" }, ctx, pending];
   }
   const id = ctx.module_count;
   ctx = { ...ctx, module_count: $rt.int.add(id, 1, $ob5) };
   let names = ctx.by_name;
-  const [, names$12] = $std_map.set({ d: names, key: name, value: id });
-  names = names$12;
+  const [, names$13] = $std_map.set({ d: names, key: name, value: id });
+  names = names$13;
   let mods = ctx.modules;
-  const [, mods$13] = $std_map.set({ d: mods, key: id, value: { id: id, name: name, file: p.file, tree: p.tree, is_std: p.is_std, imports: [], implicit: [] } });
-  mods = mods$13;
+  const [, mods$14] = $std_map.set({ d: mods, key: id, value: { id: id, name: name, file: p.file, tree: p.tree, is_std: p.is_std, imports: [], implicit: [] } });
+  mods = mods$14;
   for (const imp of p.tree.imports) {
-    const [, pending$14] = $std_list.push({ b: pending, x: { from: id, from_file: p.file, name: qname_text({ q: imp.name }), span: imp.span, implicit: false } });
-    pending = pending$14;
+    const [, pending$15] = $std_list.push({ b: pending, x: { from: id, from_file: p.file, name: qname_text({ q: imp.name }), span: imp.span, implicit: false } });
+    pending = pending$15;
   }
   for (const pre of prelude_modules) {
     if (pre !== name) {
-      const [, pending$15] = $std_list.push({ b: pending, x: { from: id, from_file: p.file, name: pre, span: p.tree.name.span, implicit: true } });
-      pending = pending$15;
+      const [, pending$16] = $std_list.push({ b: pending, x: { from: id, from_file: p.file, name: pre, span: p.tree.name.span, implicit: true } });
+      pending = pending$16;
     }
   }
   return [{ tag: "Some", value: id }, ctx, pending];
 }
 
 export function read_or_none({ files, path }) {
-  const $m37 = $std_io.read({ files: files, path: path });
-  $m37$match: {
-    if ($m37.tag === "Ok") {
-      const value = $m37.value;
+  const $m39 = $std_io.read({ files: files, path: path });
+  $m39$match: {
+    if ($m39.tag === "Ok") {
+      const value = $m39.value;
       return { tag: "Some", value: value };
-      break $m37$match;
+      break $m39$match;
     }
-    if ($m37.tag === "Err") {
-      const error = $m37.error;
+    if ($m39.tag === "Err") {
+      const error = $m39.error;
       return { tag: "None" };
-      break $m37$match;
+      break $m39$match;
     }
     $rt.unreachable();
   }
 }
 
 export function declared_name({ ctx, file }) {
-  const $m40 = module_of_file({ ctx: ctx, file: file });
-  $m40$match: {
-    if ($m40.tag === "None") {
+  const $m42 = module_of_file({ ctx: ctx, file: file });
+  $m42$match: {
+    if ($m42.tag === "None") {
       return { tag: "None" };
-      break $m40$match;
+      break $m42$match;
     }
-    if ($m40.tag === "Some") {
-      const value = $m40.value;
+    if ($m42.tag === "Some") {
+      const value = $m42.value;
       return { tag: "Some", value: name_of({ m: value }) };
-      break $m40$match;
+      break $m42$match;
     }
     $rt.unreachable();
   }
 }
 
 export function module_name_span({ ctx, file }) {
-  const $m43 = module_of_file({ ctx: ctx, file: file });
-  $m43$match: {
-    if ($m43.tag === "None") {
+  const $m45 = module_of_file({ ctx: ctx, file: file });
+  $m45$match: {
+    if ($m45.tag === "None") {
       return { start: 0, end: 0 };
-      break $m43$match;
+      break $m45$match;
     }
-    if ($m43.tag === "Some") {
-      const value = $m43.value;
+    if ($m45.tag === "Some") {
+      const value = $m45.value;
       return value.name.span;
-      break $m43$match;
+      break $m45$match;
     }
     $rt.unreachable();
   }
 }
 
 export function pending_of({ ctx, file, is_std }) {
-  const $m45 = module_of_file({ ctx: ctx, file: file });
-  $m45$match: {
-    if ($m45.tag === "None") {
+  const $m47 = module_of_file({ ctx: ctx, file: file });
+  $m47$match: {
+    if ($m47.tag === "None") {
       return { tag: "None" };
-      break $m45$match;
+      break $m47$match;
     }
-    if ($m45.tag === "Some") {
-      const value = $m45.value;
+    if ($m47.tag === "Some") {
+      const value = $m47.value;
       return { tag: "Some", value: { file: file, tree: value, is_std: is_std } };
-      break $m45$match;
+      break $m47$match;
     }
     $rt.unreachable();
   }
@@ -376,24 +386,24 @@ export function pending_of({ ctx, file, is_std }) {
 
 export function load_module({ ctx, files, name, at, at_file, failed, pending }) {
   try {
-    const $m49 = $std_map.find({ d: ctx.by_name, key: name });
-    $m49$match: {
-      if ($m49.tag === "Some") {
-        const value = $m49.value;
+    const $m51 = $std_map.find({ d: ctx.by_name, key: name });
+    $m51$match: {
+      if ($m51.tag === "Some") {
+        const value = $m51.value;
         return [{ tag: "Some", value: value }, ctx, failed, pending];
-        break $m49$match;
+        break $m51$match;
       }
-      if ($m49.tag === "None") {
+      if ($m51.tag === "None") {
         skip({  });
-        break $m49$match;
+        break $m51$match;
       }
       $rt.unreachable();
     }
     if ($std_map.contains({ d: failed, key: name })) {
       return [{ tag: "None" }, ctx, failed, pending];
     }
-    const [, failed$16] = $std_map.set({ d: failed, key: name, value: true });
-    failed = failed$16;
+    const [, failed$17] = $std_map.set({ d: failed, key: name, value: true });
+    failed = failed$17;
     const is_std = is_std_name({ name: name });
     let base = ctx.root;
     if (is_std) {
@@ -407,56 +417,56 @@ export function load_module({ ctx, files, name, at, at_file, failed, pending }) 
       text = $bundle.find({ path: key });
     } else {
       if (base.tag === "None") {
-        const [, ctx$17] = $context.report({ ctx: ctx, d: $report.diagnostic({ code: "E0103", file: at_file, span: at, def_name: { tag: "None" }, detail: "no project root is known" }) });
-        ctx = ctx$17;
+        const [, ctx$18] = $context.report({ ctx: ctx, d: $report.diagnostic({ code: "E0103", file: at_file, span: at, def_name: { tag: "None" }, detail: "no project root is known" }) });
+        ctx = ctx$18;
         return [{ tag: "None" }, ctx, failed, pending];
       }
       path = path_for({ root: or_empty({ o: base }), name: name });
       text = read_or_none({ files: files, path: path });
     }
     if (text.tag === "None") {
-      const [, ctx$18] = $context.report({ ctx: ctx, d: $report.diagnostic({ code: "E0103", file: at_file, span: at, def_name: { tag: "None" }, detail: "expected `" + name + "` at `" + path + "`" }) });
-      ctx = ctx$18;
+      const [, ctx$19] = $context.report({ ctx: ctx, d: $report.diagnostic({ code: "E0103", file: at_file, span: at, def_name: { tag: "None" }, detail: "expected `" + name + "` at `" + path + "`" }) });
+      ctx = ctx$19;
       return [{ tag: "None" }, ctx, failed, pending];
     }
-    const [$r57, ctx$19] = add_file({ ctx: ctx, path: path, text: or_empty({ o: text }) });
-    ctx = ctx$19;
-    const id = $rt.unwrapOption($r57);
-    const $m58 = declared_name({ ctx: ctx, file: id });
-    $m58$match: {
-      if ($m58.tag === "None") {
+    const [$r59, ctx$20] = add_file({ ctx: ctx, path: path, text: or_empty({ o: text }) });
+    ctx = ctx$20;
+    const id = $rt.unwrapOption($r59);
+    const $m60 = declared_name({ ctx: ctx, file: id });
+    $m60$match: {
+      if ($m60.tag === "None") {
         return [{ tag: "None" }, ctx, failed, pending];
-        break $m58$match;
+        break $m60$match;
       }
-      if ($m58.tag === "Some") {
-        const value = $m58.value;
+      if ($m60.tag === "Some") {
+        const value = $m60.value;
         if (value !== name) {
-          const [, ctx$20] = $context.report({ ctx: ctx, d: $report.diagnostic({ code: "E0104", file: id, span: module_name_span({ ctx: ctx, file: id }), def_name: { tag: "None" }, detail: "file `" + path + "` declares `module " + value + "` but is imported as `" + name + "`" }) });
-          ctx = ctx$20;
+          const [, ctx$21] = $context.report({ ctx: ctx, d: $report.diagnostic({ code: "E0104", file: id, span: module_name_span({ ctx: ctx, file: id }), def_name: { tag: "None" }, detail: "file `" + path + "` declares `module " + value + "` but is imported as `" + name + "`" }) });
+          ctx = ctx$21;
           return [{ tag: "None" }, ctx, failed, pending];
         }
-        break $m58$match;
+        break $m60$match;
       }
       $rt.unreachable();
     }
-    const $m62 = pending_of({ ctx: ctx, file: id, is_std: is_std });
-    $m62$match: {
-      if ($m62.tag === "None") {
+    const $m64 = pending_of({ ctx: ctx, file: id, is_std: is_std });
+    $m64$match: {
+      if ($m64.tag === "None") {
         return [{ tag: "None" }, ctx, failed, pending];
-        break $m62$match;
+        break $m64$match;
       }
-      if ($m62.tag === "Some") {
-        const value = $m62.value;
-        const [$r64, ctx$21, pending$21] = register({ ctx: ctx, p: value, pending: pending });
-        ctx = ctx$21;
-        pending = pending$21;
-        const r = $r64;
+      if ($m64.tag === "Some") {
+        const value = $m64.value;
+        const [$r66, ctx$22, pending$22] = register({ ctx: ctx, p: value, pending: pending });
+        ctx = ctx$22;
+        pending = pending$22;
+        const r = $r66;
         if (r.tag === "Some") {
-          const [, failed$22] = $std_map.remove({ d: failed, key: name });
-          failed = failed$22;
+          const [, failed$23] = $std_map.remove({ d: failed, key: name });
+          failed = failed$23;
         }
         return [r, ctx, failed, pending];
-        break $m62$match;
+        break $m64$match;
       }
       $rt.unreachable();
     }
@@ -474,12 +484,12 @@ export function cycle_text({ ctx, stack, to }) {
       started = true;
     }
     if (started) {
-      const [, names$23] = $std_list.push({ b: names, x: $context.module_name({ ctx: ctx, id: m }) });
-      names = names$23;
+      const [, names$24] = $std_list.push({ b: names, x: $context.module_name({ ctx: ctx, id: m }) });
+      names = names$24;
     }
   }
-  const [, names$24] = $std_list.push({ b: names, x: $context.module_name({ ctx: ctx, id: to }) });
-  names = names$24;
+  const [, names$25] = $std_list.push({ b: names, x: $context.module_name({ ctx: ctx, id: to }) });
+  names = names$25;
   return $std_text.join({ parts: $std_list.finish({ b: names }), sep: " -> " });
 }
 
@@ -487,54 +497,54 @@ export function visit({ ctx, m, edges, state, stack, fuel }) {
   if (fuel === 0) {
     return [undefined, ctx, state, stack];
   }
-  const [, state$25] = $std_map.set({ d: state, key: m, value: 1 });
-  state = state$25;
-  const [, stack$26] = $std_list.push({ b: stack, x: m });
-  stack = stack$26;
+  const [, state$26] = $std_map.set({ d: state, key: m, value: 1 });
+  state = state$26;
+  const [, stack$27] = $std_list.push({ b: stack, x: m });
+  stack = stack$27;
   for (const e of edges) {
     if (e.from === m && !e.implicit) {
-      const $m65 = $std_map.find({ d: state, key: e.to });
-      $m65$match: {
-        if ($m65.tag === "Some") {
-          const value = $m65.value;
+      const $m67 = $std_map.find({ d: state, key: e.to });
+      $m67$match: {
+        if ($m67.tag === "Some") {
+          const value = $m67.value;
           if (value === 1) {
             const file = module_file({ ctx: ctx, id: m });
-            const [, ctx$27] = $context.report({ ctx: ctx, d: $report.diagnostic({ code: "E0101", file: file, span: e.span, def_name: { tag: "None" }, detail: cycle_text({ ctx: ctx, stack: $std_list.finish({ b: stack }), to: e.to }) }) });
-            ctx = ctx$27;
+            const [, ctx$28] = $context.report({ ctx: ctx, d: $report.diagnostic({ code: "E0101", file: file, span: e.span, def_name: { tag: "None" }, detail: cycle_text({ ctx: ctx, stack: $std_list.finish({ b: stack }), to: e.to }) }) });
+            ctx = ctx$28;
           }
-          break $m65$match;
+          break $m67$match;
         }
-        if ($m65.tag === "None") {
-          const [, ctx$28, state$28, stack$28] = visit({ ctx: ctx, m: e.to, edges: edges, state: state, stack: stack, fuel: $rt.int.sub(fuel, 1, $ob6) });
-          ctx = ctx$28;
-          state = state$28;
-          stack = stack$28;
-          break $m65$match;
+        if ($m67.tag === "None") {
+          const [, ctx$29, state$29, stack$29] = visit({ ctx: ctx, m: e.to, edges: edges, state: state, stack: stack, fuel: $rt.int.sub(fuel, 1, $ob6) });
+          ctx = ctx$29;
+          state = state$29;
+          stack = stack$29;
+          break $m67$match;
         }
         $rt.unreachable();
       }
     }
   }
-  const [$r67, stack$29] = $std_list.pop({ b: stack });
-  stack = stack$29;
-  const popped = $r67;
-  const [, state$30] = $std_map.set({ d: state, key: m, value: 2 });
-  state = state$30;
+  const [$r69, stack$30] = $std_list.pop({ b: stack });
+  stack = stack$30;
+  const popped = $r69;
+  const [, state$31] = $std_map.set({ d: state, key: m, value: 2 });
+  state = state$31;
   return [undefined, ctx, state, stack];
   return [undefined, ctx, state, stack];
 }
 
 export function module_file({ ctx, id }) {
-  const $m68 = $std_map.find({ d: ctx.modules, key: id });
-  $m68$match: {
-    if ($m68.tag === "Some") {
-      const value = $m68.value;
+  const $m70 = $std_map.find({ d: ctx.modules, key: id });
+  $m70$match: {
+    if ($m70.tag === "Some") {
+      const value = $m70.value;
       return value.file;
-      break $m68$match;
+      break $m70$match;
     }
-    if ($m68.tag === "None") {
+    if ($m70.tag === "None") {
       return 0;
-      break $m68$match;
+      break $m70$match;
     }
     $rt.unreachable();
   }
@@ -552,101 +562,101 @@ export function load({ ctx, files }) {
       if (p.file >= 0 && p.file < $std_list.built({ b: ctx.files })) {
         path = $context.file_at({ ctx: ctx, id: p.file }).path;
       }
-      const $m69 = root_for({ path: path, suffix: suffix, root: root });
-      $m69$match: {
-        if ($m69.tag === "None") {
+      const $m71 = root_for({ path: path, suffix: suffix, root: root });
+      $m71$match: {
+        if ($m71.tag === "None") {
           ok = false;
-          const [, ctx$31] = $context.report({ ctx: ctx, d: $report.diagnostic({ code: "E0104", file: p.file, span: p.tree.name.span, def_name: { tag: "None" }, detail: "module `" + name + "` must live at `" + $std_text.replace({ t: name, from: ".", to: "/" }) + ".onus` under the project root; this file is `" + path + "`" }) });
-          ctx = ctx$31;
-          break $m69$match;
+          const [, ctx$32] = $context.report({ ctx: ctx, d: $report.diagnostic({ code: "E0104", file: p.file, span: p.tree.name.span, def_name: { tag: "None" }, detail: "module `" + name + "` must live at `" + $std_text.replace({ t: name, from: ".", to: "/" }) + ".onus` under the project root; this file is `" + path + "`" }) });
+          ctx = ctx$32;
+          break $m71$match;
         }
-        if ($m69.tag === "Some") {
-          const value = $m69.value;
+        if ($m71.tag === "Some") {
+          const value = $m71.value;
           root = { tag: "Some", value: value };
-          break $m69$match;
+          break $m71$match;
         }
         $rt.unreachable();
       }
     }
     if (ok) {
-      const [, entries$32] = $std_list.push({ b: entries, x: p });
-      entries = entries$32;
+      const [, entries$33] = $std_list.push({ b: entries, x: p });
+      entries = entries$33;
     }
   }
   ctx = { ...ctx, root: root };
   let pending = $std_list.builder({  });
   for (const p of $std_list.finish({ b: entries })) {
-    const [$r73, ctx$33, pending$33] = register({ ctx: ctx, p: p, pending: pending });
-    ctx = ctx$33;
-    pending = pending$33;
-    const registered = $r73;
+    const [$r75, ctx$34, pending$34] = register({ ctx: ctx, p: p, pending: pending });
+    ctx = ctx$34;
+    pending = pending$34;
+    const registered = $r75;
   }
   let failed = $std_map.dict({  });
   let edges = $std_list.builder({  });
   let i = 0;
   while (i < $std_list.built({ b: pending }) && i < max_edges) {
     const imp = $std_list.at({ b: pending, i: i });
-    const [$r76, ctx$34, failed$34, pending$34] = load_module({ ctx: ctx, files: files, name: imp.name, at: imp.span, at_file: imp.from_file, failed: failed, pending: pending });
-    ctx = ctx$34;
-    failed = failed$34;
-    pending = pending$34;
-    const $m75 = $r76;
-    $m75$match: {
-      if ($m75.tag === "None") {
+    const [$r78, ctx$35, failed$35, pending$35] = load_module({ ctx: ctx, files: files, name: imp.name, at: imp.span, at_file: imp.from_file, failed: failed, pending: pending });
+    ctx = ctx$35;
+    failed = failed$35;
+    pending = pending$35;
+    const $m77 = $r78;
+    $m77$match: {
+      if ($m77.tag === "None") {
         skip({  });
-        break $m75$match;
+        break $m77$match;
       }
-      if ($m75.tag === "Some") {
-        const value = $m75.value;
-        const [, edges$35] = $std_list.push({ b: edges, x: { from: imp.from, alias: last_segment({ name: imp.name }), span: imp.span, to: value, implicit: imp.implicit } });
-        edges = edges$35;
-        break $m75$match;
+      if ($m77.tag === "Some") {
+        const value = $m77.value;
+        const [, edges$36] = $std_list.push({ b: edges, x: { from: imp.from, alias: last_segment({ name: imp.name }), span: imp.span, to: value, implicit: imp.implicit } });
+        edges = edges$36;
+        break $m77$match;
       }
       $rt.unreachable();
     }
     i = i + 1;
   }
   const edge_list = $std_list.finish({ b: edges });
-  const $hi78 = ctx.module_count;
-  for (let id = 0; id < $hi78; id++) {
-    const $m79 = $std_map.find({ d: ctx.modules, key: id });
-    $m79$match: {
-      if ($m79.tag === "None") {
+  const $hi80 = ctx.module_count;
+  for (let id = 0; id < $hi80; id++) {
+    const $m81 = $std_map.find({ d: ctx.modules, key: id });
+    $m81$match: {
+      if ($m81.tag === "None") {
         skip({  });
-        break $m79$match;
+        break $m81$match;
       }
-      if ($m79.tag === "Some") {
-        const value = $m79.value;
+      if ($m81.tag === "Some") {
+        const value = $m81.value;
         let imports = $std_list.builder({  });
         let implicit = $std_list.builder({  });
         for (const e of edge_list) {
           if (e.from === id) {
             if (e.implicit) {
-              const [, implicit$36] = $std_list.push({ b: implicit, x: e.to });
-              implicit = implicit$36;
+              const [, implicit$37] = $std_list.push({ b: implicit, x: e.to });
+              implicit = implicit$37;
             } else {
-              const [, imports$37] = $std_list.push({ b: imports, x: { alias: e.alias, mod: e.to, span: e.span } });
-              imports = imports$37;
+              const [, imports$38] = $std_list.push({ b: imports, x: { alias: e.alias, mod: e.to, span: e.span } });
+              imports = imports$38;
             }
           }
         }
         let mods = ctx.modules;
-        const [, mods$38] = $std_map.set({ d: mods, key: id, value: { ...value, imports: $std_list.finish({ b: imports }), implicit: $std_list.finish({ b: implicit }) } });
-        mods = mods$38;
-        break $m79$match;
+        const [, mods$39] = $std_map.set({ d: mods, key: id, value: { ...value, imports: $std_list.finish({ b: imports }), implicit: $std_list.finish({ b: implicit }) } });
+        mods = mods$39;
+        break $m81$match;
       }
       $rt.unreachable();
     }
   }
   let state = $std_map.dict({  });
   let stack = $std_list.builder({  });
-  const $hi82 = ctx.module_count;
-  for (let id = 0; id < $hi82; id++) {
+  const $hi84 = ctx.module_count;
+  for (let id = 0; id < $hi84; id++) {
     if (!$std_map.contains({ d: state, key: id })) {
-      const [, ctx$39, state$39, stack$39] = visit({ ctx: ctx, m: id, edges: edge_list, state: state, stack: stack, fuel: $rt.int.add(ctx.module_count, 1, $ob7) });
-      ctx = ctx$39;
-      state = state$39;
-      stack = stack$39;
+      const [, ctx$40, state$40, stack$40] = visit({ ctx: ctx, m: id, edges: edge_list, state: state, stack: stack, fuel: $rt.int.add(ctx.module_count, 1, $ob7) });
+      ctx = ctx$40;
+      state = state$40;
+      stack = stack$40;
     }
   }
   return [undefined, ctx];

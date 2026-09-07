@@ -96,6 +96,41 @@ pub fn add_file(
   path: Text,
   text: Text
 ) -> Option[Int] may alloc, mutate {
+  let n: Int = Text.count(t: text)
+  if n >= defs.max_span or List.built(b: ctx.files) >= defs.max_files {
+    return None
+  }
+  let lexed: lexer.LexResult = lexer.lex(source: text)
+  let toks: List[tokens.Token] = lexed.tokens
+  var r: parser.ParseResult = parser.ParseResult { module: None, diagnostics: [] }
+  var lexable: Bool = false
+  if List.len(xs: toks) >= 1 and List.len(xs: toks) <= 100000000 {
+    r = parser.parse(toks: toks, source_end: n)
+    lexable = true
+  }
+  return add_parsed(
+    ctx: inout ctx,
+    path: path,
+    text: text,
+    comments: lexed.comments,
+    lex_diagnostics: lexed.diagnostics,
+    r: r,
+    lexable: lexable
+  )
+}
+
+-- Adds a file whose parse is already in hand (`onus next` parses the prefix
+-- with a hole): the file, its parse result and its syntax diagnostics; the
+-- file is marked as carrying syntax errors when it does or could not be lexed.
+pub fn add_parsed(
+  ctx: inout context.Context,
+  path: Text,
+  text: Text,
+  comments: List[tokens.Comment],
+  lex_diagnostics: List[tokens.Diagnostic],
+  r: parser.ParseResult,
+  lexable: Bool
+) -> Option[Int] may alloc, mutate {
   let cps: List[Int] = Text.code_points(t: text)
   let n: Int = List.len(xs: cps)
   if n >= defs.max_span or List.built(b: ctx.files) >= defs.max_files {
@@ -104,22 +139,14 @@ pub fn add_file(
   let id: Int = List.built(b: ctx.files)
   var fs: Builder[report.SourceFile] = ctx.files
   List.push(b: inout fs, x: report.SourceFile { id: id, path: path, text: text, cps: cps })
-  let lexed: lexer.LexResult = lexer.lex(source: text)
-  let toks: List[tokens.Token] = lexed.tokens
-  var had_error: Bool = false
-  var parsed: context.Parsed = context.Parsed { module: None, comment_list: lexed.comments }
-  if List.len(xs: toks) >= 1 and List.len(xs: toks) <= 100000000 {
-    let r: parser.ParseResult = parser.parse(toks: toks, source_end: n)
-    parsed = context.Parsed { module: r.module, comment_list: lexed.comments }
-    for d: tokens.Diagnostic in lexed.diagnostics {
-      context.report(ctx: inout ctx, d: syntax_diagnostic(file: id, d: d))
-      had_error = true
-    }
-    for d: tokens.Diagnostic in r.diagnostics {
-      context.report(ctx: inout ctx, d: syntax_diagnostic(file: id, d: d))
-      had_error = true
-    }
-  } else {
+  var had_error: Bool = not lexable
+  let parsed: context.Parsed = context.Parsed { module: r.module, comment_list: comments }
+  for d: tokens.Diagnostic in lex_diagnostics {
+    context.report(ctx: inout ctx, d: syntax_diagnostic(file: id, d: d))
+    had_error = true
+  }
+  for d: tokens.Diagnostic in r.diagnostics {
+    context.report(ctx: inout ctx, d: syntax_diagnostic(file: id, d: d))
     had_error = true
   }
   if had_error {

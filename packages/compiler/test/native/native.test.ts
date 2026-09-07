@@ -207,7 +207,7 @@ describe.skipIf(clang === null)('native target (§19)', () => {
   }, 120000);
 
   it('every example passes on both targets', () => {
-    for (const rel of ['examples/mandelbrot/mandelbrot.onus', 'packages/compiler/test/native/primitives.onus', 'packages/compiler/test/native/eq_recursive.onus', 'packages/compiler/test/native/dict.onus', 'packages/compiler/test/native/generics.onus', 'packages/compiler/test/native/text_native.onus', 'packages/compiler/test/native/function_values.onus', 'packages/compiler/test/native/old_native.onus', 'packages/compiler/test/codegen/features.onus', 'packages/compiler/test/stdlib/list_generic.onus', 'packages/compiler/test/verify/ok_interface_calls.onus']) {
+    for (const rel of ['examples/mandelbrot/mandelbrot.onus', 'packages/compiler/test/native/primitives.onus', 'packages/compiler/test/native/eq_recursive.onus', 'packages/compiler/test/native/dict.onus', 'packages/compiler/test/native/generics.onus', 'packages/compiler/test/native/text_native.onus', 'packages/compiler/test/native/function_values.onus', 'packages/compiler/test/native/old_native.onus', 'packages/compiler/test/native/inout_conditions.onus', 'packages/compiler/test/codegen/features.onus', 'packages/compiler/test/stdlib/list_generic.onus', 'packages/compiler/test/verify/ok_interface_calls.onus']) {
       const out = fresh(`examples-${rel.split('/').pop() ?? 'x'}`);
       const ctx = checked(join(repoRoot, rel));
       const js = emitAll(ctx, { outDir: out, ts: false });

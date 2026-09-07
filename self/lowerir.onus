@@ -1676,7 +1676,11 @@ fn loop_stmt(
     }
     | None -> skip()
   }
+  -- The condition's own statements (an `inout` call) must run before every test of it, not once before the
+  -- loop (docs/CHANGES.md item 194): they are collected here and, when there are any, repeated at the end of the body.
+  let saved_cond: List[ir.Stmt] = begin_collect(l: inout l)
   let c: ir.Expr = expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: cond, discard: false)
+  let cond_pre: List[ir.Stmt] = end_collect(l: inout l, saved: saved_cond, out: [])
   var body_ir: List[ir.Stmt] = []
   var dec: Option[obligations.Obligation] = None
   match dec_clause with
@@ -1760,7 +1764,21 @@ fn loop_stmt(
       ]
     )
   }
-  return List.append(xs: out, x: ir.Loop(cond: c, body: body_ir))
+  if List.len(xs: cond_pre) == 0 {
+    return List.append(xs: out, x: ir.Loop(cond: c, body: body_ir))
+  }
+  let go: Text = tmp(l: inout l, prefix: "go")
+  let bool_t: types.Type = types.Prim(name: "Bool")
+  out = out ++ cond_pre
+  out = List.append(xs: out, x: ir.Let(name: go, ty: bool_t, mutable: true, value: c))
+  let saved_again: List[ir.Stmt] = begin_collect(l: inout l)
+  let again: ir.Expr = expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: cond, discard: false)
+  body_ir = body_ir ++ end_collect(
+    l: inout l,
+    saved: saved_again,
+    out: [ir.Assign(name: go, ty: bool_t, value: again)]
+  )
+  return List.append(xs: out, x: ir.Loop(cond: ir.Local(name: go, ty: bool_t), body: body_ir))
 }
 
 fn clause_expr(o: Option[ast.LoopClause]) -> ast.Expr may alloc {
@@ -1923,11 +1941,19 @@ fn expr(
   )
   | ast.Unary(_, _, _) -> return unary(fuel: fuel - 1, l: inout l, ctx: ctx, e: e)
   | ast.Binary(_, _, _, _) -> return binary(fuel: fuel - 1, l: inout l, ctx: ctx, e: e)
-  | ast.And(operands, _) -> return ir.And(
-    operands: exprs(fuel: fuel - 1, l: inout l, ctx: ctx, es: operands)
+  | ast.And(operands, _) -> return short_circuit(
+    fuel: fuel - 1,
+    l: inout l,
+    ctx: ctx,
+    is_and: true,
+    operands: operands
   )
-  | ast.Or(operands, _) -> return ir.Or(
-    operands: exprs(fuel: fuel - 1, l: inout l, ctx: ctx, es: operands)
+  | ast.Or(operands, _) -> return short_circuit(
+    fuel: fuel - 1,
+    l: inout l,
+    ctx: ctx,
+    is_and: false,
+    operands: operands
   )
   | ast.Is(expr, pattern, _) -> {
     let subject: ir.Expr = expr_of(fuel: fuel - 1, l: inout l, ctx: ctx, e: expr, discard: false)
@@ -3193,6 +3219,125 @@ fn def_or(o: Option[defs.Def]) -> defs.Def may alloc {
   }
 }
 
+-- A later operand of `and` or `or`: its own statements and its value.
+record Later {
+  pre: List[ir.Stmt]
+  value: ir.Expr
+}
+
+-- `and` or `or` over operands. A later operand that needs statements of its
+-- own (an `inout` call) runs only when the earlier ones leave the result
+-- undecided, through a flag; without such operands the chain is the IR's own
+-- (docs/CHANGES.md item 194).
+fn short_circuit(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  is_and: Bool,
+  operands: List[ast.Expr]
+) -> ir.Expr may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return ir.UnitE
+  }
+  if List.len(xs: operands) == 0 {
+    return ir.BoolE(v: is_and)
+  }
+  let head: ir.Expr = expr(
+    fuel: fuel - 1,
+    l: inout l,
+    ctx: ctx,
+    e: List.get(xs: operands, i: 0),
+    discard: false
+  )
+  var laters: Builder[Later] = List.builder()
+  var any_pre: Bool = false
+  var first: Bool = true
+  for o: ast.Expr in operands {
+    if first {
+      first = false
+    } else {
+      let saved: List[ir.Stmt] = begin_collect(l: inout l)
+      let v: ir.Expr = expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: o, discard: false)
+      let pre: List[ir.Stmt] = end_collect(l: inout l, saved: saved, out: [])
+      if List.len(xs: pre) > 0 {
+        any_pre = true
+      }
+      List.push(b: inout laters, x: Later { pre: pre, value: v })
+    }
+  }
+  let rest: List[Later] = List.finish(b: laters)
+  if not any_pre {
+    var all: Builder[ir.Expr] = List.builder()
+    List.push(b: inout all, x: head)
+    for lt: Later in rest {
+      List.push(b: inout all, x: lt.value)
+    }
+    if is_and {
+      return ir.And(operands: List.finish(b: all))
+    }
+    return ir.Or(operands: List.finish(b: all))
+  }
+  let name: Text = tmp(l: inout l, prefix: "sc")
+  let bool_t: types.Type = types.Prim(name: "Bool")
+  let local: ir.Expr = ir.Local(name: name, ty: bool_t)
+  push_pre(l: inout l, s: ir.Let(name: name, ty: bool_t, mutable: true, value: head))
+  for lt: Later in rest {
+    var cond: ir.Expr = local
+    if not is_and {
+      cond = ir.Not(operand: local)
+    }
+    push_pre(
+      l: inout l,
+      s: ir.If(
+        cond: cond,
+        then_block: lt.pre ++ [ir.Assign(name: name, ty: bool_t, value: lt.value)],
+        else_block: None
+      )
+    )
+  }
+  return local
+}
+
+-- `left implies right`: the right side runs only when the left holds, as `and` and `or` short-circuit (item 194).
+fn implies_expr(
+  fuel: Int where it >= 0,
+  l: inout L,
+  ctx: context.Context,
+  left: ast.Expr,
+  right: ast.Expr
+) -> ir.Expr may alloc, mutate
+  decreases fuel
+{
+  if fuel == 0 {
+    return ir.UnitE
+  }
+  let left_ir: ir.Expr = expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: left, discard: false)
+  let saved: List[ir.Stmt] = begin_collect(l: inout l)
+  let right_ir: ir.Expr = expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: right, discard: false)
+  let pre: List[ir.Stmt] = end_collect(l: inout l, saved: saved, out: [])
+  if List.len(xs: pre) == 0 {
+    return ir.Implies(left: left_ir, right: right_ir)
+  }
+  let name: Text = tmp(l: inout l, prefix: "sc")
+  let bool_t: types.Type = types.Prim(name: "Bool")
+  let local: ir.Expr = ir.Local(name: name, ty: bool_t)
+  push_pre(
+    l: inout l,
+    s: ir.Let(name: name, ty: bool_t, mutable: true, value: ir.Not(operand: left_ir))
+  )
+  push_pre(
+    l: inout l,
+    s: ir.If(
+      cond: ir.Not(operand: local),
+      then_block: pre ++ [ir.Assign(name: name, ty: bool_t, value: right_ir)],
+      else_block: None
+    )
+  )
+  return local
+}
+
 fn binary(
   fuel: Int where it >= 0,
   l: inout L,
@@ -3206,6 +3351,9 @@ fn binary(
   }
   match e with
   | ast.Binary(op, left, right, span) -> {
+    if op == "implies" {
+      return implies_expr(fuel: fuel - 1, l: inout l, ctx: ctx, left: left, right: right)
+    }
     let lt: types.Type = type_of_expr(l: l, ctx: ctx, e: left)
     let s: types.Type = types.strip(t: lt)
     let left_ir: ir.Expr = expr(fuel: fuel - 1, l: inout l, ctx: ctx, e: left, discard: false)

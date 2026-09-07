@@ -57,6 +57,8 @@ fn dump_token(t: tokens.Token, src: List[Int]) -> Text may alloc {
   | tokens.Punct(text) -> return text ++ where_
   | tokens.Newline -> return "nl" ++ where_
   | tokens.Eof -> return "eof" ++ where_
+  | tokens.Cursor -> return "cursor" ++ where_
+  | tokens.Hole -> return "hole" ++ where_
 }
 
 fn code_point_list(t: Text) -> Text may alloc {

@@ -176,37 +176,125 @@ export function describe_kind({ kind }) {
       return "end of file";
       break $m3$match;
     }
+    if ($m3.tag === "Cursor") {
+      return "`cursor`";
+      break $m3$match;
+    }
+    if ($m3.tag === "Hole") {
+      return "`hole`";
+      break $m3$match;
+    }
     $rt.unreachable();
   }
 }
 
-export function is_punct({ kind, want }) {
+export function decoder_name({ kind }) {
   const $m4 = kind;
   $m4$match: {
+    if ($m4.tag === "Name") {
+      const text = $m4.text;
+      return "ident";
+      break $m4$match;
+    }
+    if ($m4.tag === "TName") {
+      const text = $m4.text;
+      return "type-ident";
+      break $m4$match;
+    }
+    if ($m4.tag === "IntLit") {
+      const value = $m4.value;
+      const text = $m4.text;
+      return "literal:int";
+      break $m4$match;
+    }
+    if ($m4.tag === "FloatLit") {
+      const value = $m4.value;
+      return "literal:float";
+      break $m4$match;
+    }
+    if ($m4.tag === "TextLit") {
+      const value = $m4.value;
+      return "literal:text";
+      break $m4$match;
+    }
+    if ($m4.tag === "DurationLit") {
+      const nanos = $m4.nanos;
+      return "literal:duration";
+      break $m4$match;
+    }
+    if ($m4.tag === "Keyword") {
+      const word = $m4.word;
+      return word;
+      break $m4$match;
+    }
     if ($m4.tag === "Punct") {
       const text = $m4.text;
-      return text === want;
+      return text;
       break $m4$match;
+    }
+    if ($m4.tag === "Newline") {
+      return "newline";
+      break $m4$match;
+    }
+    if ($m4.tag === "Eof") {
+      return "eof";
+      break $m4$match;
+    }
+    if ($m4.tag === "Cursor") {
+      return "cursor";
+      break $m4$match;
+    }
+    if ($m4.tag === "Hole") {
+      return "hole";
+      break $m4$match;
+    }
+    $rt.unreachable();
+  }
+}
+
+export function decoder_name_of({ kind }) {
+  if (kind === "name") {
+    return "ident";
+  }
+  if (kind === "tname") {
+    return "type-ident";
+  }
+  if (kind === "int" || kind === "float" || kind === "text" || kind === "duration") {
+    return "literal:" + kind;
+  }
+  if (kind === "nl") {
+    return "newline";
+  }
+  return kind;
+}
+
+export function is_punct({ kind, want }) {
+  const $m5 = kind;
+  $m5$match: {
+    if ($m5.tag === "Punct") {
+      const text = $m5.text;
+      return text === want;
+      break $m5$match;
     }
     if (true) {
       return false;
-      break $m4$match;
+      break $m5$match;
     }
     $rt.unreachable();
   }
 }
 
 export function is_word({ kind, want }) {
-  const $m5 = kind;
-  $m5$match: {
-    if ($m5.tag === "Keyword") {
-      const word = $m5.word;
+  const $m6 = kind;
+  $m6$match: {
+    if ($m6.tag === "Keyword") {
+      const word = $m6.word;
       return word === want;
-      break $m5$match;
+      break $m6$match;
     }
     if (true) {
       return false;
-      break $m5$match;
+      break $m6$match;
     }
     $rt.unreachable();
   }

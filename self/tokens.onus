@@ -13,6 +13,10 @@ pub union Kind =
   | Punct of text: Text
   | Newline
   | Eof
+  -- The position being completed (`onus next`, §14): matches no grammar alternative and cannot be consumed.
+  | Cursor
+  -- A synthesised expression at the cursor, typed to find the expected type (§14).
+  | Hole
 
 pub record Token {
   kind: Kind
@@ -300,6 +304,45 @@ pub fn describe_kind(kind: Kind) -> Text may alloc {
   | Punct(text) -> return "`" ++ text ++ "`"
   | Newline -> return "newline"
   | Eof -> return "end of file"
+  | Cursor -> return "`cursor`"
+  | Hole -> return "`hole`"
+}
+
+-- The decoder-facing name of a token kind (`onus next`, §14): keywords and
+-- punctuation as themselves; `ident`, `type-ident`, `literal:int`,
+-- `literal:float`, `literal:text`, `literal:duration`, `newline`, `eof`.
+pub fn decoder_name(kind: Kind) -> Text {
+  match kind with
+  | Name(text) -> return "ident"
+  | TName(text) -> return "type-ident"
+  | IntLit(value, text) -> return "literal:int"
+  | FloatLit(value) -> return "literal:float"
+  | TextLit(value) -> return "literal:text"
+  | DurationLit(nanos) -> return "literal:duration"
+  | Keyword(word) -> return word
+  | Punct(text) -> return text
+  | Newline -> return "newline"
+  | Eof -> return "eof"
+  | Cursor -> return "cursor"
+  | Hole -> return "hole"
+}
+
+-- The decoder-facing name of a kind the parser recorded by its grammar name
+-- (`name`, `tname`, `int`, `float`, `text`, `duration`, `nl`, `eof`, a keyword or punctuation).
+pub fn decoder_name_of(kind: Text) -> Text may alloc {
+  if kind == "name" {
+    return "ident"
+  }
+  if kind == "tname" {
+    return "type-ident"
+  }
+  if kind == "int" or kind == "float" or kind == "text" or kind == "duration" {
+    return "literal:" ++ kind
+  }
+  if kind == "nl" {
+    return "newline"
+  }
+  return kind
 }
 
 pub fn is_punct(kind: Kind, want: Text) -> Bool {

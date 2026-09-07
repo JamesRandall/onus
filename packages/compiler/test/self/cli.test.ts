@@ -21,6 +21,8 @@ import { findZ3 } from '../../src/verify/z3.js';
 import { runPipeline } from '../../src/driver.js';
 import { toText } from '../../src/report/diagnostic.js';
 import { STDLIB_ROOT } from '../harness.js';
+import { lex } from '../../src/lexer/lexer.js';
+import { DiagnosticSink } from '../../src/report/diagnostic.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..', '..', '..', '..');
@@ -351,6 +353,32 @@ describe('the command line in Onus (M15.4)', () => {
     compare(failing, 'review');
     expect(readFileSync(join(failing.onus, 'review', 'index.html'), 'utf8')).toContain('E0416');
   }, 600000);
+
+  it('next: the legal tokens, the expected type and the names in scope at every token of the fixture (item 195)', () => {
+    const source = join(repoRoot, 'packages/compiler/test/next/positions.onus');
+    const cwd = staged(source, 'next');
+    const text = readFileSync(source, 'utf8');
+    const file = new Context().addFile(source, text);
+    const offsets = lex(file, new DiagnosticSink()).tokens.filter((t) => t.kind !== 'comment' && !(t.kind === 'nl' && t.span.start === t.span.end)).map((t) => t.span.start);
+    offsets.push(text.length);
+    expect(offsets.length).toBeGreaterThan(100);
+    const misses: string[] = [];
+    for (const offset of offsets) {
+      const r = both(['next', 'positions.onus', '--offset', String(offset), '--json'], cwd);
+      if (r.onus.stdout !== r.ts.stdout || r.onus.status !== r.ts.status) misses.push(`${offset}: ts ${r.ts.stdout.trim()} | onus ${r.onus.stdout.trim()} ${r.onus.stderr.trim()}`);
+    }
+    expect(misses).toEqual([]);
+    // The text form, an expected type with its refinement, and the refused offsets.
+    const marker = 'total = total + ';
+    agree(both(['next', 'positions.onus', '--offset', String(text.indexOf(marker) + marker.length)], cwd));
+    const t = both(['next', 'positions.onus', '--offset', String(text.indexOf('var total: Int where it >= 0 = ') + 'var total: Int where it >= 0 = '.length)], cwd);
+    agree(t);
+    expect(t.ts.stdout).toContain('expected: Int where it >= 0');
+    expect(t.ts.stdout).toContain('in scope: xs, ratio, flag');
+    agree(both(['next', 'positions.onus', '--offset', '-1'], cwd));
+    agree(both(['next', 'positions.onus', '--offset', 'x'], cwd));
+    agree(both(['next', 'positions.onus'], cwd));
+  }, 900000);
 
   it.skipIf(clang === null)('the released compiler needs no repository: no --stdlib, no --runtime, no node on the path (item 180)', () => {
     const native = buildNative(ctx, { outDir: fresh('release-build') });

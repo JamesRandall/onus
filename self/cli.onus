@@ -22,6 +22,7 @@ import obligations
 import ledger
 import bundle
 import testcmd
+import nextcmd
 import review
 import z3
 import mutate
@@ -34,14 +35,14 @@ import jsemit
 -- The `onus` command line in Onus (impl spec §2, M15.4; `cli/main.ts`):
 -- `check`, `fmt`, `build`, `run`, `test` (examples, properties and laws,
 -- docs/CHANGES.md item 189; `--assumptions`, item 191; `--mutate`, item
--- 192), `interface` and `path`. `review`, `loop` and `next` stay with the
--- TypeScript `onus` until M15.6 completes.
+-- 192), `interface`, `path`, `review` (item 193) and `next` (item 195).
+-- `loop` stays with the TypeScript `onus` until M15.6 completes.
 --
 -- Exit status, as the TypeScript command line reports it (docs/CHANGES.md
 -- item 187): 0 success, 1 diagnostics (or a breaking interface, or a native
 -- build that failed), 2 usage or I/O failure, and for `run` the program's own,
 -- since `run` hands the program the terminal through `io.exec`.
-pub const usage: Text = "usage:\n  onus check <file.onus>... [--json] [--root <dir>] [--stdlib <dir>] [--to <pass>] [--budget <ms>] [--ledger] [--no-cache]\n      report every diagnostic; exit 1 if any. Passes: parse, canonical, load, resolve, types, consteval, effects, contracts, claims, capabilities, verify, paths\n  onus fmt <file.onus>... [--stdout]\n      rewrite files in canonical form\n  onus build <entry.onus> [--out <dir>] [--emit js|ir] [--target js|native|wasm] [--root <dir>] [--stdlib <dir>] [--runtime <path>]\n      check, then emit JavaScript for every module into <dir> (default: <entry dir>/out); --target native compiles\n      an executable with clang into <dir>/native (§19); --emit ir prints the target-neutral form\n  onus run <entry.onus> [--out <dir>] [--target js|native|wasm] [-- args...]\n      build, then run the entry module's main\n  onus test <entry.onus> [--out <dir>] [--target js|native|all] [--root <dir>] [--stdlib <dir>]\n      build, then run the generated example, property and law tests (§20.6); --target all runs the examples on\n      both targets and reports any disagreement as E0801 (§19.5)\n  onus test <entry.onus> --mutate [--out <dir>] [--root <dir>] [--stdlib <dir>] [--budget <ms>]\n      weaken each contract in turn and report the weakenings no example, property or law detects (§20.4)\n  onus test <entry.onus> --assumptions [--env <test module>] [--out <dir>] [--root <dir>] [--stdlib <dir>]\n      run every verify block against capabilities from the environment module and record the results in .onus/ledger/ (§20.2–§20.3)\n  onus interface <file.onus> [--json] [--diff <old-interface.json>] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]\n      check, then print the entry module's interface: canonical source with bodies elided, or the §11.1 JSON;\n      with --diff, the changes since a previous interface document (§11.1, §15.1)\n  onus path <file.onus> [<name>] [--json] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]\n      check, then print the §9.1 report of the entry module's paths (or of the named one)\n  onus --version\n      print the compiler's version\n  review, loop and next: run the TypeScript `onus` until M15.6 completes\nThe standard library is --stdlib or ONUS_STDLIB, else the one the compiler carries; the runtime for build and run is --runtime or ONUS_RUNTIME, else the one the compiler carries, written beside the program.\n"
+pub const usage: Text = "usage:\n  onus check <file.onus>... [--json] [--root <dir>] [--stdlib <dir>] [--to <pass>] [--budget <ms>] [--ledger] [--no-cache]\n      report every diagnostic; exit 1 if any. Passes: parse, canonical, load, resolve, types, consteval, effects, contracts, claims, capabilities, verify, paths\n  onus fmt <file.onus>... [--stdout]\n      rewrite files in canonical form\n  onus build <entry.onus> [--out <dir>] [--emit js|ir] [--target js|native|wasm] [--root <dir>] [--stdlib <dir>] [--runtime <path>]\n      check, then emit JavaScript for every module into <dir> (default: <entry dir>/out); --target native compiles\n      an executable with clang into <dir>/native (§19); --emit ir prints the target-neutral form\n  onus run <entry.onus> [--out <dir>] [--target js|native|wasm] [-- args...]\n      build, then run the entry module's main\n  onus test <entry.onus> [--out <dir>] [--target js|native|all] [--root <dir>] [--stdlib <dir>]\n      build, then run the generated example, property and law tests (§20.6); --target all runs the examples on\n      both targets and reports any disagreement as E0801 (§19.5)\n  onus test <entry.onus> --mutate [--out <dir>] [--root <dir>] [--stdlib <dir>] [--budget <ms>]\n      weaken each contract in turn and report the weakenings no example, property or law detects (§20.4)\n  onus test <entry.onus> --assumptions [--env <test module>] [--out <dir>] [--root <dir>] [--stdlib <dir>]\n      run every verify block against capabilities from the environment module and record the results in .onus/ledger/ (§20.2–§20.3)\n  onus interface <file.onus> [--json] [--diff <old-interface.json>] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]\n      check, then print the entry module's interface: canonical source with bodies elided, or the §11.1 JSON;\n      with --diff, the changes since a previous interface document (§11.1, §15.1)\n  onus path <file.onus> [<name>] [--json] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]\n      check, then print the §9.1 report of the entry module's paths (or of the named one)\n  onus --version\n      print the compiler's version\n  onus review <entry.onus> [--out <dir>] [--against <interface.json>] [--root <dir>] [--stdlib <dir>] [--budget <ms>]\n      check, then write the review page and its bundle (§15) into <dir> (default: <entry dir>/review)\n  onus next <file.onus> --offset <n> [--json] [--root <dir>] [--stdlib <dir>]\n      the legal next tokens at the offset (in code points), the expected type there and the names in scope (§14)\n  loop: run the TypeScript `onus` until M15.6 completes\nThe standard library is --stdlib or ONUS_STDLIB, else the one the compiler carries; the runtime for build and run is --runtime or ONUS_RUNTIME, else the one the compiler carries, written beside the program.\n"
 
 pub const passes: List[Text] = [
   "parse",
@@ -444,7 +445,7 @@ fn failure_status(console: io.Console, e: io.Error) -> Int may io.file, alloc {
     if detail == "diagnostics" or detail == "native build failed" or detail == "breaking" {
       return 1
     }
-    if detail == "usage" or detail == "unknown pass" or detail == "--emit ts" or detail == "--emit" or detail == "--target" or detail == "no main" or detail == "not a module" or detail == "not an interface document" or detail == "no such path" or detail == "--assumptions" or detail == "--mutate" or detail == "launcher" {
+    if detail == "usage" or detail == "unknown pass" or detail == "--emit ts" or detail == "--emit" or detail == "--target" or detail == "no main" or detail == "not a module" or detail == "not an interface document" or detail == "no such path" or detail == "--assumptions" or detail == "--mutate" or detail == "launcher" or detail == "--offset" {
       return 2
     }
     io.eprint(console: console, text: "onus: " ++ detail ++ "\n")
@@ -1184,6 +1185,67 @@ fn interface_command(
   return Ok(value: Unit)
 }
 
+-- `onus next` (§14; item 195): the completion state at an offset of a file.
+fn next_command(
+  args: Args,
+  files: io.Files,
+  console: io.Console,
+  env: io.Env
+) -> Result[Int, io.Error] may io.file, io.env, alloc, mutate {
+  if List.len(xs: args.files) == 0 or value(args: args, name: "offset") is None {
+    return Err(error: usage_failure(console: console))
+  }
+  let entry: Text = List.get(xs: args.files, i: 0)
+  var offset: Int = -1
+  match Int.parse(t: value_or(args: args, name: "offset", fallback: "")) with
+  | Some(value) -> offset = value
+  | None -> skip()
+  if offset < 0 {
+    io.eprint(console: console, text: "onus next: --offset takes a non-negative integer\n")
+    return Err(error: Other(detail: "--offset"))
+  }
+  let text: Text = try io.read(files: files, path: entry)
+  let s: Setup = setup(args: args, files: files, env: env)
+  var ctx: context.Context = s.ctx
+  let r: nextcmd.NextResult = nextcmd.next(
+    ctx: inout ctx,
+    files: files,
+    path: entry,
+    text: text,
+    offset: offset
+  )
+  if flag(args: args, name: "json") {
+    io.print(
+      console: console,
+      text: json.compact(
+        j: json.JObject(
+          fields: [
+            json.field(key: "tokens", value: json.texts(ts: r.tokens)),
+            json.field(key: "expectedType", value: json.text_or_null(o: r.expected_type)),
+            json.field(key: "inScope", value: json.texts(ts: r.in_scope))
+          ]
+        )
+      ) ++ "\n"
+    )
+    return Ok(value: 0)
+  }
+  var expected: Text = "(none)"
+  match r.expected_type with
+  | Some(value) -> expected = value
+  | None -> skip()
+  io.print(
+    console: console,
+    text: "tokens: " ++ Text.join(
+      parts: r.tokens,
+      sep: " "
+    ) ++ "\nexpected: " ++ expected ++ "\nin scope: " ++ Text.join(
+      parts: r.in_scope,
+      sep: ", "
+    ) ++ "\n"
+  )
+  return Ok(value: 0)
+}
+
 -- `onus review` (§15; item 193): the review bundle and page written into the
 -- output directory after the pipeline ran to paths; diagnostics are
 -- reported and the page then holds them alone.
@@ -1400,6 +1462,14 @@ pub fn main(
         value: exit_status(
           console: console,
           r: path_command(args: a, files: files, console: console, process: process, env: env)
+        )
+      )
+    }
+    if value == "next" {
+      return Ok(
+        value: exit_status_of(
+          console: console,
+          r: next_command(args: a, files: files, console: console, env: env)
         )
       )
     }

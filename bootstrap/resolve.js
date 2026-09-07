@@ -158,13 +158,10 @@ export function visible_locals({ s }) {
       break $m18$match;
     }
     if ($m18.tag === "None") {
-      outer = [];
+      return [];
       break $m18$match;
     }
     $rt.unreachable();
-  }
-  if (s.frame < 0) {
-    return outer;
   }
   let out = $std_list.builder({  });
   for (const n of outer) {
@@ -1151,9 +1148,13 @@ export function claim_ref({ r, ctx, q, at }) {
         const [$r174, ctx$91] = members_of({ ctx: ctx, mod: value });
         ctx = ctx$91;
         found = find_or({ d: $r174.claim_table, key: last.text });
-        const [$r175, ctx$92] = visible({ r: r, ctx: ctx, d: $context.get_def({ ctx: ctx, id: found }), at: q.span, what: "claim" });
-        ctx = ctx$92;
-        if (found >= 0 && !$r175) {
+        let $sc176 = found >= 0;
+        if ($sc176) {
+          const [$r175, ctx$92] = visible({ r: r, ctx: ctx, d: $context.get_def({ ctx: ctx, id: found }), at: q.span, what: "claim" });
+          ctx = ctx$92;
+          $sc176 = !$r175;
+        }
+        if ($sc176) {
           return [{ tag: "None" }, ctx];
         }
         break $m171$match;
@@ -1166,17 +1167,17 @@ export function claim_ref({ r, ctx, q, at }) {
     ctx = ctx$93;
     return [{ tag: "None" }, ctx];
   }
-  const $m178 = at;
-  $m178$match: {
-    if ($m178.tag === "Some") {
-      const value = $m178.value;
+  const $m179 = at;
+  $m179$match: {
+    if ($m179.tag === "Some") {
+      const value = $m179.value;
       const [, ctx$94] = $context.set_ref({ ctx: ctx, key: value, res: { tag: "DefRes", def: found } });
       ctx = ctx$94;
-      break $m178$match;
+      break $m179$match;
     }
-    if ($m178.tag === "None") {
+    if ($m179.tag === "None") {
       skip({  });
-      break $m178$match;
+      break $m179$match;
     }
     $rt.unreachable();
   }
@@ -1184,73 +1185,77 @@ export function claim_ref({ r, ctx, q, at }) {
 }
 
 export function res_claim_pred({ r, ctx, p }) {
-  const $m181 = p;
-  $m181$match: {
-    if ($m181.tag === "ClaimAtom") {
-      const name = $m181.name;
-      const span = $m181.span;
+  const $m182 = p;
+  $m182$match: {
+    if ($m182.tag === "ClaimAtom") {
+      const name = $m182.name;
+      const span = $m182.span;
       const n = $std_list.len({ xs: name.segments });
       let is_claim = false;
       if (n > 0) {
         is_claim = starts_upper({ t: $std_list.get({ xs: name.segments, i: $rt.int.sub(n, 1, $ob11) }).text });
       }
-      const [$r182, ctx$95] = claim_exists({ r: r, ctx: ctx, q: name });
-      ctx = ctx$95;
-      if (is_claim || $r182) {
-        const [$r184, ctx$96] = claim_ref({ r: r, ctx: ctx, q: name, at: { tag: "Some", value: key({ r: r, tag: $defs.tag_misc, span: span }) } });
+      let $sc184 = is_claim;
+      if (!$sc184) {
+        const [$r183, ctx$95] = claim_exists({ r: r, ctx: ctx, q: name });
+        ctx = ctx$95;
+        $sc184 = $r183;
+      }
+      if ($sc184) {
+        const [$r186, ctx$96] = claim_ref({ r: r, ctx: ctx, q: name, at: { tag: "Some", value: key({ r: r, tag: $defs.tag_misc, span: span }) } });
         ctx = ctx$96;
-        const c = $r184;
+        const c = $r186;
       } else {
-        const [$r187, ctx$97] = effect_of({ r: r, ctx: ctx, e: { name: name, span: span }, scope: r.module_scope, allow_recover: false });
+        const [$r189, ctx$97] = effect_of({ r: r, ctx: ctx, e: { name: name, span: span }, scope: r.module_scope, allow_recover: false });
         ctx = ctx$97;
-        const $m185 = $r187;
-        $m185$match: {
-          if ($m185.tag === "Some") {
-            const value = $m185.value;
+        const $m187 = $r189;
+        $m187$match: {
+          if ($m187.tag === "Some") {
+            const value = $m187.value;
             const [, ctx$98] = $context.set_ref({ ctx: ctx, key: key({ r: r, tag: $defs.tag_misc, span: span }), res: { tag: "EffectRes", effect: value } });
             ctx = ctx$98;
-            break $m185$match;
+            break $m187$match;
           }
-          if ($m185.tag === "None") {
+          if ($m187.tag === "None") {
             skip({  });
-            break $m185$match;
+            break $m187$match;
           }
           $rt.unreachable();
         }
       }
-      break $m181$match;
+      break $m182$match;
     }
-    if ($m181.tag === "ClaimEffectsEq") {
-      const effects = $m181.effects;
-      const span = $m181.span;
+    if ($m182.tag === "ClaimEffectsEq") {
+      const effects = $m182.effects;
+      const span = $m182.span;
       const [, ctx$99] = res_effects({ r: r, ctx: ctx, refs: effects, scope: r.module_scope, allow_recover: false });
       ctx = ctx$99;
-      break $m181$match;
+      break $m182$match;
     }
-    if ($m181.tag === "ClaimNot") {
-      const operand = $m181.operand;
-      const span = $m181.span;
+    if ($m182.tag === "ClaimNot") {
+      const operand = $m182.operand;
+      const span = $m182.span;
       const [, ctx$100] = res_claim_pred({ r: r, ctx: ctx, p: operand });
       ctx = ctx$100;
-      break $m181$match;
+      break $m182$match;
     }
-    if ($m181.tag === "ClaimAnd") {
-      const operands = $m181.operands;
-      const span = $m181.span;
+    if ($m182.tag === "ClaimAnd") {
+      const operands = $m182.operands;
+      const span = $m182.span;
       for (const o of operands) {
         const [, ctx$101] = res_claim_pred({ r: r, ctx: ctx, p: o });
         ctx = ctx$101;
       }
-      break $m181$match;
+      break $m182$match;
     }
-    if ($m181.tag === "ClaimOr") {
-      const operands = $m181.operands;
-      const span = $m181.span;
+    if ($m182.tag === "ClaimOr") {
+      const operands = $m182.operands;
+      const span = $m182.span;
       for (const o of operands) {
         const [, ctx$102] = res_claim_pred({ r: r, ctx: ctx, p: o });
         ctx = ctx$102;
       }
-      break $m181$match;
+      break $m182$match;
     }
     $rt.unreachable();
   }
@@ -1271,19 +1276,19 @@ export function bind_type_param({ r, ctx, scope, name, key, node, parent }) {
 }
 
 export function interface_def({ ctx, owner }) {
-  const $m192 = owner;
-  $m192$match: {
-    if ($m192.tag === "None") {
+  const $m194 = owner;
+  $m194$match: {
+    if ($m194.tag === "None") {
       return { tag: "None" };
-      break $m192$match;
+      break $m194$match;
     }
-    if ($m192.tag === "Some") {
-      const value = $m192.value;
+    if ($m194.tag === "Some") {
+      const value = $m194.value;
       if (is_interface({ ctx: ctx, o: value })) {
         return owner_def({ o: value });
       }
       return { tag: "None" };
-      break $m192$match;
+      break $m194$match;
     }
     $rt.unreachable();
   }
@@ -1291,19 +1296,19 @@ export function interface_def({ ctx, owner }) {
 
 export function res_tparams({ r, ctx, ps, scope }) {
   for (const p of ps) {
-    const $m195 = p;
-    $m195$match: {
-      if ($m195.tag === "TypeParam") {
-        const name = $m195.name;
-        const bound = $m195.bound;
-        const span = $m195.span;
-        const [$r198, ctx$105] = bind_type_param({ r: r, ctx: ctx, scope: scope, name: name, key: key({ r: r, tag: $defs.tag_sig, span: span }), node: { tag: "TParamNode", decl: p }, parent: { tag: "None" } });
+    const $m197 = p;
+    $m197$match: {
+      if ($m197.tag === "TypeParam") {
+        const name = $m197.name;
+        const bound = $m197.bound;
+        const span = $m197.span;
+        const [$r200, ctx$105] = bind_type_param({ r: r, ctx: ctx, scope: scope, name: name, key: key({ r: r, tag: $defs.tag_sig, span: span }), node: { tag: "TParamNode", decl: p }, parent: { tag: "None" } });
         ctx = ctx$105;
-        const id = $r198;
-        const $m199 = bound;
-        $m199$match: {
-          if ($m199.tag === "Some") {
-            const value = $m199.value;
+        const id = $r200;
+        const $m201 = bound;
+        $m201$match: {
+          if ($m201.tag === "Some") {
+            const value = $m201.value;
             const iface = or_neg({ o: interface_def({ ctx: ctx, owner: lookup_type({ s: scope, name: value.text }) }) });
             if (iface >= 0) {
               const [, ctx$106] = $context.set_ref({ ctx: ctx, key: key({ r: r, tag: $defs.tag_sig, span: span }), res: { tag: "DefRes", def: iface } });
@@ -1312,30 +1317,30 @@ export function res_tparams({ r, ctx, ps, scope }) {
               const [, ctx$107] = rep({ r: r, ctx: ctx, code: "E0106", at: value.span, detail: "`" + value.text + "` is not an interface in scope" });
               ctx = ctx$107;
             }
-            break $m199$match;
+            break $m201$match;
           }
-          if ($m199.tag === "None") {
+          if ($m201.tag === "None") {
             skip({  });
-            break $m199$match;
+            break $m201$match;
           }
           $rt.unreachable();
         }
-        break $m195$match;
+        break $m197$match;
       }
-      if ($m195.tag === "ConstParam") {
-        const name = $m195.name;
-        const ty = $m195.ty;
-        const span = $m195.span;
+      if ($m197.tag === "ConstParam") {
+        const name = $m197.name;
+        const ty = $m197.ty;
+        const span = $m197.span;
         const [, ctx$108] = res_type({ r: r, ctx: ctx, t: ty, scope: scope, as_arg: false });
         ctx = ctx$108;
-        const [$r203, ctx$109] = bind_value({ r: r, ctx: ctx, scope: scope, kind: { tag: "ConstParam" }, node: { tag: "TParamNode", decl: p }, name: name, key: key({ r: r, tag: $defs.tag_sig, span: span }), is_inout: false });
+        const [$r205, ctx$109] = bind_value({ r: r, ctx: ctx, scope: scope, kind: { tag: "ConstParam" }, node: { tag: "TParamNode", decl: p }, name: name, key: key({ r: r, tag: $defs.tag_sig, span: span }), is_inout: false });
         ctx = ctx$109;
-        const id = $r203;
-        break $m195$match;
+        const id = $r205;
+        break $m197$match;
       }
-      if ($m195.tag === "EffectParam") {
-        const name = $m195.name;
-        const span = $m195.span;
+      if ($m197.tag === "EffectParam") {
+        const name = $m197.name;
+        const span = $m197.span;
         const id = $context.def_count({ ctx: ctx });
         const [, ctx$110] = $context.add_def({ ctx: ctx, d: { id: id, kind: { tag: "EffectParam" }, node: { tag: "TParamNode", decl: p }, name: name.text, mod: r.m.id, file: r.m.file, key: key({ r: r, tag: $defs.tag_sig, span: span }), span: name.span, is_pub: false, is_sealed: false, is_intrinsic: false, parent: { tag: "None" }, frame: scope.frame, is_inout: false } });
         ctx = ctx$110;
@@ -1344,7 +1349,7 @@ export function res_tparams({ r, ctx, ps, scope }) {
           ctx = ctx$111;
         }
         scope_set_effect({ s: scope, name: name.text, id: id });
-        break $m195$match;
+        break $m197$match;
       }
       $rt.unreachable();
     }
@@ -1365,9 +1370,9 @@ export function res_params({ r, ctx, ps, scope, bind }) {
       const [, seen$114] = $std_map.set({ d: seen, key: p.name.text, value: true });
       seen = seen$114;
       if (bind) {
-        const [$r210, ctx$115] = bind_value({ r: r, ctx: ctx, scope: scope, kind: { tag: "Param" }, node: { tag: "ParamNode", decl: p }, name: p.name, key: key({ r: r, tag: $defs.tag_sig, span: p.span }), is_inout: p.is_inout });
+        const [$r212, ctx$115] = bind_value({ r: r, ctx: ctx, scope: scope, kind: { tag: "Param" }, node: { tag: "ParamNode", decl: p }, name: p.name, key: key({ r: r, tag: $defs.tag_sig, span: p.span }), is_inout: p.is_inout });
         ctx = ctx$115;
-        const id = $r210;
+        const id = $r212;
       }
     }
   }
@@ -1376,93 +1381,93 @@ export function res_params({ r, ctx, ps, scope, bind }) {
 }
 
 export function owner_res({ o }) {
-  const $m211 = o;
-  $m211$match: {
-    if ($m211.tag === "DefOwner") {
-      const def = $m211.def;
+  const $m213 = o;
+  $m213$match: {
+    if ($m213.tag === "DefOwner") {
+      const def = $m213.def;
       return { tag: "DefRes", def: def };
-      break $m211$match;
+      break $m213$match;
     }
-    if ($m211.tag === "PrimOwner") {
-      const name = $m211.name;
+    if ($m213.tag === "PrimOwner") {
+      const name = $m213.name;
       return { tag: "PrimRes", name: name };
-      break $m211$match;
+      break $m213$match;
     }
     $rt.unreachable();
   }
 }
 
 export function res_type({ r, ctx, t, scope, as_arg }) {
-  const $m214 = t;
-  $m214$match: {
-    if ($m214.tag === "FnType") {
-      const params = $m214.params;
-      const ret = $m214.ret;
-      const effects = $m214.effects;
-      const span = $m214.span;
+  const $m216 = t;
+  $m216$match: {
+    if ($m216.tag === "FnType") {
+      const params = $m216.params;
+      const ret = $m216.ret;
+      const effects = $m216.effects;
+      const span = $m216.span;
       const [, ctx$116] = res_params({ r: r, ctx: ctx, ps: params, scope: scope, bind: false });
       ctx = ctx$116;
       const [, ctx$117] = res_type({ r: r, ctx: ctx, t: ret, scope: scope, as_arg: false });
       ctx = ctx$117;
       const [, ctx$118] = res_effects({ r: r, ctx: ctx, refs: effects, scope: scope, allow_recover: false });
       ctx = ctx$118;
-      break $m214$match;
+      break $m216$match;
     }
-    if ($m214.tag === "NamedType") {
-      const name = $m214.name;
-      const args = $m214.args;
-      const where_ = $m214.where_;
-      const span = $m214.span;
-      const [$r216, ctx$119] = type_name({ r: r, ctx: ctx, q: name, scope: scope, allow_variant: as_arg && $std_list.len({ xs: args }) === 0 && where_.tag === "None" });
+    if ($m216.tag === "NamedType") {
+      const name = $m216.name;
+      const args = $m216.args;
+      const where_ = $m216.where_;
+      const span = $m216.span;
+      const [$r218, ctx$119] = type_name({ r: r, ctx: ctx, q: name, scope: scope, allow_variant: as_arg && $std_list.len({ xs: args }) === 0 && where_.tag === "None" });
       ctx = ctx$119;
-      const $m215 = $r216;
-      $m215$match: {
-        if ($m215.tag === "Some") {
-          const value = $m215.value;
+      const $m217 = $r218;
+      $m217$match: {
+        if ($m217.tag === "Some") {
+          const value = $m217.value;
           const [, ctx$120] = $context.set_ref({ ctx: ctx, key: key({ r: r, tag: $defs.tag_type, span: span }), res: owner_res({ o: value }) });
           ctx = ctx$120;
-          break $m215$match;
+          break $m217$match;
         }
-        if ($m215.tag === "None") {
+        if ($m217.tag === "None") {
           skip({  });
-          break $m215$match;
+          break $m217$match;
         }
         $rt.unreachable();
       }
       for (const a of args) {
-        const $m217 = a;
-        $m217$match: {
-          if ($m217.tag === "TypeArgType") {
-            const ty = $m217.ty;
+        const $m219 = a;
+        $m219$match: {
+          if ($m219.tag === "TypeArgType") {
+            const ty = $m219.ty;
             const [, ctx$121] = res_type({ r: r, ctx: ctx, t: ty, scope: scope, as_arg: true });
             ctx = ctx$121;
-            break $m217$match;
+            break $m219$match;
           }
-          if ($m217.tag === "TypeArgConst") {
-            const expr = $m217.expr;
+          if ($m219.tag === "TypeArgConst") {
+            const expr = $m219.expr;
             const [, ctx$122] = res_expr({ r: r, ctx: ctx, e: expr, scope: scope });
             ctx = ctx$122;
-            break $m217$match;
+            break $m219$match;
           }
           $rt.unreachable();
         }
       }
-      const $m218 = where_;
-      $m218$match: {
-        if ($m218.tag === "Some") {
-          const value = $m218.value;
+      const $m220 = where_;
+      $m220$match: {
+        if ($m220.tag === "Some") {
+          const value = $m220.value;
           const inner = { ...r, in_where: true };
           const [, ctx$123] = res_expr({ r: inner, ctx: ctx, e: value, scope: scope });
           ctx = ctx$123;
-          break $m218$match;
+          break $m220$match;
         }
-        if ($m218.tag === "None") {
+        if ($m220.tag === "None") {
           skip({  });
-          break $m218$match;
+          break $m220$match;
         }
         $rt.unreachable();
       }
-      break $m214$match;
+      break $m216$match;
     }
     $rt.unreachable();
   }
@@ -1477,32 +1482,32 @@ export function type_name({ r, ctx, q, scope, allow_variant }) {
   }
   const last = $std_list.get({ xs: q.segments, i: $rt.int.sub(n, 1, $ob12) });
   if (n === 1) {
-    const $m221 = lookup_type({ s: scope, name: last.text });
-    $m221$match: {
-      if ($m221.tag === "Some") {
-        const value = $m221.value;
+    const $m223 = lookup_type({ s: scope, name: last.text });
+    $m223$match: {
+      if ($m223.tag === "Some") {
+        const value = $m223.value;
         return [{ tag: "Some", value: value }, ctx];
-        break $m221$match;
+        break $m223$match;
       }
-      if ($m221.tag === "None") {
+      if ($m223.tag === "None") {
         skip({  });
-        break $m221$match;
+        break $m223$match;
       }
       $rt.unreachable();
     }
     if (allow_variant) {
-      const [$r224, ctx$124] = lookup_variant({ r: r, ctx: ctx, name: last.text, at: last.span });
+      const [$r226, ctx$124] = lookup_variant({ r: r, ctx: ctx, name: last.text, at: last.span });
       ctx = ctx$124;
-      const $m223 = $r224;
-      $m223$match: {
-        if ($m223.tag === "Some") {
-          const value = $m223.value;
+      const $m225 = $r226;
+      $m225$match: {
+        if ($m225.tag === "Some") {
+          const value = $m225.value;
           return [{ tag: "Some", value: { tag: "DefOwner", def: value } }, ctx];
-          break $m223$match;
+          break $m225$match;
         }
-        if ($m223.tag === "None") {
+        if ($m225.tag === "None") {
           skip({  });
-          break $m223$match;
+          break $m225$match;
         }
         $rt.unreachable();
       }
@@ -1511,19 +1516,19 @@ export function type_name({ r, ctx, q, scope, allow_variant }) {
     ctx = ctx$125;
     return [{ tag: "None" }, ctx];
   }
-  const [$r229, ctx$126] = module_of_path({ r: r, ctx: ctx, segments: $std_list.slice({ xs: q.segments, from: 0, to: $rt.int.sub(n, 1, $ob13) }) });
+  const [$r231, ctx$126] = module_of_path({ r: r, ctx: ctx, segments: $std_list.slice({ xs: q.segments, from: 0, to: $rt.int.sub(n, 1, $ob13) }) });
   ctx = ctx$126;
-  const $m228 = $r229;
-  $m228$match: {
-    if ($m228.tag === "None") {
+  const $m230 = $r231;
+  $m230$match: {
+    if ($m230.tag === "None") {
       return [{ tag: "None" }, ctx];
-      break $m228$match;
+      break $m230$match;
     }
-    if ($m228.tag === "Some") {
-      const value = $m228.value;
-      const [$r231, ctx$127] = members_of({ ctx: ctx, mod: value });
+    if ($m230.tag === "Some") {
+      const value = $m230.value;
+      const [$r233, ctx$127] = members_of({ ctx: ctx, mod: value });
       ctx = ctx$127;
-      const mem = $r231;
+      const mem = $r233;
       let d = find_or({ d: mem.types, key: last.text });
       if (d < 0) {
         d = find_or({ d: mem.interfaces, key: last.text });
@@ -1536,13 +1541,13 @@ export function type_name({ r, ctx, q, scope, allow_variant }) {
         ctx = ctx$128;
         return [{ tag: "None" }, ctx];
       }
-      const [$r233, ctx$129] = visible({ r: r, ctx: ctx, d: $context.get_def({ ctx: ctx, id: d }), at: last.span, what: "type" });
+      const [$r235, ctx$129] = visible({ r: r, ctx: ctx, d: $context.get_def({ ctx: ctx, id: d }), at: last.span, what: "type" });
       ctx = ctx$129;
-      if (!$r233) {
+      if (!$r235) {
         return [{ tag: "None" }, ctx];
       }
       return [{ tag: "Some", value: { tag: "DefOwner", def: d } }, ctx];
-      break $m228$match;
+      break $m230$match;
     }
     $rt.unreachable();
   }
@@ -1552,16 +1557,16 @@ export function res_fields({ r, ctx, fields, scope }) {
   for (const f of fields) {
     const [, ctx$130] = res_type({ r: r, ctx: ctx, t: f.ty, scope: scope, as_arg: false });
     ctx = ctx$130;
-    const $m237 = $std_map.find({ d: ctx.def_of, key: key({ r: r, tag: $defs.tag_sig, span: f.span }) });
-    $m237$match: {
-      if ($m237.tag === "Some") {
-        const value = $m237.value;
+    const $m239 = $std_map.find({ d: ctx.def_of, key: key({ r: r, tag: $defs.tag_sig, span: f.span }) });
+    $m239$match: {
+      if ($m239.tag === "Some") {
+        const value = $m239.value;
         scope_set_value({ s: scope, name: f.name.text, id: value });
-        break $m237$match;
+        break $m239$match;
       }
-      if ($m237.tag === "None") {
+      if ($m239.tag === "None") {
         skip({  });
-        break $m237$match;
+        break $m239$match;
       }
       $rt.unreachable();
     }
@@ -1612,19 +1617,19 @@ export function res_fn_decl({ r, ctx, f, outer }) {
   ctx = ctx$137;
   let claim_ids = $std_list.builder({  });
   for (const cl of f.claim_list) {
-    const [$r244, ctx$138] = claim_ref({ r: r, ctx: ctx, q: cl, at: { tag: "None" } });
+    const [$r246, ctx$138] = claim_ref({ r: r, ctx: ctx, q: cl, at: { tag: "None" } });
     ctx = ctx$138;
-    const $m242 = $r244;
-    $m242$match: {
-      if ($m242.tag === "Some") {
-        const value = $m242.value;
+    const $m244 = $r246;
+    $m244$match: {
+      if ($m244.tag === "Some") {
+        const value = $m244.value;
         const [, claim_ids$139] = $std_list.push({ b: claim_ids, x: value });
         claim_ids = claim_ids$139;
-        break $m242$match;
+        break $m244$match;
       }
-      if ($m242.tag === "None") {
+      if ($m244.tag === "None") {
         skip({  });
-        break $m242$match;
+        break $m244$match;
       }
       $rt.unreachable();
     }
@@ -1632,17 +1637,17 @@ export function res_fn_decl({ r, ctx, f, outer }) {
   let lists = ctx.claim_lists;
   const [, lists$140] = $std_map.set({ d: lists, key: key({ r: r, tag: $defs.tag_item, span: f.span }), value: $std_list.finish({ b: claim_ids }) });
   lists = lists$140;
-  const $m245 = f.body;
-  $m245$match: {
-    if ($m245.tag === "Some") {
-      const value = $m245.value;
+  const $m247 = f.body;
+  $m247$match: {
+    if ($m247.tag === "Some") {
+      const value = $m247.value;
       const [, ctx$141] = res_block({ r: r, ctx: ctx, b: value, scope: child({ parent: scope }) });
       ctx = ctx$141;
-      break $m245$match;
+      break $m247$match;
     }
-    if ($m245.tag === "None") {
+    if ($m247.tag === "None") {
       skip({  });
-      break $m245$match;
+      break $m247$match;
     }
     $rt.unreachable();
   }
@@ -1653,20 +1658,20 @@ export function res_fn_decl({ r, ctx, f, outer }) {
 
 export function res_interface({ r, ctx, d }) {
   const scope = child_frame({ parent: r.module_scope, frame: 0 });
-  const [$r248, ctx$142] = bind_type_param({ r: r, ctx: ctx, scope: scope, name: d.tparam, key: key({ r: r, tag: $defs.tag_sig, span: d.tparam.span }), node: { tag: "InterfaceNode", decl: d }, parent: $std_map.find({ d: ctx.def_of, key: key({ r: r, tag: $defs.tag_item, span: d.span }) }) });
+  const [$r250, ctx$142] = bind_type_param({ r: r, ctx: ctx, scope: scope, name: d.tparam, key: key({ r: r, tag: $defs.tag_sig, span: d.tparam.span }), node: { tag: "InterfaceNode", decl: d }, parent: $std_map.find({ d: ctx.def_of, key: key({ r: r, tag: $defs.tag_item, span: d.span }) }) });
   ctx = ctx$142;
-  const tp = $r248;
+  const tp = $r250;
   for (const member of d.items) {
-    const $m249 = $std_map.find({ d: ctx.def_of, key: key({ r: r, tag: $defs.tag_sig, span: iface_item_span({ member: member }) }) });
-    $m249$match: {
-      if ($m249.tag === "Some") {
-        const value = $m249.value;
+    const $m251 = $std_map.find({ d: ctx.def_of, key: key({ r: r, tag: $defs.tag_sig, span: iface_item_span({ member: member }) }) });
+    $m251$match: {
+      if ($m251.tag === "Some") {
+        const value = $m251.value;
         scope_set_value({ s: scope, name: iface_item_name({ member: member }).text, id: value });
-        break $m249$match;
+        break $m251$match;
       }
-      if ($m249.tag === "None") {
+      if ($m251.tag === "None") {
         skip({  });
-        break $m249$match;
+        break $m251$match;
       }
       $rt.unreachable();
     }
@@ -1674,10 +1679,10 @@ export function res_interface({ r, ctx, d }) {
   for (const member of d.items) {
     r = { ...r, current_def: { tag: "Some", value: d.name.text + "." + iface_item_name({ member: member }).text } };
     const inner = child({ parent: scope });
-    const $m252 = member;
-    $m252$match: {
-      if ($m252.tag === "IfaceFnItem") {
-        const decl = $m252.decl;
+    const $m254 = member;
+    $m254$match: {
+      if ($m254.tag === "IfaceFnItem") {
+        const decl = $m254.decl;
         const [, ctx$143] = res_params({ r: r, ctx: ctx, ps: decl.params, scope: inner, bind: true });
         ctx = ctx$143;
         const [, ctx$144] = res_effects({ r: r, ctx: ctx, refs: decl.effects, scope: inner, allow_recover: false });
@@ -1690,15 +1695,15 @@ export function res_interface({ r, ctx, d }) {
         r = r$146;
         ctx = ctx$146;
         r = { ...r, inout_params: saved_inout };
-        break $m252$match;
+        break $m254$match;
       }
-      if ($m252.tag === "LawItem") {
-        const decl = $m252.decl;
+      if ($m254.tag === "LawItem") {
+        const decl = $m254.decl;
         const [, ctx$147] = res_params({ r: r, ctx: ctx, ps: decl.params, scope: inner, bind: true });
         ctx = ctx$147;
         const [, ctx$148] = res_block({ r: r, ctx: ctx, b: decl.body, scope: child({ parent: inner }) });
         ctx = ctx$148;
-        break $m252$match;
+        break $m254$match;
       }
       $rt.unreachable();
     }
@@ -1708,18 +1713,18 @@ export function res_interface({ r, ctx, d }) {
 }
 
 export function res_impl({ r, ctx, im }) {
-  const $m255 = interface_def({ ctx: ctx, owner: lookup_type({ s: r.module_scope, name: im.iface.text }) });
-  $m255$match: {
-    if ($m255.tag === "Some") {
-      const value = $m255.value;
+  const $m257 = interface_def({ ctx: ctx, owner: lookup_type({ s: r.module_scope, name: im.iface.text }) });
+  $m257$match: {
+    if ($m257.tag === "Some") {
+      const value = $m257.value;
       const [, ctx$149] = $context.set_ref({ ctx: ctx, key: key({ r: r, tag: $defs.tag_item, span: im.span }), res: { tag: "DefRes", def: value } });
       ctx = ctx$149;
-      break $m255$match;
+      break $m257$match;
     }
-    if ($m255.tag === "None") {
+    if ($m257.tag === "None") {
       const [, ctx$150] = rep({ r: r, ctx: ctx, code: "E0106", at: im.iface.span, detail: "`" + im.iface.text + "` is not an interface in scope" });
       ctx = ctx$150;
-      break $m255$match;
+      break $m257$match;
     }
     $rt.unreachable();
   }
@@ -1727,16 +1732,16 @@ export function res_impl({ r, ctx, im }) {
   ctx = ctx$151;
   const scope = child_frame({ parent: r.module_scope, frame: 0 });
   for (const f of im.fns) {
-    const $m257 = $std_map.find({ d: ctx.def_of, key: key({ r: r, tag: $defs.tag_item, span: f.span }) });
-    $m257$match: {
-      if ($m257.tag === "Some") {
-        const value = $m257.value;
+    const $m259 = $std_map.find({ d: ctx.def_of, key: key({ r: r, tag: $defs.tag_item, span: f.span }) });
+    $m259$match: {
+      if ($m259.tag === "Some") {
+        const value = $m259.value;
         scope_set_value({ s: scope, name: f.name.text, id: value });
-        break $m257$match;
+        break $m259$match;
       }
-      if ($m257.tag === "None") {
+      if ($m259.tag === "None") {
         skip({  });
-        break $m257$match;
+        break $m259$match;
       }
       $rt.unreachable();
     }
@@ -1752,9 +1757,9 @@ export function res_impl({ r, ctx, im }) {
 }
 
 export function res_path({ r, ctx, p }) {
-  const [$r260, ctx$153] = members_of({ ctx: ctx, mod: r.m.id });
+  const [$r262, ctx$153] = members_of({ ctx: ctx, mod: r.m.id });
   ctx = ctx$153;
-  const entry = find_or({ d: $r260.values, key: p.entry_fn.text });
+  const entry = find_or({ d: $r262.values, key: p.entry_fn.text });
   if (entry < 0 || !$rt.eq(kind_of({ ctx: ctx, id: entry }), { tag: "Fn" })) {
     const [, ctx$154] = rep({ r: r, ctx: ctx, code: "E0105", at: p.entry_fn.span, detail: "no function `" + p.entry_fn.text + "` in this module" });
     ctx = ctx$154;
@@ -1763,50 +1768,50 @@ export function res_path({ r, ctx, p }) {
     ctx = ctx$155;
   }
   for (const c of p.clauses) {
-    const $m263 = c;
-    $m263$match: {
-      if ($m263.tag === "PathEffects") {
-        const effects = $m263.effects;
-        const span = $m263.span;
+    const $m265 = c;
+    $m265$match: {
+      if ($m265.tag === "PathEffects") {
+        const effects = $m265.effects;
+        const span = $m265.span;
         const [, ctx$156] = res_effects({ r: r, ctx: ctx, refs: effects, scope: r.module_scope, allow_recover: false });
         ctx = ctx$156;
-        break $m263$match;
+        break $m265$match;
       }
-      if ($m263.tag === "PathForbid") {
-        const effects = $m263.effects;
-        const span = $m263.span;
+      if ($m265.tag === "PathForbid") {
+        const effects = $m265.effects;
+        const span = $m265.span;
         for (const ref of effects) {
-          const [$r264, ctx$157] = claim_exists({ r: r, ctx: ctx, q: ref.name });
+          const [$r266, ctx$157] = claim_exists({ r: r, ctx: ctx, q: ref.name });
           ctx = ctx$157;
-          if ($r264) {
-            const [$r266, ctx$158] = claim_ref({ r: r, ctx: ctx, q: ref.name, at: { tag: "Some", value: key({ r: r, tag: $defs.tag_sig, span: ref.span }) } });
+          if ($r266) {
+            const [$r268, ctx$158] = claim_ref({ r: r, ctx: ctx, q: ref.name, at: { tag: "Some", value: key({ r: r, tag: $defs.tag_sig, span: ref.span }) } });
             ctx = ctx$158;
-            const c2 = $r266;
+            const c2 = $r268;
           } else {
             const [, ctx$159] = res_effects({ r: r, ctx: ctx, refs: [ref], scope: r.module_scope, allow_recover: true });
             ctx = ctx$159;
           }
         }
-        break $m263$match;
+        break $m265$match;
       }
-      if ($m263.tag === "PathRequire") {
-        const claim_list = $m263.claim_list;
-        const span = $m263.span;
+      if ($m265.tag === "PathRequire") {
+        const claim_list = $m265.claim_list;
+        const span = $m265.span;
         let claim_ids = $std_list.builder({  });
         for (const cl of claim_list) {
-          const [$r269, ctx$160] = claim_ref({ r: r, ctx: ctx, q: cl, at: { tag: "None" } });
+          const [$r271, ctx$160] = claim_ref({ r: r, ctx: ctx, q: cl, at: { tag: "None" } });
           ctx = ctx$160;
-          const $m267 = $r269;
-          $m267$match: {
-            if ($m267.tag === "Some") {
-              const value = $m267.value;
+          const $m269 = $r271;
+          $m269$match: {
+            if ($m269.tag === "Some") {
+              const value = $m269.value;
               const [, claim_ids$161] = $std_list.push({ b: claim_ids, x: value });
               claim_ids = claim_ids$161;
-              break $m267$match;
+              break $m269$match;
             }
-            if ($m267.tag === "None") {
+            if ($m269.tag === "None") {
               skip({  });
-              break $m267$match;
+              break $m269$match;
             }
             $rt.unreachable();
           }
@@ -1814,16 +1819,16 @@ export function res_path({ r, ctx, p }) {
         let lists = ctx.claim_lists;
         const [, lists$162] = $std_map.set({ d: lists, key: key({ r: r, tag: $defs.tag_sig, span: span }), value: $std_list.finish({ b: claim_ids }) });
         lists = lists$162;
-        break $m263$match;
+        break $m265$match;
       }
-      if ($m263.tag === "PathPolicy") {
-        const name = $m263.name;
-        const except_list = $m263.except_list;
-        const span = $m263.span;
+      if ($m265.tag === "PathPolicy") {
+        const name = $m265.name;
+        const except_list = $m265.except_list;
+        const span = $m265.span;
         if (name.text !== builtin_policy) {
-          const [$r270, ctx$163] = members_of({ ctx: ctx, mod: r.m.id });
+          const [$r272, ctx$163] = members_of({ ctx: ctx, mod: r.m.id });
           ctx = ctx$163;
-          const pol = find_or({ d: $r270.policies, key: name.text });
+          const pol = find_or({ d: $r272.policies, key: name.text });
           if (pol < 0 || !$rt.eq(kind_of({ ctx: ctx, id: pol }), { tag: "Policy" })) {
             const [, ctx$164] = rep({ r: r, ctx: ctx, code: "E0105", at: name.span, detail: "no policy `" + name.text + "` in this module" });
             ctx = ctx$164;
@@ -1832,7 +1837,7 @@ export function res_path({ r, ctx, p }) {
             ctx = ctx$165;
           }
         }
-        break $m263$match;
+        break $m265$match;
       }
       $rt.unreachable();
     }
@@ -1842,46 +1847,46 @@ export function res_path({ r, ctx, p }) {
 }
 
 export function res_item({ r, ctx, item }) {
-  const $m273 = item;
-  $m273$match: {
-    if ($m273.tag === "FnItem") {
-      const decl = $m273.decl;
+  const $m275 = item;
+  $m275$match: {
+    if ($m275.tag === "FnItem") {
+      const decl = $m275.decl;
       const [, r$166, ctx$166] = res_fn_decl({ r: r, ctx: ctx, f: decl, outer: r.module_scope });
       r = r$166;
       ctx = ctx$166;
-      break $m273$match;
+      break $m275$match;
     }
-    if ($m273.tag === "TypeAliasItem") {
-      const decl = $m273.decl;
+    if ($m275.tag === "TypeAliasItem") {
+      const decl = $m275.decl;
       const [, ctx$167] = res_type({ r: r, ctx: ctx, t: decl.ty, scope: r.module_scope, as_arg: false });
       ctx = ctx$167;
-      break $m273$match;
+      break $m275$match;
     }
-    if ($m273.tag === "IntrinsicTypeItem") {
-      const decl = $m273.decl;
+    if ($m275.tag === "IntrinsicTypeItem") {
+      const decl = $m275.decl;
       const [, ctx$168] = res_tparams({ r: r, ctx: ctx, ps: decl.tparams, scope: child({ parent: r.module_scope }) });
       ctx = ctx$168;
-      break $m273$match;
+      break $m275$match;
     }
-    if ($m273.tag === "ConstItem") {
-      const decl = $m273.decl;
+    if ($m275.tag === "ConstItem") {
+      const decl = $m275.decl;
       const [, ctx$169] = res_type({ r: r, ctx: ctx, t: decl.ty, scope: r.module_scope, as_arg: false });
       ctx = ctx$169;
       const [, ctx$170] = res_expr({ r: r, ctx: ctx, e: decl.value, scope: r.module_scope });
       ctx = ctx$170;
-      break $m273$match;
+      break $m275$match;
     }
-    if ($m273.tag === "RecordItem") {
-      const decl = $m273.decl;
+    if ($m275.tag === "RecordItem") {
+      const decl = $m275.decl;
       const scope = child({ parent: r.module_scope });
       const [, ctx$171] = res_tparams({ r: r, ctx: ctx, ps: decl.tparams, scope: scope });
       ctx = ctx$171;
       const [, ctx$172] = res_fields({ r: r, ctx: ctx, fields: decl.fields, scope: scope });
       ctx = ctx$172;
-      break $m273$match;
+      break $m275$match;
     }
-    if ($m273.tag === "UnionItem") {
-      const decl = $m273.decl;
+    if ($m275.tag === "UnionItem") {
+      const decl = $m275.decl;
       const scope = child({ parent: r.module_scope });
       const [, ctx$173] = res_tparams({ r: r, ctx: ctx, ps: decl.tparams, scope: scope });
       ctx = ctx$173;
@@ -1889,89 +1894,89 @@ export function res_item({ r, ctx, item }) {
         const [, ctx$174] = res_fields({ r: r, ctx: ctx, fields: v.fields, scope: child({ parent: scope }) });
         ctx = ctx$174;
       }
-      break $m273$match;
+      break $m275$match;
     }
-    if ($m273.tag === "InterfaceItem") {
-      const decl = $m273.decl;
+    if ($m275.tag === "InterfaceItem") {
+      const decl = $m275.decl;
       const [, r$175, ctx$175] = res_interface({ r: r, ctx: ctx, d: decl });
       r = r$175;
       ctx = ctx$175;
-      break $m273$match;
+      break $m275$match;
     }
-    if ($m273.tag === "ImplItem") {
-      const decl = $m273.decl;
+    if ($m275.tag === "ImplItem") {
+      const decl = $m275.decl;
       const [, r$176, ctx$176] = res_impl({ r: r, ctx: ctx, im: decl });
       r = r$176;
       ctx = ctx$176;
-      break $m273$match;
+      break $m275$match;
     }
-    if ($m273.tag === "ClaimItem") {
-      const decl = $m273.decl;
-      const $m274 = decl.body;
-      $m274$match: {
-        if ($m274.tag === "Derived") {
-          const pred = $m274.pred;
+    if ($m275.tag === "ClaimItem") {
+      const decl = $m275.decl;
+      const $m276 = decl.body;
+      $m276$match: {
+        if ($m276.tag === "Derived") {
+          const pred = $m276.pred;
           const [, ctx$177] = res_claim_pred({ r: r, ctx: ctx, p: pred });
           ctx = ctx$177;
-          break $m274$match;
+          break $m276$match;
         }
-        if ($m274.tag === "Asserted") {
-          const description = $m274.description;
+        if ($m276.tag === "Asserted") {
+          const description = $m276.description;
           skip({  });
-          break $m274$match;
+          break $m276$match;
         }
         $rt.unreachable();
       }
-      break $m273$match;
+      break $m275$match;
     }
-    if ($m273.tag === "CapabilityItem") {
-      const decl = $m273.decl;
+    if ($m275.tag === "CapabilityItem") {
+      const decl = $m275.decl;
       const scope = child({ parent: r.module_scope });
       const [, ctx$178] = res_tparams({ r: r, ctx: ctx, ps: decl.tparams, scope: scope });
       ctx = ctx$178;
       for (const g of decl.grant_list) {
-        const $m275 = g.when_cond;
-        $m275$match: {
-          if ($m275.tag === "Some") {
-            const value = $m275.value;
+        const $m277 = g.when_cond;
+        $m277$match: {
+          if ($m277.tag === "Some") {
+            const value = $m277.value;
             const [, ctx$179] = res_expr({ r: r, ctx: ctx, e: value, scope: scope });
             ctx = ctx$179;
-            break $m275$match;
+            break $m277$match;
           }
-          if ($m275.tag === "None") {
+          if ($m277.tag === "None") {
             skip({  });
-            break $m275$match;
+            break $m277$match;
           }
           $rt.unreachable();
         }
       }
-      break $m273$match;
+      break $m275$match;
     }
-    if ($m273.tag === "PathItem") {
-      const decl = $m273.decl;
+    if ($m275.tag === "PathItem") {
+      const decl = $m275.decl;
       const [, ctx$180] = res_path({ r: r, ctx: ctx, p: decl });
       ctx = ctx$180;
-      break $m273$match;
+      break $m275$match;
     }
-    if ($m273.tag === "PolicyItem") {
-      const decl = $m273.decl;
+    if ($m275.tag === "PolicyItem") {
+      const decl = $m275.decl;
       skip({  });
-      break $m273$match;
+      break $m275$match;
     }
-    if ($m273.tag === "ExampleItem") {
-      const decl = $m273.decl;
+    if ($m275.tag === "ExampleItem") {
+      const decl = $m275.decl;
       const [, ctx$181] = res_block({ r: r, ctx: ctx, b: decl.body, scope: child_frame({ parent: r.module_scope, frame: 0 }) });
       ctx = ctx$181;
-      break $m273$match;
+      break $m275$match;
     }
-    if ($m273.tag === "PropertyItem") {
-      const decl = $m273.decl;
+    if ($m275.tag === "PropertyItem") {
+      const decl = $m275.decl;
       const scope = child_frame({ parent: r.module_scope, frame: 0 });
       const [, ctx$182] = res_params({ r: r, ctx: ctx, ps: decl.params, scope: scope, bind: true });
       ctx = ctx$182;
       const [, ctx$183] = res_block({ r: r, ctx: ctx, b: decl.body, scope: child({ parent: scope }) });
       ctx = ctx$183;
-      break $m273$match;
+      break $m275$match;
     }
     $rt.unreachable();
   }
@@ -2004,40 +2009,40 @@ export function res_block({ r, ctx, b, scope }) {
 }
 
 export function res_stmt({ r, ctx, s, scope }) {
-  const $m279 = s;
-  $m279$match: {
-    if ($m279.tag === "Let") {
-      const name = $m279.name;
-      const ty = $m279.ty;
-      const value = $m279.value;
-      const span = $m279.span;
+  const $m281 = s;
+  $m281$match: {
+    if ($m281.tag === "Let") {
+      const name = $m281.name;
+      const ty = $m281.ty;
+      const value = $m281.value;
+      const span = $m281.span;
       const [, ctx$189] = res_type({ r: r, ctx: ctx, t: ty, scope: scope, as_arg: false });
       ctx = ctx$189;
       const [, ctx$190] = res_expr({ r: r, ctx: ctx, e: value, scope: scope });
       ctx = ctx$190;
-      const [$r282, ctx$191] = bind_value({ r: r, ctx: ctx, scope: scope, kind: { tag: "Let" }, node: { tag: "StmtNode", decl: s }, name: name, key: key({ r: r, tag: $defs.tag_stmt, span: span }), is_inout: false });
+      const [$r284, ctx$191] = bind_value({ r: r, ctx: ctx, scope: scope, kind: { tag: "Let" }, node: { tag: "StmtNode", decl: s }, name: name, key: key({ r: r, tag: $defs.tag_stmt, span: span }), is_inout: false });
       ctx = ctx$191;
-      const id = $r282;
-      break $m279$match;
+      const id = $r284;
+      break $m281$match;
     }
-    if ($m279.tag === "Var") {
-      const name = $m279.name;
-      const ty = $m279.ty;
-      const value = $m279.value;
-      const span = $m279.span;
+    if ($m281.tag === "Var") {
+      const name = $m281.name;
+      const ty = $m281.ty;
+      const value = $m281.value;
+      const span = $m281.span;
       const [, ctx$192] = res_type({ r: r, ctx: ctx, t: ty, scope: scope, as_arg: false });
       ctx = ctx$192;
       const [, ctx$193] = res_expr({ r: r, ctx: ctx, e: value, scope: scope });
       ctx = ctx$193;
-      const [$r285, ctx$194] = bind_value({ r: r, ctx: ctx, scope: scope, kind: { tag: "Var" }, node: { tag: "StmtNode", decl: s }, name: name, key: key({ r: r, tag: $defs.tag_stmt, span: span }), is_inout: false });
+      const [$r287, ctx$194] = bind_value({ r: r, ctx: ctx, scope: scope, kind: { tag: "Var" }, node: { tag: "StmtNode", decl: s }, name: name, key: key({ r: r, tag: $defs.tag_stmt, span: span }), is_inout: false });
       ctx = ctx$194;
-      const id = $r285;
-      break $m279$match;
+      const id = $r287;
+      break $m281$match;
     }
-    if ($m279.tag === "Assign") {
-      const name = $m279.name;
-      const value = $m279.value;
-      const span = $m279.span;
+    if ($m281.tag === "Assign") {
+      const name = $m281.name;
+      const value = $m281.value;
+      const span = $m281.span;
       const target = or_neg({ o: lookup_value({ s: scope, name: name.text }) });
       if (target < 0) {
         const [, ctx$195] = rep({ r: r, ctx: ctx, code: "E0105", at: name.span, detail: "no binding `" + name.text + "` in scope" });
@@ -2048,88 +2053,88 @@ export function res_stmt({ r, ctx, s, scope }) {
       }
       const [, ctx$197] = res_expr({ r: r, ctx: ctx, e: value, scope: scope });
       ctx = ctx$197;
-      break $m279$match;
+      break $m281$match;
     }
-    if ($m279.tag === "Return") {
-      const value = $m279.value;
-      const span = $m279.span;
+    if ($m281.tag === "Return") {
+      const value = $m281.value;
+      const span = $m281.span;
       const [, ctx$198] = res_expr({ r: r, ctx: ctx, e: value, scope: scope });
       ctx = ctx$198;
-      break $m279$match;
+      break $m281$match;
     }
-    if ($m279.tag === "If") {
-      const cond = $m279.cond;
-      const then_block = $m279.then_block;
-      const else_block = $m279.else_block;
-      const span = $m279.span;
+    if ($m281.tag === "If") {
+      const cond = $m281.cond;
+      const then_block = $m281.then_block;
+      const else_block = $m281.else_block;
+      const span = $m281.span;
       const [, ctx$199] = res_expr({ r: r, ctx: ctx, e: cond, scope: scope });
       ctx = ctx$199;
       const [, ctx$200] = res_block({ r: r, ctx: ctx, b: then_block, scope: child({ parent: scope }) });
       ctx = ctx$200;
-      const $m287 = else_block;
-      $m287$match: {
-        if ($m287.tag === "Some") {
-          const value = $m287.value;
+      const $m289 = else_block;
+      $m289$match: {
+        if ($m289.tag === "Some") {
+          const value = $m289.value;
           const [, ctx$201] = res_block({ r: r, ctx: ctx, b: value, scope: child({ parent: scope }) });
           ctx = ctx$201;
-          break $m287$match;
+          break $m289$match;
         }
-        if ($m287.tag === "None") {
+        if ($m289.tag === "None") {
           skip({  });
-          break $m287$match;
+          break $m289$match;
         }
         $rt.unreachable();
       }
-      break $m279$match;
+      break $m281$match;
     }
-    if ($m279.tag === "Match") {
-      const scrutinee = $m279.scrutinee;
-      const arms = $m279.arms;
-      const span = $m279.span;
+    if ($m281.tag === "Match") {
+      const scrutinee = $m281.scrutinee;
+      const arms = $m281.arms;
+      const span = $m281.span;
       const [, ctx$202] = res_expr({ r: r, ctx: ctx, e: scrutinee, scope: scope });
       ctx = ctx$202;
       for (const a of arms) {
         const arm_scope = child({ parent: scope });
         const [, ctx$203] = res_pattern({ r: r, ctx: ctx, p: a.pattern, scope: arm_scope });
         ctx = ctx$203;
-        const $m288 = a.guard;
-        $m288$match: {
-          if ($m288.tag === "Some") {
-            const value = $m288.value;
+        const $m290 = a.guard;
+        $m290$match: {
+          if ($m290.tag === "Some") {
+            const value = $m290.value;
             const [, ctx$204] = res_expr({ r: r, ctx: ctx, e: value, scope: arm_scope });
             ctx = ctx$204;
-            break $m288$match;
+            break $m290$match;
           }
-          if ($m288.tag === "None") {
+          if ($m290.tag === "None") {
             skip({  });
-            break $m288$match;
+            break $m290$match;
           }
           $rt.unreachable();
         }
-        const $m289 = a.body;
-        $m289$match: {
-          if ($m289.tag === "ArmBlock") {
-            const block = $m289.block;
+        const $m291 = a.body;
+        $m291$match: {
+          if ($m291.tag === "ArmBlock") {
+            const block = $m291.block;
             const [, ctx$205] = res_block({ r: r, ctx: ctx, b: block, scope: child({ parent: arm_scope }) });
             ctx = ctx$205;
-            break $m289$match;
+            break $m291$match;
           }
-          if ($m289.tag === "ArmStmt") {
-            const stmt = $m289.stmt;
+          if ($m291.tag === "ArmStmt") {
+            const stmt = $m291.stmt;
             const [, ctx$206] = res_stmt({ r: r, ctx: ctx, s: stmt, scope: arm_scope });
             ctx = ctx$206;
-            break $m289$match;
+            break $m291$match;
           }
           $rt.unreachable();
         }
       }
-      break $m279$match;
+      break $m281$match;
     }
-    if ($m279.tag === "Loop") {
-      const cond = $m279.cond;
-      const clauses = $m279.clauses;
-      const body = $m279.body;
-      const span = $m279.span;
+    if ($m281.tag === "Loop") {
+      const cond = $m281.cond;
+      const clauses = $m281.clauses;
+      const body = $m281.body;
+      const span = $m281.span;
       const [, ctx$207] = res_expr({ r: r, ctx: ctx, e: cond, scope: scope });
       ctx = ctx$207;
       for (const c of clauses) {
@@ -2138,56 +2143,56 @@ export function res_stmt({ r, ctx, s, scope }) {
       }
       const [, ctx$209] = res_block({ r: r, ctx: ctx, b: body, scope: child({ parent: scope }) });
       ctx = ctx$209;
-      break $m279$match;
+      break $m281$match;
     }
-    if ($m279.tag === "For") {
-      const name = $m279.name;
-      const ty = $m279.ty;
-      const domain = $m279.domain;
-      const body = $m279.body;
-      const span = $m279.span;
+    if ($m281.tag === "For") {
+      const name = $m281.name;
+      const ty = $m281.ty;
+      const domain = $m281.domain;
+      const body = $m281.body;
+      const span = $m281.span;
       const [, ctx$210] = res_type({ r: r, ctx: ctx, t: ty, scope: scope, as_arg: false });
       ctx = ctx$210;
       const [, ctx$211] = res_domain({ r: r, ctx: ctx, d: domain, scope: scope });
       ctx = ctx$211;
       const inner = child({ parent: scope });
-      const [$r292, ctx$212] = bind_value({ r: r, ctx: ctx, scope: inner, kind: { tag: "For" }, node: { tag: "StmtNode", decl: s }, name: name, key: key({ r: r, tag: $defs.tag_stmt, span: span }), is_inout: false });
+      const [$r294, ctx$212] = bind_value({ r: r, ctx: ctx, scope: inner, kind: { tag: "For" }, node: { tag: "StmtNode", decl: s }, name: name, key: key({ r: r, tag: $defs.tag_stmt, span: span }), is_inout: false });
       ctx = ctx$212;
-      const id = $r292;
+      const id = $r294;
       const [, ctx$213] = res_block({ r: r, ctx: ctx, b: body, scope: child({ parent: inner }) });
       ctx = ctx$213;
-      break $m279$match;
+      break $m281$match;
     }
-    if ($m279.tag === "Assume") {
-      const claim = $m279.claim;
-      const justification = $m279.justification;
-      const verify_block = $m279.verify_block;
-      const span = $m279.span;
-      const [$r294, ctx$214] = claim_ref({ r: r, ctx: ctx, q: claim, at: { tag: "Some", value: key({ r: r, tag: $defs.tag_stmt, span: span }) } });
+    if ($m281.tag === "Assume") {
+      const claim = $m281.claim;
+      const justification = $m281.justification;
+      const verify_block = $m281.verify_block;
+      const span = $m281.span;
+      const [$r296, ctx$214] = claim_ref({ r: r, ctx: ctx, q: claim, at: { tag: "Some", value: key({ r: r, tag: $defs.tag_stmt, span: span }) } });
       ctx = ctx$214;
-      const c = $r294;
-      const $m295 = verify_block;
-      $m295$match: {
-        if ($m295.tag === "Some") {
-          const value = $m295.value;
+      const c = $r296;
+      const $m297 = verify_block;
+      $m297$match: {
+        if ($m297.tag === "Some") {
+          const value = $m297.value;
           const [, ctx$215] = res_verify_block({ r: r, ctx: ctx, v: value });
           ctx = ctx$215;
-          break $m295$match;
+          break $m297$match;
         }
-        if ($m295.tag === "None") {
+        if ($m297.tag === "None") {
           skip({  });
-          break $m295$match;
+          break $m297$match;
         }
         $rt.unreachable();
       }
-      break $m279$match;
+      break $m281$match;
     }
-    if ($m279.tag === "ExprStmt") {
-      const expr = $m279.expr;
-      const span = $m279.span;
+    if ($m281.tag === "ExprStmt") {
+      const expr = $m281.expr;
+      const span = $m281.span;
       const [, ctx$216] = res_expr({ r: r, ctx: ctx, e: expr, scope: scope });
       ctx = ctx$216;
-      break $m279$match;
+      break $m281$match;
     }
     $rt.unreachable();
   }
@@ -2196,24 +2201,24 @@ export function res_stmt({ r, ctx, s, scope }) {
 }
 
 export function res_domain({ r, ctx, d, scope }) {
-  const $m296 = d;
-  $m296$match: {
-    if ($m296.tag === "RangeDomain") {
-      const lo = $m296.lo;
-      const hi = $m296.hi;
-      const span = $m296.span;
+  const $m298 = d;
+  $m298$match: {
+    if ($m298.tag === "RangeDomain") {
+      const lo = $m298.lo;
+      const hi = $m298.hi;
+      const span = $m298.span;
       const [, ctx$217] = res_expr({ r: r, ctx: ctx, e: lo, scope: scope });
       ctx = ctx$217;
       const [, ctx$218] = res_expr({ r: r, ctx: ctx, e: hi, scope: scope });
       ctx = ctx$218;
-      break $m296$match;
+      break $m298$match;
     }
-    if ($m296.tag === "InDomain") {
-      const expr = $m296.expr;
-      const span = $m296.span;
+    if ($m298.tag === "InDomain") {
+      const expr = $m298.expr;
+      const span = $m298.span;
       const [, ctx$219] = res_expr({ r: r, ctx: ctx, e: expr, scope: scope });
       ctx = ctx$219;
-      break $m296$match;
+      break $m298$match;
     }
     $rt.unreachable();
   }
@@ -2250,19 +2255,19 @@ export function dup_args({ r, ctx, args }) {
 }
 
 export function name_ref({ r, ctx, name, at, scope }) {
-  const $m297 = lookup_value({ s: scope, name: name.text });
-  $m297$match: {
-    if ($m297.tag === "None") {
+  const $m299 = lookup_value({ s: scope, name: name.text });
+  $m299$match: {
+    if ($m299.tag === "None") {
       let hint = "";
       if ($std_map.contains({ d: r.aliases, key: name.text })) {
         hint = "; `" + name.text + "` is a module alias, not a value";
       }
       const [, ctx$224] = rep({ r: r, ctx: ctx, code: "E0105", at: at, detail: "no binding `" + name.text + "` in scope" + hint });
       ctx = ctx$224;
-      break $m297$match;
+      break $m299$match;
     }
-    if ($m297.tag === "Some") {
-      const value = $m297.value;
+    if ($m299.tag === "Some") {
+      const value = $m299.value;
       const d = $context.get_def({ ctx: ctx, id: value });
       if (d.frame >= 0 && d.frame < scope.frame && ($rt.eq(d.kind, { tag: "Var" }) || $rt.eq(d.kind, { tag: "Param" }) && d.is_inout)) {
         let what = "an inout parameter";
@@ -2274,7 +2279,7 @@ export function name_ref({ r, ctx, name, at, scope }) {
       }
       const [, ctx$226] = $context.set_ref({ ctx: ctx, key: key({ r: r, tag: $defs.tag_expr, span: at }), res: { tag: "DefRes", def: value } });
       ctx = ctx$226;
-      break $m297$match;
+      break $m299$match;
     }
     $rt.unreachable();
   }
@@ -2283,67 +2288,67 @@ export function name_ref({ r, ctx, name, at, scope }) {
 }
 
 export function res_expr({ r, ctx, e, scope }) {
-  const $m302 = e;
-  $m302$match: {
-    if ($m302.tag === "IntLit") {
+  const $m304 = e;
+  $m304$match: {
+    if ($m304.tag === "IntLit") {
       skip({  });
-      break $m302$match;
+      break $m304$match;
     }
-    if ($m302.tag === "FloatLit") {
+    if ($m304.tag === "FloatLit") {
       skip({  });
-      break $m302$match;
+      break $m304$match;
     }
-    if ($m302.tag === "TextLit") {
+    if ($m304.tag === "TextLit") {
       skip({  });
-      break $m302$match;
+      break $m304$match;
     }
-    if ($m302.tag === "BoolLit") {
+    if ($m304.tag === "BoolLit") {
       skip({  });
-      break $m302$match;
+      break $m304$match;
     }
-    if ($m302.tag === "DurationLit") {
+    if ($m304.tag === "DurationLit") {
       skip({  });
-      break $m302$match;
+      break $m304$match;
     }
-    if ($m302.tag === "Name") {
-      const name = $m302.name;
-      const span = $m302.span;
+    if ($m304.tag === "Name") {
+      const name = $m304.name;
+      const span = $m304.span;
       const [, ctx$227] = name_ref({ r: r, ctx: ctx, name: name, at: span, scope: scope });
       ctx = ctx$227;
-      break $m302$match;
+      break $m304$match;
     }
-    if ($m302.tag === "It") {
-      const span = $m302.span;
+    if ($m304.tag === "It") {
+      const span = $m304.span;
       if (!r.in_where) {
         const [, ctx$228] = rep({ r: r, ctx: ctx, code: "E0114", at: span, detail: "`it` names the refined value and is legal only in a `where` clause" });
         ctx = ctx$228;
       }
-      break $m302$match;
+      break $m304$match;
     }
-    if ($m302.tag === "ResultRef") {
-      const span = $m302.span;
+    if ($m304.tag === "ResultRef") {
+      const span = $m304.span;
       if (!r.in_ensures) {
         const [, ctx$229] = rep({ r: r, ctx: ctx, code: "E0114", at: span, detail: "`result` is legal only in an `ensures` clause" });
         ctx = ctx$229;
       }
-      break $m302$match;
+      break $m304$match;
     }
-    if ($m302.tag === "Old") {
-      const name = $m302.name;
-      const span = $m302.span;
+    if ($m304.tag === "Old") {
+      const name = $m304.name;
+      const span = $m304.span;
       if (!r.in_ensures) {
         const [, ctx$230] = rep({ r: r, ctx: ctx, code: "E0114", at: span, detail: "`old(...)` is legal only in an `ensures` clause" });
         ctx = ctx$230;
       }
-      const $m303 = lookup_value({ s: scope, name: name.text });
-      $m303$match: {
-        if ($m303.tag === "None") {
+      const $m305 = lookup_value({ s: scope, name: name.text });
+      $m305$match: {
+        if ($m305.tag === "None") {
           const [, ctx$231] = rep({ r: r, ctx: ctx, code: "E0105", at: name.span, detail: "no binding `" + name.text + "` in scope" });
           ctx = ctx$231;
-          break $m303$match;
+          break $m305$match;
         }
-        if ($m303.tag === "Some") {
-          const value = $m303.value;
+        if ($m305.tag === "Some") {
+          const value = $m305.value;
           if (!$std_list.contains({ xs: r.inout_params, x: name.text })) {
             const [, ctx$232] = rep({ r: r, ctx: ctx, code: "E0114", at: name.span, detail: "`old(" + name.text + ")` requires an `inout` parameter" });
             ctx = ctx$232;
@@ -2351,126 +2356,57 @@ export function res_expr({ r, ctx, e, scope }) {
             const [, ctx$233] = $context.set_ref({ ctx: ctx, key: key({ r: r, tag: $defs.tag_expr, span: span }), res: { tag: "DefRes", def: value } });
             ctx = ctx$233;
           }
-          break $m303$match;
+          break $m305$match;
         }
         $rt.unreachable();
       }
-      break $m302$match;
+      break $m304$match;
     }
-    if ($m302.tag === "Ctor") {
-      const name = $m302.name;
-      const args = $m302.args;
-      const fields = $m302.fields;
-      const span = $m302.span;
-      const [$r306, ctx$234] = ctor_name({ r: r, ctx: ctx, q: name, scope: scope, has_args: args.tag === "Some", has_fields: fields.tag === "Some" });
+    if ($m304.tag === "Ctor") {
+      const name = $m304.name;
+      const args = $m304.args;
+      const fields = $m304.fields;
+      const span = $m304.span;
+      const [$r308, ctx$234] = ctor_name({ r: r, ctx: ctx, q: name, scope: scope, has_args: args.tag === "Some", has_fields: fields.tag === "Some" });
       ctx = ctx$234;
-      const $m305 = $r306;
-      $m305$match: {
-        if ($m305.tag === "Some") {
-          const value = $m305.value;
+      const $m307 = $r308;
+      $m307$match: {
+        if ($m307.tag === "Some") {
+          const value = $m307.value;
           const [, ctx$235] = $context.set_ref({ ctx: ctx, key: key({ r: r, tag: $defs.tag_expr, span: span }), res: value });
           ctx = ctx$235;
-          const $m307 = value;
-          $m307$match: {
-            if ($m307.tag === "DefRes") {
-              const def = $m307.def;
+          const $m309 = value;
+          $m309$match: {
+            if ($m309.tag === "DefRes") {
+              const def = $m309.def;
               const [, ctx$236] = check_sealed({ r: r, ctx: ctx, d: $context.get_def({ ctx: ctx, id: def }), at: name.span });
               ctx = ctx$236;
-              break $m307$match;
+              break $m309$match;
             }
             if (true) {
               skip({  });
-              break $m307$match;
+              break $m309$match;
             }
             $rt.unreachable();
           }
-          break $m305$match;
+          break $m307$match;
         }
-        if ($m305.tag === "None") {
+        if ($m307.tag === "None") {
           skip({  });
-          break $m305$match;
+          break $m307$match;
         }
         $rt.unreachable();
       }
-      const $m308 = args;
-      $m308$match: {
-        if ($m308.tag === "Some") {
-          const value = $m308.value;
+      const $m310 = args;
+      $m310$match: {
+        if ($m310.tag === "Some") {
+          const value = $m310.value;
           const [, ctx$237] = dup_args({ r: r, ctx: ctx, args: value });
           ctx = ctx$237;
           for (const a of value) {
             const [, ctx$238] = res_expr({ r: r, ctx: ctx, e: a.value, scope: scope });
             ctx = ctx$238;
           }
-          break $m308$match;
-        }
-        if ($m308.tag === "None") {
-          skip({  });
-          break $m308$match;
-        }
-        $rt.unreachable();
-      }
-      const $m309 = fields;
-      $m309$match: {
-        if ($m309.tag === "Some") {
-          const value = $m309.value;
-          const [, ctx$239] = dup_fields({ r: r, ctx: ctx, fields: value });
-          ctx = ctx$239;
-          for (const f of value) {
-            const [, ctx$240] = res_expr({ r: r, ctx: ctx, e: f.value, scope: scope });
-            ctx = ctx$240;
-          }
-          break $m309$match;
-        }
-        if ($m309.tag === "None") {
-          skip({  });
-          break $m309$match;
-        }
-        $rt.unreachable();
-      }
-      break $m302$match;
-    }
-    if ($m302.tag === "RecordUpdate") {
-      const base = $m302.base;
-      const fields = $m302.fields;
-      const span = $m302.span;
-      const [, ctx$241] = res_expr({ r: r, ctx: ctx, e: base, scope: scope });
-      ctx = ctx$241;
-      for (const f of fields) {
-        const [, ctx$242] = res_expr({ r: r, ctx: ctx, e: f.value, scope: scope });
-        ctx = ctx$242;
-      }
-      const [, ctx$243] = dup_fields({ r: r, ctx: ctx, fields: fields });
-      ctx = ctx$243;
-      break $m302$match;
-    }
-    if ($m302.tag === "ListLit") {
-      const elems = $m302.elems;
-      const span = $m302.span;
-      for (const x of elems) {
-        const [, ctx$244] = res_expr({ r: r, ctx: ctx, e: x, scope: scope });
-        ctx = ctx$244;
-      }
-      break $m302$match;
-    }
-    if ($m302.tag === "Try") {
-      const expr = $m302.expr;
-      const else_ = $m302.else_;
-      const span = $m302.span;
-      const [, ctx$245] = res_expr({ r: r, ctx: ctx, e: expr, scope: scope });
-      ctx = ctx$245;
-      const $m310 = else_;
-      $m310$match: {
-        if ($m310.tag === "Some") {
-          const value = $m310.value;
-          const inner = child({ parent: scope });
-          if (value.name.text !== "_") {
-            const [$r313, ctx$246] = bind_value({ r: r, ctx: ctx, scope: inner, kind: { tag: "TryElse" }, node: { tag: "TryElseNode", decl: value }, name: value.name, key: key({ r: r, tag: $defs.tag_misc, span: value.span }), is_inout: false });
-            ctx = ctx$246;
-            const id = $r313;
-          }
-          const [, ctx$247] = res_expr({ r: r, ctx: ctx, e: value.expr, scope: inner });
-          ctx = ctx$247;
           break $m310$match;
         }
         if ($m310.tag === "None") {
@@ -2479,67 +2415,136 @@ export function res_expr({ r, ctx, e, scope }) {
         }
         $rt.unreachable();
       }
-      break $m302$match;
+      const $m311 = fields;
+      $m311$match: {
+        if ($m311.tag === "Some") {
+          const value = $m311.value;
+          const [, ctx$239] = dup_fields({ r: r, ctx: ctx, fields: value });
+          ctx = ctx$239;
+          for (const f of value) {
+            const [, ctx$240] = res_expr({ r: r, ctx: ctx, e: f.value, scope: scope });
+            ctx = ctx$240;
+          }
+          break $m311$match;
+        }
+        if ($m311.tag === "None") {
+          skip({  });
+          break $m311$match;
+        }
+        $rt.unreachable();
+      }
+      break $m304$match;
     }
-    if ($m302.tag === "Recover") {
-      const body = $m302.body;
-      const span = $m302.span;
+    if ($m304.tag === "RecordUpdate") {
+      const base = $m304.base;
+      const fields = $m304.fields;
+      const span = $m304.span;
+      const [, ctx$241] = res_expr({ r: r, ctx: ctx, e: base, scope: scope });
+      ctx = ctx$241;
+      for (const f of fields) {
+        const [, ctx$242] = res_expr({ r: r, ctx: ctx, e: f.value, scope: scope });
+        ctx = ctx$242;
+      }
+      const [, ctx$243] = dup_fields({ r: r, ctx: ctx, fields: fields });
+      ctx = ctx$243;
+      break $m304$match;
+    }
+    if ($m304.tag === "ListLit") {
+      const elems = $m304.elems;
+      const span = $m304.span;
+      for (const x of elems) {
+        const [, ctx$244] = res_expr({ r: r, ctx: ctx, e: x, scope: scope });
+        ctx = ctx$244;
+      }
+      break $m304$match;
+    }
+    if ($m304.tag === "Try") {
+      const expr = $m304.expr;
+      const else_ = $m304.else_;
+      const span = $m304.span;
+      const [, ctx$245] = res_expr({ r: r, ctx: ctx, e: expr, scope: scope });
+      ctx = ctx$245;
+      const $m312 = else_;
+      $m312$match: {
+        if ($m312.tag === "Some") {
+          const value = $m312.value;
+          const inner = child({ parent: scope });
+          if (value.name.text !== "_") {
+            const [$r315, ctx$246] = bind_value({ r: r, ctx: ctx, scope: inner, kind: { tag: "TryElse" }, node: { tag: "TryElseNode", decl: value }, name: value.name, key: key({ r: r, tag: $defs.tag_misc, span: value.span }), is_inout: false });
+            ctx = ctx$246;
+            const id = $r315;
+          }
+          const [, ctx$247] = res_expr({ r: r, ctx: ctx, e: value.expr, scope: inner });
+          ctx = ctx$247;
+          break $m312$match;
+        }
+        if ($m312.tag === "None") {
+          skip({  });
+          break $m312$match;
+        }
+        $rt.unreachable();
+      }
+      break $m304$match;
+    }
+    if ($m304.tag === "Recover") {
+      const body = $m304.body;
+      const span = $m304.span;
       const [, ctx$248] = res_block({ r: r, ctx: ctx, b: body, scope: child({ parent: scope }) });
       ctx = ctx$248;
-      break $m302$match;
+      break $m304$match;
     }
-    if ($m302.tag === "Quantifier") {
-      const quant = $m302.quant;
-      const name = $m302.name;
-      const ty = $m302.ty;
-      const domain = $m302.domain;
-      const where_ = $m302.where_;
-      const body = $m302.body;
-      const span = $m302.span;
+    if ($m304.tag === "Quantifier") {
+      const quant = $m304.quant;
+      const name = $m304.name;
+      const ty = $m304.ty;
+      const domain = $m304.domain;
+      const where_ = $m304.where_;
+      const body = $m304.body;
+      const span = $m304.span;
       const [, ctx$249] = res_type({ r: r, ctx: ctx, t: ty, scope: scope, as_arg: false });
       ctx = ctx$249;
-      const $m314 = domain;
-      $m314$match: {
-        if ($m314.tag === "Some") {
-          const value = $m314.value;
+      const $m316 = domain;
+      $m316$match: {
+        if ($m316.tag === "Some") {
+          const value = $m316.value;
           const [, ctx$250] = res_domain({ r: r, ctx: ctx, d: value, scope: scope });
           ctx = ctx$250;
-          break $m314$match;
+          break $m316$match;
         }
-        if ($m314.tag === "None") {
+        if ($m316.tag === "None") {
           skip({  });
-          break $m314$match;
+          break $m316$match;
         }
         $rt.unreachable();
       }
       const inner = child({ parent: scope });
-      const [$r317, ctx$251] = bind_value({ r: r, ctx: ctx, scope: inner, kind: { tag: "Binder" }, node: { tag: "ExprNode", decl: e }, name: name, key: key({ r: r, tag: $defs.tag_expr, span: span }), is_inout: false });
+      const [$r319, ctx$251] = bind_value({ r: r, ctx: ctx, scope: inner, kind: { tag: "Binder" }, node: { tag: "ExprNode", decl: e }, name: name, key: key({ r: r, tag: $defs.tag_expr, span: span }), is_inout: false });
       ctx = ctx$251;
-      const id = $r317;
-      const $m318 = where_;
-      $m318$match: {
-        if ($m318.tag === "Some") {
-          const value = $m318.value;
+      const id = $r319;
+      const $m320 = where_;
+      $m320$match: {
+        if ($m320.tag === "Some") {
+          const value = $m320.value;
           const [, ctx$252] = res_expr({ r: r, ctx: ctx, e: value, scope: inner });
           ctx = ctx$252;
-          break $m318$match;
+          break $m320$match;
         }
-        if ($m318.tag === "None") {
+        if ($m320.tag === "None") {
           skip({  });
-          break $m318$match;
+          break $m320$match;
         }
         $rt.unreachable();
       }
       const [, ctx$253] = res_expr({ r: r, ctx: ctx, e: body, scope: inner });
       ctx = ctx$253;
-      break $m302$match;
+      break $m304$match;
     }
-    if ($m302.tag === "Closure") {
-      const params = $m302.params;
-      const ret = $m302.ret;
-      const effects = $m302.effects;
-      const body = $m302.body;
-      const span = $m302.span;
+    if ($m304.tag === "Closure") {
+      const params = $m304.params;
+      const ret = $m304.ret;
+      const effects = $m304.effects;
+      const body = $m304.body;
+      const span = $m304.span;
       const inner = child_frame({ parent: scope, frame: $rt.int.add(scope.frame, 1, $ob14) });
       const [, ctx$254] = res_params({ r: r, ctx: ctx, ps: params, scope: inner, bind: true });
       ctx = ctx$254;
@@ -2550,28 +2555,28 @@ export function res_expr({ r, ctx, e, scope }) {
       ctx = ctx$256;
       const [, ctx$257] = res_block({ r: cleared, ctx: ctx, b: body, scope: child({ parent: inner }) });
       ctx = ctx$257;
-      break $m302$match;
+      break $m304$match;
     }
-    if ($m302.tag === "Fake") {
-      const capability = $m302.capability;
-      const fields = $m302.fields;
-      const span = $m302.span;
-      const [$r321, ctx$258] = type_name({ r: r, ctx: ctx, q: capability, scope: scope, allow_variant: false });
+    if ($m304.tag === "Fake") {
+      const capability = $m304.capability;
+      const fields = $m304.fields;
+      const span = $m304.span;
+      const [$r323, ctx$258] = type_name({ r: r, ctx: ctx, q: capability, scope: scope, allow_variant: false });
       ctx = ctx$258;
-      const $m320 = $r321;
-      $m320$match: {
-        if ($m320.tag === "Some") {
-          const value = $m320.value;
+      const $m322 = $r323;
+      $m322$match: {
+        if ($m322.tag === "Some") {
+          const value = $m322.value;
           const d = or_neg({ o: owner_def({ o: value }) });
           if (d >= 0) {
             const [, ctx$259] = $context.set_ref({ ctx: ctx, key: key({ r: r, tag: $defs.tag_expr, span: span }), res: { tag: "DefRes", def: d } });
             ctx = ctx$259;
           }
-          break $m320$match;
+          break $m322$match;
         }
-        if ($m320.tag === "None") {
+        if ($m322.tag === "None") {
           skip({  });
-          break $m320$match;
+          break $m322$match;
         }
         $rt.unreachable();
       }
@@ -2579,61 +2584,61 @@ export function res_expr({ r, ctx, e, scope }) {
         const [, ctx$260] = res_expr({ r: r, ctx: ctx, e: f.value, scope: scope });
         ctx = ctx$260;
       }
-      break $m302$match;
+      break $m304$match;
     }
-    if ($m302.tag === "Hole") {
-      const span = $m302.span;
+    if ($m304.tag === "Hole") {
+      const span = $m304.span;
       let table = ctx.holes;
       const [, table$261] = $std_map.set({ d: table, key: key({ r: r, tag: $defs.tag_expr, span: span }), value: visible_locals({ s: scope }) });
       table = table$261;
-      break $m302$match;
+      break $m304$match;
     }
-    if ($m302.tag === "FieldAccess") {
-      const object = $m302.object;
-      const name = $m302.name;
-      const span = $m302.span;
-      const [$r323, ctx$262] = res_field_access({ r: r, ctx: ctx, e: e, scope: scope });
+    if ($m304.tag === "FieldAccess") {
+      const object = $m304.object;
+      const name = $m304.name;
+      const span = $m304.span;
+      const [$r325, ctx$262] = res_field_access({ r: r, ctx: ctx, e: e, scope: scope });
       ctx = ctx$262;
-      if (!$r323) {
+      if (!$r325) {
         const [, ctx$263] = res_expr({ r: r, ctx: ctx, e: object, scope: scope });
         ctx = ctx$263;
       }
-      break $m302$match;
+      break $m304$match;
     }
-    if ($m302.tag === "Call") {
-      const callee = $m302.callee;
-      const targs = $m302.targs;
-      const args = $m302.args;
-      const span = $m302.span;
+    if ($m304.tag === "Call") {
+      const callee = $m304.callee;
+      const targs = $m304.targs;
+      const args = $m304.args;
+      const span = $m304.span;
       const [, ctx$264] = res_expr({ r: r, ctx: ctx, e: callee, scope: scope });
       ctx = ctx$264;
-      const $m324 = targs;
-      $m324$match: {
-        if ($m324.tag === "Some") {
-          const value = $m324.value;
+      const $m326 = targs;
+      $m326$match: {
+        if ($m326.tag === "Some") {
+          const value = $m326.value;
           for (const a of value) {
-            const $m325 = a;
-            $m325$match: {
-              if ($m325.tag === "TypeArgType") {
-                const ty = $m325.ty;
+            const $m327 = a;
+            $m327$match: {
+              if ($m327.tag === "TypeArgType") {
+                const ty = $m327.ty;
                 const [, ctx$265] = res_type({ r: r, ctx: ctx, t: ty, scope: scope, as_arg: false });
                 ctx = ctx$265;
-                break $m325$match;
+                break $m327$match;
               }
-              if ($m325.tag === "TypeArgConst") {
-                const expr = $m325.expr;
+              if ($m327.tag === "TypeArgConst") {
+                const expr = $m327.expr;
                 const [, ctx$266] = res_expr({ r: r, ctx: ctx, e: expr, scope: scope });
                 ctx = ctx$266;
-                break $m325$match;
+                break $m327$match;
               }
               $rt.unreachable();
             }
           }
-          break $m324$match;
+          break $m326$match;
         }
-        if ($m324.tag === "None") {
+        if ($m326.tag === "None") {
           skip({  });
-          break $m324$match;
+          break $m326$match;
         }
         $rt.unreachable();
       }
@@ -2643,54 +2648,54 @@ export function res_expr({ r, ctx, e, scope }) {
         const [, ctx$268] = res_expr({ r: r, ctx: ctx, e: a.value, scope: scope });
         ctx = ctx$268;
       }
-      break $m302$match;
+      break $m304$match;
     }
-    if ($m302.tag === "Unary") {
-      const op = $m302.op;
-      const operand = $m302.operand;
-      const span = $m302.span;
+    if ($m304.tag === "Unary") {
+      const op = $m304.op;
+      const operand = $m304.operand;
+      const span = $m304.span;
       const [, ctx$269] = res_expr({ r: r, ctx: ctx, e: operand, scope: scope });
       ctx = ctx$269;
-      break $m302$match;
+      break $m304$match;
     }
-    if ($m302.tag === "Binary") {
-      const op = $m302.op;
-      const left = $m302.left;
-      const right = $m302.right;
-      const span = $m302.span;
+    if ($m304.tag === "Binary") {
+      const op = $m304.op;
+      const left = $m304.left;
+      const right = $m304.right;
+      const span = $m304.span;
       const [, ctx$270] = res_expr({ r: r, ctx: ctx, e: left, scope: scope });
       ctx = ctx$270;
       const [, ctx$271] = res_expr({ r: r, ctx: ctx, e: right, scope: scope });
       ctx = ctx$271;
-      break $m302$match;
+      break $m304$match;
     }
-    if ($m302.tag === "And") {
-      const operands = $m302.operands;
-      const span = $m302.span;
+    if ($m304.tag === "And") {
+      const operands = $m304.operands;
+      const span = $m304.span;
       for (const o of operands) {
         const [, ctx$272] = res_expr({ r: r, ctx: ctx, e: o, scope: scope });
         ctx = ctx$272;
       }
-      break $m302$match;
+      break $m304$match;
     }
-    if ($m302.tag === "Or") {
-      const operands = $m302.operands;
-      const span = $m302.span;
+    if ($m304.tag === "Or") {
+      const operands = $m304.operands;
+      const span = $m304.span;
       for (const o of operands) {
         const [, ctx$273] = res_expr({ r: r, ctx: ctx, e: o, scope: scope });
         ctx = ctx$273;
       }
-      break $m302$match;
+      break $m304$match;
     }
-    if ($m302.tag === "Is") {
-      const expr = $m302.expr;
-      const pattern = $m302.pattern;
-      const span = $m302.span;
+    if ($m304.tag === "Is") {
+      const expr = $m304.expr;
+      const pattern = $m304.pattern;
+      const span = $m304.span;
       const [, ctx$274] = res_expr({ r: r, ctx: ctx, e: expr, scope: scope });
       ctx = ctx$274;
       const [, ctx$275] = res_pattern({ r: r, ctx: ctx, p: pattern, scope: child({ parent: scope }) });
       ctx = ctx$275;
-      break $m302$match;
+      break $m304$match;
     }
     $rt.unreachable();
   }
@@ -2712,34 +2717,34 @@ export function ctor_name({ r, ctx, q, scope, has_args, has_fields }) {
   if (n === 1) {
     const name = last.text;
     if (name === "Unit" && !has_args && !has_fields) {
-      const [$r327, ctx$276] = lookup_variant({ r: r, ctx: ctx, name: name, at: last.span });
+      const [$r329, ctx$276] = lookup_variant({ r: r, ctx: ctx, name: name, at: last.span });
       ctx = ctx$276;
-      if ($r327.tag === "None") {
+      if ($r329.tag === "None") {
         return [{ tag: "Some", value: { tag: "UnitRes" } }, ctx];
       }
     }
-    const [$r330, ctx$277] = lookup_variant({ r: r, ctx: ctx, name: name, at: last.span });
+    const [$r332, ctx$277] = lookup_variant({ r: r, ctx: ctx, name: name, at: last.span });
     ctx = ctx$277;
-    const variant = $r330;
-    const $m331 = variant;
-    $m331$match: {
-      if ($m331.tag === "Some") {
-        const value = $m331.value;
+    const variant = $r332;
+    const $m333 = variant;
+    $m333$match: {
+      if ($m333.tag === "Some") {
+        const value = $m333.value;
         if (!want_record) {
           return [{ tag: "Some", value: { tag: "DefRes", def: value } }, ctx];
         }
-        break $m331$match;
+        break $m333$match;
       }
-      if ($m331.tag === "None") {
+      if ($m333.tag === "None") {
         skip({  });
-        break $m331$match;
+        break $m333$match;
       }
       $rt.unreachable();
     }
-    const $m334 = lookup_type({ s: scope, name: name });
-    $m334$match: {
-      if ($m334.tag === "Some") {
-        const value = $m334.value;
+    const $m336 = lookup_type({ s: scope, name: name });
+    $m336$match: {
+      if ($m336.tag === "Some") {
+        const value = $m336.value;
         if (has_args || has_fields) {
           const d = or_neg({ o: owner_def({ o: value }) });
           if (d >= 0 && $rt.eq(kind_of({ ctx: ctx, id: d }), { tag: "Record" })) {
@@ -2750,24 +2755,24 @@ export function ctor_name({ r, ctx, q, scope, has_args, has_fields }) {
           return [{ tag: "None" }, ctx];
         }
         return [{ tag: "Some", value: { tag: "TypeValueRes", owner: value } }, ctx];
-        break $m334$match;
+        break $m336$match;
       }
-      if ($m334.tag === "None") {
+      if ($m336.tag === "None") {
         skip({  });
-        break $m334$match;
+        break $m336$match;
       }
       $rt.unreachable();
     }
-    const $m341 = variant;
-    $m341$match: {
-      if ($m341.tag === "Some") {
-        const value = $m341.value;
+    const $m343 = variant;
+    $m343$match: {
+      if ($m343.tag === "Some") {
+        const value = $m343.value;
         return [{ tag: "Some", value: { tag: "DefRes", def: value } }, ctx];
-        break $m341$match;
+        break $m343$match;
       }
-      if ($m341.tag === "None") {
+      if ($m343.tag === "None") {
         skip({  });
-        break $m341$match;
+        break $m343$match;
       }
       $rt.unreachable();
     }
@@ -2775,24 +2780,24 @@ export function ctor_name({ r, ctx, q, scope, has_args, has_fields }) {
     ctx = ctx$279;
     return [{ tag: "None" }, ctx];
   }
-  const [$r346, ctx$280] = module_of_path({ r: r, ctx: ctx, segments: $std_list.slice({ xs: q.segments, from: 0, to: $rt.int.sub(n, 1, $ob16) }) });
+  const [$r348, ctx$280] = module_of_path({ r: r, ctx: ctx, segments: $std_list.slice({ xs: q.segments, from: 0, to: $rt.int.sub(n, 1, $ob16) }) });
   ctx = ctx$280;
-  const $m345 = $r346;
-  $m345$match: {
-    if ($m345.tag === "None") {
+  const $m347 = $r348;
+  $m347$match: {
+    if ($m347.tag === "None") {
       return [{ tag: "None" }, ctx];
-      break $m345$match;
+      break $m347$match;
     }
-    if ($m345.tag === "Some") {
-      const value = $m345.value;
-      const [$r348, ctx$281] = members_of({ ctx: ctx, mod: value });
+    if ($m347.tag === "Some") {
+      const value = $m347.value;
+      const [$r350, ctx$281] = members_of({ ctx: ctx, mod: value });
       ctx = ctx$281;
-      const mem = $r348;
+      const mem = $r350;
       const variant = find_or({ d: mem.variants, key: last.text });
       if (variant >= 0 && !want_record) {
-        const [$r349, ctx$282] = visible({ r: r, ctx: ctx, d: $context.get_def({ ctx: ctx, id: variant }), at: last.span, what: "variant" });
+        const [$r351, ctx$282] = visible({ r: r, ctx: ctx, d: $context.get_def({ ctx: ctx, id: variant }), at: last.span, what: "variant" });
         ctx = ctx$282;
-        if (!$r349) {
+        if (!$r351) {
           return [{ tag: "None" }, ctx];
         }
         return [{ tag: "Some", value: { tag: "DefRes", def: variant } }, ctx];
@@ -2802,9 +2807,9 @@ export function ctor_name({ r, ctx, q, scope, has_args, has_fields }) {
         ty = find_or({ d: mem.interfaces, key: last.text });
       }
       if (ty >= 0) {
-        const [$r353, ctx$283] = visible({ r: r, ctx: ctx, d: $context.get_def({ ctx: ctx, id: ty }), at: last.span, what: "type" });
+        const [$r355, ctx$283] = visible({ r: r, ctx: ctx, d: $context.get_def({ ctx: ctx, id: ty }), at: last.span, what: "type" });
         ctx = ctx$283;
-        if (!$r353) {
+        if (!$r355) {
           return [{ tag: "None" }, ctx];
         }
         if (has_args || has_fields) {
@@ -2820,53 +2825,53 @@ export function ctor_name({ r, ctx, q, scope, has_args, has_fields }) {
       const [, ctx$285] = rep({ r: r, ctx: ctx, code: "E0109", at: last.span, detail: "module `" + $context.module_name({ ctx: ctx, id: value }) + "` has no variant or type `" + last.text + "`" });
       ctx = ctx$285;
       return [{ tag: "None" }, ctx];
-      break $m345$match;
+      break $m347$match;
     }
     $rt.unreachable();
   }
 }
 
 export function field_of({ e }) {
-  const $m363 = e;
-  $m363$match: {
-    if ($m363.tag === "FieldAccess") {
-      const object = $m363.object;
-      const name = $m363.name;
-      const span = $m363.span;
+  const $m365 = e;
+  $m365$match: {
+    if ($m365.tag === "FieldAccess") {
+      const object = $m365.object;
+      const name = $m365.name;
+      const span = $m365.span;
       return name;
-      break $m363$match;
+      break $m365$match;
     }
     if (true) {
       return { text: "", span: { start: 0, end: 0 } };
-      break $m363$match;
+      break $m365$match;
     }
     $rt.unreachable();
   }
 }
 
 export function is_bare_ctor({ e }) {
-  const $m366 = e;
-  $m366$match: {
-    if ($m366.tag === "Ctor") {
-      const name = $m366.name;
-      const args = $m366.args;
-      const fields = $m366.fields;
-      const span = $m366.span;
+  const $m368 = e;
+  $m368$match: {
+    if ($m368.tag === "Ctor") {
+      const name = $m368.name;
+      const args = $m368.args;
+      const fields = $m368.fields;
+      const span = $m368.span;
       return args.tag === "None" && fields.tag === "None";
-      break $m366$match;
+      break $m368$match;
     }
     if (true) {
       return false;
-      break $m366$match;
+      break $m368$match;
     }
     $rt.unreachable();
   }
 }
 
 export function module_member_ref({ r, ctx, mod, field, at }) {
-  const [$r367, ctx$286] = members_of({ ctx: ctx, mod: mod });
+  const [$r369, ctx$286] = members_of({ ctx: ctx, mod: mod });
   ctx = ctx$286;
-  const mem = $r367;
+  const mem = $r369;
   const d = find_or({ d: mem.values, key: field.text });
   let ok = d >= 0;
   if (ok) {
@@ -2878,9 +2883,9 @@ export function module_member_ref({ r, ctx, mod, field, at }) {
     ctx = ctx$287;
     return [undefined, ctx];
   }
-  const [$r370, ctx$288] = visible({ r: r, ctx: ctx, d: $context.get_def({ ctx: ctx, id: d }), at: field.span, what: "function" });
+  const [$r372, ctx$288] = visible({ r: r, ctx: ctx, d: $context.get_def({ ctx: ctx, id: d }), at: field.span, what: "function" });
   ctx = ctx$288;
-  if (!$r370) {
+  if (!$r372) {
     return [undefined, ctx];
   }
   const [, ctx$289] = $context.set_ref({ ctx: ctx, key: key({ r: r, tag: $defs.tag_expr, span: at }), res: { tag: "DefRes", def: d } });
@@ -2890,8 +2895,8 @@ export function module_member_ref({ r, ctx, mod, field, at }) {
 }
 
 export function find_iface_fn({ ctx, iface, name }) {
-  const $hi372 = $context.def_count({ ctx: ctx });
-  for (let i = 0; i < $hi372; i++) {
+  const $hi374 = $context.def_count({ ctx: ctx });
+  for (let i = 0; i < $hi374; i++) {
     const d = $context.get_def({ ctx: ctx, id: i });
     if ($rt.eq(d.kind, { tag: "IfaceFn" }) && d.name === name && $rt.eq(d.parent, { tag: "Some", value: iface })) {
       return { tag: "Some", value: i };
@@ -2902,48 +2907,48 @@ export function find_iface_fn({ ctx, iface, name }) {
 
 export function res_field_access({ r, ctx, e, scope }) {
   const field = field_of({ e: e });
-  const $m377 = e;
-  $m377$match: {
-    if ($m377.tag === "FieldAccess") {
-      const object = $m377.object;
-      const span = $m377.span;
+  const $m379 = e;
+  $m379$match: {
+    if ($m379.tag === "FieldAccess") {
+      const object = $m379.object;
+      const span = $m379.span;
       const object_span = $parser.span_of_expr({ e: object });
-      const $m378 = object;
-      $m378$match: {
-        if ($m378.tag === "Name") {
-          const name = $m378.name;
-          const $m379 = $std_map.find({ d: r.aliases, key: name.text });
-          $m379$match: {
-            if ($m379.tag === "Some") {
-              const value = $m379.value;
+      const $m380 = object;
+      $m380$match: {
+        if ($m380.tag === "Name") {
+          const name = $m380.name;
+          const $m381 = $std_map.find({ d: r.aliases, key: name.text });
+          $m381$match: {
+            if ($m381.tag === "Some") {
+              const value = $m381.value;
               const [, ctx$290] = $context.set_ref({ ctx: ctx, key: key({ r: r, tag: $defs.tag_expr, span: object_span }), res: { tag: "ModuleRes", mod: value } });
               ctx = ctx$290;
               const [, ctx$291] = module_member_ref({ r: r, ctx: ctx, mod: value, field: field, at: span });
               ctx = ctx$291;
               return [true, ctx];
-              break $m379$match;
+              break $m381$match;
             }
-            if ($m379.tag === "None") {
+            if ($m381.tag === "None") {
               return [false, ctx];
-              break $m379$match;
+              break $m381$match;
             }
             $rt.unreachable();
           }
-          break $m378$match;
+          break $m380$match;
         }
-        if ($m378.tag === "Ctor") {
-          const name = $m378.name;
-          const args = $m378.args;
-          const fields = $m378.fields;
+        if ($m380.tag === "Ctor") {
+          const name = $m380.name;
+          const args = $m380.args;
+          const fields = $m380.fields;
           if (args.tag === "Some" || fields.tag === "Some") {
             return [false, ctx];
           }
-          const [$r382, ctx$292] = ctor_owner({ r: r, ctx: ctx, q: name, scope: scope });
+          const [$r384, ctx$292] = ctor_owner({ r: r, ctx: ctx, q: name, scope: scope });
           ctx = ctx$292;
-          const $m381 = $r382;
-          $m381$match: {
-            if ($m381.tag === "Some") {
-              const value = $m381.value;
+          const $m383 = $r384;
+          $m383$match: {
+            if ($m383.tag === "Some") {
+              const value = $m383.value;
               if (is_interface({ ctx: ctx, o: value })) {
                 const iface = or_neg({ o: owner_def({ o: value }) });
                 const fd = or_neg({ o: find_iface_fn({ ctx: ctx, iface: iface, name: field.text }) });
@@ -2957,9 +2962,9 @@ export function res_field_access({ r, ctx, e, scope }) {
                   ctx = ctx$295;
                 }
               } else {
-                const [$r385, ctx$296] = companion({ r: r, ctx: ctx, owner: value, field: field });
+                const [$r387, ctx$296] = companion({ r: r, ctx: ctx, owner: value, field: field });
                 ctx = ctx$296;
-                const fd = or_neg({ o: $r385 });
+                const fd = or_neg({ o: $r387 });
                 const [, ctx$297] = $context.set_ref({ ctx: ctx, key: key({ r: r, tag: $defs.tag_expr, span: object_span }), res: { tag: "TypeValueRes", owner: value } });
                 ctx = ctx$297;
                 if (fd >= 0) {
@@ -2968,27 +2973,27 @@ export function res_field_access({ r, ctx, e, scope }) {
                 }
               }
               return [true, ctx];
-              break $m381$match;
+              break $m383$match;
             }
-            if ($m381.tag === "None") {
+            if ($m383.tag === "None") {
               return [false, ctx];
-              break $m381$match;
+              break $m383$match;
             }
             $rt.unreachable();
           }
-          break $m378$match;
+          break $m380$match;
         }
         if (true) {
           return [false, ctx];
-          break $m378$match;
+          break $m380$match;
         }
         $rt.unreachable();
       }
-      break $m377$match;
+      break $m379$match;
     }
     if (true) {
       return [false, ctx];
-      break $m377$match;
+      break $m379$match;
     }
     $rt.unreachable();
   }
@@ -3001,9 +3006,9 @@ export function ctor_owner({ r, ctx, q, scope }) {
   }
   const last = $std_list.get({ xs: q.segments, i: $rt.int.sub(n, 1, $ob17) });
   if (n === 1) {
-    const [$r389, ctx$299] = members_of({ ctx: ctx, mod: r.m.id });
+    const [$r391, ctx$299] = members_of({ ctx: ctx, mod: r.m.id });
     ctx = ctx$299;
-    if ($std_map.contains({ d: $r389.variants, key: last.text })) {
+    if ($std_map.contains({ d: $r391.variants, key: last.text })) {
       return [{ tag: "None" }, ctx];
     }
     return [lookup_type({ s: scope, name: last.text }), ctx];
@@ -3012,17 +3017,17 @@ export function ctor_owner({ r, ctx, q, scope }) {
     return [{ tag: "None" }, ctx];
   }
   const head = $std_list.get({ xs: q.segments, i: 0 });
-  const $m392 = $std_map.find({ d: r.aliases, key: head.text });
-  $m392$match: {
-    if ($m392.tag === "None") {
+  const $m394 = $std_map.find({ d: r.aliases, key: head.text });
+  $m394$match: {
+    if ($m394.tag === "None") {
       return [{ tag: "None" }, ctx];
-      break $m392$match;
+      break $m394$match;
     }
-    if ($m392.tag === "Some") {
-      const value = $m392.value;
-      const [$r394, ctx$300] = members_of({ ctx: ctx, mod: value });
+    if ($m394.tag === "Some") {
+      const value = $m394.value;
+      const [$r396, ctx$300] = members_of({ ctx: ctx, mod: value });
       ctx = ctx$300;
-      const mem = $r394;
+      const mem = $r396;
       let d = find_or({ d: mem.types, key: last.text });
       if (d < 0) {
         d = find_or({ d: mem.interfaces, key: last.text });
@@ -3031,7 +3036,7 @@ export function ctor_owner({ r, ctx, q, scope }) {
         return [{ tag: "None" }, ctx];
       }
       return [{ tag: "Some", value: { tag: "DefOwner", def: d } }, ctx];
-      break $m392$match;
+      break $m394$match;
     }
     $rt.unreachable();
   }
@@ -3040,10 +3045,10 @@ export function ctor_owner({ r, ctx, q, scope }) {
 export function companion({ r, ctx, owner, field }) {
   let mod = $rt.int.neg(1, $ob18);
   let type_name_text = "";
-  const $m398 = owner;
-  $m398$match: {
-    if ($m398.tag === "PrimOwner") {
-      const name = $m398.name;
+  const $m400 = owner;
+  $m400$match: {
+    if ($m400.tag === "PrimOwner") {
+      const name = $m400.name;
       const mod_name = $defs.companion_module_of({ prim: name });
       mod = or_neg({ o: $std_map.find({ d: ctx.by_name, key: mod_name }) });
       type_name_text = name;
@@ -3052,27 +3057,27 @@ export function companion({ r, ctx, owner, field }) {
         ctx = ctx$301;
         return [{ tag: "None" }, ctx];
       }
-      break $m398$match;
+      break $m400$match;
     }
-    if ($m398.tag === "DefOwner") {
-      const def = $m398.def;
+    if ($m400.tag === "DefOwner") {
+      const def = $m400.def;
       mod = $context.get_def({ ctx: ctx, id: def }).mod;
       type_name_text = $context.get_def({ ctx: ctx, id: def }).name;
-      break $m398$match;
+      break $m400$match;
     }
     $rt.unreachable();
   }
-  const [$r400, ctx$302] = members_of({ ctx: ctx, mod: mod });
+  const [$r402, ctx$302] = members_of({ ctx: ctx, mod: mod });
   ctx = ctx$302;
-  const d = find_or({ d: $r400.values, key: field.text });
+  const d = find_or({ d: $r402.values, key: field.text });
   if (d < 0 || !$rt.eq(kind_of({ ctx: ctx, id: d }), { tag: "Fn" })) {
     const [, ctx$303] = rep({ r: r, ctx: ctx, code: "E0109", at: field.span, detail: "`" + type_name_text + "` has no function `" + field.text + "` (module `" + $context.module_name({ ctx: ctx, id: mod }) + "`)" });
     ctx = ctx$303;
     return [{ tag: "None" }, ctx];
   }
-  const [$r403, ctx$304] = visible({ r: r, ctx: ctx, d: $context.get_def({ ctx: ctx, id: d }), at: field.span, what: "function" });
+  const [$r405, ctx$304] = visible({ r: r, ctx: ctx, d: $context.get_def({ ctx: ctx, id: d }), at: field.span, what: "function" });
   ctx = ctx$304;
-  if (!$r403) {
+  if (!$r405) {
     return [{ tag: "None" }, ctx];
   }
   return [{ tag: "Some", value: d }, ctx];
@@ -3080,19 +3085,19 @@ export function companion({ r, ctx, owner, field }) {
 
 export function bind_pat_fields({ r, ctx, fields, scope }) {
   for (const f of fields) {
-    const $m406 = f;
-    $m406$match: {
-      if ($m406.tag === "PatFieldName") {
-        const name = $m406.name;
-        const span = $m406.span;
-        const [$r409, ctx$305] = bind_value({ r: r, ctx: ctx, scope: scope, kind: { tag: "Pattern" }, node: { tag: "PatFieldNode", decl: f }, name: name, key: key({ r: r, tag: $defs.tag_pattern, span: span }), is_inout: false });
+    const $m408 = f;
+    $m408$match: {
+      if ($m408.tag === "PatFieldName") {
+        const name = $m408.name;
+        const span = $m408.span;
+        const [$r411, ctx$305] = bind_value({ r: r, ctx: ctx, scope: scope, kind: { tag: "Pattern" }, node: { tag: "PatFieldNode", decl: f }, name: name, key: key({ r: r, tag: $defs.tag_pattern, span: span }), is_inout: false });
         ctx = ctx$305;
-        const id = $r409;
-        break $m406$match;
+        const id = $r411;
+        break $m408$match;
       }
       if (true) {
         skip({  });
-        break $m406$match;
+        break $m408$match;
       }
       $rt.unreachable();
     }
@@ -3102,48 +3107,48 @@ export function bind_pat_fields({ r, ctx, fields, scope }) {
 }
 
 export function res_pattern({ r, ctx, p, scope }) {
-  const $m410 = p;
-  $m410$match: {
-    if ($m410.tag === "WildcardPat") {
-      const span = $m410.span;
+  const $m412 = p;
+  $m412$match: {
+    if ($m412.tag === "WildcardPat") {
+      const span = $m412.span;
       skip({  });
-      break $m410$match;
+      break $m412$match;
     }
-    if ($m410.tag === "LitPat") {
-      const literal = $m410.literal;
-      const span = $m410.span;
+    if ($m412.tag === "LitPat") {
+      const literal = $m412.literal;
+      const span = $m412.span;
       skip({  });
-      break $m410$match;
+      break $m412$match;
     }
-    if ($m410.tag === "BindPat") {
-      const name = $m410.name;
-      const span = $m410.span;
-      const [$r413, ctx$306] = bind_value({ r: r, ctx: ctx, scope: scope, kind: { tag: "Pattern" }, node: { tag: "PatternNode", decl: p }, name: name, key: key({ r: r, tag: $defs.tag_pattern, span: span }), is_inout: false });
+    if ($m412.tag === "BindPat") {
+      const name = $m412.name;
+      const span = $m412.span;
+      const [$r415, ctx$306] = bind_value({ r: r, ctx: ctx, scope: scope, kind: { tag: "Pattern" }, node: { tag: "PatternNode", decl: p }, name: name, key: key({ r: r, tag: $defs.tag_pattern, span: span }), is_inout: false });
       ctx = ctx$306;
-      const id = $r413;
-      break $m410$match;
+      const id = $r415;
+      break $m412$match;
     }
-    if ($m410.tag === "VariantPat") {
-      const name = $m410.name;
-      const fields = $m410.fields;
-      const span = $m410.span;
-      const [$r415, ctx$307] = ctor_name({ r: r, ctx: ctx, q: name, scope: scope, has_args: true, has_fields: false });
+    if ($m412.tag === "VariantPat") {
+      const name = $m412.name;
+      const fields = $m412.fields;
+      const span = $m412.span;
+      const [$r417, ctx$307] = ctor_name({ r: r, ctx: ctx, q: name, scope: scope, has_args: true, has_fields: false });
       ctx = ctx$307;
-      const $m414 = $r415;
-      $m414$match: {
-        if ($m414.tag === "Some") {
-          const value = $m414.value;
+      const $m416 = $r417;
+      $m416$match: {
+        if ($m416.tag === "Some") {
+          const value = $m416.value;
           let is_variant = false;
-          const $m416 = value;
-          $m416$match: {
-            if ($m416.tag === "DefRes") {
-              const def = $m416.def;
+          const $m418 = value;
+          $m418$match: {
+            if ($m418.tag === "DefRes") {
+              const def = $m418.def;
               is_variant = $rt.eq(kind_of({ ctx: ctx, id: def }), { tag: "Variant" });
-              break $m416$match;
+              break $m418$match;
             }
             if (true) {
               is_variant = false;
-              break $m416$match;
+              break $m418$match;
             }
             $rt.unreachable();
           }
@@ -3154,29 +3159,29 @@ export function res_pattern({ r, ctx, p, scope }) {
             const [, ctx$309] = rep({ r: r, ctx: ctx, code: "E0105", at: name.span, detail: "`" + $loader.qname_text({ q: name }) + "` is not a variant" });
             ctx = ctx$309;
           }
-          break $m414$match;
+          break $m416$match;
         }
-        if ($m414.tag === "None") {
+        if ($m416.tag === "None") {
           skip({  });
-          break $m414$match;
+          break $m416$match;
         }
         $rt.unreachable();
       }
-      const $m418 = fields;
-      $m418$match: {
-        if ($m418.tag === "Some") {
-          const value = $m418.value;
+      const $m420 = fields;
+      $m420$match: {
+        if ($m420.tag === "Some") {
+          const value = $m420.value;
           const [, ctx$310] = bind_pat_fields({ r: r, ctx: ctx, fields: value, scope: scope });
           ctx = ctx$310;
-          break $m418$match;
+          break $m420$match;
         }
-        if ($m418.tag === "None") {
+        if ($m420.tag === "None") {
           skip({  });
-          break $m418$match;
+          break $m420$match;
         }
         $rt.unreachable();
       }
-      break $m410$match;
+      break $m412$match;
     }
     $rt.unreachable();
   }
@@ -3201,36 +3206,36 @@ export function resolve_module({ ctx, m }) {
 }
 
 export function resolve_pass({ ctx }) {
-  const $hi427 = ctx.module_count;
-  for (let id = 0; id < $hi427; id++) {
-    const $m428 = $std_map.find({ d: ctx.modules, key: id });
-    $m428$match: {
-      if ($m428.tag === "Some") {
-        const value = $m428.value;
-        const [, ctx$313] = collect({ ctx: ctx, m: value });
-        ctx = ctx$313;
-        break $m428$match;
-      }
-      if ($m428.tag === "None") {
-        skip({  });
-        break $m428$match;
-      }
-      $rt.unreachable();
-    }
-  }
   const $hi429 = ctx.module_count;
   for (let id = 0; id < $hi429; id++) {
     const $m430 = $std_map.find({ d: ctx.modules, key: id });
     $m430$match: {
       if ($m430.tag === "Some") {
         const value = $m430.value;
-        const [, ctx$314] = resolve_module({ ctx: ctx, m: value });
-        ctx = ctx$314;
+        const [, ctx$313] = collect({ ctx: ctx, m: value });
+        ctx = ctx$313;
         break $m430$match;
       }
       if ($m430.tag === "None") {
         skip({  });
         break $m430$match;
+      }
+      $rt.unreachable();
+    }
+  }
+  const $hi431 = ctx.module_count;
+  for (let id = 0; id < $hi431; id++) {
+    const $m432 = $std_map.find({ d: ctx.modules, key: id });
+    $m432$match: {
+      if ($m432.tag === "Some") {
+        const value = $m432.value;
+        const [, ctx$314] = resolve_module({ ctx: ctx, m: value });
+        ctx = ctx$314;
+        break $m432$match;
+      }
+      if ($m432.tag === "None") {
+        skip({  });
+        break $m432$match;
       }
       $rt.unreachable();
     }

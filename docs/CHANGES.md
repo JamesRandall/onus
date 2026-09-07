@@ -1993,6 +1993,94 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     `self/`). Fixed point reached from `bootstrap/`, native stage agrees;
     promoted. `next` and `loop` remain.
 
+194. **Conditions with `inout` calls run when they are tested (impl spec
+    §6, codegen; found by item 195).** Two lowering bugs, in both compilers,
+    the same way. A call with `inout` arguments lowers to a statement that
+    assigns its results back, placed before the statement its expression
+    belongs to. In a `loop while` condition that put the call before the
+    loop, so the condition was evaluated once and every later test read a
+    stale value: a loop guarded by `below(c: inout c) and c.n < 10` ran to
+    10 and asked `below` once. As a later operand of `and`, `or` or
+    `implies` it put the call before the whole expression, so it ran even
+    when the earlier operands had decided the result. Now the condition's
+    own statements are collected: a loop whose condition has any runs them
+    before the loop into a flag and again at the end of every iteration,
+    the loop testing the flag; a chain whose later operand has any keeps
+    the result in a flag and runs that operand under `if flag` (`and`),
+    `if not flag` (`or`) or, for `implies`, the negated left side. A
+    condition without such statements lowers as before, so every pinned
+    form (`test/codegen/lowered/`) and every differential is unchanged.
+    The compiler's own parser never had an `inout` call in a condition
+    until item 195 made its token tests record, which is how the bugs
+    surfaced: the `import` loop stopped after one iteration and lookahead
+    tests ran past a false left operand. Fixture:
+    `test/native/inout_conditions.onus`, an example on every case (`seen`
+    counts the calls, `n` the outcome), run on both targets. Neither the
+    verifier nor the emitters change: the flag is a local of the IR the
+    emitters already have. Review artefacts under `.onus/changes/194/`:
+    `lowerir` has no interface change (`Later`, `short_circuit` and
+    `implies_expr` are private); the ledger delta is 572 → 593 obligations
+    (361 proved, 232 checked: the new functions' fuel and index refinements
+    proved, their representation and overflow obligations checked, no
+    status changed). Process: promoted on its own before item 195, since a
+    compiler whose conditions hoist would miscompile the parser that item
+    instruments — the chain's stage1 could not parse its own `import`
+    line — which is the self-application rule of the skill in practice.
+
+195. **`onus next` in Onus (M15.6; §14).** `self/nextcmd.onus` (new;
+    `next/next.ts`), `self/parser.onus`, `self/tokens.onus`,
+    `self/loader.onus` and `self/cli.onus` provide `onus next <file>
+    --offset <n> [--json]`: the legal next tokens at the offset, the
+    expected type there and the local names in scope, as the TypeScript
+    command line prints them. The parser gains the two features its port
+    left out (item 158's note): the legal set and the hole. With a `Cursor`
+    token at the offset (and `eof` after it, so the parser's loops still
+    run at the cursor), every grammar test of a token kind — the `at_*`
+    functions, which now take the parser `inout` and record the kind when
+    the tested token is the cursor, the set tests `at_cmp_op`, `at_add_op`,
+    `at_mul_op` and `at_literal_pattern`, and `expecting` before the
+    dispatches over items, statements, patterns and primaries — records
+    into `Parser.legal` until the first syntax error or until the cursor
+    is consumed (`advance` stops recording; `take` goes through it); loop
+    guards and negative lookahead keep using `kind_at`, which never
+    records, and the chained-comparison re-test peeks as the TypeScript
+    one does. When the prefix ends with a newline the run without it adds
+    the continuation kinds, as `legalTokensAt` does. `parse_with_hole`
+    parses the prefix with a `Hole` token, closers for every open bracket
+    and block, a newline and `eof`; `primary` makes it an `ast.Hole`, which
+    the resolver and the checker already record under its span. `next`
+    lexes the prefix (offsets are code points, item 181), adds the file
+    with the holed parse (`loader.add_parsed`, split from `add_file`), runs
+    load, resolve and types on it whatever the diagnostics, and reads the
+    hole's tables by the key of its zero-width span; the type text spells
+    the refinements out innermost first (`typecheck.show` on the base).
+    `tokens.decoder_name_of` maps the grammar names to the decoder
+    vocabulary. Fixtures: `test/self/cli.test.ts` gains `next` at every
+    token of `test/next/positions.onus` and at its end, `--json` output
+    identical on both, plus the text form, an expected type with its
+    refinement and the names in scope, and the refused offsets. The
+    instrumentation is what surfaced item 194. The
+    resolver's list of names visible at a hole now walks every scope
+    below the module's, as the TypeScript one does: a record field's
+    refinement sees the earlier fields (the two positions the sweep
+    found). Review artefacts under `.onus/changes/195/`: the interface
+    diff of `parser` is `Parser` carrying `cursor`, `recording` and
+    `legal`, the `at_*` functions taking the parser `inout` and claiming
+    `alloc` (with `accept_*`, `skip_newline`, `visibility` and the
+    recoveries), `qtname_ahead` and `effect_follows` likewise, and
+    `prefix_tokens`, `legal_tokens_at` and `parse_with_hole` added;
+    `tokens.Kind` gains `Cursor` and `Hole` and `decoder_name` and
+    `decoder_name_of` are added; `loader.add_parsed` is added; `cli` gains
+    `next_command`; `resolve` has no interface change. The ledger delta is
+    `parser` 1153 → 1218 obligations (1053 proved, 165 checked: 48 proved
+    and 12 checked added, the checked ones the representation and overflow
+    obligations of offsets and counters; six proved obligations of `take`,
+    `parse_stmt`, `add_expr` and `mul_expr` gone with the tests that moved
+    into the helpers; no status changed), `cli` 60 → 62, `loader` 63 → 64,
+    `resolve` and `tokens` unchanged, and `nextcmd` new with 14 (9 proved,
+    5 checked representations). Fixed point reached from `bootstrap/`,
+    native stage agrees; promoted. `loop` remains.
+
 ### Deferred, not changed
 
 - Decided 2026-09-06, to apply in M15.5: generics compile natively by

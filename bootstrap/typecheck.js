@@ -743,9 +743,13 @@ export function panicked_type({ ctx }) {
 }
 
 export function is_list_type({ ctx, t }) {
-  const [$r60, ctx$17] = std_type({ ctx: ctx, module_name: "std.list", type_name: "List" });
-  ctx = ctx$17;
-  return [t.tag === "Opaque" && $types.def_of({ t: t }) === $r60, ctx];
+  let $sc61 = t.tag === "Opaque";
+  if ($sc61) {
+    const [$r60, ctx$17] = std_type({ ctx: ctx, module_name: "std.list", type_name: "List" });
+    ctx = ctx$17;
+    $sc61 = $types.def_of({ t: t }) === $r60;
+  }
+  return [$sc61, ctx];
 }
 
 export function first_type_arg({ t }) {
@@ -773,16 +777,16 @@ export function second_type_arg({ t }) {
 }
 
 export function fallible_value_or({ o, dflt }) {
-  const $m67 = o;
-  $m67$match: {
-    if ($m67.tag === "Some") {
-      const value = $m67.value;
+  const $m68 = o;
+  $m68$match: {
+    if ($m68.tag === "Some") {
+      const value = $m68.value;
       return value.value;
-      break $m67$match;
+      break $m68$match;
     }
-    if ($m67.tag === "None") {
+    if ($m68.tag === "None") {
       return dflt;
-      break $m67$match;
+      break $m68$match;
     }
     $rt.unreachable();
   }
@@ -797,18 +801,18 @@ export function unwrap_fallible({ ctx, t }) {
   if (a0.tag === "None") {
     return [{ tag: "None" }, ctx];
   }
-  const [$r70, ctx$18] = std_type({ ctx: ctx, module_name: "std.results", type_name: "Result" });
+  const [$r71, ctx$18] = std_type({ ctx: ctx, module_name: "std.results", type_name: "Result" });
   ctx = ctx$18;
-  if ($types.def_of({ t: s }) === $r70) {
+  if ($types.def_of({ t: s }) === $r71) {
     const a1 = second_type_arg({ t: s });
     if (a1.tag === "None") {
       return [{ tag: "None" }, ctx];
     }
     return [{ tag: "Some", value: { value: or_error({ o: a0 }), error: or_error({ o: a1 }), is_option: false } }, ctx];
   }
-  const [$r74, ctx$19] = std_type({ ctx: ctx, module_name: "std.option", type_name: "Option" });
+  const [$r75, ctx$19] = std_type({ ctx: ctx, module_name: "std.option", type_name: "Option" });
   ctx = ctx$19;
-  if ($types.def_of({ t: s }) === $r74) {
+  if ($types.def_of({ t: s }) === $r75) {
     return [{ tag: "Some", value: { value: or_error({ o: a0 }), error: $types.unit_t, is_option: true } }, ctx];
   }
   return [{ tag: "None" }, ctx];
@@ -817,29 +821,29 @@ export function unwrap_fallible({ ctx, t }) {
 export function effect_set_of({ ctx, file, refs }) {
   let out = $std_list.builder({  });
   for (const r of refs) {
-    const $m78 = $std_map.find({ d: ctx.refs, key: $defs.node_key({ file: file, tag: $defs.tag_sig, span: r.span }) });
-    $m78$match: {
-      if ($m78.tag === "Some") {
-        const value = $m78.value;
-        const $m79 = value;
-        $m79$match: {
-          if ($m79.tag === "EffectRes") {
-            const effect = $m79.effect;
+    const $m79 = $std_map.find({ d: ctx.refs, key: $defs.node_key({ file: file, tag: $defs.tag_sig, span: r.span }) });
+    $m79$match: {
+      if ($m79.tag === "Some") {
+        const value = $m79.value;
+        const $m80 = value;
+        $m80$match: {
+          if ($m80.tag === "EffectRes") {
+            const effect = $m80.effect;
             const [, out$20] = $std_list.push({ b: out, x: effect });
             out = out$20;
-            break $m79$match;
+            break $m80$match;
           }
           if (true) {
             skip({  });
-            break $m79$match;
+            break $m80$match;
           }
           $rt.unreachable();
         }
-        break $m78$match;
+        break $m79$match;
       }
-      if ($m78.tag === "None") {
+      if ($m79.tag === "None") {
         skip({  });
-        break $m78$match;
+        break $m79$match;
       }
       $rt.unreachable();
     }
@@ -852,23 +856,23 @@ export function type_of({ fuel, ck, ctx, t }) {
     return [{ tag: "ErrorT" }, ck, ctx];
   }
   const k = key({ ck: ck, tag: $defs.tag_type, span: $comments.type_span({ t: t }) });
-  const $m81 = $std_map.find({ d: ck.type_memo, key: k });
-  $m81$match: {
-    if ($m81.tag === "Some") {
-      const value = $m81.value;
+  const $m82 = $std_map.find({ d: ck.type_memo, key: k });
+  $m82$match: {
+    if ($m82.tag === "Some") {
+      const value = $m82.value;
       return [value, ck, ctx];
-      break $m81$match;
+      break $m82$match;
     }
-    if ($m81.tag === "None") {
+    if ($m82.tag === "None") {
       skip({  });
-      break $m81$match;
+      break $m82$match;
     }
     $rt.unreachable();
   }
-  const [$r82, ck$21, ctx$21] = compute_type({ fuel: $rt.int.sub(fuel, 1, $ob11), ck: ck, ctx: ctx, t: t });
+  const [$r83, ck$21, ctx$21] = compute_type({ fuel: $rt.int.sub(fuel, 1, $ob11), ck: ck, ctx: ctx, t: t });
   ck = ck$21;
   ctx = ctx$21;
-  const res_t = $r82;
+  const res_t = $r83;
   let memo = ck.type_memo;
   const [, memo$22] = $std_map.set({ d: memo, key: k, value: res_t });
   memo = memo$22;
@@ -879,57 +883,57 @@ export function compute_type({ fuel, ck, ctx, t }) {
   if (fuel === 0) {
     return [{ tag: "ErrorT" }, ck, ctx];
   }
-  const $m84 = t;
-  $m84$match: {
-    if ($m84.tag === "FnType") {
-      const params = $m84.params;
-      const ret = $m84.ret;
-      const effects = $m84.effects;
-      const span = $m84.span;
+  const $m85 = t;
+  $m85$match: {
+    if ($m85.tag === "FnType") {
+      const params = $m85.params;
+      const ret = $m85.ret;
+      const effects = $m85.effects;
+      const span = $m85.span;
       let ps = $std_list.builder({  });
       for (const p of params) {
-        const [$r85, ck$23, ctx$23] = type_of({ fuel: $rt.int.sub(fuel, 1, $ob12), ck: ck, ctx: ctx, t: p.ty });
+        const [$r86, ck$23, ctx$23] = type_of({ fuel: $rt.int.sub(fuel, 1, $ob12), ck: ck, ctx: ctx, t: p.ty });
         ck = ck$23;
         ctx = ctx$23;
-        const [, ps$24] = $std_list.push({ b: ps, x: { name: p.name.text, is_inout: p.is_inout, ty: $r85 } });
+        const [, ps$24] = $std_list.push({ b: ps, x: { name: p.name.text, is_inout: p.is_inout, ty: $r86 } });
         ps = ps$24;
       }
-      const [$r87, ck$25, ctx$25] = type_of({ fuel: $rt.int.sub(fuel, 1, $ob13), ck: ck, ctx: ctx, t: ret });
+      const [$r88, ck$25, ctx$25] = type_of({ fuel: $rt.int.sub(fuel, 1, $ob13), ck: ck, ctx: ctx, t: ret });
       ck = ck$25;
       ctx = ctx$25;
-      return [{ tag: "FnT", params: $std_list.finish({ b: ps }), ret: $r87, effects: effect_set_of({ ctx: ctx, file: ck.current_file, refs: effects }) }, ck, ctx];
-      break $m84$match;
+      return [{ tag: "FnT", params: $std_list.finish({ b: ps }), ret: $r88, effects: effect_set_of({ ctx: ctx, file: ck.current_file, refs: effects }) }, ck, ctx];
+      break $m85$match;
     }
-    if ($m84.tag === "NamedType") {
-      const name = $m84.name;
-      const args = $m84.args;
-      const where_ = $m84.where_;
-      const span = $m84.span;
+    if ($m85.tag === "NamedType") {
+      const name = $m85.name;
+      const args = $m85.args;
+      const where_ = $m85.where_;
+      const span = $m85.span;
       let base = { tag: "ErrorT" };
-      const $m90 = ref_at({ ctx: ctx, k: key({ ck: ck, tag: $defs.tag_type, span: span }) });
-      $m90$match: {
-        if ($m90.tag === "None") {
+      const $m91 = ref_at({ ctx: ctx, k: key({ ck: ck, tag: $defs.tag_type, span: span }) });
+      $m91$match: {
+        if ($m91.tag === "None") {
           base = { tag: "ErrorT" };
-          break $m90$match;
+          break $m91$match;
         }
-        if ($m90.tag === "Some") {
-          const value = $m90.value;
-          const [$r92, ck$26, ctx$26] = named_base({ fuel: $rt.int.sub(fuel, 1, $ob14), ck: ck, ctx: ctx, res: value, q: name, args: args, at: span });
+        if ($m91.tag === "Some") {
+          const value = $m91.value;
+          const [$r93, ck$26, ctx$26] = named_base({ fuel: $rt.int.sub(fuel, 1, $ob14), ck: ck, ctx: ctx, res: value, q: name, args: args, at: span });
           ck = ck$26;
           ctx = ctx$26;
-          base = $r92;
-          break $m90$match;
+          base = $r93;
+          break $m91$match;
         }
         $rt.unreachable();
       }
-      const $m93 = where_;
-      $m93$match: {
-        if ($m93.tag === "None") {
+      const $m94 = where_;
+      $m94$match: {
+        if ($m94.tag === "None") {
           return [base, ck, ctx];
-          break $m93$match;
+          break $m94$match;
         }
-        if ($m93.tag === "Some") {
-          const value = $m93.value;
+        if ($m94.tag === "Some") {
+          const value = $m94.value;
           let q = ck.pending;
           let wheres = ctx.where_exprs;
           const [, wheres$27] = $std_map.set({ d: wheres, key: key({ ck: ck, tag: $defs.tag_expr, span: $parser.span_of_expr({ e: value }) }), value: value });
@@ -937,11 +941,11 @@ export function compute_type({ fuel, ck, ctx, t }) {
           const [, q$28] = $std_list.push({ b: q, x: { file: ck.current_file, def_name: ck.current_def, pred: value, base: base, fn_ctx: fn_top({ ck: ck }) } });
           q = q$28;
           return [{ tag: "Refined", base: base, pred: key({ ck: ck, tag: $defs.tag_expr, span: $parser.span_of_expr({ e: value }) }), alias: { tag: "None" } }, ck, ctx];
-          break $m93$match;
+          break $m94$match;
         }
         $rt.unreachable();
       }
-      break $m84$match;
+      break $m85$match;
     }
     $rt.unreachable();
   }
@@ -951,10 +955,10 @@ export function named_base({ fuel, ck, ctx, res, q, args, at }) {
   if (fuel === 0) {
     return [{ tag: "ErrorT" }, ck, ctx];
   }
-  const $m98 = res;
-  $m98$match: {
-    if ($m98.tag === "PrimRes") {
-      const name = $m98.name;
+  const $m99 = res;
+  $m99$match: {
+    if ($m99.tag === "PrimRes") {
+      const name = $m99.name;
       if ($std_list.len({ xs: args }) > 0) {
         const [, ctx$29] = rep({ ck: ck, ctx: ctx, code: "E0324", at: at, detail: "`" + name + "` takes no type arguments" });
         ctx = ctx$29;
@@ -966,20 +970,20 @@ export function named_base({ fuel, ck, ctx, res, q, args, at }) {
         return [{ tag: "SpecT" }, ck, ctx];
       }
       return [{ tag: "Prim", name: name }, ck, ctx];
-      break $m98$match;
+      break $m99$match;
     }
-    if ($m98.tag === "DefRes") {
-      const def = $m98.def;
+    if ($m99.tag === "DefRes") {
+      const def = $m99.def;
       const d = $context.get_def({ ctx: ctx, id: def });
       if ($rt.eq(d.kind, { tag: "Alias" })) {
         if ($std_list.len({ xs: args }) > 0) {
           const [, ctx$30] = rep({ ck: ck, ctx: ctx, code: "E0324", at: at, detail: "`" + d.name + "` is a type alias and takes no type arguments" });
           ctx = ctx$30;
         }
-        const [$r103, ck$31, ctx$31] = alias_type({ fuel: $rt.int.sub(fuel, 1, $ob15), ck: ck, ctx: ctx, d: d });
+        const [$r104, ck$31, ctx$31] = alias_type({ fuel: $rt.int.sub(fuel, 1, $ob15), ck: ck, ctx: ctx, d: d });
         ck = ck$31;
         ctx = ctx$31;
-        return [$r103, ck, ctx];
+        return [$r104, ck, ctx];
       }
       if ($rt.eq(d.kind, { tag: "TypeParam" })) {
         if ($std_list.len({ xs: args }) > 0) {
@@ -989,10 +993,10 @@ export function named_base({ fuel, ck, ctx, res, q, args, at }) {
         return [{ tag: "ParamT", def: def }, ck, ctx];
       }
       if ($rt.eq(d.kind, { tag: "Record" }) || $rt.eq(d.kind, { tag: "Union" }) || $rt.eq(d.kind, { tag: "IntrinsicType" }) || $rt.eq(d.kind, { tag: "Capability" })) {
-        const [$r110, ck$33, ctx$33] = instantiate({ fuel: $rt.int.sub(fuel, 1, $ob16), ck: ck, ctx: ctx, d: d, args: args, at: at });
+        const [$r111, ck$33, ctx$33] = instantiate({ fuel: $rt.int.sub(fuel, 1, $ob16), ck: ck, ctx: ctx, d: d, args: args, at: at });
         ck = ck$33;
         ctx = ctx$33;
-        return [$r110, ck, ctx];
+        return [$r111, ck, ctx];
       }
       if ($rt.eq(d.kind, { tag: "Interface" })) {
         const [, ctx$34] = rep({ ck: ck, ctx: ctx, code: "E0106", at: q.span, detail: "`" + d.name + "` is an interface; write it as a bound (`[T: " + d.name + "]`), not a type" });
@@ -1005,28 +1009,28 @@ export function named_base({ fuel, ck, ctx, res, q, args, at }) {
         return [{ tag: "ErrorT" }, ck, ctx];
       }
       return [{ tag: "ErrorT" }, ck, ctx];
-      break $m98$match;
+      break $m99$match;
     }
     if (true) {
       return [{ tag: "ErrorT" }, ck, ctx];
-      break $m98$match;
+      break $m99$match;
     }
     $rt.unreachable();
   }
 }
 
 export function with_alias({ t, alias }) {
-  const $m117 = t;
-  $m117$match: {
-    if ($m117.tag === "Refined") {
-      const base = $m117.base;
-      const pred = $m117.pred;
+  const $m118 = t;
+  $m118$match: {
+    if ($m118.tag === "Refined") {
+      const base = $m118.base;
+      const pred = $m118.pred;
       return { tag: "Refined", base: base, pred: pred, alias: { tag: "Some", value: alias } };
-      break $m117$match;
+      break $m118$match;
     }
     if (true) {
       return t;
-      break $m117$match;
+      break $m118$match;
     }
     $rt.unreachable();
   }
@@ -1036,16 +1040,16 @@ export function alias_type({ fuel, ck, ctx, d }) {
   if (fuel === 0) {
     return [{ tag: "ErrorT" }, ck, ctx];
   }
-  const $m121 = $std_map.find({ d: ctx.type_aliases, key: d.id });
-  $m121$match: {
-    if ($m121.tag === "Some") {
-      const value = $m121.value;
+  const $m122 = $std_map.find({ d: ctx.type_aliases, key: d.id });
+  $m122$match: {
+    if ($m122.tag === "Some") {
+      const value = $m122.value;
       return [value, ck, ctx];
-      break $m121$match;
+      break $m122$match;
     }
-    if ($m121.tag === "None") {
+    if ($m122.tag === "None") {
       skip({  });
-      break $m121$match;
+      break $m122$match;
     }
     $rt.unreachable();
   }
@@ -1061,19 +1065,19 @@ export function alias_type({ fuel, ck, ctx, d }) {
   const [, busy$37] = $std_map.set({ d: busy, key: d.id, value: true });
   busy = busy$37;
   let t = { tag: "ErrorT" };
-  const $m126 = d.node;
-  $m126$match: {
-    if ($m126.tag === "AliasNode") {
-      const decl = $m126.decl;
-      const [$r127, ck$38, ctx$38] = type_of({ fuel: $rt.int.sub(fuel, 1, $ob17), ck: ck, ctx: ctx, t: decl.ty });
+  const $m127 = d.node;
+  $m127$match: {
+    if ($m127.tag === "AliasNode") {
+      const decl = $m127.decl;
+      const [$r128, ck$38, ctx$38] = type_of({ fuel: $rt.int.sub(fuel, 1, $ob17), ck: ck, ctx: ctx, t: decl.ty });
       ck = ck$38;
       ctx = ctx$38;
-      t = $r127;
-      break $m126$match;
+      t = $r128;
+      break $m127$match;
     }
     if (true) {
       t = { tag: "ErrorT" };
-      break $m126$match;
+      break $m127$match;
     }
     $rt.unreachable();
   }
@@ -1088,58 +1092,58 @@ export function alias_type({ fuel, ck, ctx, d }) {
 }
 
 export function tparams_of_node({ node }) {
-  const $m130 = node;
-  $m130$match: {
-    if ($m130.tag === "FnNode") {
-      const decl = $m130.decl;
+  const $m131 = node;
+  $m131$match: {
+    if ($m131.tag === "FnNode") {
+      const decl = $m131.decl;
       return decl.tparams;
-      break $m130$match;
+      break $m131$match;
     }
-    if ($m130.tag === "RecordNode") {
-      const decl = $m130.decl;
+    if ($m131.tag === "RecordNode") {
+      const decl = $m131.decl;
       return decl.tparams;
-      break $m130$match;
+      break $m131$match;
     }
-    if ($m130.tag === "UnionNode") {
-      const decl = $m130.decl;
+    if ($m131.tag === "UnionNode") {
+      const decl = $m131.decl;
       return decl.tparams;
-      break $m130$match;
+      break $m131$match;
     }
-    if ($m130.tag === "IntrinsicTypeNode") {
-      const decl = $m130.decl;
+    if ($m131.tag === "IntrinsicTypeNode") {
+      const decl = $m131.decl;
       return decl.tparams;
-      break $m130$match;
+      break $m131$match;
     }
-    if ($m130.tag === "CapabilityNode") {
-      const decl = $m130.decl;
+    if ($m131.tag === "CapabilityNode") {
+      const decl = $m131.decl;
       return decl.tparams;
-      break $m130$match;
+      break $m131$match;
     }
     if (true) {
       return [];
-      break $m130$match;
+      break $m131$match;
     }
     $rt.unreachable();
   }
 }
 
 export function tparam_span({ p }) {
-  const $m131 = p;
-  $m131$match: {
-    if ($m131.tag === "TypeParam") {
-      const span = $m131.span;
+  const $m132 = p;
+  $m132$match: {
+    if ($m132.tag === "TypeParam") {
+      const span = $m132.span;
       return span;
-      break $m131$match;
+      break $m132$match;
     }
-    if ($m131.tag === "ConstParam") {
-      const span = $m131.span;
+    if ($m132.tag === "ConstParam") {
+      const span = $m132.span;
       return span;
-      break $m131$match;
+      break $m132$match;
     }
-    if ($m131.tag === "EffectParam") {
-      const span = $m131.span;
+    if ($m132.tag === "EffectParam") {
+      const span = $m132.span;
       return span;
-      break $m131$match;
+      break $m132$match;
     }
     $rt.unreachable();
   }
@@ -1149,16 +1153,16 @@ export function type_params_of({ fuel, ck, ctx, d }) {
   if (fuel === 0) {
     return [[], ck, ctx];
   }
-  const $m132 = $std_map.find({ d: ctx.type_params, key: d.id });
-  $m132$match: {
-    if ($m132.tag === "Some") {
-      const value = $m132.value;
+  const $m133 = $std_map.find({ d: ctx.type_params, key: d.id });
+  $m133$match: {
+    if ($m133.tag === "Some") {
+      const value = $m133.value;
       return [value, ck, ctx];
-      break $m132$match;
+      break $m133$match;
     }
-    if ($m132.tag === "None") {
+    if ($m133.tag === "None") {
       skip({  });
-      break $m132$match;
+      break $m133$match;
     }
     $rt.unreachable();
   }
@@ -1170,12 +1174,12 @@ export function type_params_of({ fuel, ck, ctx, d }) {
   let out = $std_list.builder({  });
   for (const p of tparams_of_node({ node: d.node })) {
     const pd = def_of_key({ ctx: ctx, k: key({ ck: ck, tag: $defs.tag_sig, span: tparam_span({ p: p }) }) });
-    const $m134 = p;
-    $m134$match: {
-      if ($m134.tag === "TypeParam") {
-        const name = $m134.name;
-        const bound = $m134.bound;
-        const span = $m134.span;
+    const $m135 = p;
+    $m135$match: {
+      if ($m135.tag === "TypeParam") {
+        const name = $m135.name;
+        const bound = $m135.bound;
+        const span = $m135.span;
         const b = res_def({ res: ref_at({ ctx: ctx, k: key({ ck: ck, tag: $defs.tag_sig, span: span }) }) });
         let bound_def = { tag: "None" };
         if (b >= 0) {
@@ -1183,28 +1187,28 @@ export function type_params_of({ fuel, ck, ctx, d }) {
         }
         const [, out$42] = $std_list.push({ b: out, x: { tag: "TypeP", def: pd, bound: bound_def } });
         out = out$42;
-        break $m134$match;
+        break $m135$match;
       }
-      if ($m134.tag === "ConstParam") {
-        const name = $m134.name;
-        const ty = $m134.ty;
-        const span = $m134.span;
-        const [$r138, ck$43, ctx$43] = type_of({ fuel: $rt.int.sub(fuel, 1, $ob18), ck: ck, ctx: ctx, t: ty });
+      if ($m135.tag === "ConstParam") {
+        const name = $m135.name;
+        const ty = $m135.ty;
+        const span = $m135.span;
+        const [$r139, ck$43, ctx$43] = type_of({ fuel: $rt.int.sub(fuel, 1, $ob18), ck: ck, ctx: ctx, t: ty });
         ck = ck$43;
         ctx = ctx$43;
-        const t = $r138;
+        const t = $r139;
         const [, ctx$44] = set_decl_type({ ctx: ctx, def: pd, t: t });
         ctx = ctx$44;
         const [, out$45] = $std_list.push({ b: out, x: { tag: "ConstP", def: pd, ty: t } });
         out = out$45;
-        break $m134$match;
+        break $m135$match;
       }
-      if ($m134.tag === "EffectParam") {
-        const name = $m134.name;
-        const span = $m134.span;
+      if ($m135.tag === "EffectParam") {
+        const name = $m135.name;
+        const span = $m135.span;
         const [, out$46] = $std_list.push({ b: out, x: { tag: "EffectP", def: pd } });
         out = out$46;
-        break $m134$match;
+        break $m135$match;
       }
       $rt.unreachable();
     }
@@ -1217,8 +1221,8 @@ export function type_params_of({ fuel, ck, ctx, d }) {
 }
 
 export function iface_param({ ctx, iface }) {
-  const $hi142 = $context.def_count({ ctx: ctx });
-  for (let i = 0; i < $hi142; i++) {
+  const $hi143 = $context.def_count({ ctx: ctx });
+  for (let i = 0; i < $hi143; i++) {
     const d = $context.get_def({ ctx: ctx, id: i });
     if ($rt.eq(d.kind, { tag: "TypeParam" }) && $rt.eq(d.parent, { tag: "Some", value: iface })) {
       return i;
@@ -1228,109 +1232,109 @@ export function iface_param({ ctx, iface }) {
 }
 
 export function tparam_tag({ p }) {
-  const $m145 = p;
-  $m145$match: {
-    if ($m145.tag === "None") {
+  const $m146 = p;
+  $m146$match: {
+    if ($m146.tag === "None") {
       return $rt.int.neg(1, $ob20);
-      break $m145$match;
+      break $m146$match;
     }
-    if ($m145.tag === "Some") {
-      const value = $m145.value;
-      const $m146 = value;
-      $m146$match: {
-        if ($m146.tag === "TypeP") {
+    if ($m146.tag === "Some") {
+      const value = $m146.value;
+      const $m147 = value;
+      $m147$match: {
+        if ($m147.tag === "TypeP") {
           return 0;
-          break $m146$match;
+          break $m147$match;
         }
-        if ($m146.tag === "ConstP") {
+        if ($m147.tag === "ConstP") {
           return 1;
-          break $m146$match;
+          break $m147$match;
         }
-        if ($m146.tag === "EffectP") {
+        if ($m147.tag === "EffectP") {
           return 2;
-          break $m146$match;
+          break $m147$match;
         }
         $rt.unreachable();
       }
-      break $m145$match;
+      break $m146$match;
     }
     $rt.unreachable();
   }
 }
 
 export function tparam_name({ ctx, p }) {
-  const $m147 = p;
-  $m147$match: {
-    if ($m147.tag === "None") {
+  const $m148 = p;
+  $m148$match: {
+    if ($m148.tag === "None") {
       return "";
-      break $m147$match;
+      break $m148$match;
     }
-    if ($m147.tag === "Some") {
-      const value = $m147.value;
+    if ($m148.tag === "Some") {
+      const value = $m148.value;
       return def_name({ ctx: ctx, id: $types.tparam_def({ p: value }) });
-      break $m147$match;
+      break $m148$match;
     }
     $rt.unreachable();
   }
 }
 
 export function tparam_type({ p }) {
-  const $m148 = p;
-  $m148$match: {
-    if ($m148.tag === "None") {
+  const $m149 = p;
+  $m149$match: {
+    if ($m149.tag === "None") {
       return { tag: "ErrorT" };
-      break $m148$match;
+      break $m149$match;
     }
-    if ($m148.tag === "Some") {
-      const value = $m148.value;
-      const $m150 = value;
-      $m150$match: {
-        if ($m150.tag === "ConstP") {
-          const ty = $m150.ty;
+    if ($m149.tag === "Some") {
+      const value = $m149.value;
+      const $m151 = value;
+      $m151$match: {
+        if ($m151.tag === "ConstP") {
+          const ty = $m151.ty;
           return ty;
-          break $m150$match;
+          break $m151$match;
         }
         if (true) {
           return { tag: "ErrorT" };
-          break $m150$match;
+          break $m151$match;
         }
         $rt.unreachable();
       }
-      break $m148$match;
+      break $m149$match;
     }
     $rt.unreachable();
   }
 }
 
 export function type_arg_label({ a }) {
-  const $m152 = a;
-  $m152$match: {
-    if ($m152.tag === "TypeArgType") {
-      const label = $m152.label;
+  const $m153 = a;
+  $m153$match: {
+    if ($m153.tag === "TypeArgType") {
+      const label = $m153.label;
       return label;
-      break $m152$match;
+      break $m153$match;
     }
-    if ($m152.tag === "TypeArgConst") {
-      const label = $m152.label;
+    if ($m153.tag === "TypeArgConst") {
+      const label = $m153.label;
       return label;
-      break $m152$match;
+      break $m153$match;
     }
     $rt.unreachable();
   }
 }
 
 export function type_arg_span({ a }) {
-  const $m153 = a;
-  $m153$match: {
-    if ($m153.tag === "TypeArgType") {
-      const span = $m153.span;
+  const $m154 = a;
+  $m154$match: {
+    if ($m154.tag === "TypeArgType") {
+      const span = $m154.span;
       return span;
-      break $m153$match;
+      break $m154$match;
     }
-    if ($m153.tag === "TypeArgConst") {
-      const span = $m153.span;
+    if ($m154.tag === "TypeArgConst") {
+      const span = $m154.span;
       return span;
-      break $m153$match;
+      break $m154$match;
     }
     $rt.unreachable();
   }
@@ -1341,57 +1345,57 @@ export function eval_const({ ck, ctx, e }) {
 }
 
 export function const_type({ ck, ctx, v }) {
-  const $m154 = v;
-  $m154$match: {
-    if ($m154.tag === "IntV") {
+  const $m155 = v;
+  $m155$match: {
+    if ($m155.tag === "IntV") {
       return { tag: "Some", value: $types.int_t };
-      break $m154$match;
+      break $m155$match;
     }
-    if ($m154.tag === "FloatV") {
+    if ($m155.tag === "FloatV") {
       return { tag: "Some", value: $types.float_t };
-      break $m154$match;
+      break $m155$match;
     }
-    if ($m154.tag === "BoolV") {
+    if ($m155.tag === "BoolV") {
       return { tag: "Some", value: $types.bool_t };
-      break $m154$match;
+      break $m155$match;
     }
-    if ($m154.tag === "TextV") {
+    if ($m155.tag === "TextV") {
       return { tag: "Some", value: $types.text_t };
-      break $m154$match;
+      break $m155$match;
     }
-    if ($m154.tag === "DurationV") {
+    if ($m155.tag === "DurationV") {
       return { tag: "Some", value: $types.duration_t };
-      break $m154$match;
+      break $m155$match;
     }
-    if ($m154.tag === "UnitV") {
+    if ($m155.tag === "UnitV") {
       return { tag: "Some", value: $types.unit_t };
-      break $m154$match;
+      break $m155$match;
     }
-    if ($m154.tag === "VariantV") {
-      const def = $m154.def;
-      const $m161 = $context.get_def({ ctx: ctx, id: def }).parent;
-      $m161$match: {
-        if ($m161.tag === "None") {
+    if ($m155.tag === "VariantV") {
+      const def = $m155.def;
+      const $m162 = $context.get_def({ ctx: ctx, id: def }).parent;
+      $m162$match: {
+        if ($m162.tag === "None") {
           return { tag: "None" };
-          break $m161$match;
+          break $m162$match;
         }
-        if ($m161.tag === "Some") {
-          const value = $m161.value;
+        if ($m162.tag === "Some") {
+          const value = $m162.value;
           return { tag: "Some", value: { tag: "UnionT", def: value, args: [] } };
-          break $m161$match;
+          break $m162$match;
         }
         $rt.unreachable();
       }
-      break $m154$match;
+      break $m155$match;
     }
-    if ($m154.tag === "SymV") {
-      const def = $m154.def;
+    if ($m155.tag === "SymV") {
+      const def = $m155.def;
       return $std_map.find({ d: ctx.decl_types, key: def });
-      break $m154$match;
+      break $m155$match;
     }
-    if ($m154.tag === "ErrorV") {
+    if ($m155.tag === "ErrorV") {
       return { tag: "None" };
-      break $m154$match;
+      break $m155$match;
     }
     $rt.unreachable();
   }
@@ -1401,44 +1405,44 @@ export function type_arg_of({ fuel, ck, ctx, a, param }) {
   if (fuel === 0) {
     return [{ tag: "None" }, ck, ctx];
   }
-  const $m167 = a;
-  $m167$match: {
-    if ($m167.tag === "TypeArgType") {
-      const label = $m167.label;
-      const ty = $m167.ty;
-      const span = $m167.span;
+  const $m168 = a;
+  $m168$match: {
+    if ($m168.tag === "TypeArgType") {
+      const label = $m168.label;
+      const ty = $m168.ty;
+      const span = $m168.span;
       if (ty.tag === "NamedType") {
         const v = res_def({ res: ref_at({ ctx: ctx, k: key({ ck: ck, tag: $defs.tag_type, span: $comments.type_span({ t: ty }) }) }) });
         if (v >= 0 && $rt.eq($context.get_def({ ctx: ctx, id: v }).kind, { tag: "Variant" })) {
           return [{ tag: "Some", value: { tag: "ConstA", value: { tag: "VariantV", def: v } } }, ck, ctx];
         }
       }
-      const [$r172, ck$48, ctx$48] = type_of({ fuel: $rt.int.sub(fuel, 1, $ob21), ck: ck, ctx: ctx, t: ty });
+      const [$r173, ck$48, ctx$48] = type_of({ fuel: $rt.int.sub(fuel, 1, $ob21), ck: ck, ctx: ctx, t: ty });
       ck = ck$48;
       ctx = ctx$48;
-      const t = $r172;
+      const t = $r173;
       if (tparam_tag({ p: param }) === 1) {
         const [, ctx$49] = rep({ ck: ck, ctx: ctx, code: "E0324", at: span, detail: "`" + tparam_name({ ctx: ctx, p: param }) + "` is a const parameter; a type was given" });
         ctx = ctx$49;
         return [{ tag: "None" }, ck, ctx];
       }
       return [{ tag: "Some", value: { tag: "TypeA", ty: t } }, ck, ctx];
-      break $m167$match;
+      break $m168$match;
     }
-    if ($m167.tag === "TypeArgConst") {
-      const label = $m167.label;
-      const expr = $m167.expr;
-      const span = $m167.span;
-      const $m176 = eval_const({ ck: ck, ctx: ctx, e: expr });
-      $m176$match: {
-        if ($m176.tag === "None") {
+    if ($m168.tag === "TypeArgConst") {
+      const label = $m168.label;
+      const expr = $m168.expr;
+      const span = $m168.span;
+      const $m177 = eval_const({ ck: ck, ctx: ctx, e: expr });
+      $m177$match: {
+        if ($m177.tag === "None") {
           const [, ctx$50] = rep({ ck: ck, ctx: ctx, code: "E0337", at: span, detail: "a type index must be a literal, a `const`, or a parameter" });
           ctx = ctx$50;
           return [{ tag: "Some", value: { tag: "ConstA", value: { tag: "ErrorV" } } }, ck, ctx];
-          break $m176$match;
+          break $m177$match;
         }
-        if ($m176.tag === "Some") {
-          const value = $m176.value;
+        if ($m177.tag === "Some") {
+          const value = $m177.value;
           if (tparam_tag({ p: param }) === 0) {
             const [, ctx$51] = rep({ ck: ck, ctx: ctx, code: "E0324", at: span, detail: "`" + tparam_name({ ctx: ctx, p: param }) + "` is a type parameter; a value was given" });
             ctx = ctx$51;
@@ -1452,11 +1456,11 @@ export function type_arg_of({ fuel, ck, ctx, a, param }) {
             }
           }
           return [{ tag: "Some", value: { tag: "ConstA", value: value } }, ck, ctx];
-          break $m176$match;
+          break $m177$match;
         }
         $rt.unreachable();
       }
-      break $m167$match;
+      break $m168$match;
     }
     $rt.unreachable();
   }
@@ -1466,19 +1470,19 @@ export function instantiate({ fuel, ck, ctx, d, args, at }) {
   if (fuel === 0) {
     return [{ tag: "ErrorT" }, ck, ctx];
   }
-  const [$r184, ck$53, ctx$53] = type_params_of({ fuel: $rt.int.sub(fuel, 1, $ob22), ck: ck, ctx: ctx, d: d });
+  const [$r185, ck$53, ctx$53] = type_params_of({ fuel: $rt.int.sub(fuel, 1, $ob22), ck: ck, ctx: ctx, d: d });
   ck = ck$53;
   ctx = ctx$53;
-  const tparams = $r184;
+  const tparams = $r185;
   const n = $std_list.len({ xs: tparams });
   let out = $std_map.dict({  });
   let restrictions = $std_list.builder({  });
   let positional = 0;
   for (const a of args) {
-    const $m185 = type_arg_label({ a: a });
-    $m185$match: {
-      if ($m185.tag === "Some") {
-        const value = $m185.value;
+    const $m186 = type_arg_label({ a: a });
+    $m186$match: {
+      if ($m186.tag === "Some") {
+        const value = $m186.value;
         let idx = $rt.int.neg(1, $ob23);
         for (let i = 0; i < n; i++) {
           if (idx < 0 && def_name({ ctx: ctx, id: $types.tparam_def({ p: $std_list.get({ xs: tparams, i: i }) }) }) === value.text) {
@@ -1486,20 +1490,20 @@ export function instantiate({ fuel, ck, ctx, d, args, at }) {
           }
         }
         if (idx >= 0) {
-          const [$r187, ck$54, ctx$54] = type_arg_of({ fuel: $rt.int.sub(fuel, 1, $ob24), ck: ck, ctx: ctx, a: a, param: { tag: "Some", value: $std_list.get({ xs: tparams, i: idx }) } });
+          const [$r188, ck$54, ctx$54] = type_arg_of({ fuel: $rt.int.sub(fuel, 1, $ob24), ck: ck, ctx: ctx, a: a, param: { tag: "Some", value: $std_list.get({ xs: tparams, i: idx }) } });
           ck = ck$54;
           ctx = ctx$54;
-          const v = $r187;
+          const v = $r188;
           if (v.tag === "Some") {
             const [, out$55] = $std_map.set({ d: out, key: idx, value: arg_or({ o: v }) });
             out = out$55;
           }
         } else {
           if ($rt.eq(d.kind, { tag: "Capability" })) {
-            const [$r190, ck$56, ctx$56] = type_arg_of({ fuel: $rt.int.sub(fuel, 1, $ob25), ck: ck, ctx: ctx, a: a, param: { tag: "None" } });
+            const [$r191, ck$56, ctx$56] = type_arg_of({ fuel: $rt.int.sub(fuel, 1, $ob25), ck: ck, ctx: ctx, a: a, param: { tag: "None" } });
             ck = ck$56;
             ctx = ctx$56;
-            const v = $r190;
+            const v = $r191;
             if (v.tag === "Some") {
               const va = arg_or({ o: v });
               if (va.tag === "ConstA") {
@@ -1515,25 +1519,25 @@ export function instantiate({ fuel, ck, ctx, d, args, at }) {
             ctx = ctx$59;
           }
         }
-        break $m185$match;
+        break $m186$match;
       }
-      if ($m185.tag === "None") {
+      if ($m186.tag === "None") {
         if (positional >= n) {
           const [, ctx$60] = rep({ ck: ck, ctx: ctx, code: "E0324", at: type_arg_span({ a: a }), detail: "`" + d.name + "` takes " + plural({ n: n }) });
           ctx = ctx$60;
           positional = $rt.int.add(positional, 1, $ob26);
         } else {
-          const [$r193, ck$61, ctx$61] = type_arg_of({ fuel: $rt.int.sub(fuel, 1, $ob27), ck: ck, ctx: ctx, a: a, param: { tag: "Some", value: $std_list.get({ xs: tparams, i: positional }) } });
+          const [$r194, ck$61, ctx$61] = type_arg_of({ fuel: $rt.int.sub(fuel, 1, $ob27), ck: ck, ctx: ctx, a: a, param: { tag: "Some", value: $std_list.get({ xs: tparams, i: positional }) } });
           ck = ck$61;
           ctx = ctx$61;
-          const v = $r193;
+          const v = $r194;
           if (v.tag === "Some") {
             const [, out$62] = $std_map.set({ d: out, key: positional, value: arg_or({ o: v }) });
             out = out$62;
           }
           positional = $rt.int.add(positional, 1, $ob28);
         }
-        break $m185$match;
+        break $m186$match;
       }
       $rt.unreachable();
     }
@@ -1541,15 +1545,15 @@ export function instantiate({ fuel, ck, ctx, d, args, at }) {
   let filled = $std_list.builder({  });
   let missing = false;
   for (let i = 0; i < n; i++) {
-    const $m194 = $std_map.find({ d: out, key: i });
-    $m194$match: {
-      if ($m194.tag === "Some") {
-        const value = $m194.value;
+    const $m195 = $std_map.find({ d: out, key: i });
+    $m195$match: {
+      if ($m195.tag === "Some") {
+        const value = $m195.value;
         const [, filled$63] = $std_list.push({ b: filled, x: value });
         filled = filled$63;
-        break $m194$match;
+        break $m195$match;
       }
-      if ($m194.tag === "None") {
+      if ($m195.tag === "None") {
         missing = true;
         if (tparam_tag({ p: { tag: "Some", value: $std_list.get({ xs: tparams, i: i }) } }) === 0) {
           const [, filled$64] = $std_list.push({ b: filled, x: { tag: "TypeA", ty: { tag: "ErrorT" } } });
@@ -1558,7 +1562,7 @@ export function instantiate({ fuel, ck, ctx, d, args, at }) {
           const [, filled$65] = $std_list.push({ b: filled, x: { tag: "ConstA", value: { tag: "UnitV" } } });
           filled = filled$65;
         }
-        break $m194$match;
+        break $m195$match;
       }
       $rt.unreachable();
     }
@@ -1586,37 +1590,37 @@ export function instantiate({ fuel, ck, ctx, d, args, at }) {
 }
 
 export function fields_of_node({ node }) {
-  const $m207 = node;
-  $m207$match: {
-    if ($m207.tag === "RecordNode") {
-      const decl = $m207.decl;
+  const $m208 = node;
+  $m208$match: {
+    if ($m208.tag === "RecordNode") {
+      const decl = $m208.decl;
       return decl.fields;
-      break $m207$match;
+      break $m208$match;
     }
-    if ($m207.tag === "VariantNode") {
-      const decl = $m207.decl;
+    if ($m208.tag === "VariantNode") {
+      const decl = $m208.decl;
       return decl.fields;
-      break $m207$match;
+      break $m208$match;
     }
     if (true) {
       return [];
-      break $m207$match;
+      break $m208$match;
     }
     $rt.unreachable();
   }
 }
 
 export function fields_of({ ck, ctx, d }) {
-  const $m208 = $std_map.find({ d: ctx.fields, key: d.id });
-  $m208$match: {
-    if ($m208.tag === "Some") {
-      const value = $m208.value;
+  const $m209 = $std_map.find({ d: ctx.fields, key: d.id });
+  $m209$match: {
+    if ($m209.tag === "Some") {
+      const value = $m209.value;
       return [value, ck, ctx];
-      break $m208$match;
+      break $m209$match;
     }
-    if ($m208.tag === "None") {
+    if ($m209.tag === "None") {
       skip({  });
-      break $m208$match;
+      break $m209$match;
     }
     $rt.unreachable();
   }
@@ -1628,10 +1632,10 @@ export function fields_of({ ck, ctx, d }) {
   let out = $std_list.builder({  });
   for (const f of fields_of_node({ node: d.node })) {
     const fd = def_of_key({ ctx: ctx, k: key({ ck: ck, tag: $defs.tag_sig, span: f.span }) });
-    const [$r210, ck$69, ctx$69] = type_of({ fuel: max_type_depth, ck: ck, ctx: ctx, t: f.ty });
+    const [$r211, ck$69, ctx$69] = type_of({ fuel: max_type_depth, ck: ck, ctx: ctx, t: f.ty });
     ck = ck$69;
     ctx = ctx$69;
-    const t = $r210;
+    const t = $r211;
     const [, ctx$70] = set_decl_type({ ctx: ctx, def: fd, t: t });
     ctx = ctx$70;
     const [, out$71] = $std_list.push({ b: out, x: { def: fd, name: f.name.text, ty: t } });
@@ -1645,33 +1649,33 @@ export function fields_of({ ck, ctx, d }) {
 }
 
 export function variants_of({ ck, ctx, d }) {
-  const $m213 = $std_map.find({ d: ctx.variants, key: d.id });
-  $m213$match: {
-    if ($m213.tag === "Some") {
-      const value = $m213.value;
+  const $m214 = $std_map.find({ d: ctx.variants, key: d.id });
+  $m214$match: {
+    if ($m214.tag === "Some") {
+      const value = $m214.value;
       return [value, ctx];
-      break $m213$match;
+      break $m214$match;
     }
-    if ($m213.tag === "None") {
+    if ($m214.tag === "None") {
       skip({  });
-      break $m213$match;
+      break $m214$match;
     }
     $rt.unreachable();
   }
   let out = $std_list.builder({  });
-  const $m214 = d.node;
-  $m214$match: {
-    if ($m214.tag === "UnionNode") {
-      const decl = $m214.decl;
+  const $m215 = d.node;
+  $m215$match: {
+    if ($m215.tag === "UnionNode") {
+      const decl = $m215.decl;
       for (const v of decl.variants) {
         const [, out$73] = $std_list.push({ b: out, x: def_of_key({ ctx: ctx, k: $defs.node_key({ file: d.file, tag: $defs.tag_sig, span: v.span }) }) });
         out = out$73;
       }
-      break $m214$match;
+      break $m215$match;
     }
     if (true) {
       skip({  });
-      break $m214$match;
+      break $m215$match;
     }
     $rt.unreachable();
   }
@@ -1683,42 +1687,42 @@ export function variants_of({ ck, ctx, d }) {
 }
 
 export function sig_parts({ node }) {
-  const $m215 = node;
-  $m215$match: {
-    if ($m215.tag === "FnNode") {
-      const decl = $m215.decl;
+  const $m216 = node;
+  $m216$match: {
+    if ($m216.tag === "FnNode") {
+      const decl = $m216.decl;
       return { params: decl.params, ret: { tag: "Some", value: decl.ret }, effects: decl.effects, contracts: decl.contracts, is_const: decl.is_const, is_intrinsic: decl.is_intrinsic, has_tparams: true };
-      break $m215$match;
+      break $m216$match;
     }
-    if ($m215.tag === "IfaceFnNode") {
-      const decl = $m215.decl;
+    if ($m216.tag === "IfaceFnNode") {
+      const decl = $m216.decl;
       return { params: decl.params, ret: { tag: "Some", value: decl.ret }, effects: decl.effects, contracts: decl.contracts, is_const: false, is_intrinsic: false, has_tparams: false };
-      break $m215$match;
+      break $m216$match;
     }
-    if ($m215.tag === "LawNode") {
-      const decl = $m215.decl;
+    if ($m216.tag === "LawNode") {
+      const decl = $m216.decl;
       return { params: decl.params, ret: { tag: "None" }, effects: [], contracts: [], is_const: false, is_intrinsic: false, has_tparams: false };
-      break $m215$match;
+      break $m216$match;
     }
     if (true) {
       return { params: [], ret: { tag: "None" }, effects: [], contracts: [], is_const: false, is_intrinsic: false, has_tparams: false };
-      break $m215$match;
+      break $m216$match;
     }
     $rt.unreachable();
   }
 }
 
 export function signature_of({ ck, ctx, d }) {
-  const $m224 = $std_map.find({ d: ctx.signatures, key: d.id });
-  $m224$match: {
-    if ($m224.tag === "Some") {
-      const value = $m224.value;
+  const $m225 = $std_map.find({ d: ctx.signatures, key: d.id });
+  $m225$match: {
+    if ($m225.tag === "Some") {
+      const value = $m225.value;
       return [value, ck, ctx];
-      break $m224$match;
+      break $m225$match;
     }
-    if ($m224.tag === "None") {
+    if ($m225.tag === "None") {
       skip({  });
-      break $m224$match;
+      break $m225$match;
     }
     $rt.unreachable();
   }
@@ -1727,19 +1731,19 @@ export function signature_of({ ck, ctx, d }) {
   const parts = sig_parts({ node: d.node });
   let tparams = [];
   if (parts.has_tparams) {
-    const [$r226, ck$75, ctx$75] = type_params_of({ fuel: max_type_depth, ck: ck, ctx: ctx, d: d });
+    const [$r227, ck$75, ctx$75] = type_params_of({ fuel: max_type_depth, ck: ck, ctx: ctx, d: d });
     ck = ck$75;
     ctx = ctx$75;
-    tparams = $r226;
+    tparams = $r227;
   }
   let fn_params = $std_list.builder({  });
   let param_defs = $std_list.builder({  });
   for (const p of parts.params) {
     const pd = def_of_key({ ctx: ctx, k: key({ ck: ck, tag: $defs.tag_sig, span: p.span }) });
-    const [$r227, ck$76, ctx$76] = type_of({ fuel: max_type_depth, ck: ck, ctx: ctx, t: p.ty });
+    const [$r228, ck$76, ctx$76] = type_of({ fuel: max_type_depth, ck: ck, ctx: ctx, t: p.ty });
     ck = ck$76;
     ctx = ctx$76;
-    const t = $r227;
+    const t = $r228;
     if (pd >= 0) {
       const [, ctx$77] = set_decl_type({ ctx: ctx, def: pd, t: t });
       ctx = ctx$77;
@@ -1750,19 +1754,19 @@ export function signature_of({ ck, ctx, d }) {
     fn_params = fn_params$79;
   }
   let ret = $types.bool_t;
-  const $m229 = parts.ret;
-  $m229$match: {
-    if ($m229.tag === "Some") {
-      const value = $m229.value;
-      const [$r230, ck$80, ctx$80] = type_of({ fuel: max_type_depth, ck: ck, ctx: ctx, t: value });
+  const $m230 = parts.ret;
+  $m230$match: {
+    if ($m230.tag === "Some") {
+      const value = $m230.value;
+      const [$r231, ck$80, ctx$80] = type_of({ fuel: max_type_depth, ck: ck, ctx: ctx, t: value });
       ck = ck$80;
       ctx = ctx$80;
-      ret = $r230;
-      break $m229$match;
+      ret = $r231;
+      break $m230$match;
     }
-    if ($m229.tag === "None") {
+    if ($m230.tag === "None") {
       ret = $types.bool_t;
-      break $m229$match;
+      break $m230$match;
     }
     $rt.unreachable();
   }
@@ -1775,42 +1779,42 @@ export function signature_of({ ck, ctx, d }) {
 }
 
 export function sig_of_id({ ck, ctx, id }) {
-  const [$r233, ck$82, ctx$82] = signature_of({ ck: ck, ctx: ctx, d: $context.get_def({ ctx: ctx, id: id }) });
+  const [$r234, ck$82, ctx$82] = signature_of({ ck: ck, ctx: ctx, d: $context.get_def({ ctx: ctx, id: id }) });
   ck = ck$82;
   ctx = ctx$82;
-  return [$r233, ck, ctx];
+  return [$r234, ck, ctx];
 }
 
 export function const_decl_type({ ck, ctx, d }) {
-  const $m234 = $std_map.find({ d: ctx.decl_types, key: d.id });
-  $m234$match: {
-    if ($m234.tag === "Some") {
-      const value = $m234.value;
+  const $m235 = $std_map.find({ d: ctx.decl_types, key: d.id });
+  $m235$match: {
+    if ($m235.tag === "Some") {
+      const value = $m235.value;
       return [value, ck, ctx];
-      break $m234$match;
+      break $m235$match;
     }
-    if ($m234.tag === "None") {
+    if ($m235.tag === "None") {
       skip({  });
-      break $m234$match;
+      break $m235$match;
     }
     $rt.unreachable();
   }
   const saved_file = ck.current_file;
   ck = { ...ck, current_file: d.file };
   let t = { tag: "ErrorT" };
-  const $m237 = d.node;
-  $m237$match: {
-    if ($m237.tag === "ConstNode") {
-      const decl = $m237.decl;
-      const [$r238, ck$83, ctx$83] = type_of({ fuel: max_type_depth, ck: ck, ctx: ctx, t: decl.ty });
+  const $m238 = d.node;
+  $m238$match: {
+    if ($m238.tag === "ConstNode") {
+      const decl = $m238.decl;
+      const [$r239, ck$83, ctx$83] = type_of({ fuel: max_type_depth, ck: ck, ctx: ctx, t: decl.ty });
       ck = ck$83;
       ctx = ctx$83;
-      t = $r238;
-      break $m237$match;
+      t = $r239;
+      break $m238$match;
     }
     if (true) {
       t = { tag: "ErrorT" };
-      break $m237$match;
+      break $m238$match;
     }
     $rt.unreachable();
   }
@@ -1821,127 +1825,127 @@ export function const_decl_type({ ck, ctx, d }) {
 }
 
 export function item_name({ item }) {
-  const $m241 = item;
-  $m241$match: {
-    if ($m241.tag === "FnItem") {
-      const decl = $m241.decl;
+  const $m242 = item;
+  $m242$match: {
+    if ($m242.tag === "FnItem") {
+      const decl = $m242.decl;
       return decl.name.text;
-      break $m241$match;
+      break $m242$match;
     }
-    if ($m241.tag === "TypeAliasItem") {
-      const decl = $m241.decl;
+    if ($m242.tag === "TypeAliasItem") {
+      const decl = $m242.decl;
       return decl.name.text;
-      break $m241$match;
+      break $m242$match;
     }
-    if ($m241.tag === "IntrinsicTypeItem") {
-      const decl = $m241.decl;
+    if ($m242.tag === "IntrinsicTypeItem") {
+      const decl = $m242.decl;
       return decl.name.text;
-      break $m241$match;
+      break $m242$match;
     }
-    if ($m241.tag === "ConstItem") {
-      const decl = $m241.decl;
+    if ($m242.tag === "ConstItem") {
+      const decl = $m242.decl;
       return decl.name.text;
-      break $m241$match;
+      break $m242$match;
     }
-    if ($m241.tag === "RecordItem") {
-      const decl = $m241.decl;
+    if ($m242.tag === "RecordItem") {
+      const decl = $m242.decl;
       return decl.name.text;
-      break $m241$match;
+      break $m242$match;
     }
-    if ($m241.tag === "UnionItem") {
-      const decl = $m241.decl;
+    if ($m242.tag === "UnionItem") {
+      const decl = $m242.decl;
       return decl.name.text;
-      break $m241$match;
+      break $m242$match;
     }
-    if ($m241.tag === "InterfaceItem") {
-      const decl = $m241.decl;
+    if ($m242.tag === "InterfaceItem") {
+      const decl = $m242.decl;
       return decl.name.text;
-      break $m241$match;
+      break $m242$match;
     }
-    if ($m241.tag === "ImplItem") {
-      const decl = $m241.decl;
+    if ($m242.tag === "ImplItem") {
+      const decl = $m242.decl;
       return decl.iface.text;
-      break $m241$match;
+      break $m242$match;
     }
-    if ($m241.tag === "ClaimItem") {
-      const decl = $m241.decl;
+    if ($m242.tag === "ClaimItem") {
+      const decl = $m242.decl;
       return decl.name.text;
-      break $m241$match;
+      break $m242$match;
     }
-    if ($m241.tag === "CapabilityItem") {
-      const decl = $m241.decl;
+    if ($m242.tag === "CapabilityItem") {
+      const decl = $m242.decl;
       return decl.name.text;
-      break $m241$match;
+      break $m242$match;
     }
-    if ($m241.tag === "PathItem") {
-      const decl = $m241.decl;
+    if ($m242.tag === "PathItem") {
+      const decl = $m242.decl;
       return decl.name.text;
-      break $m241$match;
+      break $m242$match;
     }
-    if ($m241.tag === "PolicyItem") {
-      const decl = $m241.decl;
+    if ($m242.tag === "PolicyItem") {
+      const decl = $m242.decl;
       return decl.name.text;
-      break $m241$match;
+      break $m242$match;
     }
-    if ($m241.tag === "ExampleItem") {
-      const decl = $m241.decl;
+    if ($m242.tag === "ExampleItem") {
+      const decl = $m242.decl;
       return decl.name.text;
-      break $m241$match;
+      break $m242$match;
     }
-    if ($m241.tag === "PropertyItem") {
-      const decl = $m241.decl;
+    if ($m242.tag === "PropertyItem") {
+      const decl = $m242.decl;
       return decl.name.text;
-      break $m241$match;
+      break $m242$match;
     }
     $rt.unreachable();
   }
 }
 
 export function iface_item_name({ member }) {
-  const $m242 = member;
-  $m242$match: {
-    if ($m242.tag === "IfaceFnItem") {
-      const decl = $m242.decl;
+  const $m243 = member;
+  $m243$match: {
+    if ($m243.tag === "IfaceFnItem") {
+      const decl = $m243.decl;
       return decl.name.text;
-      break $m242$match;
+      break $m243$match;
     }
-    if ($m242.tag === "LawItem") {
-      const decl = $m242.decl;
+    if ($m243.tag === "LawItem") {
+      const decl = $m243.decl;
       return decl.name.text;
-      break $m242$match;
+      break $m243$match;
     }
     $rt.unreachable();
   }
 }
 
 export function law_body({ member }) {
-  const $m243 = member;
-  $m243$match: {
-    if ($m243.tag === "LawItem") {
-      const decl = $m243.decl;
+  const $m244 = member;
+  $m244$match: {
+    if ($m244.tag === "LawItem") {
+      const decl = $m244.decl;
       return decl.body;
-      break $m243$match;
+      break $m244$match;
     }
     if (true) {
       return { stmts: [], elided: false, span: { start: 0, end: 0 } };
-      break $m243$match;
+      break $m244$match;
     }
     $rt.unreachable();
   }
 }
 
 export function iface_item_span({ member }) {
-  const $m246 = member;
-  $m246$match: {
-    if ($m246.tag === "IfaceFnItem") {
-      const decl = $m246.decl;
+  const $m247 = member;
+  $m247$match: {
+    if ($m247.tag === "IfaceFnItem") {
+      const decl = $m247.decl;
       return decl.span;
-      break $m246$match;
+      break $m247$match;
     }
-    if ($m246.tag === "LawItem") {
-      const decl = $m246.decl;
+    if ($m247.tag === "LawItem") {
+      const decl = $m247.decl;
       return decl.span;
-      break $m246$match;
+      break $m247$match;
     }
     $rt.unreachable();
   }
@@ -1962,16 +1966,16 @@ export function sealed_misuse({ ck, ctx, vis, name }) {
 
 export function add_impl({ ck, ctx, iface, target, def }) {
   let current = [];
-  const $m247 = $std_map.find({ d: ck.impls, key: iface });
-  $m247$match: {
-    if ($m247.tag === "Some") {
-      const value = $m247.value;
+  const $m248 = $std_map.find({ d: ck.impls, key: iface });
+  $m248$match: {
+    if ($m248.tag === "Some") {
+      const value = $m248.value;
       current = value;
-      break $m247$match;
+      break $m248$match;
     }
-    if ($m247.tag === "None") {
+    if ($m248.tag === "None") {
       current = [];
-      break $m247$match;
+      break $m248$match;
     }
     $rt.unreachable();
   }
@@ -1980,16 +1984,16 @@ export function add_impl({ ck, ctx, iface, target, def }) {
   const [, mine$86] = $std_map.set({ d: mine, key: iface, value: $std_list.append({ xs: current, x: entry }) });
   mine = mine$86;
   let shared = [];
-  const $m249 = $std_map.find({ d: ctx.impls, key: iface });
-  $m249$match: {
-    if ($m249.tag === "Some") {
-      const value = $m249.value;
+  const $m250 = $std_map.find({ d: ctx.impls, key: iface });
+  $m250$match: {
+    if ($m250.tag === "Some") {
+      const value = $m250.value;
       shared = value;
-      break $m249$match;
+      break $m250$match;
     }
-    if ($m249.tag === "None") {
+    if ($m250.tag === "None") {
       shared = [];
-      break $m249$match;
+      break $m250$match;
     }
     $rt.unreachable();
   }
@@ -2001,21 +2005,21 @@ export function add_impl({ ck, ctx, iface, target, def }) {
 }
 
 export function has_impl_for({ ck, iface, target }) {
-  const $m250 = $std_map.find({ d: ck.impls, key: iface });
-  $m250$match: {
-    if ($m250.tag === "None") {
+  const $m251 = $std_map.find({ d: ck.impls, key: iface });
+  $m251$match: {
+    if ($m251.tag === "None") {
       return false;
-      break $m250$match;
+      break $m251$match;
     }
-    if ($m250.tag === "Some") {
-      const value = $m250.value;
+    if ($m251.tag === "Some") {
+      const value = $m251.value;
       for (const x of value) {
         if ($types.same_base({ a: x.target, b: target })) {
           return true;
         }
       }
       return false;
-      break $m250$match;
+      break $m251$match;
     }
     $rt.unreachable();
   }
@@ -2023,104 +2027,104 @@ export function has_impl_for({ ck, iface, target }) {
 
 export function elaborate_item({ ck, ctx, item }) {
   ck = { ...ck, current_def: { tag: "Some", value: item_name({ item: item }) } };
-  const $m253 = item;
-  $m253$match: {
-    if ($m253.tag === "FnItem") {
-      const decl = $m253.decl;
+  const $m254 = item;
+  $m254$match: {
+    if ($m254.tag === "FnItem") {
+      const decl = $m254.decl;
       const [, ctx$88] = sealed_misuse({ ck: ck, ctx: ctx, vis: decl.vis, name: decl.name });
       ctx = ctx$88;
-      const [$r254, ck$89, ctx$89] = signature_of({ ck: ck, ctx: ctx, d: item_def({ ck: ck, ctx: ctx, span: decl.span }) });
+      const [$r255, ck$89, ctx$89] = signature_of({ ck: ck, ctx: ctx, d: item_def({ ck: ck, ctx: ctx, span: decl.span }) });
       ck = ck$89;
       ctx = ctx$89;
-      const sig = $r254;
-      break $m253$match;
+      const sig = $r255;
+      break $m254$match;
     }
-    if ($m253.tag === "TypeAliasItem") {
-      const decl = $m253.decl;
+    if ($m254.tag === "TypeAliasItem") {
+      const decl = $m254.decl;
       const [, ctx$90] = sealed_misuse({ ck: ck, ctx: ctx, vis: decl.vis, name: decl.name });
       ctx = ctx$90;
-      const [$r255, ck$91, ctx$91] = alias_type({ fuel: max_type_depth, ck: ck, ctx: ctx, d: item_def({ ck: ck, ctx: ctx, span: decl.span }) });
+      const [$r256, ck$91, ctx$91] = alias_type({ fuel: max_type_depth, ck: ck, ctx: ctx, d: item_def({ ck: ck, ctx: ctx, span: decl.span }) });
       ck = ck$91;
       ctx = ctx$91;
-      const t = $r255;
-      break $m253$match;
+      const t = $r256;
+      break $m254$match;
     }
-    if ($m253.tag === "IntrinsicTypeItem") {
-      const decl = $m253.decl;
-      const [$r256, ck$92, ctx$92] = type_params_of({ fuel: max_type_depth, ck: ck, ctx: ctx, d: item_def({ ck: ck, ctx: ctx, span: decl.span }) });
+    if ($m254.tag === "IntrinsicTypeItem") {
+      const decl = $m254.decl;
+      const [$r257, ck$92, ctx$92] = type_params_of({ fuel: max_type_depth, ck: ck, ctx: ctx, d: item_def({ ck: ck, ctx: ctx, span: decl.span }) });
       ck = ck$92;
       ctx = ctx$92;
-      const ps = $r256;
-      break $m253$match;
+      const ps = $r257;
+      break $m254$match;
     }
-    if ($m253.tag === "CapabilityItem") {
-      const decl = $m253.decl;
-      const [$r257, ck$93, ctx$93] = type_params_of({ fuel: max_type_depth, ck: ck, ctx: ctx, d: item_def({ ck: ck, ctx: ctx, span: decl.span }) });
+    if ($m254.tag === "CapabilityItem") {
+      const decl = $m254.decl;
+      const [$r258, ck$93, ctx$93] = type_params_of({ fuel: max_type_depth, ck: ck, ctx: ctx, d: item_def({ ck: ck, ctx: ctx, span: decl.span }) });
       ck = ck$93;
       ctx = ctx$93;
-      const ps = $r257;
-      break $m253$match;
+      const ps = $r258;
+      break $m254$match;
     }
-    if ($m253.tag === "ConstItem") {
-      const decl = $m253.decl;
+    if ($m254.tag === "ConstItem") {
+      const decl = $m254.decl;
       const d = item_def({ ck: ck, ctx: ctx, span: decl.span });
-      const [$r258, ck$94, ctx$94] = type_of({ fuel: max_type_depth, ck: ck, ctx: ctx, t: decl.ty });
+      const [$r259, ck$94, ctx$94] = type_of({ fuel: max_type_depth, ck: ck, ctx: ctx, t: decl.ty });
       ck = ck$94;
       ctx = ctx$94;
-      const t = $r258;
+      const t = $r259;
       const [, ctx$95] = set_decl_type({ ctx: ctx, def: d.id, t: t });
       ctx = ctx$95;
-      break $m253$match;
+      break $m254$match;
     }
-    if ($m253.tag === "RecordItem") {
-      const decl = $m253.decl;
+    if ($m254.tag === "RecordItem") {
+      const decl = $m254.decl;
       const d = item_def({ ck: ck, ctx: ctx, span: decl.span });
-      const [$r259, ck$96, ctx$96] = type_params_of({ fuel: max_type_depth, ck: ck, ctx: ctx, d: d });
+      const [$r260, ck$96, ctx$96] = type_params_of({ fuel: max_type_depth, ck: ck, ctx: ctx, d: d });
       ck = ck$96;
       ctx = ctx$96;
-      const ps = $r259;
-      const [$r260, ck$97, ctx$97] = fields_of({ ck: ck, ctx: ctx, d: d });
+      const ps = $r260;
+      const [$r261, ck$97, ctx$97] = fields_of({ ck: ck, ctx: ctx, d: d });
       ck = ck$97;
       ctx = ctx$97;
-      const fs = $r260;
-      break $m253$match;
+      const fs = $r261;
+      break $m254$match;
     }
-    if ($m253.tag === "UnionItem") {
-      const decl = $m253.decl;
+    if ($m254.tag === "UnionItem") {
+      const decl = $m254.decl;
       const d = item_def({ ck: ck, ctx: ctx, span: decl.span });
-      const [$r261, ck$98, ctx$98] = type_params_of({ fuel: max_type_depth, ck: ck, ctx: ctx, d: d });
+      const [$r262, ck$98, ctx$98] = type_params_of({ fuel: max_type_depth, ck: ck, ctx: ctx, d: d });
       ck = ck$98;
       ctx = ctx$98;
-      const ps = $r261;
-      const [$r262, ctx$99] = variants_of({ ck: ck, ctx: ctx, d: d });
+      const ps = $r262;
+      const [$r263, ctx$99] = variants_of({ ck: ck, ctx: ctx, d: d });
       ctx = ctx$99;
-      for (const v of $r262) {
-        const [$r263, ck$100, ctx$100] = fields_of({ ck: ck, ctx: ctx, d: $context.get_def({ ctx: ctx, id: v }) });
+      for (const v of $r263) {
+        const [$r264, ck$100, ctx$100] = fields_of({ ck: ck, ctx: ctx, d: $context.get_def({ ctx: ctx, id: v }) });
         ck = ck$100;
         ctx = ctx$100;
-        const fs = $r263;
+        const fs = $r264;
       }
-      break $m253$match;
+      break $m254$match;
     }
-    if ($m253.tag === "InterfaceItem") {
-      const decl = $m253.decl;
+    if ($m254.tag === "InterfaceItem") {
+      const decl = $m254.decl;
       const [, ctx$101] = sealed_misuse({ ck: ck, ctx: ctx, vis: decl.vis, name: decl.name });
       ctx = ctx$101;
       for (const member of decl.items) {
-        const [$r264, ck$102, ctx$102] = signature_of({ ck: ck, ctx: ctx, d: $context.get_def({ ctx: ctx, id: def_of_key({ ctx: ctx, k: key({ ck: ck, tag: $defs.tag_sig, span: iface_item_span({ member: member }) }) }) }) });
+        const [$r265, ck$102, ctx$102] = signature_of({ ck: ck, ctx: ctx, d: $context.get_def({ ctx: ctx, id: def_of_key({ ctx: ctx, k: key({ ck: ck, tag: $defs.tag_sig, span: iface_item_span({ member: member }) }) }) }) });
         ck = ck$102;
         ctx = ctx$102;
-        const sig = $r264;
+        const sig = $r265;
       }
-      break $m253$match;
+      break $m254$match;
     }
-    if ($m253.tag === "ImplItem") {
-      const decl = $m253.decl;
+    if ($m254.tag === "ImplItem") {
+      const decl = $m254.decl;
       const iface = res_def({ res: ref_at({ ctx: ctx, k: key({ ck: ck, tag: $defs.tag_item, span: decl.span }) }) });
-      const [$r265, ck$103, ctx$103] = type_of({ fuel: max_type_depth, ck: ck, ctx: ctx, t: decl.target });
+      const [$r266, ck$103, ctx$103] = type_of({ fuel: max_type_depth, ck: ck, ctx: ctx, t: decl.target });
       ck = ck$103;
       ctx = ctx$103;
-      const target = $r265;
+      const target = $r266;
       if (iface >= 0) {
         if (has_impl_for({ ck: ck, iface: iface, target: target })) {
           const [, ctx$104] = rep({ ck: ck, ctx: ctx, code: "E0107", at: decl.iface.span, detail: "`" + decl.iface.text + "` is already implemented for " + show({ ctx: ctx, t: target }) });
@@ -2131,27 +2135,27 @@ export function elaborate_item({ ck, ctx, item }) {
         ctx = ctx$105;
       }
       for (const f of decl.fns) {
-        const [$r266, ck$106, ctx$106] = signature_of({ ck: ck, ctx: ctx, d: item_def({ ck: ck, ctx: ctx, span: f.span }) });
+        const [$r267, ck$106, ctx$106] = signature_of({ ck: ck, ctx: ctx, d: item_def({ ck: ck, ctx: ctx, span: f.span }) });
         ck = ck$106;
         ctx = ctx$106;
-        const sig = $r266;
+        const sig = $r267;
       }
-      break $m253$match;
+      break $m254$match;
     }
-    if ($m253.tag === "PropertyItem") {
-      const decl = $m253.decl;
+    if ($m254.tag === "PropertyItem") {
+      const decl = $m254.decl;
       for (const p of decl.params) {
-        const [$r267, ck$107, ctx$107] = type_of({ fuel: max_type_depth, ck: ck, ctx: ctx, t: p.ty });
+        const [$r268, ck$107, ctx$107] = type_of({ fuel: max_type_depth, ck: ck, ctx: ctx, t: p.ty });
         ck = ck$107;
         ctx = ctx$107;
-        const [, ctx$108] = set_decl_type({ ctx: ctx, def: def_of_key({ ctx: ctx, k: key({ ck: ck, tag: $defs.tag_sig, span: p.span }) }), t: $r267 });
+        const [, ctx$108] = set_decl_type({ ctx: ctx, def: def_of_key({ ctx: ctx, k: key({ ck: ck, tag: $defs.tag_sig, span: p.span }) }), t: $r268 });
         ctx = ctx$108;
       }
-      break $m253$match;
+      break $m254$match;
     }
     if (true) {
       skip({  });
-      break $m253$match;
+      break $m254$match;
     }
     $rt.unreachable();
   }
@@ -2161,62 +2165,62 @@ export function elaborate_item({ ck, ctx, item }) {
 }
 
 export function check_item({ ck, ctx, item }) {
-  const $m270 = item;
-  $m270$match: {
-    if ($m270.tag === "FnItem") {
-      const decl = $m270.decl;
+  const $m271 = item;
+  $m271$match: {
+    if ($m271.tag === "FnItem") {
+      const decl = $m271.decl;
       const [, ck$109, ctx$109] = check_fn({ ck: ck, ctx: ctx, f: decl });
       ck = ck$109;
       ctx = ctx$109;
-      break $m270$match;
+      break $m271$match;
     }
-    if ($m270.tag === "ConstItem") {
-      const decl = $m270.decl;
+    if ($m271.tag === "ConstItem") {
+      const decl = $m271.decl;
       const t = decl_type({ ctx: ctx, def: def_of_key({ ctx: ctx, k: key({ ck: ck, tag: $defs.tag_item, span: decl.span }) }) });
       const [, ck$110] = push_fn({ ck: ck, f: plain_fn({ ret: { tag: "None" }, frame: 0 }) });
       ck = ck$110;
-      const [$r273, ck$111, ctx$111] = check_expr({ ck: ck, ctx: ctx, e: decl.value, expected: { tag: "Some", value: t } });
+      const [$r274, ck$111, ctx$111] = check_expr({ ck: ck, ctx: ctx, e: decl.value, expected: { tag: "Some", value: t } });
       ck = ck$111;
       ctx = ctx$111;
-      const vt = $r273;
+      const vt = $r274;
       const [, ck$112] = pop_fn({ ck: ck });
       ck = ck$112;
-      break $m270$match;
+      break $m271$match;
     }
-    if ($m270.tag === "CapabilityItem") {
-      const decl = $m270.decl;
+    if ($m271.tag === "CapabilityItem") {
+      const decl = $m271.decl;
       for (const g of decl.grant_list) {
-        const $m274 = g.when_cond;
-        $m274$match: {
-          if ($m274.tag === "Some") {
-            const value = $m274.value;
+        const $m275 = g.when_cond;
+        $m275$match: {
+          if ($m275.tag === "Some") {
+            const value = $m275.value;
             const [, ck$113] = push_fn({ ck: ck, f: plain_fn({ ret: { tag: "None" }, frame: 0 }) });
             ck = ck$113;
-            const [$r277, ck$114, ctx$114] = check_expr({ ck: ck, ctx: ctx, e: value, expected: { tag: "Some", value: $types.bool_t } });
+            const [$r278, ck$114, ctx$114] = check_expr({ ck: ck, ctx: ctx, e: value, expected: { tag: "Some", value: $types.bool_t } });
             ck = ck$114;
             ctx = ctx$114;
-            const wt = $r277;
+            const wt = $r278;
             const [, ck$115] = pop_fn({ ck: ck });
             ck = ck$115;
-            break $m274$match;
+            break $m275$match;
           }
-          if ($m274.tag === "None") {
+          if ($m275.tag === "None") {
             skip({  });
-            break $m274$match;
+            break $m275$match;
           }
           $rt.unreachable();
         }
       }
-      break $m270$match;
+      break $m271$match;
     }
-    if ($m270.tag === "InterfaceItem") {
-      const decl = $m270.decl;
+    if ($m271.tag === "InterfaceItem") {
+      const decl = $m271.decl;
       for (const member of decl.items) {
         ck = { ...ck, current_def: { tag: "Some", value: decl.name.text + "." + iface_item_name({ member: member }) } };
-        const [$r280, ck$116, ctx$116] = signature_of({ ck: ck, ctx: ctx, d: $context.get_def({ ctx: ctx, id: def_of_key({ ctx: ctx, k: key({ ck: ck, tag: $defs.tag_sig, span: iface_item_span({ member: member }) }) }) }) });
+        const [$r281, ck$116, ctx$116] = signature_of({ ck: ck, ctx: ctx, d: $context.get_def({ ctx: ctx, id: def_of_key({ ctx: ctx, k: key({ ck: ck, tag: $defs.tag_sig, span: iface_item_span({ member: member }) }) }) }) });
         ck = ck$116;
         ctx = ctx$116;
-        const sig = $r280;
+        const sig = $r281;
         if (member.tag === "IfaceFnItem") {
           const [, ck$117, ctx$117] = check_contracts({ ck: ck, ctx: ctx, sig: sig });
           ck = ck$117;
@@ -2227,32 +2231,32 @@ export function check_item({ ck, ctx, item }) {
           ctx = ctx$118;
         }
       }
-      break $m270$match;
+      break $m271$match;
     }
-    if ($m270.tag === "ImplItem") {
-      const decl = $m270.decl;
+    if ($m271.tag === "ImplItem") {
+      const decl = $m271.decl;
       const [, ck$119, ctx$119] = check_impl({ ck: ck, ctx: ctx, im: decl });
       ck = ck$119;
       ctx = ctx$119;
-      break $m270$match;
+      break $m271$match;
     }
-    if ($m270.tag === "ExampleItem") {
-      const decl = $m270.decl;
+    if ($m271.tag === "ExampleItem") {
+      const decl = $m271.decl;
       const [, ck$120, ctx$120] = check_assertion_block({ ck: ck, ctx: ctx, b: decl.body });
       ck = ck$120;
       ctx = ctx$120;
-      break $m270$match;
+      break $m271$match;
     }
-    if ($m270.tag === "PropertyItem") {
-      const decl = $m270.decl;
+    if ($m271.tag === "PropertyItem") {
+      const decl = $m271.decl;
       const [, ck$121, ctx$121] = check_assertion_block({ ck: ck, ctx: ctx, b: decl.body });
       ck = ck$121;
       ctx = ctx$121;
-      break $m270$match;
+      break $m271$match;
     }
     if (true) {
       skip({  });
-      break $m270$match;
+      break $m271$match;
     }
     $rt.unreachable();
   }
@@ -2261,21 +2265,21 @@ export function check_item({ ck, ctx, item }) {
 }
 
 export function check_fn({ ck, ctx, f }) {
-  const [$r281, ck$122, ctx$122] = signature_of({ ck: ck, ctx: ctx, d: item_def({ ck: ck, ctx: ctx, span: f.span }) });
+  const [$r282, ck$122, ctx$122] = signature_of({ ck: ck, ctx: ctx, d: item_def({ ck: ck, ctx: ctx, span: f.span }) });
   ck = ck$122;
   ctx = ctx$122;
-  const sig = $r281;
+  const sig = $r282;
   const [, ck$123, ctx$123] = check_contracts({ ck: ck, ctx: ctx, sig: sig });
   ck = ck$123;
   ctx = ctx$123;
-  const $m282 = f.body;
-  $m282$match: {
-    if ($m282.tag === "None") {
+  const $m283 = f.body;
+  $m283$match: {
+    if ($m283.tag === "None") {
       skip({  });
-      break $m282$match;
+      break $m283$match;
     }
-    if ($m282.tag === "Some") {
-      const value = $m282.value;
+    if ($m283.tag === "Some") {
+      const value = $m283.value;
       const [, ck$124] = push_fn({ ck: ck, f: plain_fn({ ret: { tag: "Some", value: sig.ret }, frame: 0 }) });
       ck = ck$124;
       const [, ck$125, ctx$125] = check_block({ ck: ck, ctx: ctx, b: value });
@@ -2287,7 +2291,7 @@ export function check_fn({ ck, ctx, f }) {
       }
       const [, ck$127] = pop_fn({ ck: ck });
       ck = ck$127;
-      break $m282$match;
+      break $m283$match;
     }
     $rt.unreachable();
   }
@@ -2300,15 +2304,15 @@ export function check_contracts({ ck, ctx, sig }) {
     const [, ck$128] = push_fn({ ck: ck, f: plain_fn({ ret: { tag: "Some", value: sig.ret }, frame: 0 }) });
     ck = ck$128;
     if (c.clause !== "decreases") {
-      const [$r286, ck$129, ctx$129] = check_expr({ ck: ck, ctx: ctx, e: c.expr, expected: { tag: "Some", value: $types.bool_t } });
+      const [$r287, ck$129, ctx$129] = check_expr({ ck: ck, ctx: ctx, e: c.expr, expected: { tag: "Some", value: $types.bool_t } });
       ck = ck$129;
       ctx = ctx$129;
-      const bt = $r286;
+      const bt = $r287;
     } else {
-      const [$r288, ck$130, ctx$130] = check_expr({ ck: ck, ctx: ctx, e: c.expr, expected: { tag: "None" } });
+      const [$r289, ck$130, ctx$130] = check_expr({ ck: ck, ctx: ctx, e: c.expr, expected: { tag: "None" } });
       ck = ck$130;
       ctx = ctx$130;
-      const t = $r288;
+      const t = $r289;
       const s = $types.strip({ t: t });
       const pn = $types.prim_name({ t: s });
       const ok = pn === "Int" || pn === "Duration" || s.tag === "RecordT" || s.tag === "UnionT" || s.tag === "ErrorT" || s.tag === "Opaque" && $context.qualified_name({ ctx: ctx, id: $types.def_of({ t: s }) }) === "std.list.List";
@@ -2327,10 +2331,10 @@ export function check_contracts({ ck, ctx, sig }) {
 export function check_verify({ ck, ctx, v }) {
   let ps = $std_list.builder({  });
   for (const p of v.params) {
-    const [$r289, ck$133, ctx$133] = type_of({ fuel: max_type_depth, ck: ck, ctx: ctx, t: p.ty });
+    const [$r290, ck$133, ctx$133] = type_of({ fuel: max_type_depth, ck: ck, ctx: ctx, t: p.ty });
     ck = ck$133;
     ctx = ctx$133;
-    const t = $r289;
+    const t = $r290;
     const [, ctx$134] = set_decl_type({ ctx: ctx, def: def_of_key({ ctx: ctx, k: key({ ck: ck, tag: $defs.tag_sig, span: p.span }) }), t: t });
     ctx = ctx$134;
     const [, ps$135] = $std_list.push({ b: ps, x: { name: p.name.text, is_inout: false, ty: t } });
@@ -2368,8 +2372,8 @@ export function check_assertion_block({ ck, ctx, b }) {
 
 export function iface_fns({ ctx, iface }) {
   let out = $std_list.builder({  });
-  const $hi296 = $context.def_count({ ctx: ctx });
-  for (let i = 0; i < $hi296; i++) {
+  const $hi297 = $context.def_count({ ctx: ctx });
+  for (let i = 0; i < $hi297; i++) {
     const d = $context.get_def({ ctx: ctx, id: i });
     if ($rt.eq(d.kind, { tag: "IfaceFn" }) && $rt.eq(d.parent, { tag: "Some", value: iface })) {
       const [, out$144] = $std_list.push({ b: out, x: d });
@@ -2403,10 +2407,10 @@ export function check_impl({ ck, ctx, im }) {
     return [undefined, ck, ctx];
   }
   const iface = $context.get_def({ ctx: ctx, id: iface_id });
-  const [$r301, ck$145, ctx$145] = type_of({ fuel: max_type_depth, ck: ck, ctx: ctx, t: im.target });
+  const [$r302, ck$145, ctx$145] = type_of({ fuel: max_type_depth, ck: ck, ctx: ctx, t: im.target });
   ck = ck$145;
   ctx = ctx$145;
-  const target = $r301;
+  const target = $r302;
   const tp = iface_param({ ctx: ctx, iface: iface_id });
   let subst = $std_map.dict({  });
   const [, subst$146] = $std_map.set({ d: subst, key: tp, value: { tag: "TypeA", ty: target } });
@@ -2419,30 +2423,30 @@ export function check_impl({ ck, ctx, im }) {
   }
   const have_fns = $std_list.finish({ b: impl_fns });
   for (const want of wanted) {
-    const $m304 = find_impl_fn({ fns: have_fns, name: want.name });
-    $m304$match: {
-      if ($m304.tag === "None") {
+    const $m305 = find_impl_fn({ fns: have_fns, name: want.name });
+    $m305$match: {
+      if ($m305.tag === "None") {
         const [, ctx$148] = rep({ ck: ck, ctx: ctx, code: "E0334", at: im.iface.span, detail: "impl " + iface.name + "[" + show({ ctx: ctx, t: target }) + "] is missing `" + want.name + "`" });
         ctx = ctx$148;
-        break $m304$match;
+        break $m305$match;
       }
-      if ($m304.tag === "Some") {
-        const value = $m304.value;
-        const [$r305, ck$149, ctx$149] = signature_of({ ck: ck, ctx: ctx, d: want });
+      if ($m305.tag === "Some") {
+        const value = $m305.value;
+        const [$r306, ck$149, ctx$149] = signature_of({ ck: ck, ctx: ctx, d: want });
         ck = ck$149;
         ctx = ctx$149;
-        const ws = $r305;
-        const [$r306, ck$150, ctx$150] = signature_of({ ck: ck, ctx: ctx, d: value.def });
+        const ws = $r306;
+        const [$r307, ck$150, ctx$150] = signature_of({ ck: ck, ctx: ctx, d: value.def });
         ck = ck$150;
         ctx = ctx$150;
-        const hs = $r306;
+        const hs = $r307;
         let problems = $std_list.builder({  });
         if ($std_list.len({ xs: ws.params }) !== $std_list.len({ xs: hs.params })) {
           const [, problems$151] = $std_list.push({ b: problems, x: "expected " + $std_int.to_text({ x: $std_list.len({ xs: ws.params }) }) + " parameters, found " + $std_int.to_text({ x: $std_list.len({ xs: hs.params }) }) });
           problems = problems$151;
         } else {
-          const $hi307 = $std_list.len({ xs: ws.params });
-          for (let i = 0; i < $hi307; i++) {
+          const $hi308 = $std_list.len({ xs: ws.params });
+          for (let i = 0; i < $hi308; i++) {
             const wp = $std_list.get({ xs: ws.params, i: i });
             const hp = $std_list.get({ xs: hs.params, i: i });
             const wt = $types.substitute({ t: wp.ty, subst: subst });
@@ -2475,7 +2479,7 @@ export function check_impl({ ck, ctx, im }) {
           const [, ctx$157] = rep({ ck: ck, ctx: ctx, code: "E0334", at: value.node.name.span, detail: "`" + want.name + "`: " + p });
           ctx = ctx$157;
         }
-        break $m304$match;
+        break $m305$match;
       }
       $rt.unreachable();
     }
@@ -2501,10 +2505,10 @@ export function implemented({ ck, ctx, iface, target }) {
   if (s.tag === "ErrorT") {
     return true;
   }
-  const $m310 = s;
-  $m310$match: {
-    if ($m310.tag === "ParamT") {
-      const def = $m310.def;
+  const $m311 = s;
+  $m311$match: {
+    if ($m311.tag === "ParamT") {
+      const def = $m311.def;
       for (const infos of $std_map.values({ d: ctx.type_params })) {
         for (const p of infos) {
           if (p.tag === "TypeP" && $types.tparam_def({ p: p }) === def) {
@@ -2513,11 +2517,11 @@ export function implemented({ ck, ctx, iface, target }) {
         }
       }
       return false;
-      break $m310$match;
+      break $m311$match;
     }
     if (true) {
       return has_impl_for({ ck: ck, iface: iface, target: s });
-      break $m310$match;
+      break $m311$match;
     }
     $rt.unreachable();
   }
@@ -2543,61 +2547,61 @@ export function check_block({ ck, ctx, b }) {
 }
 
 export function stmt_returns({ s }) {
-  const $m312 = s;
-  $m312$match: {
-    if ($m312.tag === "Return") {
+  const $m313 = s;
+  $m313$match: {
+    if ($m313.tag === "Return") {
       return true;
-      break $m312$match;
+      break $m313$match;
     }
-    if ($m312.tag === "If") {
-      const then_block = $m312.then_block;
-      const else_block = $m312.else_block;
-      const $m313 = else_block;
-      $m313$match: {
-        if ($m313.tag === "None") {
+    if ($m313.tag === "If") {
+      const then_block = $m313.then_block;
+      const else_block = $m313.else_block;
+      const $m314 = else_block;
+      $m314$match: {
+        if ($m314.tag === "None") {
           return false;
-          break $m313$match;
+          break $m314$match;
         }
-        if ($m313.tag === "Some") {
-          const value = $m313.value;
+        if ($m314.tag === "Some") {
+          const value = $m314.value;
           return block_returns({ b: then_block }) && block_returns({ b: value });
-          break $m313$match;
+          break $m314$match;
         }
         $rt.unreachable();
       }
-      break $m312$match;
+      break $m313$match;
     }
-    if ($m312.tag === "Match") {
-      const arms = $m312.arms;
+    if ($m313.tag === "Match") {
+      const arms = $m313.arms;
       if ($std_list.len({ xs: arms }) === 0) {
         return false;
       }
       for (const a of arms) {
-        const $m314 = a.body;
-        $m314$match: {
-          if ($m314.tag === "ArmBlock") {
-            const block = $m314.block;
+        const $m315 = a.body;
+        $m315$match: {
+          if ($m315.tag === "ArmBlock") {
+            const block = $m315.block;
             if (!block_returns({ b: block })) {
               return false;
             }
-            break $m314$match;
+            break $m315$match;
           }
-          if ($m314.tag === "ArmStmt") {
-            const stmt = $m314.stmt;
+          if ($m315.tag === "ArmStmt") {
+            const stmt = $m315.stmt;
             if (!stmt_returns({ s: stmt })) {
               return false;
             }
-            break $m314$match;
+            break $m315$match;
           }
           $rt.unreachable();
         }
       }
       return true;
-      break $m312$match;
+      break $m313$match;
     }
     if (true) {
       return false;
-      break $m312$match;
+      break $m313$match;
     }
     $rt.unreachable();
   }
@@ -2629,46 +2633,46 @@ export function describe_binding({ d }) {
 }
 
 export function check_stmt({ ck, ctx, s }) {
-  const $m319 = s;
-  $m319$match: {
-    if ($m319.tag === "Let") {
-      const name = $m319.name;
-      const ty = $m319.ty;
-      const value = $m319.value;
-      const span = $m319.span;
-      const [$r320, ck$162, ctx$162] = type_of({ fuel: max_type_depth, ck: ck, ctx: ctx, t: ty });
+  const $m320 = s;
+  $m320$match: {
+    if ($m320.tag === "Let") {
+      const name = $m320.name;
+      const ty = $m320.ty;
+      const value = $m320.value;
+      const span = $m320.span;
+      const [$r321, ck$162, ctx$162] = type_of({ fuel: max_type_depth, ck: ck, ctx: ctx, t: ty });
       ck = ck$162;
       ctx = ctx$162;
-      const t = $r320;
+      const t = $r321;
       const [, ctx$163] = set_decl_type({ ctx: ctx, def: def_of_key({ ctx: ctx, k: key({ ck: ck, tag: $defs.tag_stmt, span: span }) }), t: t });
       ctx = ctx$163;
-      const [$r322, ck$164, ctx$164] = check_expr({ ck: ck, ctx: ctx, e: value, expected: { tag: "Some", value: t } });
+      const [$r323, ck$164, ctx$164] = check_expr({ ck: ck, ctx: ctx, e: value, expected: { tag: "Some", value: t } });
       ck = ck$164;
       ctx = ctx$164;
-      const vt = $r322;
-      break $m319$match;
+      const vt = $r323;
+      break $m320$match;
     }
-    if ($m319.tag === "Var") {
-      const name = $m319.name;
-      const ty = $m319.ty;
-      const value = $m319.value;
-      const span = $m319.span;
-      const [$r323, ck$165, ctx$165] = type_of({ fuel: max_type_depth, ck: ck, ctx: ctx, t: ty });
+    if ($m320.tag === "Var") {
+      const name = $m320.name;
+      const ty = $m320.ty;
+      const value = $m320.value;
+      const span = $m320.span;
+      const [$r324, ck$165, ctx$165] = type_of({ fuel: max_type_depth, ck: ck, ctx: ctx, t: ty });
       ck = ck$165;
       ctx = ctx$165;
-      const t = $r323;
+      const t = $r324;
       const [, ctx$166] = set_decl_type({ ctx: ctx, def: def_of_key({ ctx: ctx, k: key({ ck: ck, tag: $defs.tag_stmt, span: span }) }), t: t });
       ctx = ctx$166;
-      const [$r325, ck$167, ctx$167] = check_expr({ ck: ck, ctx: ctx, e: value, expected: { tag: "Some", value: t } });
+      const [$r326, ck$167, ctx$167] = check_expr({ ck: ck, ctx: ctx, e: value, expected: { tag: "Some", value: t } });
       ck = ck$167;
       ctx = ctx$167;
-      const vt = $r325;
-      break $m319$match;
+      const vt = $r326;
+      break $m320$match;
     }
-    if ($m319.tag === "Assign") {
-      const name = $m319.name;
-      const value = $m319.value;
-      const span = $m319.span;
+    if ($m320.tag === "Assign") {
+      const name = $m320.name;
+      const value = $m320.value;
+      const span = $m320.span;
       const def = res_def({ res: ref_at({ ctx: ctx, k: key({ ck: ck, tag: $defs.tag_stmt, span: span }) }) });
       if (def >= 0) {
         const d = $context.get_def({ ctx: ctx, id: def });
@@ -2676,16 +2680,16 @@ export function check_stmt({ ck, ctx, s }) {
           const [, ctx$168] = rep({ ck: ck, ctx: ctx, code: "E0328", at: name.span, detail: "`" + name.text + "` is " + describe_binding({ d: d }) + "; only a `var` or an `inout` parameter can be assigned" });
           ctx = ctx$168;
         }
-        const [$r329, ck$169, ctx$169] = check_expr({ ck: ck, ctx: ctx, e: value, expected: { tag: "Some", value: decl_type({ ctx: ctx, def: def }) } });
+        const [$r330, ck$169, ctx$169] = check_expr({ ck: ck, ctx: ctx, e: value, expected: { tag: "Some", value: decl_type({ ctx: ctx, def: def }) } });
         ck = ck$169;
         ctx = ctx$169;
-        const vt = $r329;
+        const vt = $r330;
       }
-      break $m319$match;
+      break $m320$match;
     }
-    if ($m319.tag === "Return") {
-      const value = $m319.value;
-      const span = $m319.span;
+    if ($m320.tag === "Return") {
+      const value = $m320.value;
+      const span = $m320.span;
       const rt = fn_ret({ ck: ck });
       if (rt.tag === "None") {
         let why = "`return` is not allowed here";
@@ -2695,163 +2699,163 @@ export function check_stmt({ ck, ctx, s }) {
         const [, ctx$170] = rep({ ck: ck, ctx: ctx, code: "E0321", at: span, detail: why });
         ctx = ctx$170;
       }
-      const [$r330, ck$171, ctx$171] = check_expr({ ck: ck, ctx: ctx, e: value, expected: rt });
+      const [$r331, ck$171, ctx$171] = check_expr({ ck: ck, ctx: ctx, e: value, expected: rt });
       ck = ck$171;
       ctx = ctx$171;
-      const vt = $r330;
-      break $m319$match;
+      const vt = $r331;
+      break $m320$match;
     }
-    if ($m319.tag === "If") {
-      const cond = $m319.cond;
-      const then_block = $m319.then_block;
-      const else_block = $m319.else_block;
-      const span = $m319.span;
-      const [$r332, ck$172, ctx$172] = check_expr({ ck: ck, ctx: ctx, e: cond, expected: { tag: "Some", value: $types.bool_t } });
+    if ($m320.tag === "If") {
+      const cond = $m320.cond;
+      const then_block = $m320.then_block;
+      const else_block = $m320.else_block;
+      const span = $m320.span;
+      const [$r333, ck$172, ctx$172] = check_expr({ ck: ck, ctx: ctx, e: cond, expected: { tag: "Some", value: $types.bool_t } });
       ck = ck$172;
       ctx = ctx$172;
-      const ct = $r332;
+      const ct = $r333;
       const [, ck$173, ctx$173] = check_block({ ck: ck, ctx: ctx, b: then_block });
       ck = ck$173;
       ctx = ctx$173;
-      const $m333 = else_block;
-      $m333$match: {
-        if ($m333.tag === "Some") {
-          const value = $m333.value;
+      const $m334 = else_block;
+      $m334$match: {
+        if ($m334.tag === "Some") {
+          const value = $m334.value;
           const [, ck$174, ctx$174] = check_block({ ck: ck, ctx: ctx, b: value });
           ck = ck$174;
           ctx = ctx$174;
-          break $m333$match;
+          break $m334$match;
         }
-        if ($m333.tag === "None") {
+        if ($m334.tag === "None") {
           skip({  });
-          break $m333$match;
+          break $m334$match;
         }
         $rt.unreachable();
       }
-      break $m319$match;
+      break $m320$match;
     }
-    if ($m319.tag === "Match") {
-      const scrutinee = $m319.scrutinee;
-      const arms = $m319.arms;
-      const span = $m319.span;
+    if ($m320.tag === "Match") {
+      const scrutinee = $m320.scrutinee;
+      const arms = $m320.arms;
+      const span = $m320.span;
       const [, ck$175, ctx$175] = match_stmt({ ck: ck, ctx: ctx, s: s });
       ck = ck$175;
       ctx = ctx$175;
-      break $m319$match;
+      break $m320$match;
     }
-    if ($m319.tag === "Loop") {
-      const cond = $m319.cond;
-      const clauses = $m319.clauses;
-      const body = $m319.body;
-      const span = $m319.span;
-      const [$r335, ck$176, ctx$176] = check_expr({ ck: ck, ctx: ctx, e: cond, expected: { tag: "Some", value: $types.bool_t } });
+    if ($m320.tag === "Loop") {
+      const cond = $m320.cond;
+      const clauses = $m320.clauses;
+      const body = $m320.body;
+      const span = $m320.span;
+      const [$r336, ck$176, ctx$176] = check_expr({ ck: ck, ctx: ctx, e: cond, expected: { tag: "Some", value: $types.bool_t } });
       ck = ck$176;
       ctx = ctx$176;
-      const ct = $r335;
+      const ct = $r336;
       for (const c of clauses) {
         let want = $types.int_t;
         if (c.clause === "invariant") {
           want = $types.bool_t;
         }
-        const [$r337, ck$177, ctx$177] = check_expr({ ck: ck, ctx: ctx, e: c.expr, expected: { tag: "Some", value: want } });
+        const [$r338, ck$177, ctx$177] = check_expr({ ck: ck, ctx: ctx, e: c.expr, expected: { tag: "Some", value: want } });
         ck = ck$177;
         ctx = ctx$177;
-        const lt = $r337;
+        const lt = $r338;
       }
       const [, ck$178, ctx$178] = check_block({ ck: ck, ctx: ctx, b: body });
       ck = ck$178;
       ctx = ctx$178;
-      break $m319$match;
+      break $m320$match;
     }
-    if ($m319.tag === "For") {
-      const name = $m319.name;
-      const ty = $m319.ty;
-      const domain = $m319.domain;
-      const body = $m319.body;
-      const span = $m319.span;
-      const [$r338, ck$179, ctx$179] = type_of({ fuel: max_type_depth, ck: ck, ctx: ctx, t: ty });
+    if ($m320.tag === "For") {
+      const name = $m320.name;
+      const ty = $m320.ty;
+      const domain = $m320.domain;
+      const body = $m320.body;
+      const span = $m320.span;
+      const [$r339, ck$179, ctx$179] = type_of({ fuel: max_type_depth, ck: ck, ctx: ctx, t: ty });
       ck = ck$179;
       ctx = ctx$179;
-      const declared = $r338;
+      const declared = $r339;
       const [, ctx$180] = set_decl_type({ ctx: ctx, def: def_of_key({ ctx: ctx, k: key({ ck: ck, tag: $defs.tag_stmt, span: span }) }), t: declared });
       ctx = ctx$180;
-      const $m339 = domain;
-      $m339$match: {
-        if ($m339.tag === "RangeDomain") {
-          const lo = $m339.lo;
-          const hi = $m339.hi;
+      const $m340 = domain;
+      $m340$match: {
+        if ($m340.tag === "RangeDomain") {
+          const lo = $m340.lo;
+          const hi = $m340.hi;
           if (!$types.same_base({ a: declared, b: $types.int_t })) {
             const [, ctx$181] = rep({ ck: ck, ctx: ctx, code: "E0321", at: $comments.type_span({ t: ty }), detail: "a range iterates Int values, not " + show({ ctx: ctx, t: declared }) });
             ctx = ctx$181;
           }
-          const [$r341, ck$182, ctx$182] = check_expr({ ck: ck, ctx: ctx, e: lo, expected: { tag: "Some", value: $types.int_t } });
+          const [$r342, ck$182, ctx$182] = check_expr({ ck: ck, ctx: ctx, e: lo, expected: { tag: "Some", value: $types.int_t } });
           ck = ck$182;
           ctx = ctx$182;
-          const lt = $r341;
-          const [$r343, ck$183, ctx$183] = check_expr({ ck: ck, ctx: ctx, e: hi, expected: { tag: "Some", value: $types.int_t } });
+          const lt = $r342;
+          const [$r344, ck$183, ctx$183] = check_expr({ ck: ck, ctx: ctx, e: hi, expected: { tag: "Some", value: $types.int_t } });
           ck = ck$183;
           ctx = ctx$183;
-          const ht = $r343;
-          break $m339$match;
+          const ht = $r344;
+          break $m340$match;
         }
-        if ($m339.tag === "InDomain") {
-          const expr = $m339.expr;
-          const [$r345, ck$184, ctx$184] = check_expr({ ck: ck, ctx: ctx, e: expr, expected: { tag: "None" } });
+        if ($m340.tag === "InDomain") {
+          const expr = $m340.expr;
+          const [$r346, ck$184, ctx$184] = check_expr({ ck: ck, ctx: ctx, e: expr, expected: { tag: "None" } });
           ck = ck$184;
           ctx = ctx$184;
-          const dt = $r345;
-          const [$r347, ctx$185] = element_type({ ck: ck, ctx: ctx, t: dt, at: $parser.span_of_expr({ e: expr }) });
+          const dt = $r346;
+          const [$r348, ctx$185] = element_type({ ck: ck, ctx: ctx, t: dt, at: $parser.span_of_expr({ e: expr }) });
           ctx = ctx$185;
-          const $m346 = $r347;
-          $m346$match: {
-            if ($m346.tag === "Some") {
-              const value = $m346.value;
-              const [$r349, ctx$186] = coerce({ ck: ck, ctx: ctx, actual: value, expected: declared, at: $comments.type_span({ t: ty }), what: "loop variable", at_key: { tag: "None" } });
+          const $m347 = $r348;
+          $m347$match: {
+            if ($m347.tag === "Some") {
+              const value = $m347.value;
+              const [$r350, ctx$186] = coerce({ ck: ck, ctx: ctx, actual: value, expected: declared, at: $comments.type_span({ t: ty }), what: "loop variable", at_key: { tag: "None" } });
               ctx = ctx$186;
-              const ct = $r349;
-              break $m346$match;
+              const ct = $r350;
+              break $m347$match;
             }
-            if ($m346.tag === "None") {
+            if ($m347.tag === "None") {
               skip({  });
-              break $m346$match;
+              break $m347$match;
             }
             $rt.unreachable();
           }
-          break $m339$match;
+          break $m340$match;
         }
         $rt.unreachable();
       }
       const [, ck$187, ctx$187] = check_block({ ck: ck, ctx: ctx, b: body });
       ck = ck$187;
       ctx = ctx$187;
-      break $m319$match;
+      break $m320$match;
     }
-    if ($m319.tag === "Assume") {
-      const verify_block = $m319.verify_block;
-      const $m350 = verify_block;
-      $m350$match: {
-        if ($m350.tag === "Some") {
-          const value = $m350.value;
+    if ($m320.tag === "Assume") {
+      const verify_block = $m320.verify_block;
+      const $m351 = verify_block;
+      $m351$match: {
+        if ($m351.tag === "Some") {
+          const value = $m351.value;
           const [, ck$188, ctx$188] = check_verify({ ck: ck, ctx: ctx, v: value });
           ck = ck$188;
           ctx = ctx$188;
-          break $m350$match;
+          break $m351$match;
         }
-        if ($m350.tag === "None") {
+        if ($m351.tag === "None") {
           skip({  });
-          break $m350$match;
+          break $m351$match;
         }
         $rt.unreachable();
       }
-      break $m319$match;
+      break $m320$match;
     }
-    if ($m319.tag === "ExprStmt") {
-      const expr = $m319.expr;
-      const span = $m319.span;
-      const [$r352, ck$189, ctx$189] = check_expr({ ck: ck, ctx: ctx, e: expr, expected: { tag: "None" } });
+    if ($m320.tag === "ExprStmt") {
+      const expr = $m320.expr;
+      const span = $m320.span;
+      const [$r353, ck$189, ctx$189] = check_expr({ ck: ck, ctx: ctx, e: expr, expected: { tag: "None" } });
       ck = ck$189;
       ctx = ctx$189;
-      const t = $r352;
+      const t = $r353;
       if (fn_flag({ ck: ck, which: 0 })) {
         if (!$types.assignable({ actual: t, expected: $types.bool_t })) {
           const [, ctx$190] = rep({ ck: ck, ctx: ctx, code: "E0321", at: span, detail: "an assertion must be Bool, found " + show({ ctx: ctx, t: t }) });
@@ -2865,7 +2869,7 @@ export function check_stmt({ ck, ctx, s }) {
           }
         }
       }
-      break $m319$match;
+      break $m320$match;
     }
     $rt.unreachable();
   }
@@ -2878,19 +2882,19 @@ export function element_type({ ck, ctx, t, at }) {
   if (s.tag === "ErrorT") {
     return [{ tag: "Some", value: { tag: "ErrorT" } }, ctx];
   }
-  const [$r355, ctx$192] = is_list_type({ ctx: ctx, t: s });
+  const [$r356, ctx$192] = is_list_type({ ctx: ctx, t: s });
   ctx = ctx$192;
-  if ($r355) {
-    const $m356 = first_type_arg({ t: s });
-    $m356$match: {
-      if ($m356.tag === "Some") {
-        const value = $m356.value;
+  if ($r356) {
+    const $m357 = first_type_arg({ t: s });
+    $m357$match: {
+      if ($m357.tag === "Some") {
+        const value = $m357.value;
         return [{ tag: "Some", value: value }, ctx];
-        break $m356$match;
+        break $m357$match;
       }
-      if ($m356.tag === "None") {
+      if ($m357.tag === "None") {
         skip({  });
-        break $m356$match;
+        break $m357$match;
       }
       $rt.unreachable();
     }
@@ -2901,48 +2905,48 @@ export function element_type({ ck, ctx, t, at }) {
 }
 
 export function shape_key({ a }) {
-  const $m359 = a;
-  $m359$match: {
-    if ($m359.tag === "VariantShape") {
-      const variant = $m359.variant;
+  const $m360 = a;
+  $m360$match: {
+    if ($m360.tag === "VariantShape") {
+      const variant = $m360.variant;
       return { tag: "Some", value: "v:" + $std_int.to_text({ x: variant }) };
-      break $m359$match;
+      break $m360$match;
     }
-    if ($m359.tag === "BoolShape") {
-      const value = $m359.value;
+    if ($m360.tag === "BoolShape") {
+      const value = $m360.value;
       return { tag: "Some", value: "b:" + $std_bool.to_text({ b: value }) };
-      break $m359$match;
+      break $m360$match;
     }
     if (true) {
       return { tag: "None" };
-      break $m359$match;
+      break $m360$match;
     }
     $rt.unreachable();
   }
 }
 
 export function shape_guarded({ a }) {
-  const $m363 = a;
-  $m363$match: {
-    if ($m363.tag === "AllShape") {
-      const guarded = $m363.guarded;
+  const $m364 = a;
+  $m364$match: {
+    if ($m364.tag === "AllShape") {
+      const guarded = $m364.guarded;
       return guarded;
-      break $m363$match;
+      break $m364$match;
     }
-    if ($m363.tag === "VariantShape") {
-      const guarded = $m363.guarded;
+    if ($m364.tag === "VariantShape") {
+      const guarded = $m364.guarded;
       return guarded;
-      break $m363$match;
+      break $m364$match;
     }
-    if ($m363.tag === "BoolShape") {
-      const guarded = $m363.guarded;
+    if ($m364.tag === "BoolShape") {
+      const guarded = $m364.guarded;
       return guarded;
-      break $m363$match;
+      break $m364$match;
     }
-    if ($m363.tag === "LitShape") {
-      const guarded = $m363.guarded;
+    if ($m364.tag === "LitShape") {
+      const guarded = $m364.guarded;
       return guarded;
-      break $m363$match;
+      break $m364$match;
     }
     $rt.unreachable();
   }
@@ -2965,18 +2969,18 @@ export function coverage({ ctx, scrutinee, arms }) {
   for (const arm of arms) {
     const k = shape_key({ a: arm });
     let already = all;
-    const $m364 = k;
-    $m364$match: {
-      if ($m364.tag === "Some") {
-        const value = $m364.value;
+    const $m365 = k;
+    $m365$match: {
+      if ($m365.tag === "Some") {
+        const value = $m365.value;
         if ($std_map.contains({ d: covered, key: value })) {
           already = true;
         }
-        break $m364$match;
+        break $m365$match;
       }
-      if ($m364.tag === "None") {
+      if ($m365.tag === "None") {
         skip({  });
-        break $m364$match;
+        break $m365$match;
       }
       $rt.unreachable();
     }
@@ -2988,39 +2992,39 @@ export function coverage({ ctx, scrutinee, arms }) {
         if (arm.tag === "AllShape") {
           all = true;
         } else {
-          const $m365 = k;
-          $m365$match: {
-            if ($m365.tag === "Some") {
-              const value = $m365.value;
+          const $m366 = k;
+          $m366$match: {
+            if ($m366.tag === "Some") {
+              const value = $m366.value;
               const [, covered$195] = $std_map.set({ d: covered, key: value, value: true });
               covered = covered$195;
-              break $m365$match;
+              break $m366$match;
             }
-            if ($m365.tag === "None") {
+            if ($m366.tag === "None") {
               skip({  });
-              break $m365$match;
+              break $m366$match;
             }
             $rt.unreachable();
           }
         }
-        const $m366 = scrutinee;
-        $m366$match: {
-          if ($m366.tag === "BoolS") {
+        const $m367 = scrutinee;
+        $m367$match: {
+          if ($m367.tag === "BoolS") {
             if ($std_map.contains({ d: covered, key: "b:true" }) && $std_map.contains({ d: covered, key: "b:false" })) {
               all = true;
             }
-            break $m366$match;
+            break $m367$match;
           }
-          if ($m366.tag === "UnionS") {
-            const variants = $m366.variants;
+          if ($m367.tag === "UnionS") {
+            const variants = $m367.variants;
             if (all_variants_covered({ variants: variants, covered: covered })) {
               all = true;
             }
-            break $m366$match;
+            break $m367$match;
           }
-          if ($m366.tag === "OtherS") {
+          if ($m367.tag === "OtherS") {
             skip({  });
-            break $m366$match;
+            break $m367$match;
           }
           $rt.unreachable();
         }
@@ -3031,10 +3035,10 @@ export function coverage({ ctx, scrutinee, arms }) {
   if (all) {
     return { missing: [], needs_catch_all: false, unreachable: $std_list.finish({ b: unreachable }) };
   }
-  const $m368 = scrutinee;
-  $m368$match: {
-    if ($m368.tag === "UnionS") {
-      const variants = $m368.variants;
+  const $m369 = scrutinee;
+  $m369$match: {
+    if ($m369.tag === "UnionS") {
+      const variants = $m369.variants;
       let missing = $std_list.builder({  });
       for (const v of variants) {
         if (!$std_map.contains({ d: covered, key: "v:" + $std_int.to_text({ x: v }) })) {
@@ -3043,9 +3047,9 @@ export function coverage({ ctx, scrutinee, arms }) {
         }
       }
       return { missing: $std_list.finish({ b: missing }), needs_catch_all: false, unreachable: $std_list.finish({ b: unreachable }) };
-      break $m368$match;
+      break $m369$match;
     }
-    if ($m368.tag === "BoolS") {
+    if ($m369.tag === "BoolS") {
       let missing = $std_list.builder({  });
       if (!$std_map.contains({ d: covered, key: "b:true" })) {
         const [, missing$197] = $std_list.push({ b: missing, x: "true" });
@@ -3056,61 +3060,61 @@ export function coverage({ ctx, scrutinee, arms }) {
         missing = missing$198;
       }
       return { missing: $std_list.finish({ b: missing }), needs_catch_all: false, unreachable: $std_list.finish({ b: unreachable }) };
-      break $m368$match;
+      break $m369$match;
     }
-    if ($m368.tag === "OtherS") {
+    if ($m369.tag === "OtherS") {
       return { missing: [], needs_catch_all: true, unreachable: $std_list.finish({ b: unreachable }) };
-      break $m368$match;
+      break $m369$match;
     }
     $rt.unreachable();
   }
 }
 
 export function pattern_span({ p }) {
-  const $m372 = p;
-  $m372$match: {
-    if ($m372.tag === "WildcardPat") {
-      const span = $m372.span;
+  const $m373 = p;
+  $m373$match: {
+    if ($m373.tag === "WildcardPat") {
+      const span = $m373.span;
       return span;
-      break $m372$match;
+      break $m373$match;
     }
-    if ($m372.tag === "BindPat") {
-      const span = $m372.span;
+    if ($m373.tag === "BindPat") {
+      const span = $m373.span;
       return span;
-      break $m372$match;
+      break $m373$match;
     }
-    if ($m372.tag === "LitPat") {
-      const span = $m372.span;
+    if ($m373.tag === "LitPat") {
+      const span = $m373.span;
       return span;
-      break $m372$match;
+      break $m373$match;
     }
-    if ($m372.tag === "VariantPat") {
-      const span = $m372.span;
+    if ($m373.tag === "VariantPat") {
+      const span = $m373.span;
       return span;
-      break $m372$match;
+      break $m373$match;
     }
     $rt.unreachable();
   }
 }
 
 export function match_stmt({ ck, ctx, s }) {
-  const $m373 = s;
-  $m373$match: {
-    if ($m373.tag === "Match") {
-      const scrutinee = $m373.scrutinee;
-      const arms = $m373.arms;
-      const span = $m373.span;
-      const [$r375, ck$199, ctx$199] = check_expr({ ck: ck, ctx: ctx, e: scrutinee, expected: { tag: "None" } });
+  const $m374 = s;
+  $m374$match: {
+    if ($m374.tag === "Match") {
+      const scrutinee = $m374.scrutinee;
+      const arms = $m374.arms;
+      const span = $m374.span;
+      const [$r376, ck$199, ctx$199] = check_expr({ ck: ck, ctx: ctx, e: scrutinee, expected: { tag: "None" } });
       ck = ck$199;
       ctx = ctx$199;
-      const st_full = $r375;
+      const st_full = $r376;
       const st = $types.strip({ t: st_full });
       let shape = { tag: "OtherS" };
       const pn = $types.prim_name({ t: st });
       if (st.tag === "UnionT") {
-        const [$r377, ctx$200] = variants_of({ ck: ck, ctx: ctx, d: $context.get_def({ ctx: ctx, id: $types.def_of({ t: st }) }) });
+        const [$r378, ctx$200] = variants_of({ ck: ck, ctx: ctx, d: $context.get_def({ ctx: ctx, id: $types.def_of({ t: st }) }) });
         ctx = ctx$200;
-        shape = { tag: "UnionS", variants: $r377 };
+        shape = { tag: "UnionS", variants: $r378 };
       } else {
         if (pn === "Bool") {
           shape = { tag: "BoolS" };
@@ -3126,42 +3130,42 @@ export function match_stmt({ ck, ctx, s }) {
       }
       let shapes = $std_list.builder({  });
       for (const a of arms) {
-        const [$r382, ck$202, ctx$202] = check_pattern({ ck: ck, ctx: ctx, p: a.pattern, scrutinee: st_full, guarded: a.guard.tag === "Some" });
+        const [$r383, ck$202, ctx$202] = check_pattern({ ck: ck, ctx: ctx, p: a.pattern, scrutinee: st_full, guarded: a.guard.tag === "Some" });
         ck = ck$202;
         ctx = ctx$202;
-        const [, shapes$203] = $std_list.push({ b: shapes, x: $r382 });
+        const [, shapes$203] = $std_list.push({ b: shapes, x: $r383 });
         shapes = shapes$203;
-        const $m383 = a.guard;
-        $m383$match: {
-          if ($m383.tag === "Some") {
-            const value = $m383.value;
-            const [$r385, ck$204, ctx$204] = check_expr({ ck: ck, ctx: ctx, e: value, expected: { tag: "Some", value: $types.bool_t } });
+        const $m384 = a.guard;
+        $m384$match: {
+          if ($m384.tag === "Some") {
+            const value = $m384.value;
+            const [$r386, ck$204, ctx$204] = check_expr({ ck: ck, ctx: ctx, e: value, expected: { tag: "Some", value: $types.bool_t } });
             ck = ck$204;
             ctx = ctx$204;
-            const gt = $r385;
-            break $m383$match;
+            const gt = $r386;
+            break $m384$match;
           }
-          if ($m383.tag === "None") {
+          if ($m384.tag === "None") {
             skip({  });
-            break $m383$match;
+            break $m384$match;
           }
           $rt.unreachable();
         }
-        const $m386 = a.body;
-        $m386$match: {
-          if ($m386.tag === "ArmBlock") {
-            const block = $m386.block;
+        const $m387 = a.body;
+        $m387$match: {
+          if ($m387.tag === "ArmBlock") {
+            const block = $m387.block;
             const [, ck$205, ctx$205] = check_block({ ck: ck, ctx: ctx, b: block });
             ck = ck$205;
             ctx = ctx$205;
-            break $m386$match;
+            break $m387$match;
           }
-          if ($m386.tag === "ArmStmt") {
-            const stmt = $m386.stmt;
+          if ($m387.tag === "ArmStmt") {
+            const stmt = $m387.stmt;
             const [, ck$206, ctx$206] = check_stmt({ ck: ck, ctx: ctx, s: stmt });
             ck = ck$206;
             ctx = ctx$206;
-            break $m386$match;
+            break $m387$match;
           }
           $rt.unreachable();
         }
@@ -3190,11 +3194,11 @@ export function match_stmt({ ck, ctx, s }) {
           ctx = ctx$210;
         }
       }
-      break $m373$match;
+      break $m374$match;
     }
     if (true) {
       skip({  });
-      break $m373$match;
+      break $m374$match;
     }
     $rt.unreachable();
   }
@@ -3203,57 +3207,57 @@ export function match_stmt({ ck, ctx, s }) {
 }
 
 export function pat_field_tag({ pf }) {
-  const $m387 = pf;
-  $m387$match: {
-    if ($m387.tag === "PatFieldName") {
+  const $m388 = pf;
+  $m388$match: {
+    if ($m388.tag === "PatFieldName") {
       return 0;
-      break $m387$match;
+      break $m388$match;
     }
-    if ($m387.tag === "PatFieldSkip") {
+    if ($m388.tag === "PatFieldSkip") {
       return 1;
-      break $m387$match;
+      break $m388$match;
     }
-    if ($m387.tag === "PatFieldRest") {
+    if ($m388.tag === "PatFieldRest") {
       return 2;
-      break $m387$match;
+      break $m388$match;
     }
     $rt.unreachable();
   }
 }
 
 export function pat_field_span({ pf }) {
-  const $m388 = pf;
-  $m388$match: {
-    if ($m388.tag === "PatFieldName") {
-      const span = $m388.span;
+  const $m389 = pf;
+  $m389$match: {
+    if ($m389.tag === "PatFieldName") {
+      const span = $m389.span;
       return span;
-      break $m388$match;
+      break $m389$match;
     }
-    if ($m388.tag === "PatFieldSkip") {
-      const span = $m388.span;
+    if ($m389.tag === "PatFieldSkip") {
+      const span = $m389.span;
       return span;
-      break $m388$match;
+      break $m389$match;
     }
-    if ($m388.tag === "PatFieldRest") {
-      const span = $m388.span;
+    if ($m389.tag === "PatFieldRest") {
+      const span = $m389.span;
       return span;
-      break $m388$match;
+      break $m389$match;
     }
     $rt.unreachable();
   }
 }
 
 export function pat_field_ident({ pf }) {
-  const $m389 = pf;
-  $m389$match: {
-    if ($m389.tag === "PatFieldName") {
-      const name = $m389.name;
+  const $m390 = pf;
+  $m390$match: {
+    if ($m390.tag === "PatFieldName") {
+      const name = $m390.name;
       return name;
-      break $m389$match;
+      break $m390$match;
     }
     if (true) {
       return { text: "", span: { start: 0, end: 0 } };
-      break $m389$match;
+      break $m390$match;
     }
     $rt.unreachable();
   }
@@ -3261,12 +3265,12 @@ export function pat_field_ident({ pf }) {
 
 export function subst_of({ ck, ctx, d, args }) {
   let subst = $std_map.dict({  });
-  const [$r392, ck$211, ctx$211] = type_params_of({ fuel: max_type_depth, ck: ck, ctx: ctx, d: d });
+  const [$r393, ck$211, ctx$211] = type_params_of({ fuel: max_type_depth, ck: ck, ctx: ctx, d: d });
   ck = ck$211;
   ctx = ctx$211;
-  const ps = $r392;
-  const $hi393 = $std_list.len({ xs: ps });
-  for (let i = 0; i < $hi393; i++) {
+  const ps = $r393;
+  const $hi394 = $std_list.len({ xs: ps });
+  for (let i = 0; i < $hi394; i++) {
     if (i < $std_list.len({ xs: args })) {
       const [, subst$212] = $std_map.set({ d: subst, key: $types.tparam_def({ p: $std_list.get({ xs: ps, i: i }) }), value: $std_list.get({ xs: args, i: i }) });
       subst = subst$212;
@@ -3284,49 +3288,49 @@ export function plural_fields({ n }) {
 
 export function check_pattern({ ck, ctx, p, scrutinee, guarded }) {
   const st = $types.strip({ t: scrutinee });
-  const $m394 = p;
-  $m394$match: {
-    if ($m394.tag === "WildcardPat") {
+  const $m395 = p;
+  $m395$match: {
+    if ($m395.tag === "WildcardPat") {
       return [{ tag: "AllShape", guarded: guarded }, ck, ctx];
-      break $m394$match;
+      break $m395$match;
     }
-    if ($m394.tag === "BindPat") {
-      const span = $m394.span;
+    if ($m395.tag === "BindPat") {
+      const span = $m395.span;
       const [, ctx$213] = set_decl_type({ ctx: ctx, def: def_of_key({ ctx: ctx, k: key({ ck: ck, tag: $defs.tag_pattern, span: span }) }), t: scrutinee });
       ctx = ctx$213;
       return [{ tag: "AllShape", guarded: guarded }, ck, ctx];
-      break $m394$match;
+      break $m395$match;
     }
-    if ($m394.tag === "LitPat") {
-      const literal = $m394.literal;
-      const span = $m394.span;
-      const [$r398, ck$214, ctx$214] = check_expr({ ck: ck, ctx: ctx, e: literal, expected: { tag: "None" } });
+    if ($m395.tag === "LitPat") {
+      const literal = $m395.literal;
+      const span = $m395.span;
+      const [$r399, ck$214, ctx$214] = check_expr({ ck: ck, ctx: ctx, e: literal, expected: { tag: "None" } });
       ck = ck$214;
       ctx = ctx$214;
-      const lt = $r398;
+      const lt = $r399;
       if (!$types.assignable({ actual: lt, expected: scrutinee })) {
         const [, ctx$215] = rep({ ck: ck, ctx: ctx, code: "E0341", at: span, detail: "a " + show({ ctx: ctx, t: lt }) + " literal cannot match " + show({ ctx: ctx, t: scrutinee }) });
         ctx = ctx$215;
       }
-      const $m399 = literal;
-      $m399$match: {
-        if ($m399.tag === "BoolLit") {
-          const value = $m399.value;
+      const $m400 = literal;
+      $m400$match: {
+        if ($m400.tag === "BoolLit") {
+          const value = $m400.value;
           return [{ tag: "BoolShape", value: value, guarded: guarded }, ck, ctx];
-          break $m399$match;
+          break $m400$match;
         }
         if (true) {
           return [{ tag: "LitShape", guarded: guarded }, ck, ctx];
-          break $m399$match;
+          break $m400$match;
         }
         $rt.unreachable();
       }
-      break $m394$match;
+      break $m395$match;
     }
-    if ($m394.tag === "VariantPat") {
-      const name = $m394.name;
-      const fields = $m394.fields;
-      const span = $m394.span;
+    if ($m395.tag === "VariantPat") {
+      const name = $m395.name;
+      const fields = $m395.fields;
+      const span = $m395.span;
       const vdef = res_def({ res: ref_at({ ctx: ctx, k: key({ ck: ck, tag: $defs.tag_pattern, span: span }) }) });
       if (vdef < 0) {
         return [{ tag: "AllShape", guarded: true }, ck, ctx];
@@ -3345,23 +3349,23 @@ export function check_pattern({ ck, ctx, p, scrutinee, guarded }) {
         ctx = ctx$216;
         return [{ tag: "VariantShape", variant: vdef, guarded: true }, ck, ctx];
       }
-      const [$r405, ck$217, ctx$217] = subst_of({ ck: ck, ctx: ctx, d: $context.get_def({ ctx: ctx, id: union_id }), args: $types.args_of({ t: st }) });
+      const [$r406, ck$217, ctx$217] = subst_of({ ck: ck, ctx: ctx, d: $context.get_def({ ctx: ctx, id: union_id }), args: $types.args_of({ t: st }) });
       ck = ck$217;
       ctx = ctx$217;
-      const subst = $r405;
-      const [$r406, ck$218, ctx$218] = fields_of({ ck: ck, ctx: ctx, d: variant });
+      const subst = $r406;
+      const [$r407, ck$218, ctx$218] = fields_of({ ck: ck, ctx: ctx, d: variant });
       ck = ck$218;
       ctx = ctx$218;
-      const fs = $r406;
+      const fs = $r407;
       const nf = $std_list.len({ xs: fs });
-      const $m407 = fields;
-      $m407$match: {
-        if ($m407.tag === "None") {
+      const $m408 = fields;
+      $m408$match: {
+        if ($m408.tag === "None") {
           return [{ tag: "VariantShape", variant: vdef, guarded: guarded }, ck, ctx];
-          break $m407$match;
+          break $m408$match;
         }
-        if ($m407.tag === "Some") {
-          const value = $m407.value;
+        if ($m408.tag === "Some") {
+          const value = $m408.value;
           let i = 0;
           let rest = false;
           let stop = false;
@@ -3401,11 +3405,11 @@ export function check_pattern({ ck, ctx, p, scrutinee, guarded }) {
             ctx = ctx$223;
           }
           return [{ tag: "VariantShape", variant: vdef, guarded: guarded }, ck, ctx];
-          break $m407$match;
+          break $m408$match;
         }
         $rt.unreachable();
       }
-      break $m394$match;
+      break $m395$match;
     }
     $rt.unreachable();
   }
@@ -3427,20 +3431,20 @@ export function coerce({ ck, ctx, actual, expected, at, what, at_key }) {
     ctx = ctx$224;
     return [{ tag: "ErrorT" }, ctx];
   }
-  const $m412 = at_key;
-  $m412$match: {
-    if ($m412.tag === "Some") {
-      const value = $m412.value;
+  const $m413 = at_key;
+  $m413$match: {
+    if ($m413.tag === "Some") {
+      const value = $m413.value;
       if ($types.is_refined({ t: expected }) && !$types.same_refinement({ a: actual, b: expected })) {
         let flows = ctx.refinement_flows;
         const [, flows$225] = $std_list.push({ b: flows, x: { at: value, from: actual, to: expected } });
         flows = flows$225;
       }
-      break $m412$match;
+      break $m413$match;
     }
-    if ($m412.tag === "None") {
+    if ($m413.tag === "None") {
       skip({  });
-      break $m412$match;
+      break $m413$match;
     }
     $rt.unreachable();
   }
@@ -3448,31 +3452,31 @@ export function coerce({ ck, ctx, actual, expected, at, what, at_key }) {
 }
 
 export function infer({ ck, ctx, e }) {
-  const [$r415, ck$226, ctx$226] = check_expr({ ck: ck, ctx: ctx, e: e, expected: { tag: "None" } });
+  const [$r416, ck$226, ctx$226] = check_expr({ ck: ck, ctx: ctx, e: e, expected: { tag: "None" } });
   ck = ck$226;
   ctx = ctx$226;
-  return [$r415, ck, ctx];
+  return [$r416, ck, ctx];
 }
 
 export function check_expr({ ck, ctx, e, expected }) {
-  const [$r416, ck$227, ctx$227] = expr_inner({ ck: ck, ctx: ctx, e: e, expected: expected });
+  const [$r417, ck$227, ctx$227] = expr_inner({ ck: ck, ctx: ctx, e: e, expected: expected });
   ck = ck$227;
   ctx = ctx$227;
-  const t = $r416;
+  const t = $r417;
   const k = key({ ck: ck, tag: $defs.tag_expr, span: $parser.span_of_expr({ e: e }) });
   let res_t = t;
-  const $m417 = expected;
-  $m417$match: {
-    if ($m417.tag === "None") {
+  const $m418 = expected;
+  $m418$match: {
+    if ($m418.tag === "None") {
       res_t = t;
-      break $m417$match;
+      break $m418$match;
     }
-    if ($m417.tag === "Some") {
-      const value = $m417.value;
-      const [$r419, ctx$228] = coerce({ ck: ck, ctx: ctx, actual: t, expected: value, at: $parser.span_of_expr({ e: e }), what: "expression", at_key: { tag: "Some", value: k } });
+    if ($m418.tag === "Some") {
+      const value = $m418.value;
+      const [$r420, ctx$228] = coerce({ ck: ck, ctx: ctx, actual: t, expected: value, at: $parser.span_of_expr({ e: e }), what: "expression", at_key: { tag: "Some", value: k } });
       ctx = ctx$228;
-      res_t = $r419;
-      break $m417$match;
+      res_t = $r420;
+      break $m418$match;
     }
     $rt.unreachable();
   }
@@ -3499,145 +3503,145 @@ export function it_top({ ck }) {
 }
 
 export function expr_inner({ ck, ctx, e, expected }) {
-  const $m421 = e;
-  $m421$match: {
-    if ($m421.tag === "IntLit") {
+  const $m422 = e;
+  $m422$match: {
+    if ($m422.tag === "IntLit") {
       return [$types.int_t, ck, ctx];
-      break $m421$match;
+      break $m422$match;
     }
-    if ($m421.tag === "FloatLit") {
+    if ($m422.tag === "FloatLit") {
       return [$types.float_t, ck, ctx];
-      break $m421$match;
+      break $m422$match;
     }
-    if ($m421.tag === "TextLit") {
+    if ($m422.tag === "TextLit") {
       return [$types.text_t, ck, ctx];
-      break $m421$match;
+      break $m422$match;
     }
-    if ($m421.tag === "BoolLit") {
+    if ($m422.tag === "BoolLit") {
       return [$types.bool_t, ck, ctx];
-      break $m421$match;
+      break $m422$match;
     }
-    if ($m421.tag === "DurationLit") {
+    if ($m422.tag === "DurationLit") {
       return [$types.duration_t, ck, ctx];
-      break $m421$match;
+      break $m422$match;
     }
-    if ($m421.tag === "Name") {
-      const [$r422, ck$231, ctx$231] = name_type({ ck: ck, ctx: ctx, e: e });
+    if ($m422.tag === "Name") {
+      const [$r423, ck$231, ctx$231] = name_type({ ck: ck, ctx: ctx, e: e });
       ck = ck$231;
       ctx = ctx$231;
-      return [$r422, ck, ctx];
-      break $m421$match;
+      return [$r423, ck, ctx];
+      break $m422$match;
     }
-    if ($m421.tag === "It") {
+    if ($m422.tag === "It") {
       return [it_top({ ck: ck }), ck, ctx];
-      break $m421$match;
+      break $m422$match;
     }
-    if ($m421.tag === "ResultRef") {
+    if ($m422.tag === "ResultRef") {
       return [or_error({ o: fn_ret({ ck: ck }) }), ck, ctx];
-      break $m421$match;
+      break $m422$match;
     }
-    if ($m421.tag === "Old") {
-      const span = $m421.span;
+    if ($m422.tag === "Old") {
+      const span = $m422.span;
       const def = res_def({ res: ref_at({ ctx: ctx, k: key({ ck: ck, tag: $defs.tag_expr, span: span }) }) });
       if (def < 0) {
         return [{ tag: "ErrorT" }, ck, ctx];
       }
       return [decl_type({ ctx: ctx, def: def }), ck, ctx];
-      break $m421$match;
+      break $m422$match;
     }
-    if ($m421.tag === "Ctor") {
-      const [$r424, ck$232, ctx$232] = ctor({ ck: ck, ctx: ctx, e: e, expected: expected });
+    if ($m422.tag === "Ctor") {
+      const [$r425, ck$232, ctx$232] = ctor({ ck: ck, ctx: ctx, e: e, expected: expected });
       ck = ck$232;
       ctx = ctx$232;
-      return [$r424, ck, ctx];
-      break $m421$match;
+      return [$r425, ck, ctx];
+      break $m422$match;
     }
-    if ($m421.tag === "RecordUpdate") {
-      const [$r425, ck$233, ctx$233] = record_update({ ck: ck, ctx: ctx, e: e });
+    if ($m422.tag === "RecordUpdate") {
+      const [$r426, ck$233, ctx$233] = record_update({ ck: ck, ctx: ctx, e: e });
       ck = ck$233;
       ctx = ctx$233;
-      return [$r425, ck, ctx];
-      break $m421$match;
+      return [$r426, ck, ctx];
+      break $m422$match;
     }
-    if ($m421.tag === "ListLit") {
-      const [$r426, ck$234, ctx$234] = list_lit({ ck: ck, ctx: ctx, e: e, expected: expected });
+    if ($m422.tag === "ListLit") {
+      const [$r427, ck$234, ctx$234] = list_lit({ ck: ck, ctx: ctx, e: e, expected: expected });
       ck = ck$234;
       ctx = ctx$234;
-      return [$r426, ck, ctx];
-      break $m421$match;
+      return [$r427, ck, ctx];
+      break $m422$match;
     }
-    if ($m421.tag === "Try") {
-      const [$r427, ck$235, ctx$235] = try_expr({ ck: ck, ctx: ctx, e: e });
+    if ($m422.tag === "Try") {
+      const [$r428, ck$235, ctx$235] = try_expr({ ck: ck, ctx: ctx, e: e });
       ck = ck$235;
       ctx = ctx$235;
-      return [$r427, ck, ctx];
-      break $m421$match;
+      return [$r428, ck, ctx];
+      break $m422$match;
     }
-    if ($m421.tag === "Recover") {
-      const [$r428, ck$236, ctx$236] = recover_expr({ ck: ck, ctx: ctx, e: e });
+    if ($m422.tag === "Recover") {
+      const [$r429, ck$236, ctx$236] = recover_expr({ ck: ck, ctx: ctx, e: e });
       ck = ck$236;
       ctx = ctx$236;
-      return [$r428, ck, ctx];
-      break $m421$match;
+      return [$r429, ck, ctx];
+      break $m422$match;
     }
-    if ($m421.tag === "Quantifier") {
-      const [$r429, ck$237, ctx$237] = quantifier({ ck: ck, ctx: ctx, e: e });
+    if ($m422.tag === "Quantifier") {
+      const [$r430, ck$237, ctx$237] = quantifier({ ck: ck, ctx: ctx, e: e });
       ck = ck$237;
       ctx = ctx$237;
-      return [$r429, ck, ctx];
-      break $m421$match;
+      return [$r430, ck, ctx];
+      break $m422$match;
     }
-    if ($m421.tag === "Closure") {
-      const [$r430, ck$238, ctx$238] = closure({ ck: ck, ctx: ctx, e: e });
+    if ($m422.tag === "Closure") {
+      const [$r431, ck$238, ctx$238] = closure({ ck: ck, ctx: ctx, e: e });
       ck = ck$238;
       ctx = ctx$238;
-      return [$r430, ck, ctx];
-      break $m421$match;
+      return [$r431, ck, ctx];
+      break $m422$match;
     }
-    if ($m421.tag === "Fake") {
-      const [$r431, ck$239, ctx$239] = fake_expr({ ck: ck, ctx: ctx, e: e, expected: expected });
+    if ($m422.tag === "Fake") {
+      const [$r432, ck$239, ctx$239] = fake_expr({ ck: ck, ctx: ctx, e: e, expected: expected });
       ck = ck$239;
       ctx = ctx$239;
-      return [$r431, ck, ctx];
-      break $m421$match;
+      return [$r432, ck, ctx];
+      break $m422$match;
     }
-    if ($m421.tag === "Hole") {
-      const span = $m421.span;
+    if ($m422.tag === "Hole") {
+      const span = $m422.span;
       let table = ctx.type_holes;
       const [, table$240] = $std_map.set({ d: table, key: key({ ck: ck, tag: $defs.tag_expr, span: span }), value: expected });
       table = table$240;
       return [{ tag: "ErrorT" }, ck, ctx];
-      break $m421$match;
+      break $m422$match;
     }
-    if ($m421.tag === "FieldAccess") {
-      const [$r433, ck$241, ctx$241] = field_access({ ck: ck, ctx: ctx, e: e });
+    if ($m422.tag === "FieldAccess") {
+      const [$r434, ck$241, ctx$241] = field_access({ ck: ck, ctx: ctx, e: e });
       ck = ck$241;
       ctx = ctx$241;
-      return [$r433, ck, ctx];
-      break $m421$match;
+      return [$r434, ck, ctx];
+      break $m422$match;
     }
-    if ($m421.tag === "Call") {
-      const [$r434, ck$242, ctx$242] = call({ ck: ck, ctx: ctx, e: e, expected: expected });
+    if ($m422.tag === "Call") {
+      const [$r435, ck$242, ctx$242] = call({ ck: ck, ctx: ctx, e: e, expected: expected });
       ck = ck$242;
       ctx = ctx$242;
-      return [$r434, ck, ctx];
-      break $m421$match;
+      return [$r435, ck, ctx];
+      break $m422$match;
     }
-    if ($m421.tag === "Unary") {
-      const op = $m421.op;
-      const operand = $m421.operand;
-      const span = $m421.span;
+    if ($m422.tag === "Unary") {
+      const op = $m422.op;
+      const operand = $m422.operand;
+      const span = $m422.span;
       if (op === "not") {
-        const [$r436, ck$243, ctx$243] = check_expr({ ck: ck, ctx: ctx, e: operand, expected: { tag: "Some", value: $types.bool_t } });
+        const [$r437, ck$243, ctx$243] = check_expr({ ck: ck, ctx: ctx, e: operand, expected: { tag: "Some", value: $types.bool_t } });
         ck = ck$243;
         ctx = ctx$243;
-        const bt = $r436;
+        const bt = $r437;
         return [$types.bool_t, ck, ctx];
       }
-      const [$r437, ck$244, ctx$244] = infer({ ck: ck, ctx: ctx, e: operand });
+      const [$r438, ck$244, ctx$244] = infer({ ck: ck, ctx: ctx, e: operand });
       ck = ck$244;
       ctx = ctx$244;
-      const t = $r437;
+      const t = $r438;
       if (!$types.is_numeric({ t: t })) {
         if (!(t.tag === "ErrorT")) {
           const [, ctx$245] = rep({ ck: ck, ctx: ctx, code: "E0340", at: span, detail: "unary `-` needs Int, Float or Duration, not " + show({ ctx: ctx, t: t }) });
@@ -3646,60 +3650,60 @@ export function expr_inner({ ck, ctx, e, expected }) {
         return [{ tag: "ErrorT" }, ck, ctx];
       }
       return [$types.strip({ t: t }), ck, ctx];
-      break $m421$match;
+      break $m422$match;
     }
-    if ($m421.tag === "Binary") {
-      const [$r439, ck$246, ctx$246] = binary({ ck: ck, ctx: ctx, e: e });
+    if ($m422.tag === "Binary") {
+      const [$r440, ck$246, ctx$246] = binary({ ck: ck, ctx: ctx, e: e });
       ck = ck$246;
       ctx = ctx$246;
-      return [$r439, ck, ctx];
-      break $m421$match;
+      return [$r440, ck, ctx];
+      break $m422$match;
     }
-    if ($m421.tag === "And") {
-      const operands = $m421.operands;
+    if ($m422.tag === "And") {
+      const operands = $m422.operands;
       for (const o of operands) {
-        const [$r441, ck$247, ctx$247] = check_expr({ ck: ck, ctx: ctx, e: o, expected: { tag: "Some", value: $types.bool_t } });
+        const [$r442, ck$247, ctx$247] = check_expr({ ck: ck, ctx: ctx, e: o, expected: { tag: "Some", value: $types.bool_t } });
         ck = ck$247;
         ctx = ctx$247;
-        const bt = $r441;
+        const bt = $r442;
       }
       return [$types.bool_t, ck, ctx];
-      break $m421$match;
+      break $m422$match;
     }
-    if ($m421.tag === "Or") {
-      const operands = $m421.operands;
+    if ($m422.tag === "Or") {
+      const operands = $m422.operands;
       for (const o of operands) {
-        const [$r443, ck$248, ctx$248] = check_expr({ ck: ck, ctx: ctx, e: o, expected: { tag: "Some", value: $types.bool_t } });
+        const [$r444, ck$248, ctx$248] = check_expr({ ck: ck, ctx: ctx, e: o, expected: { tag: "Some", value: $types.bool_t } });
         ck = ck$248;
         ctx = ctx$248;
-        const bt = $r443;
+        const bt = $r444;
       }
       return [$types.bool_t, ck, ctx];
-      break $m421$match;
+      break $m422$match;
     }
-    if ($m421.tag === "Is") {
-      const expr = $m421.expr;
-      const pattern = $m421.pattern;
-      const [$r444, ck$249, ctx$249] = infer({ ck: ck, ctx: ctx, e: expr });
+    if ($m422.tag === "Is") {
+      const expr = $m422.expr;
+      const pattern = $m422.pattern;
+      const [$r445, ck$249, ctx$249] = infer({ ck: ck, ctx: ctx, e: expr });
       ck = ck$249;
       ctx = ctx$249;
-      const t = $r444;
-      const [$r445, ck$250, ctx$250] = check_pattern({ ck: ck, ctx: ctx, p: pattern, scrutinee: t, guarded: false });
+      const t = $r445;
+      const [$r446, ck$250, ctx$250] = check_pattern({ ck: ck, ctx: ctx, p: pattern, scrutinee: t, guarded: false });
       ck = ck$250;
       ctx = ctx$250;
-      const shape = $r445;
+      const shape = $r446;
       return [$types.bool_t, ck, ctx];
-      break $m421$match;
+      break $m422$match;
     }
     $rt.unreachable();
   }
 }
 
 export function fn_value_type({ ck, ctx, d, at }) {
-  const [$r446, ck$251, ctx$251] = signature_of({ ck: ck, ctx: ctx, d: d });
+  const [$r447, ck$251, ctx$251] = signature_of({ ck: ck, ctx: ctx, d: d });
   ck = ck$251;
   ctx = ctx$251;
-  const sig = $r446;
+  const sig = $r447;
   if ($std_list.len({ xs: sig.tparams }) > 0) {
     const [, ctx$252] = rep({ ck: ck, ctx: ctx, code: "E0324", at: at, detail: "`" + d.name + "` is generic; a generic function cannot be used as a value" });
     ctx = ctx$252;
@@ -3709,27 +3713,27 @@ export function fn_value_type({ ck, ctx, d, at }) {
 }
 
 export function name_type({ ck, ctx, e }) {
-  const $m449 = e;
-  $m449$match: {
-    if ($m449.tag === "Name") {
-      const name = $m449.name;
-      const span = $m449.span;
+  const $m450 = e;
+  $m450$match: {
+    if ($m450.tag === "Name") {
+      const name = $m450.name;
+      const span = $m450.span;
       const def = res_def({ res: ref_at({ ctx: ctx, k: key({ ck: ck, tag: $defs.tag_expr, span: span }) }) });
       if (def < 0) {
         return [{ tag: "ErrorT" }, ck, ctx];
       }
       const d = $context.get_def({ ctx: ctx, id: def });
       if ($rt.eq(d.kind, { tag: "Fn" })) {
-        const [$r452, ck$253, ctx$253] = fn_value_type({ ck: ck, ctx: ctx, d: d, at: span });
+        const [$r453, ck$253, ctx$253] = fn_value_type({ ck: ck, ctx: ctx, d: d, at: span });
         ck = ck$253;
         ctx = ctx$253;
-        return [$r452, ck, ctx];
+        return [$r453, ck, ctx];
       }
       if ($rt.eq(d.kind, { tag: "Const" })) {
-        const [$r454, ck$254, ctx$254] = const_decl_type({ ck: ck, ctx: ctx, d: d });
+        const [$r455, ck$254, ctx$254] = const_decl_type({ ck: ck, ctx: ctx, d: d });
         ck = ck$254;
         ctx = ctx$254;
-        return [$r454, ck, ctx];
+        return [$r455, ck, ctx];
       }
       const t = decl_type({ ctx: ctx, def: def });
       if (fn_top({ ck: ck }).tag === "Some" && d.frame >= 0 && d.frame < fn_frame({ ck: ck }) && $types.strip({ t: t }).tag === "Capability") {
@@ -3737,11 +3741,11 @@ export function name_type({ ck, ctx, e }) {
         ctx = ctx$255;
       }
       return [t, ck, ctx];
-      break $m449$match;
+      break $m450$match;
     }
     if (true) {
       return [{ tag: "ErrorT" }, ck, ctx];
-      break $m449$match;
+      break $m450$match;
     }
     $rt.unreachable();
   }
@@ -3756,76 +3760,80 @@ export function is_order({ op }) {
 }
 
 export function binary({ ck, ctx, e }) {
-  const $m456 = e;
-  $m456$match: {
-    if ($m456.tag === "Binary") {
-      const op = $m456.op;
-      const left = $m456.left;
-      const right = $m456.right;
-      const span = $m456.span;
+  const $m457 = e;
+  $m457$match: {
+    if ($m457.tag === "Binary") {
+      const op = $m457.op;
+      const left = $m457.left;
+      const right = $m457.right;
+      const span = $m457.span;
       if (is_arith({ op: op })) {
-        const [$r457, ck$256, ctx$256] = infer({ ck: ck, ctx: ctx, e: left });
+        const [$r458, ck$256, ctx$256] = infer({ ck: ck, ctx: ctx, e: left });
         ck = ck$256;
         ctx = ctx$256;
-        const l = $r457;
+        const l = $r458;
         if (l.tag === "ErrorT") {
-          const [$r458, ck$257, ctx$257] = infer({ ck: ck, ctx: ctx, e: right });
+          const [$r459, ck$257, ctx$257] = infer({ ck: ck, ctx: ctx, e: right });
           ck = ck$257;
           ctx = ctx$257;
-          const rt = $r458;
+          const rt = $r459;
           return [{ tag: "ErrorT" }, ck, ctx];
         }
         if (!$types.is_numeric({ t: l })) {
           const [, ctx$258] = rep({ ck: ck, ctx: ctx, code: "E0340", at: $parser.span_of_expr({ e: left }), detail: "`" + op + "` needs Int, Float or Duration operands, not " + show({ ctx: ctx, t: l }) });
           ctx = ctx$258;
-          const [$r460, ck$259, ctx$259] = infer({ ck: ck, ctx: ctx, e: right });
+          const [$r461, ck$259, ctx$259] = infer({ ck: ck, ctx: ctx, e: right });
           ck = ck$259;
           ctx = ctx$259;
-          const rt = $r460;
+          const rt = $r461;
           return [{ tag: "ErrorT" }, ck, ctx];
         }
         const base = $types.strip({ t: l });
-        const [$r463, ck$260, ctx$260] = check_expr({ ck: ck, ctx: ctx, e: right, expected: { tag: "Some", value: base } });
+        const [$r464, ck$260, ctx$260] = check_expr({ ck: ck, ctx: ctx, e: right, expected: { tag: "Some", value: base } });
         ck = ck$260;
         ctx = ctx$260;
-        const rt = $r463;
+        const rt = $r464;
         return [base, ck, ctx];
       }
       if (op === "++") {
-        const [$r464, ck$261, ctx$261] = infer({ ck: ck, ctx: ctx, e: left });
+        const [$r465, ck$261, ctx$261] = infer({ ck: ck, ctx: ctx, e: left });
         ck = ck$261;
         ctx = ctx$261;
-        const l = $r464;
+        const l = $r465;
         if (l.tag === "ErrorT") {
-          const [$r465, ck$262, ctx$262] = infer({ ck: ck, ctx: ctx, e: right });
+          const [$r466, ck$262, ctx$262] = infer({ ck: ck, ctx: ctx, e: right });
           ck = ck$262;
           ctx = ctx$262;
-          const rt = $r465;
+          const rt = $r466;
           return [{ tag: "ErrorT" }, ck, ctx];
         }
         const base = $types.strip({ t: l });
-        const [$r467, ctx$263] = is_list_type({ ctx: ctx, t: base });
-        ctx = ctx$263;
-        if (!$types.same_base({ a: base, b: $types.text_t }) && !$r467) {
+        let $sc469 = !$types.same_base({ a: base, b: $types.text_t });
+        if ($sc469) {
+          const [$r468, ctx$263] = is_list_type({ ctx: ctx, t: base });
+          ctx = ctx$263;
+          $sc469 = !$r468;
+        }
+        if ($sc469) {
           const [, ctx$264] = rep({ ck: ck, ctx: ctx, code: "E0340", at: $parser.span_of_expr({ e: left }), detail: "`++` joins Text or List values, not " + show({ ctx: ctx, t: l }) });
           ctx = ctx$264;
-          const [$r468, ck$265, ctx$265] = infer({ ck: ck, ctx: ctx, e: right });
+          const [$r470, ck$265, ctx$265] = infer({ ck: ck, ctx: ctx, e: right });
           ck = ck$265;
           ctx = ctx$265;
-          const rt = $r468;
+          const rt = $r470;
           return [{ tag: "ErrorT" }, ck, ctx];
         }
-        const [$r471, ck$266, ctx$266] = check_expr({ ck: ck, ctx: ctx, e: right, expected: { tag: "Some", value: base } });
+        const [$r473, ck$266, ctx$266] = check_expr({ ck: ck, ctx: ctx, e: right, expected: { tag: "Some", value: base } });
         ck = ck$266;
         ctx = ctx$266;
-        const rt = $r471;
+        const rt = $r473;
         return [base, ck, ctx];
       }
       if (op === "==" || op === "!=") {
-        const [$r472, ck$267, ctx$267] = infer({ ck: ck, ctx: ctx, e: left });
+        const [$r474, ck$267, ctx$267] = infer({ ck: ck, ctx: ctx, e: left });
         ck = ck$267;
         ctx = ctx$267;
-        const l = $r472;
+        const l = $r474;
         if ($types.strip({ t: l }).tag === "FnT") {
           const [, ctx$268] = rep({ ck: ck, ctx: ctx, code: "E0340", at: span, detail: "function values cannot be compared (§3.7)" });
           ctx = ctx$268;
@@ -3834,50 +3842,50 @@ export function binary({ ck, ctx, e }) {
         if (l.tag === "ErrorT") {
           want = l;
         }
-        const [$r474, ck$269, ctx$269] = check_expr({ ck: ck, ctx: ctx, e: right, expected: { tag: "Some", value: want } });
+        const [$r476, ck$269, ctx$269] = check_expr({ ck: ck, ctx: ctx, e: right, expected: { tag: "Some", value: want } });
         ck = ck$269;
         ctx = ctx$269;
-        const rt = $r474;
+        const rt = $r476;
         return [$types.bool_t, ck, ctx];
       }
       if (is_order({ op: op })) {
-        const [$r475, ck$270, ctx$270] = infer({ ck: ck, ctx: ctx, e: left });
+        const [$r477, ck$270, ctx$270] = infer({ ck: ck, ctx: ctx, e: left });
         ck = ck$270;
         ctx = ctx$270;
-        const l = $r475;
+        const l = $r477;
         if (!(l.tag === "ErrorT") && !$types.is_numeric({ t: l })) {
           const [, ctx$271] = rep({ ck: ck, ctx: ctx, code: "E0340", at: $parser.span_of_expr({ e: left }), detail: "`" + op + "` compares Int, Float or Duration values, not " + show({ ctx: ctx, t: l }) });
           ctx = ctx$271;
-          const [$r476, ck$272, ctx$272] = infer({ ck: ck, ctx: ctx, e: right });
+          const [$r478, ck$272, ctx$272] = infer({ ck: ck, ctx: ctx, e: right });
           ck = ck$272;
           ctx = ctx$272;
-          const rt = $r476;
+          const rt = $r478;
           return [$types.bool_t, ck, ctx];
         }
         let want = $types.strip({ t: l });
         if (l.tag === "ErrorT") {
           want = l;
         }
-        const [$r478, ck$273, ctx$273] = check_expr({ ck: ck, ctx: ctx, e: right, expected: { tag: "Some", value: want } });
+        const [$r480, ck$273, ctx$273] = check_expr({ ck: ck, ctx: ctx, e: right, expected: { tag: "Some", value: want } });
         ck = ck$273;
         ctx = ctx$273;
-        const rt = $r478;
+        const rt = $r480;
         return [$types.bool_t, ck, ctx];
       }
-      const [$r480, ck$274, ctx$274] = check_expr({ ck: ck, ctx: ctx, e: left, expected: { tag: "Some", value: $types.bool_t } });
+      const [$r482, ck$274, ctx$274] = check_expr({ ck: ck, ctx: ctx, e: left, expected: { tag: "Some", value: $types.bool_t } });
       ck = ck$274;
       ctx = ctx$274;
-      const lt = $r480;
-      const [$r482, ck$275, ctx$275] = check_expr({ ck: ck, ctx: ctx, e: right, expected: { tag: "Some", value: $types.bool_t } });
+      const lt = $r482;
+      const [$r484, ck$275, ctx$275] = check_expr({ ck: ck, ctx: ctx, e: right, expected: { tag: "Some", value: $types.bool_t } });
       ck = ck$275;
       ctx = ctx$275;
-      const rt = $r482;
+      const rt = $r484;
       return [$types.bool_t, ck, ctx];
-      break $m456$match;
+      break $m457$match;
     }
     if (true) {
       return [{ tag: "ErrorT" }, ck, ctx];
-      break $m456$match;
+      break $m457$match;
     }
     $rt.unreachable();
   }
@@ -3893,12 +3901,12 @@ export function field_params({ fs }) {
 }
 
 export function ctor({ ck, ctx, e, expected }) {
-  const $m485 = e;
-  $m485$match: {
-    if ($m485.tag === "Ctor") {
-      const args = $m485.args;
-      const fields = $m485.fields;
-      const span = $m485.span;
+  const $m487 = e;
+  $m487$match: {
+    if ($m487.tag === "Ctor") {
+      const args = $m487.args;
+      const fields = $m487.fields;
+      const span = $m487.span;
       const res = ref_at({ ctx: ctx, k: key({ ck: ck, tag: $defs.tag_expr, span: span }) });
       const tag = res_tag({ res: res });
       if (tag === 2) {
@@ -3922,39 +3930,39 @@ export function ctor({ ck, ctx, e, expected }) {
           return [{ tag: "ErrorT" }, ck, ctx];
         }
         const union_def = $context.get_def({ ctx: ctx, id: union_id });
-        const [$r491, ck$278, ctx$278] = bind_from_expected({ ck: ck, ctx: ctx, d: union_def, expected: expected });
+        const [$r493, ck$278, ctx$278] = bind_from_expected({ ck: ck, ctx: ctx, d: union_def, expected: expected });
         ck = ck$278;
         ctx = ctx$278;
-        const subst = $r491;
-        const [$r492, ck$279, ctx$279] = fields_of({ ck: ck, ctx: ctx, d: d });
+        const subst = $r493;
+        const [$r494, ck$279, ctx$279] = fields_of({ ck: ck, ctx: ctx, d: d });
         ck = ck$279;
         ctx = ctx$279;
-        const fs = $r492;
+        const fs = $r494;
         const vparams = field_params({ fs: fs });
-        const [$r493, ck$280, ctx$280] = type_params_of({ fuel: max_type_depth, ck: ck, ctx: ctx, d: union_def });
+        const [$r495, ck$280, ctx$280] = type_params_of({ fuel: max_type_depth, ck: ck, ctx: ctx, d: union_def });
         ck = ck$280;
         ctx = ctx$280;
-        const vtparams = $r493;
-        const $m494 = args;
-        $m494$match: {
-          if ($m494.tag === "Some") {
-            const value = $m494.value;
+        const vtparams = $r495;
+        const $m496 = args;
+        $m496$match: {
+          if ($m496.tag === "Some") {
+            const value = $m496.value;
             const [, ck$281, ctx$281] = match_named({ ck: ck, ctx: ctx, args: value, params: vparams, subst: subst, tparams: vtparams, at: span, what: "variant `" + d.name + "`" });
             ck = ck$281;
             ctx = ctx$281;
-            break $m494$match;
+            break $m496$match;
           }
-          if ($m494.tag === "None") {
+          if ($m496.tag === "None") {
             const [, ctx$282] = report_missing({ ck: ck, ctx: ctx, params: vparams, seen: $std_map.dict({  }), at: span, what: "variant `" + d.name + "`" });
             ctx = ctx$282;
-            break $m494$match;
+            break $m496$match;
           }
           $rt.unreachable();
         }
-        const [$r495, ck$283, ctx$283] = finish_args({ ck: ck, ctx: ctx, d: union_def, subst: subst, at: span });
+        const [$r497, ck$283, ctx$283] = finish_args({ ck: ck, ctx: ctx, d: union_def, subst: subst, at: span });
         ck = ck$283;
         ctx = ctx$283;
-        return [{ tag: "UnionT", def: union_id, args: $r495 }, ck, ctx];
+        return [{ tag: "UnionT", def: union_id, args: $r497 }, ck, ctx];
       }
       if ($rt.eq(d.kind, { tag: "Record" })) {
         if (args.tag === "Some") {
@@ -3962,46 +3970,46 @@ export function ctor({ ck, ctx, e, expected }) {
           ctx = ctx$284;
           return [{ tag: "ErrorT" }, ck, ctx];
         }
-        const [$r499, ck$285, ctx$285] = bind_from_expected({ ck: ck, ctx: ctx, d: d, expected: expected });
+        const [$r501, ck$285, ctx$285] = bind_from_expected({ ck: ck, ctx: ctx, d: d, expected: expected });
         ck = ck$285;
         ctx = ctx$285;
-        const subst = $r499;
-        const [$r500, ck$286, ctx$286] = fields_of({ ck: ck, ctx: ctx, d: d });
+        const subst = $r501;
+        const [$r502, ck$286, ctx$286] = fields_of({ ck: ck, ctx: ctx, d: d });
         ck = ck$286;
         ctx = ctx$286;
-        const fs = $r500;
+        const fs = $r502;
         const rparams = field_params({ fs: fs });
-        const [$r501, ck$287, ctx$287] = type_params_of({ fuel: max_type_depth, ck: ck, ctx: ctx, d: d });
+        const [$r503, ck$287, ctx$287] = type_params_of({ fuel: max_type_depth, ck: ck, ctx: ctx, d: d });
         ck = ck$287;
         ctx = ctx$287;
-        const rtparams = $r501;
-        const $m502 = fields;
-        $m502$match: {
-          if ($m502.tag === "Some") {
-            const value = $m502.value;
+        const rtparams = $r503;
+        const $m504 = fields;
+        $m504$match: {
+          if ($m504.tag === "Some") {
+            const value = $m504.value;
             const [, ck$288, ctx$288] = match_named_fields({ ck: ck, ctx: ctx, inits: value, params: rparams, subst: subst, tparams: rtparams, at: span, what: "record `" + d.name + "`" });
             ck = ck$288;
             ctx = ctx$288;
-            break $m502$match;
+            break $m504$match;
           }
-          if ($m502.tag === "None") {
+          if ($m504.tag === "None") {
             const [, ctx$289] = report_missing({ ck: ck, ctx: ctx, params: rparams, seen: $std_map.dict({  }), at: span, what: "record `" + d.name + "`" });
             ctx = ctx$289;
-            break $m502$match;
+            break $m504$match;
           }
           $rt.unreachable();
         }
-        const [$r503, ck$290, ctx$290] = finish_args({ ck: ck, ctx: ctx, d: d, subst: subst, at: span });
+        const [$r505, ck$290, ctx$290] = finish_args({ ck: ck, ctx: ctx, d: d, subst: subst, at: span });
         ck = ck$290;
         ctx = ctx$290;
-        return [{ tag: "RecordT", def: d.id, args: $r503 }, ck, ctx];
+        return [{ tag: "RecordT", def: d.id, args: $r505 }, ck, ctx];
       }
       return [{ tag: "ErrorT" }, ck, ctx];
-      break $m485$match;
+      break $m487$match;
     }
     if (true) {
       return [{ tag: "ErrorT" }, ck, ctx];
-      break $m485$match;
+      break $m487$match;
     }
     $rt.unreachable();
   }
@@ -4009,23 +4017,23 @@ export function ctor({ ck, ctx, e, expected }) {
 
 export function bind_from_expected({ ck, ctx, d, expected }) {
   let subst = $std_map.dict({  });
-  const $m507 = expected;
-  $m507$match: {
-    if ($m507.tag === "None") {
+  const $m509 = expected;
+  $m509$match: {
+    if ($m509.tag === "None") {
       return [subst, ck, ctx];
-      break $m507$match;
+      break $m509$match;
     }
-    if ($m507.tag === "Some") {
-      const value = $m507.value;
+    if ($m509.tag === "Some") {
+      const value = $m509.value;
       const s = $types.strip({ t: value });
       if ((s.tag === "RecordT" || s.tag === "UnionT" || s.tag === "Opaque") && $types.def_of({ t: s }) === d.id) {
-        const [$r508, ck$291, ctx$291] = type_params_of({ fuel: max_type_depth, ck: ck, ctx: ctx, d: d });
+        const [$r510, ck$291, ctx$291] = type_params_of({ fuel: max_type_depth, ck: ck, ctx: ctx, d: d });
         ck = ck$291;
         ctx = ctx$291;
-        const ps = $r508;
+        const ps = $r510;
         const args = $types.args_of({ t: s });
-        const $hi509 = $std_list.len({ xs: ps });
-        for (let i = 0; i < $hi509; i++) {
+        const $hi511 = $std_list.len({ xs: ps });
+        for (let i = 0; i < $hi511; i++) {
           if (i < $std_list.len({ xs: args })) {
             const [, subst$292] = $std_map.set({ d: subst, key: $types.tparam_def({ p: $std_list.get({ xs: ps, i: i }) }), value: $std_list.get({ xs: args, i: i }) });
             subst = subst$292;
@@ -4033,7 +4041,7 @@ export function bind_from_expected({ ck, ctx, d, expected }) {
         }
       }
       return [subst, ck, ctx];
-      break $m507$match;
+      break $m509$match;
     }
     $rt.unreachable();
   }
@@ -4041,19 +4049,19 @@ export function bind_from_expected({ ck, ctx, d, expected }) {
 
 export function finish_args({ ck, ctx, d, subst, at }) {
   let out = $std_list.builder({  });
-  const [$r510, ck$293, ctx$293] = type_params_of({ fuel: max_type_depth, ck: ck, ctx: ctx, d: d });
+  const [$r512, ck$293, ctx$293] = type_params_of({ fuel: max_type_depth, ck: ck, ctx: ctx, d: d });
   ck = ck$293;
   ctx = ctx$293;
-  for (const p of $r510) {
-    const $m511 = $std_map.find({ d: subst, key: $types.tparam_def({ p: p }) });
-    $m511$match: {
-      if ($m511.tag === "Some") {
-        const value = $m511.value;
+  for (const p of $r512) {
+    const $m513 = $std_map.find({ d: subst, key: $types.tparam_def({ p: p }) });
+    $m513$match: {
+      if ($m513.tag === "Some") {
+        const value = $m513.value;
         const [, out$294] = $std_list.push({ b: out, x: value });
         out = out$294;
-        break $m511$match;
+        break $m513$match;
       }
-      if ($m511.tag === "None") {
+      if ($m513.tag === "None") {
         const [, ctx$295] = rep({ ck: ck, ctx: ctx, code: "E0324", at: at, detail: "cannot determine `" + def_name({ ctx: ctx, id: $types.tparam_def({ p: p }) }) + "` of `" + d.name + "`; annotate the binding or pass the type argument" });
         ctx = ctx$295;
         if (p.tag === "TypeP") {
@@ -4063,7 +4071,7 @@ export function finish_args({ ck, ctx, d, subst, at }) {
           const [, out$297] = $std_list.push({ b: out, x: { tag: "ConstA", value: { tag: "UnitV" } } });
           out = out$297;
         }
-        break $m511$match;
+        break $m513$match;
       }
       $rt.unreachable();
     }
@@ -4111,16 +4119,16 @@ export function report_missing({ ck, ctx, params, seen, at, what }) {
 }
 
 export function expr_text({ e }) {
-  const $m518 = e;
-  $m518$match: {
-    if ($m518.tag === "Name") {
-      const name = $m518.name;
+  const $m520 = e;
+  $m520$match: {
+    if ($m520.tag === "Name") {
+      const name = $m520.name;
       return name.text;
-      break $m518$match;
+      break $m520$match;
     }
     if (true) {
       return "…";
-      break $m518$match;
+      break $m520$match;
     }
     $rt.unreachable();
   }
@@ -4129,19 +4137,19 @@ export function expr_text({ e }) {
 export function check_arg_value({ ck, ctx, value, p, subst, tvars }) {
   const pt = $types.substitute({ t: p.ty, subst: subst });
   if ($types.has_unbound({ t: pt, tvars: tvars, subst: subst })) {
-    const [$r519, ck$301, ctx$301] = infer({ ck: ck, ctx: ctx, e: value });
+    const [$r521, ck$301, ctx$301] = infer({ ck: ck, ctx: ctx, e: value });
     ck = ck$301;
     ctx = ctx$301;
-    const actual = $r519;
+    const actual = $r521;
     if (!unify({ pattern: pt, actual: actual, subst: subst, tvars: tvars })) {
       const [, ctx$302] = rep({ ck: ck, ctx: ctx, code: "E0321", at: $parser.span_of_expr({ e: value }), detail: "expected " + show({ ctx: ctx, t: $types.substitute({ t: pt, subst: subst }) }) + ", found " + show({ ctx: ctx, t: actual }) });
       ctx = ctx$302;
     }
   } else {
-    const [$r521, ck$303, ctx$303] = check_expr({ ck: ck, ctx: ctx, e: value, expected: { tag: "Some", value: pt } });
+    const [$r523, ck$303, ctx$303] = check_expr({ ck: ck, ctx: ctx, e: value, expected: { tag: "Some", value: pt } });
     ck = ck$303;
     ctx = ctx$303;
-    const at = $r521;
+    const at = $r523;
   }
   return [undefined, ck, ctx];
   return [undefined, ck, ctx];
@@ -4152,19 +4160,19 @@ export function match_named({ ck, ctx, args, params, subst, tparams, at, what })
   let seen = $std_map.dict({  });
   let inout_vars = $std_map.dict({  });
   for (const a of args) {
-    const $m522 = find_param({ params: params, name: a.name.text });
-    $m522$match: {
-      if ($m522.tag === "None") {
+    const $m524 = find_param({ params: params, name: a.name.text });
+    $m524$match: {
+      if ($m524.tag === "None") {
         const [, ctx$304] = rep({ ck: ck, ctx: ctx, code: "E0322", at: a.name.span, detail: what + " has no parameter `" + a.name.text + "`" });
         ctx = ctx$304;
-        const [$r523, ck$305, ctx$305] = infer({ ck: ck, ctx: ctx, e: a.value });
+        const [$r525, ck$305, ctx$305] = infer({ ck: ck, ctx: ctx, e: a.value });
         ck = ck$305;
         ctx = ctx$305;
-        const it_ = $r523;
-        break $m522$match;
+        const it_ = $r525;
+        break $m524$match;
       }
-      if ($m522.tag === "Some") {
-        const value = $m522.value;
+      if ($m524.tag === "Some") {
+        const value = $m524.value;
         const [, seen$306] = $std_map.set({ d: seen, key: value.name, value: true });
         seen = seen$306;
         if (value.is_inout !== a.is_inout) {
@@ -4183,7 +4191,7 @@ export function match_named({ ck, ctx, args, params, subst, tparams, at, what })
         const [, ck$310, ctx$310] = check_arg_value({ ck: ck, ctx: ctx, value: a.value, p: value, subst: subst, tvars: tvars });
         ck = ck$310;
         ctx = ctx$310;
-        break $m522$match;
+        break $m524$match;
       }
       $rt.unreachable();
     }
@@ -4201,25 +4209,25 @@ export function match_named_fields({ ck, ctx, inits, params, subst, tparams, at,
   const tvars = tvars_of({ tparams: tparams });
   let seen = $std_map.dict({  });
   for (const f of inits) {
-    const $m524 = find_param({ params: params, name: f.name.text });
-    $m524$match: {
-      if ($m524.tag === "None") {
+    const $m526 = find_param({ params: params, name: f.name.text });
+    $m526$match: {
+      if ($m526.tag === "None") {
         const [, ctx$312] = rep({ ck: ck, ctx: ctx, code: "E0322", at: f.name.span, detail: what + " has no parameter `" + f.name.text + "`" });
         ctx = ctx$312;
-        const [$r525, ck$313, ctx$313] = infer({ ck: ck, ctx: ctx, e: f.value });
+        const [$r527, ck$313, ctx$313] = infer({ ck: ck, ctx: ctx, e: f.value });
         ck = ck$313;
         ctx = ctx$313;
-        const it_ = $r525;
-        break $m524$match;
+        const it_ = $r527;
+        break $m526$match;
       }
-      if ($m524.tag === "Some") {
-        const value = $m524.value;
+      if ($m526.tag === "Some") {
+        const value = $m526.value;
         const [, seen$314] = $std_map.set({ d: seen, key: value.name, value: true });
         seen = seen$314;
         const [, ck$315, ctx$315] = check_arg_value({ ck: ck, ctx: ctx, value: f.value, p: value, subst: subst, tvars: tvars });
         ck = ck$315;
         ctx = ctx$315;
-        break $m524$match;
+        break $m526$match;
       }
       $rt.unreachable();
     }
@@ -4261,16 +4269,16 @@ export function check_inout_arg({ ck, ctx, a, inout_vars }) {
 
 export function unify({ pattern, actual, subst, tvars }) {
   let st = subst;
-  const $m528 = pattern;
-  $m528$match: {
-    if ($m528.tag === "Refined") {
-      const base = $m528.base;
+  const $m530 = pattern;
+  $m530$match: {
+    if ($m530.tag === "Refined") {
+      const base = $m530.base;
       return unify({ pattern: base, actual: actual, subst: subst, tvars: tvars });
-      break $m528$match;
+      break $m530$match;
     }
     if (true) {
       skip({  });
-      break $m528$match;
+      break $m530$match;
     }
     $rt.unreachable();
   }
@@ -4278,80 +4286,80 @@ export function unify({ pattern, actual, subst, tvars }) {
   if (a.tag === "ErrorT" || pattern.tag === "ErrorT") {
     return true;
   }
-  const $m529 = pattern;
-  $m529$match: {
-    if ($m529.tag === "ParamT") {
-      const def = $m529.def;
+  const $m531 = pattern;
+  $m531$match: {
+    if ($m531.tag === "ParamT") {
+      const def = $m531.def;
       if ($std_map.contains({ d: tvars, key: def })) {
-        const $m530 = $std_map.find({ d: subst, key: def });
-        $m530$match: {
-          if ($m530.tag === "None") {
+        const $m532 = $std_map.find({ d: subst, key: def });
+        $m532$match: {
+          if ($m532.tag === "None") {
             const [, st$320] = $std_map.set({ d: st, key: def, value: { tag: "TypeA", ty: actual } });
             st = st$320;
             return true;
-            break $m530$match;
+            break $m532$match;
           }
-          if ($m530.tag === "Some") {
-            const value = $m530.value;
+          if ($m532.tag === "Some") {
+            const value = $m532.value;
             return value.tag === "TypeA" && $types.assignable({ actual: actual, expected: $types.arg_type({ a: value }) });
-            break $m530$match;
+            break $m532$match;
           }
           $rt.unreachable();
         }
       }
       return a.tag === "ParamT" && $types.def_of({ t: a }) === def;
-      break $m529$match;
+      break $m531$match;
     }
     if (true) {
       skip({  });
-      break $m529$match;
+      break $m531$match;
     }
     $rt.unreachable();
   }
   if ($types.kind_tag({ t: pattern }) !== $types.kind_tag({ t: a })) {
     return false;
   }
-  const $m532 = pattern;
-  $m532$match: {
-    if ($m532.tag === "Prim") {
-      const name = $m532.name;
+  const $m534 = pattern;
+  $m534$match: {
+    if ($m534.tag === "Prim") {
+      const name = $m534.name;
       return name === $types.prim_name({ t: a });
-      break $m532$match;
+      break $m534$match;
     }
-    if ($m532.tag === "RecordT") {
-      const def = $m532.def;
-      const args = $m532.args;
+    if ($m534.tag === "RecordT") {
+      const def = $m534.def;
+      const args = $m534.args;
       return unify_args({ pargs: args, aargs: $types.args_of({ t: a }), same_def: def === $types.def_of({ t: a }), subst: subst, tvars: tvars });
-      break $m532$match;
+      break $m534$match;
     }
-    if ($m532.tag === "UnionT") {
-      const def = $m532.def;
-      const args = $m532.args;
+    if ($m534.tag === "UnionT") {
+      const def = $m534.def;
+      const args = $m534.args;
       return unify_args({ pargs: args, aargs: $types.args_of({ t: a }), same_def: def === $types.def_of({ t: a }), subst: subst, tvars: tvars });
-      break $m532$match;
+      break $m534$match;
     }
-    if ($m532.tag === "Opaque") {
-      const def = $m532.def;
-      const args = $m532.args;
+    if ($m534.tag === "Opaque") {
+      const def = $m534.def;
+      const args = $m534.args;
       return unify_args({ pargs: args, aargs: $types.args_of({ t: a }), same_def: def === $types.def_of({ t: a }), subst: subst, tvars: tvars });
-      break $m532$match;
+      break $m534$match;
     }
-    if ($m532.tag === "Capability") {
-      const def = $m532.def;
-      const args = $m532.args;
+    if ($m534.tag === "Capability") {
+      const def = $m534.def;
+      const args = $m534.args;
       return unify_args({ pargs: args, aargs: $types.args_of({ t: a }), same_def: def === $types.def_of({ t: a }), subst: subst, tvars: tvars });
-      break $m532$match;
+      break $m534$match;
     }
-    if ($m532.tag === "FnT") {
-      const params = $m532.params;
-      const ret = $m532.ret;
-      const effects = $m532.effects;
+    if ($m534.tag === "FnT") {
+      const params = $m534.params;
+      const ret = $m534.ret;
+      const effects = $m534.effects;
       const aps = $types.params_of({ t: a });
       if ($std_list.len({ xs: aps }) !== $std_list.len({ xs: params })) {
         return false;
       }
-      const $hi533 = $std_list.len({ xs: params });
-      for (let i = 0; i < $hi533; i++) {
+      const $hi535 = $std_list.len({ xs: params });
+      for (let i = 0; i < $hi535; i++) {
         const pp = $std_list.get({ xs: params, i: i });
         const ap = $std_list.get({ xs: aps, i: i });
         if (pp.is_inout !== ap.is_inout || !unify({ pattern: pp.ty, actual: ap.ty, subst: subst, tvars: tvars })) {
@@ -4364,16 +4372,16 @@ export function unify({ pattern, actual, subst, tvars }) {
       let concrete = $std_list.builder({  });
       for (const x of $effectset.values({ s: effects })) {
         let is_var = false;
-        const $m534 = x;
-        $m534$match: {
-          if ($m534.tag === "ParamEffect") {
-            const def = $m534.def;
+        const $m536 = x;
+        $m536$match: {
+          if ($m536.tag === "ParamEffect") {
+            const def = $m536.def;
             is_var = $std_map.contains({ d: tvars, key: def });
-            break $m534$match;
+            break $m536$match;
           }
           if (true) {
             is_var = false;
-            break $m534$match;
+            break $m536$match;
           }
           $rt.unreachable();
         }
@@ -4384,29 +4392,29 @@ export function unify({ pattern, actual, subst, tvars }) {
       }
       const concrete_set = $effectset.of_list({ effects: $std_list.finish({ b: concrete }) });
       for (const x of $effectset.values({ s: effects })) {
-        const $m535 = x;
-        $m535$match: {
-          if ($m535.tag === "ParamEffect") {
-            const def = $m535.def;
+        const $m537 = x;
+        $m537$match: {
+          if ($m537.tag === "ParamEffect") {
+            const def = $m537.def;
             if ($std_map.contains({ d: tvars, key: def }) && !$std_map.contains({ d: subst, key: def })) {
               const [, st$322] = $std_map.set({ d: st, key: def, value: { tag: "EffectsA", effects: $effectset.of_list({ effects: $effectset.minus({ a: $types.effects_of({ t: a }), b: concrete_set }) }) } });
               st = st$322;
             }
-            break $m535$match;
+            break $m537$match;
           }
           if (true) {
             skip({  });
-            break $m535$match;
+            break $m537$match;
           }
           $rt.unreachable();
         }
       }
       return true;
-      break $m532$match;
+      break $m534$match;
     }
     if (true) {
       return $types.same_base({ a: pattern, b: a });
-      break $m532$match;
+      break $m534$match;
     }
     $rt.unreachable();
   }
@@ -4417,30 +4425,30 @@ export function unify_args({ pargs, aargs, same_def, subst, tvars }) {
   if (!same_def || $std_list.len({ xs: pargs }) !== $std_list.len({ xs: aargs })) {
     return false;
   }
-  const $hi537 = $std_list.len({ xs: pargs });
-  for (let i = 0; i < $hi537; i++) {
+  const $hi539 = $std_list.len({ xs: pargs });
+  for (let i = 0; i < $hi539; i++) {
     const pa = $std_list.get({ xs: pargs, i: i });
     const aa = $std_list.get({ xs: aargs, i: i });
     if ($types.arg_tag({ a: pa }) !== $types.arg_tag({ a: aa })) {
       return false;
     }
-    const $m538 = pa;
-    $m538$match: {
-      if ($m538.tag === "TypeA") {
-        const ty = $m538.ty;
+    const $m540 = pa;
+    $m540$match: {
+      if ($m540.tag === "TypeA") {
+        const ty = $m540.ty;
         if (!unify({ pattern: ty, actual: $types.arg_type({ a: aa }), subst: subst, tvars: tvars })) {
           return false;
         }
-        break $m538$match;
+        break $m540$match;
       }
-      if ($m538.tag === "ConstA") {
-        const value = $m538.value;
+      if ($m540.tag === "ConstA") {
+        const value = $m540.value;
         const av = $types.arg_const({ a: aa });
         let handled = false;
-        const $m539 = value;
-        $m539$match: {
-          if ($m539.tag === "SymV") {
-            const def = $m539.def;
+        const $m541 = value;
+        $m541$match: {
+          if ($m541.tag === "SymV") {
+            const def = $m541.def;
             if ($std_map.contains({ d: tvars, key: def })) {
               handled = true;
               const bound = $std_map.find({ d: subst, key: def });
@@ -4454,22 +4462,22 @@ export function unify_args({ pargs, aargs, same_def, subst, tvars }) {
                 }
               }
             }
-            break $m539$match;
+            break $m541$match;
           }
           if (true) {
             skip({  });
-            break $m539$match;
+            break $m541$match;
           }
           $rt.unreachable();
         }
         if (!handled && !$types.const_equals({ a: value, b: av })) {
           return false;
         }
-        break $m538$match;
+        break $m540$match;
       }
-      if ($m538.tag === "EffectsA") {
+      if ($m540.tag === "EffectsA") {
         return false;
-        break $m538$match;
+        break $m540$match;
       }
       $rt.unreachable();
     }
@@ -4478,23 +4486,23 @@ export function unify_args({ pargs, aargs, same_def, subst, tvars }) {
 }
 
 export function record_update({ ck, ctx, e }) {
-  const $m540 = e;
-  $m540$match: {
-    if ($m540.tag === "RecordUpdate") {
-      const base = $m540.base;
-      const fields = $m540.fields;
-      const span = $m540.span;
-      const [$r541, ck$324, ctx$324] = infer({ ck: ck, ctx: ctx, e: base });
+  const $m542 = e;
+  $m542$match: {
+    if ($m542.tag === "RecordUpdate") {
+      const base = $m542.base;
+      const fields = $m542.fields;
+      const span = $m542.span;
+      const [$r543, ck$324, ctx$324] = infer({ ck: ck, ctx: ctx, e: base });
       ck = ck$324;
       ctx = ctx$324;
-      const bt = $r541;
+      const bt = $r543;
       const s = $types.strip({ t: bt });
       if (s.tag === "ErrorT") {
         for (const f of fields) {
-          const [$r542, ck$325, ctx$325] = infer({ ck: ck, ctx: ctx, e: f.value });
+          const [$r544, ck$325, ctx$325] = infer({ ck: ck, ctx: ctx, e: f.value });
           ck = ck$325;
           ctx = ctx$325;
-          const ft = $r542;
+          const ft = $r544;
         }
         return [{ tag: "ErrorT" }, ck, ctx];
       }
@@ -4502,117 +4510,117 @@ export function record_update({ ck, ctx, e }) {
         const [, ctx$326] = rep({ ck: ck, ctx: ctx, code: "E0321", at: $parser.span_of_expr({ e: base }), detail: "`with` updates a record, not " + show({ ctx: ctx, t: bt }) });
         ctx = ctx$326;
         for (const f of fields) {
-          const [$r544, ck$327, ctx$327] = infer({ ck: ck, ctx: ctx, e: f.value });
+          const [$r546, ck$327, ctx$327] = infer({ ck: ck, ctx: ctx, e: f.value });
           ck = ck$327;
           ctx = ctx$327;
-          const ft = $r544;
+          const ft = $r546;
         }
         return [{ tag: "ErrorT" }, ck, ctx];
       }
       const d = $context.get_def({ ctx: ctx, id: $types.def_of({ t: s }) });
-      const $m546 = ck.current_module;
-      $m546$match: {
-        if ($m546.tag === "Some") {
-          const value = $m546.value;
+      const $m548 = ck.current_module;
+      $m548$match: {
+        if ($m548.tag === "Some") {
+          const value = $m548.value;
           if (d.is_sealed && d.mod !== value.id && !value.tree.is_test) {
             const [, ctx$328] = rep({ ck: ck, ctx: ctx, code: "E0111", at: span, detail: "`" + $context.qualified_name({ ctx: ctx, id: d.id }) + "` is sealed; `with` is allowed only in module `" + $context.module_name({ ctx: ctx, id: d.mod }) + "`" });
             ctx = ctx$328;
           }
-          break $m546$match;
+          break $m548$match;
         }
-        if ($m546.tag === "None") {
+        if ($m548.tag === "None") {
           skip({  });
-          break $m546$match;
+          break $m548$match;
         }
         $rt.unreachable();
       }
-      const [$r547, ck$329, ctx$329] = subst_of({ ck: ck, ctx: ctx, d: d, args: $types.args_of({ t: s }) });
+      const [$r549, ck$329, ctx$329] = subst_of({ ck: ck, ctx: ctx, d: d, args: $types.args_of({ t: s }) });
       ck = ck$329;
       ctx = ctx$329;
-      const subst = $r547;
-      const [$r548, ck$330, ctx$330] = fields_of({ ck: ck, ctx: ctx, d: d });
+      const subst = $r549;
+      const [$r550, ck$330, ctx$330] = fields_of({ ck: ck, ctx: ctx, d: d });
       ck = ck$330;
       ctx = ctx$330;
-      const fs = $r548;
+      const fs = $r550;
       for (const f of fields) {
-        const $m549 = find_param({ params: field_params({ fs: fs }), name: f.name.text });
-        $m549$match: {
-          if ($m549.tag === "None") {
+        const $m551 = find_param({ params: field_params({ fs: fs }), name: f.name.text });
+        $m551$match: {
+          if ($m551.tag === "None") {
             const [, ctx$331] = rep({ ck: ck, ctx: ctx, code: "E0325", at: f.name.span, detail: "`" + d.name + "` has no field `" + f.name.text + "`" });
             ctx = ctx$331;
-            const [$r550, ck$332, ctx$332] = infer({ ck: ck, ctx: ctx, e: f.value });
+            const [$r552, ck$332, ctx$332] = infer({ ck: ck, ctx: ctx, e: f.value });
             ck = ck$332;
             ctx = ctx$332;
-            const ft = $r550;
-            break $m549$match;
+            const ft = $r552;
+            break $m551$match;
           }
-          if ($m549.tag === "Some") {
-            const value = $m549.value;
-            const [$r552, ck$333, ctx$333] = check_expr({ ck: ck, ctx: ctx, e: f.value, expected: { tag: "Some", value: $types.substitute({ t: value.ty, subst: subst }) } });
+          if ($m551.tag === "Some") {
+            const value = $m551.value;
+            const [$r554, ck$333, ctx$333] = check_expr({ ck: ck, ctx: ctx, e: f.value, expected: { tag: "Some", value: $types.substitute({ t: value.ty, subst: subst }) } });
             ck = ck$333;
             ctx = ctx$333;
-            const ft = $r552;
-            break $m549$match;
+            const ft = $r554;
+            break $m551$match;
           }
           $rt.unreachable();
         }
       }
       return [s, ck, ctx];
-      break $m540$match;
+      break $m542$match;
     }
     if (true) {
       return [{ tag: "ErrorT" }, ck, ctx];
-      break $m540$match;
+      break $m542$match;
     }
     $rt.unreachable();
   }
 }
 
 export function list_lit({ ck, ctx, e, expected }) {
-  const $m554 = e;
-  $m554$match: {
-    if ($m554.tag === "ListLit") {
-      const elems = $m554.elems;
-      const span = $m554.span;
+  const $m556 = e;
+  $m556$match: {
+    if ($m556.tag === "ListLit") {
+      const elems = $m556.elems;
+      const span = $m556.span;
       let exp_elem = { tag: "None" };
       let has_expected = false;
-      const $m556 = expected;
-      $m556$match: {
-        if ($m556.tag === "Some") {
-          const value = $m556.value;
-          has_expected = true;
-          const exp = $types.strip({ t: value });
-          const [$r557, ctx$334] = is_list_type({ ctx: ctx, t: exp });
-          ctx = ctx$334;
-          if ($r557) {
-            exp_elem = first_type_arg({ t: exp });
-          }
-          break $m556$match;
-        }
-        if ($m556.tag === "None") {
-          skip({  });
-          break $m556$match;
-        }
-        $rt.unreachable();
-      }
-      const $m558 = exp_elem;
+      const $m558 = expected;
       $m558$match: {
         if ($m558.tag === "Some") {
           const value = $m558.value;
-          for (const x of elems) {
-            const [$r560, ck$335, ctx$335] = check_expr({ ck: ck, ctx: ctx, e: x, expected: { tag: "Some", value: value } });
-            ck = ck$335;
-            ctx = ctx$335;
-            const xt = $r560;
+          has_expected = true;
+          const exp = $types.strip({ t: value });
+          const [$r559, ctx$334] = is_list_type({ ctx: ctx, t: exp });
+          ctx = ctx$334;
+          if ($r559) {
+            exp_elem = first_type_arg({ t: exp });
           }
-          const [$r561, ctx$336] = list_of({ ctx: ctx, elem: value });
-          ctx = ctx$336;
-          return [$r561, ck, ctx];
           break $m558$match;
         }
         if ($m558.tag === "None") {
           skip({  });
           break $m558$match;
+        }
+        $rt.unreachable();
+      }
+      const $m560 = exp_elem;
+      $m560$match: {
+        if ($m560.tag === "Some") {
+          const value = $m560.value;
+          for (const x of elems) {
+            const [$r562, ck$335, ctx$335] = check_expr({ ck: ck, ctx: ctx, e: x, expected: { tag: "Some", value: value } });
+            ck = ck$335;
+            ctx = ctx$335;
+            const xt = $r562;
+          }
+          const [$r563, ctx$336] = list_of({ ctx: ctx, elem: value });
+          ctx = ctx$336;
+          return [$r563, ck, ctx];
+          break $m560$match;
+        }
+        if ($m560.tag === "None") {
+          skip({  });
+          break $m560$match;
         }
         $rt.unreachable();
       }
@@ -4622,145 +4630,145 @@ export function list_lit({ ck, ctx, e, expected }) {
           ctx = ctx$337;
           return [{ tag: "ErrorT" }, ck, ctx];
         }
-        const [$r564, ctx$338] = list_of({ ctx: ctx, elem: { tag: "ErrorT" } });
+        const [$r566, ctx$338] = list_of({ ctx: ctx, elem: { tag: "ErrorT" } });
         ctx = ctx$338;
-        return [$r564, ck, ctx];
+        return [$r566, ck, ctx];
       }
       let elem = { tag: "ErrorT" };
       let first = true;
       for (const x of elems) {
         if (first) {
-          const [$r566, ck$339, ctx$339] = infer({ ck: ck, ctx: ctx, e: x });
+          const [$r568, ck$339, ctx$339] = infer({ ck: ck, ctx: ctx, e: x });
           ck = ck$339;
           ctx = ctx$339;
-          elem = $types.strip({ t: $r566 });
+          elem = $types.strip({ t: $r568 });
           first = false;
         } else {
-          const [$r568, ck$340, ctx$340] = check_expr({ ck: ck, ctx: ctx, e: x, expected: { tag: "Some", value: elem } });
+          const [$r570, ck$340, ctx$340] = check_expr({ ck: ck, ctx: ctx, e: x, expected: { tag: "Some", value: elem } });
           ck = ck$340;
           ctx = ctx$340;
-          const xt = $r568;
+          const xt = $r570;
         }
       }
-      const [$r569, ctx$341] = list_of({ ctx: ctx, elem: elem });
+      const [$r571, ctx$341] = list_of({ ctx: ctx, elem: elem });
       ctx = ctx$341;
-      return [$r569, ck, ctx];
-      break $m554$match;
+      return [$r571, ck, ctx];
+      break $m556$match;
     }
     if (true) {
       return [{ tag: "ErrorT" }, ck, ctx];
-      break $m554$match;
+      break $m556$match;
     }
     $rt.unreachable();
   }
 }
 
 export function try_expr({ ck, ctx, e }) {
-  const $m571 = e;
-  $m571$match: {
-    if ($m571.tag === "Try") {
-      const expr = $m571.expr;
-      const else_ = $m571.else_;
-      const span = $m571.span;
-      const [$r572, ck$342, ctx$342] = infer({ ck: ck, ctx: ctx, e: expr });
+  const $m573 = e;
+  $m573$match: {
+    if ($m573.tag === "Try") {
+      const expr = $m573.expr;
+      const else_ = $m573.else_;
+      const span = $m573.span;
+      const [$r574, ck$342, ctx$342] = infer({ ck: ck, ctx: ctx, e: expr });
       ck = ck$342;
       ctx = ctx$342;
-      const inner = $r572;
-      const [$r574, ctx$343] = unwrap_fallible({ ctx: ctx, t: inner });
+      const inner = $r574;
+      const [$r576, ctx$343] = unwrap_fallible({ ctx: ctx, t: inner });
       ctx = ctx$343;
-      const $m573 = $r574;
-      $m573$match: {
-        if ($m573.tag === "None") {
+      const $m575 = $r576;
+      $m575$match: {
+        if ($m575.tag === "None") {
           if (!(inner.tag === "ErrorT")) {
             const [, ctx$344] = rep({ ck: ck, ctx: ctx, code: "E0321", at: $parser.span_of_expr({ e: expr }), detail: "`try` unwraps a Result or Option, not " + show({ ctx: ctx, t: inner }) });
             ctx = ctx$344;
           }
-          const $m575 = else_;
-          $m575$match: {
-            if ($m575.tag === "Some") {
-              const value = $m575.value;
-              const [$r576, ck$345, ctx$345] = infer({ ck: ck, ctx: ctx, e: value.expr });
+          const $m577 = else_;
+          $m577$match: {
+            if ($m577.tag === "Some") {
+              const value = $m577.value;
+              const [$r578, ck$345, ctx$345] = infer({ ck: ck, ctx: ctx, e: value.expr });
               ck = ck$345;
               ctx = ctx$345;
-              const et = $r576;
-              break $m575$match;
+              const et = $r578;
+              break $m577$match;
             }
-            if ($m575.tag === "None") {
+            if ($m577.tag === "None") {
               skip({  });
-              break $m575$match;
+              break $m577$match;
             }
             $rt.unreachable();
           }
           return [{ tag: "ErrorT" }, ck, ctx];
-          break $m573$match;
+          break $m575$match;
         }
-        if ($m573.tag === "Some") {
-          const value = $m573.value;
-          const [$r578, ck$346, ctx$346] = try_tail({ ck: ck, ctx: ctx, else_: else_, fallible: value, at: span });
+        if ($m575.tag === "Some") {
+          const value = $m575.value;
+          const [$r580, ck$346, ctx$346] = try_tail({ ck: ck, ctx: ctx, else_: else_, fallible: value, at: span });
           ck = ck$346;
           ctx = ctx$346;
-          return [$r578, ck, ctx];
-          break $m573$match;
+          return [$r580, ck, ctx];
+          break $m575$match;
         }
         $rt.unreachable();
       }
-      break $m571$match;
+      break $m573$match;
     }
     if (true) {
       return [{ tag: "ErrorT" }, ck, ctx];
-      break $m571$match;
+      break $m573$match;
     }
     $rt.unreachable();
   }
 }
 
 export function fallible_of_ret({ ck, ctx }) {
-  const $m580 = fn_ret({ ck: ck });
-  $m580$match: {
-    if ($m580.tag === "Some") {
-      const value = $m580.value;
-      const [$r581, ctx$347] = unwrap_fallible({ ctx: ctx, t: value });
+  const $m582 = fn_ret({ ck: ck });
+  $m582$match: {
+    if ($m582.tag === "Some") {
+      const value = $m582.value;
+      const [$r583, ctx$347] = unwrap_fallible({ ctx: ctx, t: value });
       ctx = ctx$347;
-      return [$r581, ctx];
-      break $m580$match;
+      return [$r583, ctx];
+      break $m582$match;
     }
-    if ($m580.tag === "None") {
+    if ($m582.tag === "None") {
       return [{ tag: "None" }, ctx];
-      break $m580$match;
+      break $m582$match;
     }
     $rt.unreachable();
   }
 }
 
 export function fallible_or({ o }) {
-  const $m583 = o;
-  $m583$match: {
-    if ($m583.tag === "Some") {
-      const value = $m583.value;
+  const $m585 = o;
+  $m585$match: {
+    if ($m585.tag === "Some") {
+      const value = $m585.value;
       return value;
-      break $m583$match;
+      break $m585$match;
     }
-    if ($m583.tag === "None") {
+    if ($m585.tag === "None") {
       return { value: { tag: "ErrorT" }, error: { tag: "ErrorT" }, is_option: false };
-      break $m583$match;
+      break $m585$match;
     }
     $rt.unreachable();
   }
 }
 
 export function report_no_fallible_ret({ ck, ctx, at }) {
-  const $m587 = fn_ret({ ck: ck });
-  $m587$match: {
-    if ($m587.tag === "None") {
+  const $m589 = fn_ret({ ck: ck });
+  $m589$match: {
+    if ($m589.tag === "None") {
       const [, ctx$348] = rep({ ck: ck, ctx: ctx, code: "E0321", at: at, detail: "`try` is allowed only in a function returning Result or Option" });
       ctx = ctx$348;
-      break $m587$match;
+      break $m589$match;
     }
-    if ($m587.tag === "Some") {
-      const value = $m587.value;
+    if ($m589.tag === "Some") {
+      const value = $m589.value;
       const [, ctx$349] = rep({ ck: ck, ctx: ctx, code: "E0321", at: at, detail: "`try` needs the enclosing function to return Result or Option, not " + show({ ctx: ctx, t: value }) });
       ctx = ctx$349;
-      break $m587$match;
+      break $m589$match;
     }
     $rt.unreachable();
   }
@@ -4770,36 +4778,36 @@ export function report_no_fallible_ret({ ck, ctx, at }) {
 
 export function try_tail({ ck, ctx, else_, fallible, at }) {
   if (fn_flag({ ck: ck, which: 2 })) {
-    const $m588 = else_;
-    $m588$match: {
-      if ($m588.tag === "None") {
+    const $m590 = else_;
+    $m590$match: {
+      if ($m590.tag === "None") {
         const [, ctx$350] = rep({ ck: ck, ctx: ctx, code: "E0321", at: at, detail: "`try` in a verify block needs an `else` yielding the Bool result" });
         ctx = ctx$350;
         return [fallible.value, ck, ctx];
-        break $m588$match;
+        break $m590$match;
       }
-      if ($m588.tag === "Some") {
-        const value = $m588.value;
+      if ($m590.tag === "Some") {
+        const value = $m590.value;
         if (value.name.text !== "_") {
           const [, ctx$351] = set_decl_type({ ctx: ctx, def: def_of_key({ ctx: ctx, k: key({ ck: ck, tag: $defs.tag_misc, span: value.span }) }), t: fallible.error });
           ctx = ctx$351;
         }
-        const [$r590, ck$352, ctx$352] = check_expr({ ck: ck, ctx: ctx, e: value.expr, expected: { tag: "Some", value: $types.bool_t } });
+        const [$r592, ck$352, ctx$352] = check_expr({ ck: ck, ctx: ctx, e: value.expr, expected: { tag: "Some", value: $types.bool_t } });
         ck = ck$352;
         ctx = ctx$352;
-        const et = $r590;
+        const et = $r592;
         return [fallible.value, ck, ctx];
-        break $m588$match;
+        break $m590$match;
       }
       $rt.unreachable();
     }
   }
-  const [$r591, ctx$353] = fallible_of_ret({ ck: ck, ctx: ctx });
+  const [$r593, ctx$353] = fallible_of_ret({ ck: ck, ctx: ctx });
   ctx = ctx$353;
-  const outer = $r591;
-  const $m592 = else_;
-  $m592$match: {
-    if ($m592.tag === "None") {
+  const outer = $r593;
+  const $m594 = else_;
+  $m594$match: {
+    if ($m594.tag === "None") {
       if (outer.tag === "None") {
         const [, ctx$354] = report_no_fallible_ret({ ck: ck, ctx: ctx, at: at });
         ctx = ctx$354;
@@ -4824,17 +4832,17 @@ export function try_tail({ ck, ctx, else_, fallible, at }) {
         }
       }
       return [fallible.value, ck, ctx];
-      break $m592$match;
+      break $m594$match;
     }
-    if ($m592.tag === "Some") {
-      const value = $m592.value;
+    if ($m594.tag === "Some") {
+      const value = $m594.value;
       if (outer.tag === "None") {
         const [, ctx$357] = report_no_fallible_ret({ ck: ck, ctx: ctx, at: at });
         ctx = ctx$357;
-        const [$r593, ck$358, ctx$358] = infer({ ck: ck, ctx: ctx, e: value.expr });
+        const [$r595, ck$358, ctx$358] = infer({ ck: ck, ctx: ctx, e: value.expr });
         ck = ck$358;
         ctx = ctx$358;
-        const et = $r593;
+        const et = $r595;
         return [fallible.value, ck, ctx];
       }
       const o = fallible_or({ o: outer });
@@ -4842,23 +4850,23 @@ export function try_tail({ ck, ctx, else_, fallible, at }) {
         const [, ctx$359] = set_decl_type({ ctx: ctx, def: def_of_key({ ctx: ctx, k: key({ ck: ck, tag: $defs.tag_misc, span: value.span }) }), t: fallible.error });
         ctx = ctx$359;
       }
-      const [$r595, ck$360, ctx$360] = check_expr({ ck: ck, ctx: ctx, e: value.expr, expected: { tag: "Some", value: o.error } });
+      const [$r597, ck$360, ctx$360] = check_expr({ ck: ck, ctx: ctx, e: value.expr, expected: { tag: "Some", value: o.error } });
       ck = ck$360;
       ctx = ctx$360;
-      const et = $r595;
+      const et = $r597;
       return [fallible.value, ck, ctx];
-      break $m592$match;
+      break $m594$match;
     }
     $rt.unreachable();
   }
 }
 
 export function recover_expr({ ck, ctx, e }) {
-  const $m596 = e;
-  $m596$match: {
-    if ($m596.tag === "Recover") {
-      const body = $m596.body;
-      const span = $m596.span;
+  const $m598 = e;
+  $m598$match: {
+    if ($m598.tag === "Recover") {
+      const body = $m598.body;
+      const span = $m598.span;
       const n = $std_list.len({ xs: body.stmts });
       let value = { tag: "ErrorT" };
       let ends_in_expr = false;
@@ -4868,21 +4876,21 @@ export function recover_expr({ ck, ctx, e }) {
       for (const s of body.stmts) {
         let handled = false;
         if (i === $rt.int.sub(n, 1, $ob35)) {
-          const $m600 = s;
-          $m600$match: {
-            if ($m600.tag === "ExprStmt") {
-              const expr = $m600.expr;
-              const [$r601, ck$362, ctx$362] = infer({ ck: ck, ctx: ctx, e: expr });
+          const $m602 = s;
+          $m602$match: {
+            if ($m602.tag === "ExprStmt") {
+              const expr = $m602.expr;
+              const [$r603, ck$362, ctx$362] = infer({ ck: ck, ctx: ctx, e: expr });
               ck = ck$362;
               ctx = ctx$362;
-              value = $r601;
+              value = $r603;
               ends_in_expr = true;
               handled = true;
-              break $m600$match;
+              break $m602$match;
             }
             if (true) {
               skip({  });
-              break $m600$match;
+              break $m602$match;
             }
             $rt.unreachable();
           }
@@ -4900,16 +4908,16 @@ export function recover_expr({ ck, ctx, e }) {
         const [, ctx$365] = rep({ ck: ck, ctx: ctx, code: "E0321", at: span, detail: "a `recover` block ends in the expression whose value it yields" });
         ctx = ctx$365;
       }
-      const [$r602, ctx$366] = panicked_type({ ctx: ctx });
+      const [$r604, ctx$366] = panicked_type({ ctx: ctx });
       ctx = ctx$366;
-      const [$r603, ctx$367] = result_of({ ctx: ctx, value: value, error: $r602 });
+      const [$r605, ctx$367] = result_of({ ctx: ctx, value: value, error: $r604 });
       ctx = ctx$367;
-      return [$r603, ck, ctx];
-      break $m596$match;
+      return [$r605, ck, ctx];
+      break $m598$match;
     }
     if (true) {
       return [{ tag: "ErrorT" }, ck, ctx];
-      break $m596$match;
+      break $m598$match;
     }
     $rt.unreachable();
   }
@@ -4920,13 +4928,13 @@ export function finite_type({ ck, ctx, base }) {
     return [true, ck, ctx];
   }
   if (base.tag === "UnionT") {
-    const [$r605, ctx$368] = variants_of({ ck: ck, ctx: ctx, d: $context.get_def({ ctx: ctx, id: $types.def_of({ t: base }) }) });
+    const [$r607, ctx$368] = variants_of({ ck: ck, ctx: ctx, d: $context.get_def({ ctx: ctx, id: $types.def_of({ t: base }) }) });
     ctx = ctx$368;
-    for (const v of $r605) {
-      const [$r606, ck$369, ctx$369] = fields_of({ ck: ck, ctx: ctx, d: $context.get_def({ ctx: ctx, id: v }) });
+    for (const v of $r607) {
+      const [$r608, ck$369, ctx$369] = fields_of({ ck: ck, ctx: ctx, d: $context.get_def({ ctx: ctx, id: v }) });
       ck = ck$369;
       ctx = ctx$369;
-      if ($std_list.len({ xs: $r606 }) > 0) {
+      if ($std_list.len({ xs: $r608 }) > 0) {
         return [false, ck, ctx];
       }
     }
@@ -4936,134 +4944,134 @@ export function finite_type({ ck, ctx, base }) {
 }
 
 export function quantifier({ ck, ctx, e }) {
-  const $m607 = e;
-  $m607$match: {
-    if ($m607.tag === "Quantifier") {
-      const ty = $m607.ty;
-      const domain = $m607.domain;
-      const where_ = $m607.where_;
-      const body = $m607.body;
-      const span = $m607.span;
-      const [$r608, ck$370, ctx$370] = type_of({ fuel: max_type_depth, ck: ck, ctx: ctx, t: ty });
+  const $m609 = e;
+  $m609$match: {
+    if ($m609.tag === "Quantifier") {
+      const ty = $m609.ty;
+      const domain = $m609.domain;
+      const where_ = $m609.where_;
+      const body = $m609.body;
+      const span = $m609.span;
+      const [$r610, ck$370, ctx$370] = type_of({ fuel: max_type_depth, ck: ck, ctx: ctx, t: ty });
       ck = ck$370;
       ctx = ctx$370;
-      const binder = $r608;
+      const binder = $r610;
       const [, ctx$371] = set_decl_type({ ctx: ctx, def: def_of_key({ ctx: ctx, k: key({ ck: ck, tag: $defs.tag_expr, span: span }) }), t: binder });
       ctx = ctx$371;
       const base = $types.strip({ t: binder });
-      const $m609 = domain;
-      $m609$match: {
-        if ($m609.tag === "None") {
-          const [$r610, ck$372, ctx$372] = finite_type({ ck: ck, ctx: ctx, base: base });
+      const $m611 = domain;
+      $m611$match: {
+        if ($m611.tag === "None") {
+          const [$r612, ck$372, ctx$372] = finite_type({ ck: ck, ctx: ctx, base: base });
           ck = ck$372;
           ctx = ctx$372;
-          if (!$r610 && !(base.tag === "ErrorT")) {
+          if (!$r612 && !(base.tag === "ErrorT")) {
             const [, ctx$373] = rep({ ck: ck, ctx: ctx, code: "E0338", at: span, detail: "quantify over a range or a list: " + show({ ctx: ctx, t: binder }) + " is not a finite type (§5.3)" });
             ctx = ctx$373;
           }
-          break $m609$match;
+          break $m611$match;
         }
-        if ($m609.tag === "Some") {
-          const value = $m609.value;
-          const $m611 = value;
-          $m611$match: {
-            if ($m611.tag === "RangeDomain") {
-              const lo = $m611.lo;
-              const hi = $m611.hi;
+        if ($m611.tag === "Some") {
+          const value = $m611.value;
+          const $m613 = value;
+          $m613$match: {
+            if ($m613.tag === "RangeDomain") {
+              const lo = $m613.lo;
+              const hi = $m613.hi;
               if (!$types.same_base({ a: base, b: $types.int_t })) {
                 const [, ctx$374] = rep({ ck: ck, ctx: ctx, code: "E0321", at: $comments.type_span({ t: ty }), detail: "a range binds an Int, not " + show({ ctx: ctx, t: binder }) });
                 ctx = ctx$374;
               }
-              const [$r613, ck$375, ctx$375] = check_expr({ ck: ck, ctx: ctx, e: lo, expected: { tag: "Some", value: $types.int_t } });
+              const [$r615, ck$375, ctx$375] = check_expr({ ck: ck, ctx: ctx, e: lo, expected: { tag: "Some", value: $types.int_t } });
               ck = ck$375;
               ctx = ctx$375;
-              const lt = $r613;
-              const [$r615, ck$376, ctx$376] = check_expr({ ck: ck, ctx: ctx, e: hi, expected: { tag: "Some", value: $types.int_t } });
+              const lt = $r615;
+              const [$r617, ck$376, ctx$376] = check_expr({ ck: ck, ctx: ctx, e: hi, expected: { tag: "Some", value: $types.int_t } });
               ck = ck$376;
               ctx = ctx$376;
-              const ht = $r615;
-              break $m611$match;
+              const ht = $r617;
+              break $m613$match;
             }
-            if ($m611.tag === "InDomain") {
-              const expr = $m611.expr;
-              const [$r616, ck$377, ctx$377] = infer({ ck: ck, ctx: ctx, e: expr });
+            if ($m613.tag === "InDomain") {
+              const expr = $m613.expr;
+              const [$r618, ck$377, ctx$377] = infer({ ck: ck, ctx: ctx, e: expr });
               ck = ck$377;
               ctx = ctx$377;
-              const dom_type = $r616;
-              const [$r617, ctx$378] = unwrap_fallible({ ctx: ctx, t: dom_type });
+              const dom_type = $r618;
+              const [$r619, ctx$378] = unwrap_fallible({ ctx: ctx, t: dom_type });
               ctx = ctx$378;
-              const inner_type = fallible_value_or({ o: $r617, dflt: dom_type });
-              const [$r618, ctx$379] = element_type({ ck: ck, ctx: ctx, t: inner_type, at: $parser.span_of_expr({ e: expr }) });
+              const inner_type = fallible_value_or({ o: $r619, dflt: dom_type });
+              const [$r620, ctx$379] = element_type({ ck: ck, ctx: ctx, t: inner_type, at: $parser.span_of_expr({ e: expr }) });
               ctx = ctx$379;
-              const elem = $r618;
+              const elem = $r620;
               if (elem.tag === "Some") {
-                const [$r620, ctx$380] = coerce({ ck: ck, ctx: ctx, actual: or_error({ o: elem }), expected: binder, at: $comments.type_span({ t: ty }), what: "binder", at_key: { tag: "None" } });
+                const [$r622, ctx$380] = coerce({ ck: ck, ctx: ctx, actual: or_error({ o: elem }), expected: binder, at: $comments.type_span({ t: ty }), what: "binder", at_key: { tag: "None" } });
                 ctx = ctx$380;
-                const ct = $r620;
+                const ct = $r622;
               }
-              break $m611$match;
+              break $m613$match;
             }
             $rt.unreachable();
           }
-          break $m609$match;
+          break $m611$match;
         }
         $rt.unreachable();
       }
-      const $m621 = where_;
-      $m621$match: {
-        if ($m621.tag === "Some") {
-          const value = $m621.value;
-          const [$r623, ck$381, ctx$381] = check_expr({ ck: ck, ctx: ctx, e: value, expected: { tag: "Some", value: $types.bool_t } });
+      const $m623 = where_;
+      $m623$match: {
+        if ($m623.tag === "Some") {
+          const value = $m623.value;
+          const [$r625, ck$381, ctx$381] = check_expr({ ck: ck, ctx: ctx, e: value, expected: { tag: "Some", value: $types.bool_t } });
           ck = ck$381;
           ctx = ctx$381;
-          const wt = $r623;
-          break $m621$match;
+          const wt = $r625;
+          break $m623$match;
         }
-        if ($m621.tag === "None") {
+        if ($m623.tag === "None") {
           skip({  });
-          break $m621$match;
+          break $m623$match;
         }
         $rt.unreachable();
       }
-      const [$r625, ck$382, ctx$382] = check_expr({ ck: ck, ctx: ctx, e: body, expected: { tag: "Some", value: $types.bool_t } });
+      const [$r627, ck$382, ctx$382] = check_expr({ ck: ck, ctx: ctx, e: body, expected: { tag: "Some", value: $types.bool_t } });
       ck = ck$382;
       ctx = ctx$382;
-      const bt = $r625;
+      const bt = $r627;
       return [$types.bool_t, ck, ctx];
-      break $m607$match;
+      break $m609$match;
     }
     if (true) {
       return [{ tag: "ErrorT" }, ck, ctx];
-      break $m607$match;
+      break $m609$match;
     }
     $rt.unreachable();
   }
 }
 
 export function closure({ ck, ctx, e }) {
-  const $m627 = e;
-  $m627$match: {
-    if ($m627.tag === "Closure") {
-      const params = $m627.params;
-      const ret = $m627.ret;
-      const effects = $m627.effects;
-      const body = $m627.body;
-      const span = $m627.span;
+  const $m629 = e;
+  $m629$match: {
+    if ($m629.tag === "Closure") {
+      const params = $m629.params;
+      const ret = $m629.ret;
+      const effects = $m629.effects;
+      const body = $m629.body;
+      const span = $m629.span;
       let ps = $std_list.builder({  });
       for (const p of params) {
-        const [$r628, ck$383, ctx$383] = type_of({ fuel: max_type_depth, ck: ck, ctx: ctx, t: p.ty });
+        const [$r630, ck$383, ctx$383] = type_of({ fuel: max_type_depth, ck: ck, ctx: ctx, t: p.ty });
         ck = ck$383;
         ctx = ctx$383;
-        const t = $r628;
+        const t = $r630;
         const [, ctx$384] = set_decl_type({ ctx: ctx, def: def_of_key({ ctx: ctx, k: key({ ck: ck, tag: $defs.tag_sig, span: p.span }) }), t: t });
         ctx = ctx$384;
         const [, ps$385] = $std_list.push({ b: ps, x: { name: p.name.text, is_inout: p.is_inout, ty: t } });
         ps = ps$385;
       }
-      const [$r630, ck$386, ctx$386] = type_of({ fuel: max_type_depth, ck: ck, ctx: ctx, t: ret });
+      const [$r632, ck$386, ctx$386] = type_of({ fuel: max_type_depth, ck: ck, ctx: ctx, t: ret });
       ck = ck$386;
       ctx = ctx$386;
-      const rt = $r630;
+      const rt = $r632;
       const frame = $rt.int.add(fn_frame({ ck: ck }), 1, $ob37);
       const [, ck$387] = push_fn({ ck: ck, f: plain_fn({ ret: { tag: "Some", value: rt }, frame: frame }) });
       ck = ck$387;
@@ -5077,28 +5085,28 @@ export function closure({ ck, ctx, e }) {
       const [, ck$390] = pop_fn({ ck: ck });
       ck = ck$390;
       return [{ tag: "FnT", params: $std_list.finish({ b: ps }), ret: rt, effects: effect_set_of({ ctx: ctx, file: ck.current_file, refs: effects }) }, ck, ctx];
-      break $m627$match;
+      break $m629$match;
     }
     if (true) {
       return [{ tag: "ErrorT" }, ck, ctx];
-      break $m627$match;
+      break $m629$match;
     }
     $rt.unreachable();
   }
 }
 
 export function fake_expr({ ck, ctx, e, expected }) {
-  const $m634 = e;
-  $m634$match: {
-    if ($m634.tag === "Fake") {
-      const capability = $m634.capability;
-      const fields = $m634.fields;
-      const span = $m634.span;
+  const $m636 = e;
+  $m636$match: {
+    if ($m636.tag === "Fake") {
+      const capability = $m636.capability;
+      const fields = $m636.fields;
+      const span = $m636.span;
       for (const f of fields) {
-        const [$r635, ck$391, ctx$391] = infer({ ck: ck, ctx: ctx, e: f.value });
+        const [$r637, ck$391, ctx$391] = infer({ ck: ck, ctx: ctx, e: f.value });
         ck = ck$391;
         ctx = ctx$391;
-        const ft = $r635;
+        const ft = $r637;
       }
       const def = res_def({ res: ref_at({ ctx: ctx, k: key({ ck: ck, tag: $defs.tag_expr, span: span }) }) });
       if (def < 0) {
@@ -5110,63 +5118,63 @@ export function fake_expr({ ck, ctx, e, expected }) {
         ctx = ctx$392;
         return [{ tag: "ErrorT" }, ck, ctx];
       }
-      const $m639 = expected;
-      $m639$match: {
-        if ($m639.tag === "Some") {
-          const value = $m639.value;
+      const $m641 = expected;
+      $m641$match: {
+        if ($m641.tag === "Some") {
+          const value = $m641.value;
           const exp = $types.strip({ t: value });
           if (exp.tag === "Capability" && $types.def_of({ t: exp }) === def) {
             return [exp, ck, ctx];
           }
-          break $m639$match;
+          break $m641$match;
         }
-        if ($m639.tag === "None") {
+        if ($m641.tag === "None") {
           skip({  });
-          break $m639$match;
+          break $m641$match;
         }
         $rt.unreachable();
       }
-      const [$r640, ck$393, ctx$393] = instantiate({ fuel: max_type_depth, ck: ck, ctx: ctx, d: d, args: [], at: span });
+      const [$r642, ck$393, ctx$393] = instantiate({ fuel: max_type_depth, ck: ck, ctx: ctx, d: d, args: [], at: span });
       ck = ck$393;
       ctx = ctx$393;
-      return [$r640, ck, ctx];
-      break $m634$match;
+      return [$r642, ck, ctx];
+      break $m636$match;
     }
     if (true) {
       return [{ tag: "ErrorT" }, ck, ctx];
-      break $m634$match;
+      break $m636$match;
     }
     $rt.unreachable();
   }
 }
 
 export function field_access({ ck, ctx, e }) {
-  const $m642 = e;
-  $m642$match: {
-    if ($m642.tag === "FieldAccess") {
-      const object = $m642.object;
-      const name = $m642.name;
-      const span = $m642.span;
-      const $m643 = ref_at({ ctx: ctx, k: key({ ck: ck, tag: $defs.tag_expr, span: span }) });
-      $m643$match: {
-        if ($m643.tag === "Some") {
-          const value = $m643.value;
-          const [$r644, ck$394, ctx$394] = resolved_value_type({ ck: ck, ctx: ctx, res: value, at: span });
+  const $m644 = e;
+  $m644$match: {
+    if ($m644.tag === "FieldAccess") {
+      const object = $m644.object;
+      const name = $m644.name;
+      const span = $m644.span;
+      const $m645 = ref_at({ ctx: ctx, k: key({ ck: ck, tag: $defs.tag_expr, span: span }) });
+      $m645$match: {
+        if ($m645.tag === "Some") {
+          const value = $m645.value;
+          const [$r646, ck$394, ctx$394] = resolved_value_type({ ck: ck, ctx: ctx, res: value, at: span });
           ck = ck$394;
           ctx = ctx$394;
-          return [$r644, ck, ctx];
-          break $m643$match;
+          return [$r646, ck, ctx];
+          break $m645$match;
         }
-        if ($m643.tag === "None") {
+        if ($m645.tag === "None") {
           skip({  });
-          break $m643$match;
+          break $m645$match;
         }
         $rt.unreachable();
       }
-      const [$r645, ck$395, ctx$395] = infer({ ck: ck, ctx: ctx, e: object });
+      const [$r647, ck$395, ctx$395] = infer({ ck: ck, ctx: ctx, e: object });
       ck = ck$395;
       ctx = ctx$395;
-      const obj = $r645;
+      const obj = $r647;
       const s = $types.strip({ t: obj });
       if (s.tag === "ErrorT") {
         return [{ tag: "ErrorT" }, ck, ctx];
@@ -5181,33 +5189,33 @@ export function field_access({ ck, ctx, e }) {
         return [{ tag: "ErrorT" }, ck, ctx];
       }
       const d = $context.get_def({ ctx: ctx, id: $types.def_of({ t: s }) });
-      const [$r648, ck$397, ctx$397] = fields_of({ ck: ck, ctx: ctx, d: d });
+      const [$r650, ck$397, ctx$397] = fields_of({ ck: ck, ctx: ctx, d: d });
       ck = ck$397;
       ctx = ctx$397;
-      const fs = $r648;
-      const $m649 = find_param({ params: field_params({ fs: fs }), name: name.text });
-      $m649$match: {
-        if ($m649.tag === "None") {
+      const fs = $r650;
+      const $m651 = find_param({ params: field_params({ fs: fs }), name: name.text });
+      $m651$match: {
+        if ($m651.tag === "None") {
           const [, ctx$398] = rep({ ck: ck, ctx: ctx, code: "E0325", at: name.span, detail: "`" + d.name + "` has no field `" + name.text + "`" });
           ctx = ctx$398;
           return [{ tag: "ErrorT" }, ck, ctx];
-          break $m649$match;
+          break $m651$match;
         }
-        if ($m649.tag === "Some") {
-          const value = $m649.value;
-          const [$r651, ck$399, ctx$399] = subst_of({ ck: ck, ctx: ctx, d: d, args: $types.args_of({ t: s }) });
+        if ($m651.tag === "Some") {
+          const value = $m651.value;
+          const [$r653, ck$399, ctx$399] = subst_of({ ck: ck, ctx: ctx, d: d, args: $types.args_of({ t: s }) });
           ck = ck$399;
           ctx = ctx$399;
-          return [$types.substitute({ t: value.ty, subst: $r651 }), ck, ctx];
-          break $m649$match;
+          return [$types.substitute({ t: value.ty, subst: $r653 }), ck, ctx];
+          break $m651$match;
         }
         $rt.unreachable();
       }
-      break $m642$match;
+      break $m644$match;
     }
     if (true) {
       return [{ tag: "ErrorT" }, ck, ctx];
-      break $m642$match;
+      break $m644$match;
     }
     $rt.unreachable();
   }
@@ -5215,39 +5223,39 @@ export function field_access({ ck, ctx, e }) {
 
 export function resolved_value_type({ ck, ctx, res, at }) {
   let target_def = $rt.int.neg(1, $ob38);
-  const $m653 = res;
-  $m653$match: {
-    if ($m653.tag === "DefRes") {
-      const def = $m653.def;
+  const $m655 = res;
+  $m655$match: {
+    if ($m655.tag === "DefRes") {
+      const def = $m655.def;
       target_def = def;
-      break $m653$match;
+      break $m655$match;
     }
-    if ($m653.tag === "CompanionRes") {
-      const owner = $m653.owner;
-      const fn_def = $m653.fn_def;
+    if ($m655.tag === "CompanionRes") {
+      const owner = $m655.owner;
+      const fn_def = $m655.fn_def;
       target_def = fn_def;
-      break $m653$match;
+      break $m655$match;
     }
-    if ($m653.tag === "IfaceFnRes") {
-      const iface = $m653.iface;
-      const fn_def = $m653.fn_def;
+    if ($m655.tag === "IfaceFnRes") {
+      const iface = $m655.iface;
+      const fn_def = $m655.fn_def;
       const [, ctx$400] = rep({ ck: ck, ctx: ctx, code: "E0323", at: at, detail: "an interface function must be called" });
       ctx = ctx$400;
       return [{ tag: "ErrorT" }, ck, ctx];
-      break $m653$match;
+      break $m655$match;
     }
-    if ($m653.tag === "UnitRes") {
+    if ($m655.tag === "UnitRes") {
       return [$types.unit_t, ck, ctx];
-      break $m653$match;
+      break $m655$match;
     }
-    if ($m653.tag === "TypeValueRes") {
-      const owner = $m653.owner;
+    if ($m655.tag === "TypeValueRes") {
+      const owner = $m655.owner;
       return [{ tag: "TypeInfoT" }, ck, ctx];
-      break $m653$match;
+      break $m655$match;
     }
     if (true) {
       return [{ tag: "ErrorT" }, ck, ctx];
-      break $m653$match;
+      break $m655$match;
     }
     $rt.unreachable();
   }
@@ -5256,28 +5264,28 @@ export function resolved_value_type({ ck, ctx, res, at }) {
   }
   const d = $context.get_def({ ctx: ctx, id: target_def });
   if ($rt.eq(d.kind, { tag: "Fn" })) {
-    const [$r659, ck$401, ctx$401] = fn_value_type({ ck: ck, ctx: ctx, d: d, at: at });
+    const [$r661, ck$401, ctx$401] = fn_value_type({ ck: ck, ctx: ctx, d: d, at: at });
     ck = ck$401;
     ctx = ctx$401;
-    return [$r659, ck, ctx];
+    return [$r661, ck, ctx];
   }
   if ($rt.eq(d.kind, { tag: "Const" })) {
-    const [$r661, ck$402, ctx$402] = const_decl_type({ ck: ck, ctx: ctx, d: d });
+    const [$r663, ck$402, ctx$402] = const_decl_type({ ck: ck, ctx: ctx, d: d });
     ck = ck$402;
     ctx = ctx$402;
-    return [$r661, ck, ctx];
+    return [$r663, ck, ctx];
   }
   return [decl_type({ ctx: ctx, def: target_def }), ck, ctx];
 }
 
 export function call({ ck, ctx, e, expected }) {
-  const $m662 = e;
-  $m662$match: {
-    if ($m662.tag === "Call") {
-      const callee = $m662.callee;
-      const targs = $m662.targs;
-      const args = $m662.args;
-      const span = $m662.span;
+  const $m664 = e;
+  $m664$match: {
+    if ($m664.tag === "Call") {
+      const callee = $m664.callee;
+      const targs = $m664.targs;
+      const args = $m664.args;
+      const span = $m664.span;
       const res = ref_at({ ctx: ctx, k: key({ ck: ck, tag: $defs.tag_expr, span: $parser.span_of_expr({ e: callee }) }) });
       const tag = res_tag({ res: res });
       if (tag === 0 || tag === 5 || tag === 6) {
@@ -5289,23 +5297,23 @@ export function call({ ck, ctx, e, expected }) {
           if (tag === 6) {
             iface = { tag: "Some", value: res_iface({ res: res }) };
           }
-          const [$r668, ck$404, ctx$404] = call_signature({ ck: ck, ctx: ctx, e: e, fn_def: fn_def, iface: iface, expected: expected });
+          const [$r670, ck$404, ctx$404] = call_signature({ ck: ck, ctx: ctx, e: e, fn_def: fn_def, iface: iface, expected: expected });
           ck = ck$404;
           ctx = ctx$404;
-          return [$r668, ck, ctx];
+          return [$r670, ck, ctx];
         }
       }
-      const [$r669, ck$405, ctx$405] = infer({ ck: ck, ctx: ctx, e: callee });
+      const [$r671, ck$405, ctx$405] = infer({ ck: ck, ctx: ctx, e: callee });
       ck = ck$405;
       ctx = ctx$405;
-      const callee_type = $r669;
+      const callee_type = $r671;
       const s = $types.strip({ t: callee_type });
       if (s.tag === "ErrorT") {
         for (const a of args) {
-          const [$r670, ck$406, ctx$406] = infer({ ck: ck, ctx: ctx, e: a.value });
+          const [$r672, ck$406, ctx$406] = infer({ ck: ck, ctx: ctx, e: a.value });
           ck = ck$406;
           ctx = ctx$406;
-          const at = $r670;
+          const at = $r672;
         }
         return [{ tag: "ErrorT" }, ck, ctx];
       }
@@ -5313,10 +5321,10 @@ export function call({ ck, ctx, e, expected }) {
         const [, ctx$407] = rep({ ck: ck, ctx: ctx, code: "E0323", at: $parser.span_of_expr({ e: callee }), detail: show({ ctx: ctx, t: callee_type }) + " is not a function" });
         ctx = ctx$407;
         for (const a of args) {
-          const [$r672, ck$408, ctx$408] = infer({ ck: ck, ctx: ctx, e: a.value });
+          const [$r674, ck$408, ctx$408] = infer({ ck: ck, ctx: ctx, e: a.value });
           ck = ck$408;
           ctx = ctx$408;
-          const at = $r672;
+          const at = $r674;
         }
         return [{ tag: "ErrorT" }, ck, ctx];
       }
@@ -5328,11 +5336,11 @@ export function call({ ck, ctx, e, expected }) {
       ck = ck$410;
       ctx = ctx$410;
       return [$types.ret_of({ t: s }), ck, ctx];
-      break $m662$match;
+      break $m664$match;
     }
     if (true) {
       return [{ tag: "ErrorT" }, ck, ctx];
-      break $m662$match;
+      break $m664$match;
     }
     $rt.unreachable();
   }
@@ -5348,37 +5356,37 @@ export function find_tparam({ ctx, tparams, name }) {
 }
 
 export function call_signature({ ck, ctx, e, fn_def, iface, expected }) {
-  const $m677 = e;
-  $m677$match: {
-    if ($m677.tag === "Call") {
-      const callee = $m677.callee;
-      const targs = $m677.targs;
-      const args = $m677.args;
-      const span = $m677.span;
-      const [$r678, ck$411, ctx$411] = signature_of({ ck: ck, ctx: ctx, d: fn_def });
+  const $m679 = e;
+  $m679$match: {
+    if ($m679.tag === "Call") {
+      const callee = $m679.callee;
+      const targs = $m679.targs;
+      const args = $m679.args;
+      const span = $m679.span;
+      const [$r680, ck$411, ctx$411] = signature_of({ ck: ck, ctx: ctx, d: fn_def });
       ck = ck$411;
       ctx = ctx$411;
-      const sig = $r678;
+      const sig = $r680;
       let tparams = sig.tparams;
-      const $m679 = iface;
-      $m679$match: {
-        if ($m679.tag === "Some") {
-          const value = $m679.value;
+      const $m681 = iface;
+      $m681$match: {
+        if ($m681.tag === "Some") {
+          const value = $m681.value;
           tparams = $std_list.append({ xs: tparams, x: { tag: "TypeP", def: iface_param({ ctx: ctx, iface: value }), bound: { tag: "Some", value: value } } });
-          break $m679$match;
+          break $m681$match;
         }
-        if ($m679.tag === "None") {
+        if ($m681.tag === "None") {
           skip({  });
-          break $m679$match;
+          break $m681$match;
         }
         $rt.unreachable();
       }
       let subst = $std_map.dict({  });
       const tvars = tvars_of({ tparams: tparams });
-      const $m682 = targs;
-      $m682$match: {
-        if ($m682.tag === "Some") {
-          const value = $m682.value;
+      const $m684 = targs;
+      $m684$match: {
+        if ($m684.tag === "Some") {
+          const value = $m684.value;
           let positional = 0;
           for (const a of value) {
             let p = { tag: "None" };
@@ -5400,34 +5408,34 @@ export function call_signature({ ck, ctx, e, fn_def, iface, expected }) {
               positional = $rt.int.add(positional, 1, $ob39);
             }
             if (p.tag === "Some") {
-              const [$r685, ck$414, ctx$414] = type_arg_of({ fuel: max_type_depth, ck: ck, ctx: ctx, a: a, param: p });
+              const [$r687, ck$414, ctx$414] = type_arg_of({ fuel: max_type_depth, ck: ck, ctx: ctx, a: a, param: p });
               ck = ck$414;
               ctx = ctx$414;
-              const v = $r685;
+              const v = $r687;
               if (v.tag === "Some") {
                 const [, subst$415] = $std_map.set({ d: subst, key: $types.tparam_def({ p: tparam_or({ o: p }) }), value: arg_or({ o: v }) });
                 subst = subst$415;
               }
             }
           }
-          break $m682$match;
+          break $m684$match;
         }
-        if ($m682.tag === "None") {
+        if ($m684.tag === "None") {
           skip({  });
-          break $m682$match;
+          break $m684$match;
         }
         $rt.unreachable();
       }
-      const $m686 = expected;
-      $m686$match: {
-        if ($m686.tag === "Some") {
-          const value = $m686.value;
+      const $m688 = expected;
+      $m688$match: {
+        if ($m688.tag === "Some") {
+          const value = $m688.value;
           const u = unify({ pattern: sig.ret, actual: value, subst: subst, tvars: tvars });
-          break $m686$match;
+          break $m688$match;
         }
-        if ($m686.tag === "None") {
+        if ($m688.tag === "None") {
           skip({  });
-          break $m686$match;
+          break $m688$match;
         }
         $rt.unreachable();
       }
@@ -5468,8 +5476,8 @@ export function call_signature({ ck, ctx, e, fn_def, iface, expected }) {
         }
       }
       let index_subst = $std_map.dict({  });
-      const $hi692 = $std_list.len({ xs: sig.param_defs });
-      for (let i = 0; i < $hi692; i++) {
+      const $hi694 = $std_list.len({ xs: sig.param_defs });
+      for (let i = 0; i < $hi694; i++) {
         const pd = $std_list.get({ xs: sig.param_defs, i: i });
         let pname = "";
         if (i < $std_list.len({ xs: sig.params })) {
@@ -5497,22 +5505,22 @@ export function call_signature({ ck, ctx, e, fn_def, iface, expected }) {
       let inst = $std_list.builder({  });
       let bindings = $std_map.dict({  });
       for (const p of tparams) {
-        const $m696 = $std_map.find({ d: subst, key: $types.tparam_def({ p: p }) });
-        $m696$match: {
-          if ($m696.tag === "Some") {
-            const value = $m696.value;
+        const $m698 = $std_map.find({ d: subst, key: $types.tparam_def({ p: p }) });
+        $m698$match: {
+          if ($m698.tag === "Some") {
+            const value = $m698.value;
             const [, inst$425] = $std_list.push({ b: inst, x: value });
             inst = inst$425;
             if (p.tag === "EffectP" && value.tag === "EffectsA") {
               const [, bindings$426] = $std_map.set({ d: bindings, key: $types.tparam_def({ p: p }), value: $types.arg_effects({ a: value }) });
               bindings = bindings$426;
             }
-            break $m696$match;
+            break $m698$match;
           }
-          if ($m696.tag === "None") {
+          if ($m698.tag === "None") {
             const [, inst$427] = $std_list.push({ b: inst, x: { tag: "TypeA", ty: { tag: "ErrorT" } } });
             inst = inst$427;
-            break $m696$match;
+            break $m698$match;
           }
           $rt.unreachable();
         }
@@ -5527,11 +5535,11 @@ export function call_signature({ ck, ctx, e, fn_def, iface, expected }) {
       const [, effs$430] = $std_map.set({ d: effs, key: call_key, value: bindings });
       effs = effs$430;
       return [ret, ck, ctx];
-      break $m677$match;
+      break $m679$match;
     }
     if (true) {
       return [{ tag: "ErrorT" }, ck, ctx];
-      break $m677$match;
+      break $m679$match;
     }
     $rt.unreachable();
   }
@@ -5548,25 +5556,25 @@ export function process_pending({ ck, ctx }) {
     const saved_def = ck.current_def;
     ck = { ...ck, current_file: p.file, current_def: p.def_name, it_stack: $std_list.append({ xs: ck.it_stack, x: p.base }) };
     let pushed = false;
-    const $m702 = p.fn_ctx;
-    $m702$match: {
-      if ($m702.tag === "Some") {
-        const value = $m702.value;
+    const $m704 = p.fn_ctx;
+    $m704$match: {
+      if ($m704.tag === "Some") {
+        const value = $m704.value;
         const [, ck$431] = push_fn({ ck: ck, f: value });
         ck = ck$431;
         pushed = true;
-        break $m702$match;
+        break $m704$match;
       }
-      if ($m702.tag === "None") {
+      if ($m704.tag === "None") {
         skip({  });
-        break $m702$match;
+        break $m704$match;
       }
       $rt.unreachable();
     }
-    const [$r704, ck$432, ctx$432] = check_expr({ ck: ck, ctx: ctx, e: p.pred, expected: { tag: "Some", value: $types.bool_t } });
+    const [$r706, ck$432, ctx$432] = check_expr({ ck: ck, ctx: ctx, e: p.pred, expected: { tag: "Some", value: $types.bool_t } });
     ck = ck$432;
     ctx = ctx$432;
-    const t = $r704;
+    const t = $r706;
     if (pushed) {
       const [, ck$433] = pop_fn({ ck: ck });
       ck = ck$433;
@@ -5585,36 +5593,36 @@ export function process_pending({ ck, ctx }) {
 export function polymorphic_recursion({ ctx }) {
   let adjacency = $std_map.dict({  });
   let edges = $std_list.builder({  });
-  const $hi708 = $context.def_count({ ctx: ctx });
-  for (let id = 0; id < $hi708; id++) {
+  const $hi710 = $context.def_count({ ctx: ctx });
+  for (let id = 0; id < $hi710; id++) {
     const f = $context.get_def({ ctx: ctx, id: id });
     if (f.kind.tag === "Fn") {
       const params = type_param_defs({ ctx: ctx, owner: f.id });
       if ($std_list.len({ xs: params }) > 0) {
-        const $m709 = f.node;
-        $m709$match: {
-          if ($m709.tag === "FnNode") {
-            const decl = $m709.decl;
-            const $m710 = decl.body;
-            $m710$match: {
-              if ($m710.tag === "Some") {
-                const value = $m710.value;
+        const $m711 = f.node;
+        $m711$match: {
+          if ($m711.tag === "FnNode") {
+            const decl = $m711.decl;
+            const $m712 = decl.body;
+            $m712$match: {
+              if ($m712.tag === "Some") {
+                const value = $m712.value;
                 const [, adjacency$434, edges$434] = collect_edges({ ctx: ctx, f: f, params: params, body: value, adjacency: adjacency, edges: edges });
                 adjacency = adjacency$434;
                 edges = edges$434;
-                break $m710$match;
+                break $m712$match;
               }
-              if ($m710.tag === "None") {
+              if ($m712.tag === "None") {
                 skip({  });
-                break $m710$match;
+                break $m712$match;
               }
               $rt.unreachable();
             }
-            break $m709$match;
+            break $m711$match;
           }
           if (true) {
             skip({  });
-            break $m709$match;
+            break $m711$match;
           }
           $rt.unreachable();
         }
@@ -5637,31 +5645,31 @@ export function polymorphic_recursion({ ctx }) {
 
 export function type_param_defs({ ctx, owner }) {
   let out = $std_list.builder({  });
-  const $m712 = $std_map.find({ d: ctx.type_params, key: owner });
-  $m712$match: {
-    if ($m712.tag === "Some") {
-      const value = $m712.value;
+  const $m714 = $std_map.find({ d: ctx.type_params, key: owner });
+  $m714$match: {
+    if ($m714.tag === "Some") {
+      const value = $m714.value;
       for (const p of value) {
-        const $m713 = p;
-        $m713$match: {
-          if ($m713.tag === "TypeP") {
-            const def = $m713.def;
+        const $m715 = p;
+        $m715$match: {
+          if ($m715.tag === "TypeP") {
+            const def = $m715.def;
             const [, out$437] = $std_list.push({ b: out, x: def });
             out = out$437;
-            break $m713$match;
+            break $m715$match;
           }
           if (true) {
             skip({  });
-            break $m713$match;
+            break $m715$match;
           }
           $rt.unreachable();
         }
       }
-      break $m712$match;
+      break $m714$match;
     }
-    if ($m712.tag === "None") {
+    if ($m714.tag === "None") {
       skip({  });
-      break $m712$match;
+      break $m714$match;
     }
     $rt.unreachable();
   }
@@ -5669,44 +5677,44 @@ export function type_param_defs({ ctx, owner }) {
 }
 
 export function callee_def({ ctx, file, callee }) {
-  const $m714 = $std_map.find({ d: ctx.refs, key: $defs.node_key({ file: file, tag: $defs.tag_expr, span: $parser.span_of_expr({ e: callee }) }) });
-  $m714$match: {
-    if ($m714.tag === "Some") {
-      const value = $m714.value;
-      const $m715 = value;
-      $m715$match: {
-        if ($m715.tag === "DefRes") {
-          const def = $m715.def;
+  const $m716 = $std_map.find({ d: ctx.refs, key: $defs.node_key({ file: file, tag: $defs.tag_expr, span: $parser.span_of_expr({ e: callee }) }) });
+  $m716$match: {
+    if ($m716.tag === "Some") {
+      const value = $m716.value;
+      const $m717 = value;
+      $m717$match: {
+        if ($m717.tag === "DefRes") {
+          const def = $m717.def;
           return { tag: "Some", value: def };
-          break $m715$match;
+          break $m717$match;
         }
         if (true) {
           return { tag: "None" };
-          break $m715$match;
+          break $m717$match;
         }
         $rt.unreachable();
       }
-      break $m714$match;
+      break $m716$match;
     }
-    if ($m714.tag === "None") {
+    if ($m716.tag === "None") {
       return { tag: "None" };
-      break $m714$match;
+      break $m716$match;
     }
     $rt.unreachable();
   }
 }
 
 export function instantiation_at({ ctx, file, span }) {
-  const $m719 = $std_map.find({ d: ctx.instantiations, key: $defs.node_key({ file: file, tag: $defs.tag_expr, span: span }) });
-  $m719$match: {
-    if ($m719.tag === "Some") {
-      const value = $m719.value;
+  const $m721 = $std_map.find({ d: ctx.instantiations, key: $defs.node_key({ file: file, tag: $defs.tag_expr, span: span }) });
+  $m721$match: {
+    if ($m721.tag === "Some") {
+      const value = $m721.value;
       return value;
-      break $m719$match;
+      break $m721$match;
     }
-    if ($m719.tag === "None") {
+    if ($m721.tag === "None") {
       return [];
-      break $m719$match;
+      break $m721$match;
     }
     $rt.unreachable();
   }
@@ -5714,16 +5722,16 @@ export function instantiation_at({ ctx, file, span }) {
 
 export function add_edge({ adjacency, from, to }) {
   let list = [];
-  const $m720 = $std_map.find({ d: adjacency, key: from });
-  $m720$match: {
-    if ($m720.tag === "Some") {
-      const value = $m720.value;
+  const $m722 = $std_map.find({ d: adjacency, key: from });
+  $m722$match: {
+    if ($m722.tag === "Some") {
+      const value = $m722.value;
       list = value;
-      break $m720$match;
+      break $m722$match;
     }
-    if ($m720.tag === "None") {
+    if ($m722.tag === "None") {
       skip({  });
-      break $m720$match;
+      break $m722$match;
     }
     $rt.unreachable();
   }
@@ -5735,28 +5743,28 @@ export function add_edge({ adjacency, from, to }) {
 
 export function collect_edges({ ctx, f, params, body, adjacency, edges }) {
   for (const n of $walk.nodes_in_block({ b: body, into_verify: true })) {
-    const $m721 = n;
-    $m721$match: {
-      if ($m721.tag === "NExpr") {
-        const e = $m721.e;
-        const $m722 = e;
-        $m722$match: {
-          if ($m722.tag === "Call") {
-            const callee = $m722.callee;
-            const span = $m722.span;
-            const $m723 = callee_def({ ctx: ctx, file: f.file, callee: callee });
-            $m723$match: {
-              if ($m723.tag === "Some") {
-                const value = $m723.value;
+    const $m723 = n;
+    $m723$match: {
+      if ($m723.tag === "NExpr") {
+        const e = $m723.e;
+        const $m724 = e;
+        $m724$match: {
+          if ($m724.tag === "Call") {
+            const callee = $m724.callee;
+            const span = $m724.span;
+            const $m725 = callee_def({ ctx: ctx, file: f.file, callee: callee });
+            $m725$match: {
+              if ($m725.tag === "Some") {
+                const value = $m725.value;
                 const g_params = type_param_defs({ ctx: ctx, owner: value });
                 const inst = instantiation_at({ ctx: ctx, file: f.file, span: span });
-                const $hi724 = $std_list.len({ xs: g_params });
-                for (let i = 0; i < $hi724; i++) {
+                const $hi726 = $std_list.len({ xs: g_params });
+                for (let i = 0; i < $hi726; i++) {
                   if (i < $std_list.len({ xs: inst })) {
-                    const $m725 = $std_list.get({ xs: inst, i: i });
-                    $m725$match: {
-                      if ($m725.tag === "TypeA") {
-                        const ty = $m725.ty;
+                    const $m727 = $std_list.get({ xs: inst, i: i });
+                    $m727$match: {
+                      if ($m727.tag === "TypeA") {
+                        const ty = $m727.ty;
                         for (const p of params) {
                           if (occurs({ t: ty, p: p })) {
                             const from = $std_int.to_text({ x: f.id }) + ":" + $std_int.to_text({ x: p });
@@ -5769,37 +5777,37 @@ export function collect_edges({ ctx, f, params, body, adjacency, edges }) {
                             }
                           }
                         }
-                        break $m725$match;
+                        break $m727$match;
                       }
                       if (true) {
                         skip({  });
-                        break $m725$match;
+                        break $m727$match;
                       }
                       $rt.unreachable();
                     }
                   }
                 }
-                break $m723$match;
+                break $m725$match;
               }
-              if ($m723.tag === "None") {
+              if ($m725.tag === "None") {
                 skip({  });
-                break $m723$match;
+                break $m725$match;
               }
               $rt.unreachable();
             }
-            break $m722$match;
+            break $m724$match;
           }
           if (true) {
             skip({  });
-            break $m722$match;
+            break $m724$match;
           }
           $rt.unreachable();
         }
-        break $m721$match;
+        break $m723$match;
       }
       if (true) {
         skip({  });
-        break $m721$match;
+        break $m723$match;
       }
       $rt.unreachable();
     }
@@ -5809,63 +5817,63 @@ export function collect_edges({ ctx, f, params, body, adjacency, edges }) {
 }
 
 export function is_param({ t, p }) {
-  const $m727 = t;
-  $m727$match: {
-    if ($m727.tag === "ParamT") {
-      const def = $m727.def;
+  const $m729 = t;
+  $m729$match: {
+    if ($m729.tag === "ParamT") {
+      const def = $m729.def;
       return def === p;
-      break $m727$match;
+      break $m729$match;
     }
     if (true) {
       return false;
-      break $m727$match;
+      break $m729$match;
     }
     $rt.unreachable();
   }
 }
 
 export function occurs({ t, p }) {
-  const $m728 = t;
-  $m728$match: {
-    if ($m728.tag === "ParamT") {
-      const def = $m728.def;
+  const $m730 = t;
+  $m730$match: {
+    if ($m730.tag === "ParamT") {
+      const def = $m730.def;
       return def === p;
-      break $m728$match;
+      break $m730$match;
     }
-    if ($m728.tag === "Refined") {
-      const base = $m728.base;
+    if ($m730.tag === "Refined") {
+      const base = $m730.base;
       return occurs({ t: base, p: p });
-      break $m728$match;
+      break $m730$match;
     }
-    if ($m728.tag === "RecordT") {
-      const args = $m728.args;
+    if ($m730.tag === "RecordT") {
+      const args = $m730.args;
       return occurs_args({ args: args, p: p });
-      break $m728$match;
+      break $m730$match;
     }
-    if ($m728.tag === "UnionT") {
-      const args = $m728.args;
+    if ($m730.tag === "UnionT") {
+      const args = $m730.args;
       return occurs_args({ args: args, p: p });
-      break $m728$match;
+      break $m730$match;
     }
-    if ($m728.tag === "Opaque") {
-      const args = $m728.args;
+    if ($m730.tag === "Opaque") {
+      const args = $m730.args;
       return occurs_args({ args: args, p: p });
-      break $m728$match;
+      break $m730$match;
     }
-    if ($m728.tag === "Capability") {
-      const args = $m728.args;
+    if ($m730.tag === "Capability") {
+      const args = $m730.args;
       return occurs_args({ args: args, p: p });
-      break $m728$match;
+      break $m730$match;
     }
-    if ($m728.tag === "FnT") {
-      const params = $m728.params;
-      const ret = $m728.ret;
+    if ($m730.tag === "FnT") {
+      const params = $m730.params;
+      const ret = $m730.ret;
       return occurs_params({ params: params, p: p }) || occurs({ t: ret, p: p });
-      break $m728$match;
+      break $m730$match;
     }
     if (true) {
       return false;
-      break $m728$match;
+      break $m730$match;
     }
     $rt.unreachable();
   }
@@ -5873,18 +5881,18 @@ export function occurs({ t, p }) {
 
 export function occurs_args({ args, p }) {
   for (const a of args) {
-    const $m729 = a;
-    $m729$match: {
-      if ($m729.tag === "TypeA") {
-        const ty = $m729.ty;
+    const $m731 = a;
+    $m731$match: {
+      if ($m731.tag === "TypeA") {
+        const ty = $m731.ty;
         if (occurs({ t: ty, p: p })) {
           return true;
         }
-        break $m729$match;
+        break $m731$match;
       }
       if (true) {
         skip({  });
-        break $m729$match;
+        break $m731$match;
       }
       $rt.unreachable();
     }
@@ -5914,10 +5922,10 @@ export function reaches({ adjacency, start, target }) {
     steps = $rt.int.sub(steps, 1, $ob41);
     const cur = $std_list.get({ xs: queue, i: $rt.int.sub($std_list.len({ xs: queue }), 1, $ob42) });
     queue = $std_list.slice({ xs: queue, from: 0, to: $rt.int.sub($std_list.len({ xs: queue }), 1, $ob43) });
-    const $m731 = $std_map.find({ d: adjacency, key: cur });
-    $m731$match: {
-      if ($m731.tag === "Some") {
-        const value = $m731.value;
+    const $m733 = $std_map.find({ d: adjacency, key: cur });
+    $m733$match: {
+      if ($m733.tag === "Some") {
+        const value = $m733.value;
         for (const next of value) {
           if (next === target) {
             return true;
@@ -5928,35 +5936,6 @@ export function reaches({ adjacency, start, target }) {
             queue = [...queue, ...[next]];
           }
         }
-        break $m731$match;
-      }
-      if ($m731.tag === "None") {
-        skip({  });
-        break $m731$match;
-      }
-      $rt.unreachable();
-    }
-  }
-  return false;
-}
-
-export function types_pass({ ctx }) {
-  let ck = new_checker({  });
-  const $hi732 = ctx.module_count;
-  for (let id = 0; id < $hi732; id++) {
-    const $m733 = $std_map.find({ d: ctx.modules, key: id });
-    $m733$match: {
-      if ($m733.tag === "Some") {
-        const value = $m733.value;
-        ck = { ...ck, current_module: { tag: "Some", value: value }, current_file: value.file };
-        for (const item of value.tree.items) {
-          const [, ck$443, ctx$443] = elaborate_item({ ck: ck, ctx: ctx, item: item });
-          ck = ck$443;
-          ctx = ctx$443;
-        }
-        const [, ck$444, ctx$444] = process_pending({ ck: ck, ctx: ctx });
-        ck = ck$444;
-        ctx = ctx$444;
         break $m733$match;
       }
       if ($m733.tag === "None") {
@@ -5966,12 +5945,41 @@ export function types_pass({ ctx }) {
       $rt.unreachable();
     }
   }
-  const $hi736 = ctx.module_count;
-  for (let id = 0; id < $hi736; id++) {
-    const $m737 = $std_map.find({ d: ctx.modules, key: id });
-    $m737$match: {
-      if ($m737.tag === "Some") {
-        const value = $m737.value;
+  return false;
+}
+
+export function types_pass({ ctx }) {
+  let ck = new_checker({  });
+  const $hi734 = ctx.module_count;
+  for (let id = 0; id < $hi734; id++) {
+    const $m735 = $std_map.find({ d: ctx.modules, key: id });
+    $m735$match: {
+      if ($m735.tag === "Some") {
+        const value = $m735.value;
+        ck = { ...ck, current_module: { tag: "Some", value: value }, current_file: value.file };
+        for (const item of value.tree.items) {
+          const [, ck$443, ctx$443] = elaborate_item({ ck: ck, ctx: ctx, item: item });
+          ck = ck$443;
+          ctx = ctx$443;
+        }
+        const [, ck$444, ctx$444] = process_pending({ ck: ck, ctx: ctx });
+        ck = ck$444;
+        ctx = ctx$444;
+        break $m735$match;
+      }
+      if ($m735.tag === "None") {
+        skip({  });
+        break $m735$match;
+      }
+      $rt.unreachable();
+    }
+  }
+  const $hi738 = ctx.module_count;
+  for (let id = 0; id < $hi738; id++) {
+    const $m739 = $std_map.find({ d: ctx.modules, key: id });
+    $m739$match: {
+      if ($m739.tag === "Some") {
+        const value = $m739.value;
         ck = { ...ck, current_module: { tag: "Some", value: value }, current_file: value.file };
         for (const item of value.tree.items) {
           ck = { ...ck, current_def: { tag: "Some", value: item_name({ item: item }) } };
@@ -5983,11 +5991,11 @@ export function types_pass({ ctx }) {
           ck = ck$446;
           ctx = ctx$446;
         }
-        break $m737$match;
+        break $m739$match;
       }
-      if ($m737.tag === "None") {
+      if ($m739.tag === "None") {
         skip({  });
-        break $m737$match;
+        break $m739$match;
       }
       $rt.unreachable();
     }

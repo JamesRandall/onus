@@ -541,7 +541,13 @@ class Lowerer {
       const o = obs.find((x) => x.kind === 'invariant-entry' && x.source === inv.id);
       if (o !== undefined && o.status === 'checked') out.push({ k: 'check', cond: this.expr(inv.expr), ob: this.obRefOf(o) });
     }
-    const cond = this.expr(s.cond);
+    // The condition's own statements (an `inout` call) must run before every test of it, not once before the loop
+    // (docs/CHANGES.md item 194): they are collected here and, when there are any, repeated at the end of the body.
+    let cond: IrExpr = { k: 'bool', v: true };
+    const condPre = this.collect(() => {
+      cond = this.expr(s.cond);
+      return [];
+    });
     const body: IrStmt[] = [];
     const dec = decreases === null ? null : (obs.find((x) => x.kind === 'decreases' && x.source === decreases.id) ?? null);
     const measure = this.tmp('measure');
@@ -559,7 +565,19 @@ class Lowerer {
     if (checkedDecreases && dec !== null && decreases !== null) {
       body.push(...this.collect(() => [{ k: 'check', cond: { k: 'cmp', op: '<', left: this.expr(decreases.expr), right: measureExpr, float: false }, ob: this.obRefOf(dec) }]));
     }
-    out.push({ k: 'loop', cond, body });
+    if (condPre.length === 0) {
+      out.push({ k: 'loop', cond, body });
+      return out;
+    }
+    const go = this.tmp('go');
+    out.push(...condPre, { k: 'let', name: go, type: prim('Bool'), mutable: true, value: cond });
+    let again: IrExpr = cond;
+    const againPre = this.collect(() => {
+      again = this.expr(s.cond);
+      return [];
+    });
+    body.push(...againPre, { k: 'assign', name: go, type: prim('Bool'), value: again });
+    out.push({ k: 'loop', cond: { k: 'local', name: go, type: prim('Bool') }, body });
     return out;
   }
 
@@ -639,9 +657,9 @@ class Lowerer {
       case 'Binary':
         return this.binary(e);
       case 'And':
-        return { k: 'and', operands: e.operands.map((o) => this.expr(o)) };
+        return this.shortCircuit('and', e.operands);
       case 'Or':
-        return { k: 'or', operands: e.operands.map((o) => this.expr(o)) };
+        return this.shortCircuit('or', e.operands);
       case 'Is': {
         const subject = this.expr(e.expr);
         const test = this.patternTest(e.pattern, subject, this.typeOfExpr(e.expr));
@@ -980,7 +998,50 @@ class Lowerer {
     return { k: 'neg', operand: v, float: true, ob: null };
   }
 
+  /**
+   * `and` or `or` over operands. A later operand that needs statements of its own (an `inout` call) runs only
+   * when the earlier ones leave the result undecided, through a flag; without such operands the chain is the
+   * IR's own (docs/CHANGES.md item 194).
+   */
+  private shortCircuit(k: 'and' | 'or', operands: readonly A.Expr[]): IrExpr {
+    const first = operands[0];
+    if (first === undefined) return { k: 'bool', v: k === 'and' };
+    const head = this.expr(first);
+    const rest: { pre: IrStmt[]; value: IrExpr }[] = [];
+    for (const o of operands.slice(1)) {
+      let value: IrExpr = { k: 'bool', v: true };
+      const pre = this.collect(() => {
+        value = this.expr(o);
+        return [];
+      });
+      rest.push({ pre, value });
+    }
+    if (rest.every((r) => r.pre.length === 0)) return { k, operands: [head, ...rest.map((r) => r.value)] };
+    const name = this.tmp('sc');
+    const local: IrExpr = { k: 'local', name, type: prim('Bool') };
+    this.pre.push({ k: 'let', name, type: prim('Bool'), mutable: true, value: head });
+    for (const r of rest) this.pre.push({ k: 'if', cond: k === 'and' ? local : { k: 'not', operand: local }, then: [...r.pre, { k: 'assign', name, type: prim('Bool'), value: r.value }], else: null });
+    return local;
+  }
+
+  /** `left implies right`: the right side runs only when the left holds, as `and` and `or` short-circuit (item 194). */
+  private implies(e: A.Binary): IrExpr {
+    const left = this.expr(e.left);
+    let right: IrExpr = { k: 'bool', v: true };
+    const pre = this.collect(() => {
+      right = this.expr(e.right);
+      return [];
+    });
+    if (pre.length === 0) return { k: 'implies', left, right };
+    const name = this.tmp('sc');
+    const local: IrExpr = { k: 'local', name, type: prim('Bool') };
+    this.pre.push({ k: 'let', name, type: prim('Bool'), mutable: true, value: { k: 'not', operand: left } });
+    this.pre.push({ k: 'if', cond: { k: 'not', operand: local }, then: [...pre, { k: 'assign', name, type: prim('Bool'), value: right }], else: null });
+    return local;
+  }
+
   private binary(e: A.Binary): IrExpr {
+    if (e.op === 'implies') return this.implies(e);
     const left = this.expr(e.left);
     const right = this.expr(e.right);
     const lt = this.typeOfExpr(e.left);
@@ -1008,8 +1069,6 @@ class Lowerer {
       case '>':
       case '>=':
         return { k: 'cmp', op: e.op, left, right, float: s.k === 'prim' && s.name === 'Float' };
-      case 'implies':
-        return { k: 'implies', left, right };
     }
   }
 

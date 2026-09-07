@@ -113,16 +113,16 @@ fn scope_set_effect(s: Scope, name: Text, id: Int) -> Unit may mutate, alloc {
 }
 
 -- Local bindings visible from `scope`, outermost first (`onus next`, §14).
+-- The names bound in every scope below the module's, outermost first (the
+-- hole's `in_scope` of `onus next`, §14): a record field's refinement sees the
+-- earlier fields, a body its parameters and locals.
 fn visible_locals(s: Scope) -> List[Text] may alloc, mutate
   decreases s
 {
   var outer: List[Text] = []
   match s.parent with
   | Some(value) -> outer = visible_locals(s: value)
-  | None -> outer = []
-  if s.frame < 0 {
-    return outer
-  }
+  | None -> return []
   var out: Builder[Text] = List.builder()
   for n: Text in outer {
     List.push(b: inout out, x: n)

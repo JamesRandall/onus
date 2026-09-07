@@ -1,0 +1,81 @@
+module inout_conditions
+
+-- An `inout` call in a condition runs when the condition is tested and only
+-- then (docs/CHANGES.md item 194): in a loop condition before every test, so
+-- `below` is asked four times and the loop stops at 3; as a later operand of
+-- `and`, `or` or `implies` only when the earlier operands leave the result
+-- undecided. The same on both targets.
+record Counter {
+  n: Int
+  seen: Int
+}
+
+fn below(c: inout Counter, bound: Int) -> Bool may mutate
+  ensures c.n == old(c).n
+{
+  c = { c with seen: c.seen + 1 }
+  return c.n < bound
+}
+
+fn count_to(bound: Int where it >= 0) -> Counter may mutate {
+  var c: Counter = Counter { n: 0, seen: 0 }
+  loop while below(c: inout c, bound: bound) and c.n < 10
+    invariant c.n >= 0 and c.n <= 10
+    decreases 10 - c.n
+  {
+    c = { c with n: c.n + 1 }
+  }
+  return c
+}
+
+example stops_where_the_condition_says {
+  count_to(bound: 3).n == 3
+  count_to(bound: 3).seen == 4
+  count_to(bound: 0).n == 0
+  count_to(bound: 0).seen == 1
+}
+
+fn probe(c: inout Counter, answer: Bool) -> Bool may mutate {
+  c = { c with seen: c.seen + 1 }
+  return answer
+}
+
+-- How many operands `and`, `or` and `implies` evaluate, and what they yield.
+fn both(a: Bool, b: Bool) -> Counter may mutate {
+  var c: Counter = Counter { n: 0, seen: 0 }
+  if probe(c: inout c, answer: a) and probe(c: inout c, answer: b) {
+    c = { c with n: 1 }
+  }
+  return c
+}
+
+fn either(a: Bool, b: Bool) -> Counter may mutate {
+  var c: Counter = Counter { n: 0, seen: 0 }
+  if probe(c: inout c, answer: a) or probe(c: inout c, answer: b) {
+    c = { c with n: 1 }
+  }
+  return c
+}
+
+fn given(a: Bool, b: Bool) -> Counter may mutate {
+  var c: Counter = Counter { n: 0, seen: 0 }
+  if probe(c: inout c, answer: a) implies probe(c: inout c, answer: b) {
+    c = { c with n: 1 }
+  }
+  return c
+}
+
+example later_operands_run_only_when_needed {
+  both(a: false, b: true).seen == 1
+  both(a: false, b: true).n == 0
+  both(a: true, b: true).seen == 2
+  both(a: true, b: true).n == 1
+  either(a: true, b: false).seen == 1
+  either(a: true, b: false).n == 1
+  either(a: false, b: false).seen == 2
+  either(a: false, b: false).n == 0
+  given(a: false, b: false).seen == 1
+  given(a: false, b: false).n == 1
+  given(a: true, b: false).seen == 2
+  given(a: true, b: false).n == 0
+}

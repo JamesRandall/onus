@@ -1,0 +1,154 @@
+module nextcmd
+import std.io
+import ast
+import context
+import defs
+import loader
+import lexer
+import tokens
+import parser
+import resolve
+import typecheck
+import types
+import printer
+
+-- `onus next` (language spec §14; impl spec §8, M9; `next/next.ts`): the
+-- legal next tokens at a position, the expected type there, and the local
+-- names in scope.
+--
+-- Tokens come from the parser's state after the prefix (`legal_tokens_at`).
+-- The expected type comes from a second parse of the prefix with a hole at
+-- the cursor and closers for every open bracket, resolved and typed with
+-- diagnostics ignored; when the cursor is not in expression position, or the
+-- hole is typed without an expectation, `expected_type` is none. Refinements
+-- are reported in the type text but not enforced (§14). v0 re-runs the front
+-- half of the pipeline per call (impl spec §12, item 5).
+pub record NextResult {
+  -- Legal next tokens, sorted, by decoder name.
+  tokens: List[Text]
+  expected_type: Option[Text]
+  in_scope: List[Text]
+}
+
+fn skip() -> Unit {
+  return Unit
+}
+
+fn sorted(xs: List[Text]) -> List[Text] may alloc, mutate {
+  var out: List[Text] = []
+  for x: Text in xs {
+    var placed: Bool = false
+    var next_out: Builder[Text] = List.builder()
+    for y: Text in out {
+      if not placed and Text.compare(a: x, b: y) < 0 {
+        List.push(b: inout next_out, x: x)
+        placed = true
+      }
+      List.push(b: inout next_out, x: y)
+    }
+    if not placed {
+      List.push(b: inout next_out, x: x)
+    }
+    out = List.finish(b: next_out)
+  }
+  return out
+}
+
+-- Computes the completion state at `offset` (a code point index into `text`)
+-- of the file `path`, which becomes the context's entry file. The context has
+-- no files yet. The holed prefix's syntax diagnostics are reported to the
+-- context and are not part of the result.
+pub fn next(
+  ctx: inout context.Context,
+  files: io.Files,
+  path: Text,
+  text: Text,
+  offset: Int
+) -> NextResult may io.file, alloc, mutate {
+  let n: Int = Text.count(t: text)
+  if n > lexer.max_source {
+    return NextResult { tokens: [], expected_type: None, in_scope: [] }
+  }
+  var at: Int = offset
+  if at < 0 {
+    at = 0
+  }
+  if at > n {
+    at = n
+  }
+  let lexed: lexer.LexResult = lexer.lex(source: Text.slice(t: text, from: 0, to: at))
+  let prefix: List[tokens.Token] = parser.prefix_tokens(toks: lexed.tokens)
+  var names: Builder[Text] = List.builder()
+  for k: Text in Map.keys(d: parser.legal_tokens_at(prefix: prefix, offset: at)) {
+    List.push(b: inout names, x: tokens.decoder_name_of(kind: k))
+  }
+  let holed: parser.ParseResult = parser.parse_with_hole(prefix: prefix, source_end: n, offset: at)
+  let added: Option[Int] = loader.add_parsed(
+    ctx: inout ctx,
+    path: path,
+    text: text,
+    comments: [],
+    lex_diagnostics: [],
+    r: holed,
+    lexable: true
+  )
+  var expected: Option[Text] = None
+  var in_scope: List[Text] = []
+  if holed.module is Some and added is Some {
+    loader.load(ctx: inout ctx, files: files)
+    resolve.resolve_pass(ctx: inout ctx)
+    typecheck.types_pass(ctx: inout ctx)
+    let key: Int = defs.node_key(file: 0, tag: defs.tag_expr, span: ast.Span { start: at, end: at })
+    expected = expected_at(ctx: ctx, key: key)
+    match Map.find(d: ctx.holes, key: key) with
+    | Some(value) -> in_scope = value
+    | None -> skip()
+  }
+  return NextResult {
+    tokens: sorted(xs: List.finish(b: names)),
+    expected_type: expected,
+    in_scope: in_scope
+  }
+}
+
+fn expected_at(ctx: context.Context, key: Int) -> Option[Text] may alloc, mutate {
+  match Map.find(d: ctx.type_holes, key: key) with
+  | None -> return None
+  | Some(value) -> return expected_text(ctx: ctx, t: value)
+}
+
+fn expected_text(ctx: context.Context, t: Option[types.Type]) -> Option[Text] may alloc, mutate {
+  match t with
+  | None -> return None
+  | Some(value) -> return Some(value: type_text(ctx: ctx, t: value))
+}
+
+-- A type with its refinement predicates spelled out, innermost first (§14: reported, not enforced).
+fn type_text(ctx: context.Context, t: types.Type) -> Text may alloc, mutate {
+  var preds: Builder[Text] = List.builder()
+  collect_preds(ctx: ctx, t: t, out: inout preds)
+  let base: Text = typecheck.show(ctx: ctx, t: types.strip(t: t))
+  let found: List[Text] = List.finish(b: preds)
+  if List.len(xs: found) == 0 {
+    return base
+  }
+  return base ++ " where " ++ Text.join(parts: List.reverse(xs: found), sep: " and ")
+}
+
+fn collect_preds(
+  ctx: context.Context,
+  t: types.Type,
+  out: inout Builder[Text]
+) -> Unit may alloc, mutate
+  decreases t
+{
+  match t with
+  | types.Refined(base, pred, _) -> {
+    match Map.find(d: ctx.where_exprs, key: pred) with
+    | Some(value) -> List.push(b: inout out, x: printer.print_expr(e: value))
+    | None -> skip()
+    collect_preds(ctx: ctx, t: base, out: inout out)
+  }
+  | _ -> skip()
+  return Unit
+}
