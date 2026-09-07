@@ -1,0 +1,10 @@
+path monthly_report (ok)
+  entry reporting.monthly_totals
+  reachable (4): reporting.monthly_totals, std.sql.select, std.sql.int, std.sql.query
+  effects: { alloc, sql.read } within { alloc, sql.read }, forbidding { io.file, io.net, sql.write }
+  assumes: none
+  obligations: 4 proved, 0 checked, 0 assumed
+  coverage: 3 proved, 0 checked (0 exercised by tests), 0 assumptions (0 verifiable, 0 verified)
+  unresolvable calls: none
+  capabilities: none
+  graph: 4 nodes, 3 edges

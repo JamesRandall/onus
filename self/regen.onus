@@ -1,0 +1,3941 @@
+module regen
+import std.io
+import std.hash
+import std.http
+import ast
+import context
+import defs
+import loader
+import check
+import verifier
+import report
+import diagjson
+import json
+import loc
+import interface
+import idiff
+import printer
+import parser
+import tokens
+import build
+import testcmd
+import jsemit
+import assumptions
+import codes
+import lexer
+
+-- The regeneration loop (docs/onus-loop-v0.md; impl spec M14; `packages/loop`
+-- in TypeScript): `onus loop run <task.json>` runs one task to its
+-- conclusion — intake → prepare → [generate → check → classify]* → conclude —
+-- with the escalation ladder of §4.1, the budgets of §4.2, the proposals of
+-- §5, the changes of §6, the regeneration audits of §8 and the boundaries of
+-- §9. The loop edits bodies and nothing else; when it cannot, it stops with a
+-- proposal. The model sits behind `generate`: a scripted list of answers for
+-- the tests, Claude Code as a subprocess, and the Anthropic and OpenRouter
+-- APIs through `curl`; keys come from the environment or `.env` files, never
+-- from the command line.
+fn skip() -> Unit {
+  return Unit
+}
+
+fn or_empty(o: Option[Text]) -> Text {
+  match o with
+  | Some(value) -> return value
+  | None -> return ""
+}
+
+fn text_or(o: Option[Text], dflt: Text) -> Text {
+  match o with
+  | Some(value) -> return value
+  | None -> return dflt
+}
+
+fn int_or(o: Option[Int], dflt: Int) -> Int {
+  match o with
+  | Some(value) -> return value
+  | None -> return dflt
+}
+
+fn plural(n: Int, word: Text) -> Text may alloc {
+  if n == 1 {
+    return Int.to_text(x: n) ++ " " ++ word
+  }
+  return Int.to_text(x: n) ++ " " ++ word ++ "s"
+}
+
+fn trim_end(t: Text) -> Text may alloc, mutate {
+  let cps: List[Int] = Text.code_points(t: t)
+  let n: Int = List.len(xs: cps)
+  var end: Int = n
+  var scanning: Bool = true
+  for i: Int in 0 ..< n {
+    if scanning {
+      let c: Int = List.get(xs: cps, i: n - 1 - i)
+      if c == 32 or c == 9 or c == 10 or c == 13 {
+        end = end - 1
+      } else {
+        scanning = false
+      }
+    }
+  }
+  return slice_within(t: t, from: 0, to: end)
+}
+
+fn sorted_texts(xs: List[Text]) -> List[Text] may alloc, mutate {
+  var out: List[Text] = []
+  for x: Text in xs {
+    var placed: Bool = false
+    var next_out: Builder[Text] = List.builder()
+    for y: Text in out {
+      if not placed and Text.compare(a: x, b: y) < 0 {
+        List.push(b: inout next_out, x: x)
+        placed = true
+      }
+      List.push(b: inout next_out, x: y)
+    }
+    if not placed {
+      List.push(b: inout next_out, x: x)
+    }
+    out = List.finish(b: next_out)
+  }
+  return out
+}
+
+fn is_word_char(c: Int) -> Bool {
+  return (c >= 48 and c <= 57) or (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c == 95
+}
+
+-- Whether `word` occurs in `t` at a word boundary on both sides (`\bword\b`), or on
+-- its left side alone when `after_only` (`\bword\.`, the word carrying its own end).
+fn has_word(t: Text, word: Text, after_only: Bool) -> Bool may alloc, mutate {
+  let cps: List[Int] = Text.code_points(t: t)
+  let wcps: List[Int] = Text.code_points(t: word)
+  let n: Int = List.len(xs: cps)
+  let w: Int = List.len(xs: wcps)
+  var found: Bool = false
+  for i: Int in 0 ..< n {
+    if not found and matches_at(cps: cps, at: i, word: wcps) {
+      var ok: Bool = i == 0 or not is_word_char(c: List.get(xs: cps, i: i - 1))
+      if ok and not after_only and i + w < n {
+        ok = not is_word_char(c: List.get(xs: cps, i: i + w))
+      }
+      if ok {
+        found = true
+      }
+    }
+  }
+  return found
+}
+
+-- Whether `word` is the code points of `cps` from `at`.
+fn matches_at(cps: List[Int], at: Int, word: List[Int]) -> Bool {
+  let n: Int = List.len(xs: cps)
+  let w: Int = List.len(xs: word)
+  if at < 0 or at + w > n {
+    return false
+  }
+  for k: Int in 0 ..< w {
+    if List.get(xs: cps, i: at + k) != List.get(xs: word, i: k) {
+      return false
+    }
+  }
+  return true
+}
+
+-- Tasks (§2) ----------------------------------------------------------------------------
+pub record Budget {
+  iterations: Int
+  tokens: Int
+  wall_ms: Int
+}
+
+pub record Target {
+  def: Text
+  obligation: Option[Text]
+}
+
+pub record Origin {
+  kind: Text
+  ref: Text
+}
+
+pub record Task {
+  id: Text
+  kind: Text
+  scope: List[Text]
+  target: Option[Target]
+  counterexample: Option[json.Json]
+  budget: Budget
+  context_policy: Text
+  origin: Option[Origin]
+  description: Option[Text]
+  helpers: Bool
+  alternate_model: Option[Text]
+}
+
+pub const default_iterations: Int = 12
+
+pub const default_tokens: Int = 400000
+
+pub const default_wall_ms: Int = 900000
+
+fn is_string(j: json.Json) -> Bool {
+  return j is json.JString
+}
+
+fn keys_within(j: json.Json, allowed: List[Text]) -> Option[Text] {
+  match j with
+  | json.JObject(fields) -> {
+    for f: json.Field in fields {
+      if not List.contains(xs: allowed, x: f.key) {
+        return Some(value: f.key)
+      }
+    }
+    return None
+  }
+  | _ -> return None
+}
+
+fn positive_int(j: json.Json, key: Text, dflt: Int) -> Result[Int, Text] may alloc {
+  if not json.has(j: j, key: key) {
+    return Ok(value: dflt)
+  }
+  match json.at(j: j, key: key) with
+  | json.JNumber(text) -> {
+    match Int.parse(t: text) with
+    | Some(value) -> {
+      if value < 1 {
+        return Err(error: "task: /budget/" ++ key ++ ": must be >= 1")
+      }
+      return Ok(value: value)
+    }
+    | None -> return Err(error: "task: /budget/" ++ key ++ ": must be integer")
+  }
+  | _ -> return Err(error: "task: /budget/" ++ key ++ ": must be integer")
+}
+
+fn str_or_none(j: json.Json) -> Option[Text] {
+  match j with
+  | json.JString(value) -> return Some(value: value)
+  | _ -> return None
+}
+
+-- Parses a task from JSON as `schema/task.schema.json` admits it, with the
+-- defaults: twelve iterations, 400k tokens, fifteen minutes, `context_policy:
+-- module`, escalation steps 3 and 4 off. The message names the first fault.
+pub fn parse_task(j: json.Json) -> Result[Task, Text] may alloc, mutate {
+  if not j is json.JObject {
+    return Err(error: "task: must be object")
+  }
+  match keys_within(
+    j: j,
+    allowed: [
+      "id",
+      "kind",
+      "scope",
+      "target",
+      "counterexample",
+      "budget",
+      "context_policy",
+      "origin",
+      "description",
+      "escalation"
+    ]
+  ) with
+  | Some(value) -> return Err(error: "task: must NOT have additional properties (" ++ value ++ ")")
+  | None -> skip()
+  if not is_string(j: json.at(j: j, key: "id")) or json.str_at(j: j, key: "id") == "" {
+    return Err(error: "task: must have required property 'id'")
+  }
+  let kind: Text = json.str_at(j: j, key: "kind")
+  if kind != "implement" and kind != "repair" and kind != "interface_change" and kind != "regenerate" and kind != "ticket" {
+    return Err(error: "task: unknown kind")
+  }
+  if not json.at(j: j, key: "scope") is json.JArray {
+    return Err(error: "task: must have required property 'scope'")
+  }
+  var scope: Builder[Text] = List.builder()
+  for s: json.Json in json.list_at(j: j, key: "scope") {
+    if not is_string(j: s) or json.str_of(j: s) == "" {
+      return Err(error: "task: /scope: every item must be a non-empty string")
+    }
+    List.push(b: inout scope, x: json.str_of(j: s))
+  }
+  if List.built(b: scope) == 0 {
+    return Err(error: "task: /scope: must NOT have fewer than 1 items")
+  }
+  var target: Option[Target] = None
+  if json.has(j: j, key: "target") {
+    let t: json.Json = json.at(j: j, key: "target")
+    if not t is json.JObject {
+      return Err(error: "task: /target: must be object")
+    }
+    match keys_within(j: t, allowed: ["def", "obligation"]) with
+    | Some(value) -> return Err(
+      error: "task: /target: must NOT have additional properties (" ++ value ++ ")"
+    )
+    | None -> skip()
+    if not is_string(j: json.at(j: t, key: "def")) {
+      return Err(error: "task: /target: must have required property 'def'")
+    }
+    if json.has(j: t, key: "obligation") and not is_string(j: json.at(j: t, key: "obligation")) {
+      return Err(error: "task: /target/obligation: must be string")
+    }
+    target = Some(
+      value: Target {
+        def: json.str_at(j: t, key: "def"),
+        obligation: str_or_none(j: json.at(j: t, key: "obligation"))
+      }
+    )
+  }
+  if (kind == "implement" or kind == "repair" or kind == "interface_change") and target is None {
+    return Err(error: "task: a " ++ kind ++ " task needs a target")
+  }
+  var counterexample: Option[json.Json] = None
+  if json.has(j: j, key: "counterexample") {
+    let c: json.Json = json.at(j: j, key: "counterexample")
+    if not c is json.JObject {
+      return Err(error: "task: /counterexample: must be object")
+    }
+    counterexample = Some(value: c)
+  }
+  var budget: Budget = Budget {
+    iterations: default_iterations,
+    tokens: default_tokens,
+    wall_ms: default_wall_ms
+  }
+  if json.has(j: j, key: "budget") {
+    let b: json.Json = json.at(j: j, key: "budget")
+    if not b is json.JObject {
+      return Err(error: "task: /budget: must be object")
+    }
+    match keys_within(j: b, allowed: ["iterations", "tokens", "wall_ms"]) with
+    | Some(value) -> return Err(
+      error: "task: /budget: must NOT have additional properties (" ++ value ++ ")"
+    )
+    | None -> skip()
+    let iterations: Int = try positive_int(j: b, key: "iterations", dflt: default_iterations)
+    let tokens: Int = try positive_int(j: b, key: "tokens", dflt: default_tokens)
+    let wall_ms: Int = try positive_int(j: b, key: "wall_ms", dflt: default_wall_ms)
+    budget = Budget { iterations: iterations, tokens: tokens, wall_ms: wall_ms }
+  }
+  var context_policy: Text = "module"
+  if json.has(j: j, key: "context_policy") {
+    let p: Text = json.str_at(j: j, key: "context_policy")
+    if p != "none" and p != "module" and p != "scope" {
+      return Err(error: "task: /context_policy: must be equal to one of the allowed values")
+    }
+    context_policy = p
+  }
+  var origin: Option[Origin] = None
+  if json.has(j: j, key: "origin") {
+    let o: json.Json = json.at(j: j, key: "origin")
+    if not o is json.JObject or not is_string(j: json.at(j: o, key: "kind")) or not is_string(
+      j: json.at(j: o, key: "ref")
+    ) {
+      return Err(error: "task: /origin: must have required properties 'kind' and 'ref'")
+    }
+    match keys_within(j: o, allowed: ["kind", "ref"]) with
+    | Some(value) -> return Err(
+      error: "task: /origin: must NOT have additional properties (" ++ value ++ ")"
+    )
+    | None -> skip()
+    origin = Some(
+      value: Origin { kind: json.str_at(j: o, key: "kind"), ref: json.str_at(j: o, key: "ref") }
+    )
+  }
+  var description: Option[Text] = None
+  if json.has(j: j, key: "description") {
+    if not is_string(j: json.at(j: j, key: "description")) {
+      return Err(error: "task: /description: must be string")
+    }
+    description = Some(value: json.str_at(j: j, key: "description"))
+  }
+  var helpers: Bool = false
+  var alternate: Option[Text] = None
+  if json.has(j: j, key: "escalation") {
+    let e: json.Json = json.at(j: j, key: "escalation")
+    if not e is json.JObject {
+      return Err(error: "task: /escalation: must be object")
+    }
+    match keys_within(j: e, allowed: ["helpers", "alternate_model"]) with
+    | Some(value) -> return Err(
+      error: "task: /escalation: must NOT have additional properties (" ++ value ++ ")"
+    )
+    | None -> skip()
+    if json.has(j: e, key: "helpers") and not json.at(j: e, key: "helpers") is json.JBool {
+      return Err(error: "task: /escalation/helpers: must be boolean")
+    }
+    if json.has(j: e, key: "alternate_model") and not is_string(
+      j: json.at(j: e, key: "alternate_model")
+    ) {
+      return Err(error: "task: /escalation/alternate_model: must be string")
+    }
+    helpers = json.bool_at(j: e, key: "helpers")
+    alternate = str_or_none(j: json.at(j: e, key: "alternate_model"))
+  }
+  return Ok(
+    value: Task {
+      id: json.str_at(j: j, key: "id"),
+      kind: kind,
+      scope: List.finish(b: scope),
+      target: target,
+      counterexample: counterexample,
+      budget: budget,
+      context_policy: context_policy,
+      origin: origin,
+      description: description,
+      helpers: helpers,
+      alternate_model: alternate
+    }
+  )
+}
+
+fn target_json(t: Option[Target]) -> json.Json may alloc {
+  match t with
+  | None -> return json.JNull
+  | Some(value) -> return json.JObject(
+    fields: [
+      json.field(key: "def", value: json.text(t: value.def)),
+      json.field(key: "obligation", value: json.text_or_null(o: value.obligation))
+    ]
+  )
+}
+
+fn origin_json(o: Option[Origin]) -> json.Json may alloc {
+  match o with
+  | None -> return json.JNull
+  | Some(value) -> return json.JObject(
+    fields: [
+      json.field(key: "kind", value: json.text(t: value.kind)),
+      json.field(key: "ref", value: json.text(t: value.ref))
+    ]
+  )
+}
+
+fn json_or_null(o: Option[json.Json]) -> json.Json {
+  match o with
+  | None -> return json.JNull
+  | Some(value) -> return value
+}
+
+-- The task as `change.json` carries it.
+pub fn task_json(t: Task) -> json.Json may alloc, mutate {
+  return json.JObject(
+    fields: [
+      json.field(key: "id", value: json.text(t: t.id)),
+      json.field(key: "kind", value: json.text(t: t.kind)),
+      json.field(key: "scope", value: json.texts(ts: t.scope)),
+      json.field(key: "target", value: target_json(t: t.target)),
+      json.field(key: "counterexample", value: json_or_null(o: t.counterexample)),
+      json.field(
+        key: "budget",
+        value: json.JObject(
+          fields: [
+            json.field(key: "iterations", value: json.int(v: t.budget.iterations)),
+            json.field(key: "tokens", value: json.int(v: t.budget.tokens)),
+            json.field(key: "wall_ms", value: json.int(v: t.budget.wall_ms))
+          ]
+        )
+      ),
+      json.field(key: "context_policy", value: json.text(t: t.context_policy)),
+      json.field(key: "origin", value: origin_json(o: t.origin)),
+      json.field(key: "description", value: json.text_or_null(o: t.description)),
+      json.field(
+        key: "escalation",
+        value: json.JObject(
+          fields: [
+            json.field(key: "helpers", value: json.bool(b: t.helpers)),
+            json.field(key: "alternate_model", value: json.text_or_null(o: t.alternate_model))
+          ]
+        )
+      )
+    ]
+  )
+}
+
+-- Environment files ----------------------------------------------------------------------
+fn is_key_start(c: Int) -> Bool {
+  return (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c == 95
+}
+
+fn is_key_char(c: Int) -> Bool {
+  return is_key_start(c: c) or (c >= 48 and c <= 57)
+}
+
+fn strip_quotes(v: Text) -> Text may alloc {
+  let n: Int = Text.count(t: v)
+  if n >= 2 {
+    let first: Text = Text.slice(t: v, from: 0, to: 1)
+    let last: Text = Text.slice(t: v, from: n - 1, to: n)
+    if (first == "\"" and last == "\"") or (first == "'" and last == "'") {
+      return Text.slice(t: v, from: 1, to: n - 1)
+    }
+  }
+  return v
+}
+
+-- One `KEY=value` line of an env file, or nothing: `#` comments, blank lines
+-- and an `export ` prefix are allowed, and quotes around a value are stripped.
+fn env_line(raw: Text) -> Option[Origin] may alloc, mutate {
+  var line: Text = Text.trim(t: raw)
+  if line == "" or Text.starts_with(t: line, prefix: "#") {
+    return None
+  }
+  if Text.starts_with(t: line, prefix: "export ") {
+    line = Text.trim(t: slice_within(t: line, from: 7, to: Text.count(t: line)))
+  }
+  let cps: List[Int] = Text.code_points(t: line)
+  let n: Int = List.len(xs: cps)
+  if n == 0 or not is_key_start(c: List.get(xs: cps, i: 0)) {
+    return None
+  }
+  var i: Int = 1
+  var scanning: Bool = true
+  for k: Int in 1 ..< n {
+    if scanning {
+      if is_key_char(c: List.get(xs: cps, i: k)) {
+        i = k + 1
+      } else {
+        scanning = false
+      }
+    }
+  }
+  let key: Text = slice_within(t: line, from: 0, to: i)
+  let rest: Text = Text.trim(t: slice_within(t: line, from: i, to: n))
+  if not Text.starts_with(t: rest, prefix: "=") {
+    return None
+  }
+  let value_text: Text = Text.trim(t: slice_within(t: rest, from: 1, to: Text.count(t: rest)))
+  return Some(value: Origin { kind: key, ref: strip_quotes(v: value_text) })
+}
+
+-- The `KEY=value` pairs of an env file's text, in order.
+pub fn parse_env(text: Text) -> List[Origin] may alloc, mutate {
+  var out: Builder[Origin] = List.builder()
+  for raw: Text in Text.split(t: Text.replace(t: text, from: "\r\n", to: "\n"), sep: "\n") {
+    match env_line(raw: raw) with
+    | Some(value) -> List.push(b: inout out, x: value)
+    | None -> skip()
+  }
+  return List.finish(b: out)
+}
+
+-- The value of `name`: the process environment first, then `.env` and
+-- `.env.local` in each directory in order, an earlier file winning.
+pub fn env_value(
+  env: io.Env,
+  files: io.Files,
+  dirs: List[Text],
+  name: Text
+) -> Option[Text] may io.env, io.file, alloc, mutate {
+  match io.get_env(env: env, name: name) with
+  | Some(value) -> return Some(value: value)
+  | None -> skip()
+  for dir: Text in dirs {
+    for file_name: Text in [".env", ".env.local"] {
+      match io.read(files: files, path: dir ++ "/" ++ file_name) with
+      | Err(_) -> skip()
+      | Ok(value) -> {
+        for pair: Origin in parse_env(text: value) {
+          if pair.kind == name {
+            return Some(value: pair.ref)
+          }
+        }
+      }
+    }
+  }
+  return None
+}
+
+-- Models (§10) --------------------------------------------------------------------------
+pub union Model =
+  | Scripted of answers: List[Text]
+  | ClaudeCode of model_id: Option[Text]
+  | Anthropic of key: Text, model_id: Text
+  | OpenRouter of key: Text, model_id: Text
+
+pub record Answer {
+  text: Text
+  model: Text
+  tokens: Int
+}
+
+-- A provider that has not answered in this long is not going to (§9).
+pub const request_timeout_ms: Int = 180000
+
+pub fn model_name(m: Model) -> Text may alloc {
+  match m with
+  | Scripted(_) -> return "scripted"
+  | ClaudeCode(model_id) -> {
+    match model_id with
+    | Some(value) -> return "claude-code:" ++ value
+    | None -> return "claude-code"
+  }
+  | Anthropic(_, model_id) -> return "anthropic:" ++ model_id
+  | OpenRouter(_, model_id) -> return "openrouter:" ++ model_id
+}
+
+fn estimate(system: Text, prompt: Text, text: Text) -> Int may alloc {
+  return (Text.count(t: system) + Text.count(t: prompt) + Text.count(t: text) + 3) / 4
+}
+
+fn at_or_last(xs: List[Text], i: Int) -> Text {
+  let n: Int = List.len(xs: xs)
+  if n == 0 {
+    return ""
+  }
+  if i >= 0 and i < n {
+    return List.get(xs: xs, i: i)
+  }
+  return List.get(xs: xs, i: n - 1)
+}
+
+-- A model from a command-line spec: `claude-code[:<model>]`, `anthropic[:<model>]`,
+-- `openrouter[:<model>]`, or `scripted:<file.json>` (a JSON array of answers).
+pub fn model_from_spec(
+  spec: Text,
+  env: io.Env,
+  files: io.Files,
+  env_dirs: List[Text]
+) -> Result[Model, Text] may io.env, io.file, alloc, mutate {
+  let parts: List[Text] = Text.split(t: spec, sep: ":")
+  let head: Text = List.get(xs: parts, i: 0)
+  var arg: Option[Text] = None
+  if List.len(xs: parts) > 1 {
+    arg = Some(value: Text.slice(t: spec, from: Text.count(t: head) + 1, to: Text.count(t: spec)))
+  }
+  if head == "claude-code" {
+    return Ok(value: ClaudeCode(model_id: arg))
+  }
+  if head == "anthropic" {
+    let key: Text = or_empty(
+      o: env_value(env: env, files: files, dirs: env_dirs, name: "ANTHROPIC_API_KEY")
+    )
+    if key == "" {
+      return Err(error: "the anthropic model needs ANTHROPIC_API_KEY")
+    }
+    return Ok(value: Anthropic(key: key, model_id: text_or(o: arg, dflt: "claude-fable-5-1")))
+  }
+  if head == "openrouter" {
+    let key: Text = or_empty(
+      o: env_value(env: env, files: files, dirs: env_dirs, name: "OPENROUTER_API_KEY")
+    )
+    if key == "" {
+      return Err(
+        error: "the openrouter model needs OPENROUTER_API_KEY (in the environment or a .env.local at the project root)"
+      )
+    }
+    let configured: Text = text_or(
+      o: env_value(env: env, files: files, dirs: env_dirs, name: "OPENROUTER_MODEL"),
+      dflt: "deepseek/deepseek-v4-flash"
+    )
+    return Ok(value: OpenRouter(key: key, model_id: text_or(o: arg, dflt: configured)))
+  }
+  if head == "scripted" {
+    match arg with
+    | None -> return Err(error: "scripted:<file.json> names a JSON array of answers")
+    | Some(value) -> return scripted_from(files: files, path: value)
+  }
+  return Err(
+    error: "unknown model spec " ++ spec ++ "; use claude-code[:<model>], anthropic[:<model>], openrouter[:<model>] or scripted:<file.json>"
+  )
+}
+
+fn scripted_from(files: io.Files, path: Text) -> Result[Model, Text] may io.file, alloc, mutate {
+  match io.read(files: files, path: path) with
+  | Err(_) -> return Err(error: "cannot read " ++ path)
+  | Ok(value) -> return scripted_of_text(path: path, text: value)
+}
+
+fn scripted_of_text(path: Text, text: Text) -> Result[Model, Text] may alloc, mutate {
+  match json.parse(t: text) with
+  | None -> return Err(error: path ++ ": not a JSON array of strings")
+  | Some(value) -> {
+    match value with
+    | json.JArray(items) -> {
+      var out: Builder[Text] = List.builder()
+      for x: json.Json in items {
+        if not is_string(j: x) {
+          return Err(error: path ++ ": not a JSON array of strings")
+        }
+        List.push(b: inout out, x: json.str_of(j: x))
+      }
+      return Ok(value: Scripted(answers: List.finish(b: out)))
+    }
+    | _ -> return Err(error: path ++ ": not a JSON array of strings")
+  }
+}
+
+-- One request to the model: the answer text, the model that answered and the
+-- tokens consumed. `call` counts the requests of the run, from 0, which a
+-- scripted model answers in turn, repeating its last.
+pub fn generate(
+  m: Model,
+  process: io.Process,
+  net: io.Net,
+  call: Int,
+  system: Text,
+  prompt: Text,
+  max_tokens: Int
+) -> Result[Answer, Text] may io.file, io.net, nondet, alloc, mutate {
+  match m with
+  | Scripted(answers) -> {
+    let text: Text = at_or_last(xs: answers, i: call)
+    return Ok(
+      value: Answer {
+        text: text,
+        model: "scripted",
+        tokens: estimate(system: system, prompt: prompt, text: text)
+      }
+    )
+  }
+  | ClaudeCode(model_id) -> {
+    -- A nested Claude Code refuses to start inside another: the marker variables are not inherited.
+    var args: List[Text] = [
+      "-c",
+      "for v in $(env | sed -n 's/^\\(CLAUDE[A-Za-z0-9_]*\\)=.*/\\1/p'); do unset \"$v\"; done; exec claude \"$@\"",
+      "sh",
+      "-p",
+      "--output-format",
+      "text",
+      "--system-prompt",
+      system
+    ]
+    match model_id with
+    | Some(value) -> args = args ++ ["--model", value]
+    | None -> skip()
+    match io.run(
+      process: process,
+      program: "sh",
+      args: args,
+      stdin: prompt,
+      timeout_ms: 900000
+    ) with
+    | Err(error) -> return Err(error: "claude: " ++ io_error_text(e: error))
+    | Ok(value) -> {
+      if value.status != 0 {
+        return Err(error: "claude exited " ++ Int.to_text(x: value.status) ++ ": " ++ value.stderr)
+      }
+      return Ok(
+        value: Answer {
+          text: value.stdout,
+          model: model_name(m: m),
+          tokens: estimate(system: system, prompt: prompt, text: value.stdout)
+        }
+      )
+    }
+  }
+  | Anthropic(key, model_id) -> {
+    let body: json.Json = json.JObject(
+      fields: [
+        json.field(key: "model", value: json.text(t: model_id)),
+        json.field(key: "max_tokens", value: json.int(v: max_tokens)),
+        json.field(key: "system", value: json.text(t: system)),
+        json.field(
+          key: "messages",
+          value: json.JArray(items: [message(role: "user", content: prompt)])
+        )
+      ]
+    )
+    let reply: json.Json = try post(
+      net: net,
+      provider: "anthropic",
+      url: "https://api.anthropic.com/v1/messages",
+      headers: [
+        "content-type: application/json",
+        "x-api-key: " ++ key,
+        "anthropic-version: 2023-06-01"
+      ],
+      body: body
+    )
+    let text: Text = content_text(body: reply)
+    let usage: json.Json = json.at(j: reply, key: "usage")
+    var tokens: Int = (Text.count(t: text) + 3) / 4
+    if json.at(j: usage, key: "input_tokens") is json.JNumber and json.at(
+      j: usage,
+      key: "output_tokens"
+    ) is json.JNumber {
+      tokens = json.int_at(j: usage, key: "input_tokens") + json.int_at(
+        j: usage,
+        key: "output_tokens"
+      )
+    }
+    return Ok(value: Answer { text: text, model: model_name(m: m), tokens: tokens })
+  }
+  | OpenRouter(key, model_id) -> {
+    let body: json.Json = json.JObject(
+      fields: [
+        json.field(key: "model", value: json.text(t: model_id)),
+        json.field(key: "max_tokens", value: json.int(v: max_tokens)),
+        json.field(
+          key: "messages",
+          value: json.JArray(
+            items: [
+              message(role: "system", content: system),
+              message(role: "user", content: prompt)
+            ]
+          )
+        )
+      ]
+    )
+    let reply: json.Json = try post(
+      net: net,
+      provider: "openrouter",
+      url: "https://openrouter.ai/api/v1/chat/completions",
+      headers: [
+        "content-type: application/json",
+        "authorization: Bearer " ++ key,
+        "x-title: onus loop"
+      ],
+      body: body
+    )
+    let err: json.Json = json.at(j: reply, key: "error")
+    if err is json.JObject and json.has(j: err, key: "message") {
+      return Err(error: "openrouter: " ++ json.str_at(j: err, key: "message"))
+    }
+    let text: Text = choice_text(body: reply)
+    let usage: json.Json = json.at(j: reply, key: "usage")
+    var tokens: Int = estimate(system: system, prompt: prompt, text: text)
+    if json.at(j: usage, key: "total_tokens") is json.JNumber {
+      tokens = json.int_at(j: usage, key: "total_tokens")
+    }
+    return Ok(value: Answer { text: text, model: model_name(m: m), tokens: tokens })
+  }
+}
+
+fn io_error_text(e: io.Error) -> Text may alloc {
+  match e with
+  | NotFound(path) -> return "not found: " ++ path
+  | Denied(path) -> return "denied: " ++ path
+  | Other(detail) -> return detail
+}
+
+fn message(role: Text, content: Text) -> json.Json may alloc {
+  return json.JObject(
+    fields: [
+      json.field(key: "role", value: json.text(t: role)),
+      json.field(key: "content", value: json.text(t: content))
+    ]
+  )
+}
+
+-- A POST through `http.post` (§19.1): the response as JSON; a status outside
+-- 2xx is the provider's message.
+fn post(
+  net: io.Net,
+  provider: Text,
+  url: Text,
+  headers: List[Text],
+  body: json.Json
+) -> Result[json.Json, Text] may io.net, nondet, alloc, mutate {
+  match http.post(
+    net: net,
+    url: url,
+    headers: headers,
+    body: json.compact(j: body),
+    timeout_ms: request_timeout_ms
+  ) with
+  | Err(error) -> return Err(error: provider ++ ": " ++ io_error_text(e: error))
+  | Ok(value) -> {
+    if value.status < 200 or value.status >= 300 {
+      return Err(error: provider ++ ": HTTP " ++ Int.to_text(x: value.status) ++ ": " ++ value.body)
+    }
+    return parse_reply(provider: provider, body: value.body)
+  }
+}
+
+fn parse_reply(provider: Text, body: Text) -> Result[json.Json, Text] may alloc, mutate {
+  match json.parse(t: body) with
+  | None -> return Err(error: provider ++ ": the response is not JSON")
+  | Some(value) -> return Ok(value: value)
+}
+
+fn content_text(body: json.Json) -> Text may alloc, mutate {
+  var parts: Builder[Text] = List.builder()
+  for block: json.Json in json.list_at(j: body, key: "content") {
+    if json.str_at(j: block, key: "type") == "text" and is_string(
+      j: json.at(j: block, key: "text")
+    ) {
+      List.push(b: inout parts, x: json.str_at(j: block, key: "text"))
+    }
+  }
+  return Text.join(parts: List.finish(b: parts), sep: "")
+}
+
+fn choice_text(body: json.Json) -> Text may alloc, mutate {
+  let choices: List[json.Json] = json.list_at(j: body, key: "choices")
+  if List.len(xs: choices) == 0 {
+    return ""
+  }
+  let content: json.Json = json.at(
+    j: json.at(j: List.get(xs: choices, i: 0), key: "message"),
+    key: "content"
+  )
+  match content with
+  | json.JString(value) -> return value
+  | json.JArray(items) -> {
+    var parts: Builder[Text] = List.builder()
+    for part: json.Json in items {
+      List.push(b: inout parts, x: json.str_at(j: part, key: "text"))
+    }
+    return Text.join(parts: List.finish(b: parts), sep: "")
+  }
+  | _ -> return ""
+}
+
+-- Editing bodies (§1) ------------------------------------------------------------------
+-- A parse of one text: its module, its syntax diagnostics as objects and as JSON.
+pub record Parsed {
+  module: Option[ast.Module]
+  diagnostics: List[report.Diagnostic]
+  json: List[json.Json]
+  text: Text
+}
+
+fn empty_table() -> Dict[Int, loc.LineTable] may alloc {
+  return Map.dict()
+}
+
+-- Parses `text` as the module at `path`, in a context of its own.
+pub fn parse_module(path: Text, text: Text) -> Parsed may alloc, mutate {
+  var ctx: context.Context = context.new_context(root: None, stdlib: None)
+  let added: Option[Int] = loader.add_file(ctx: inout ctx, path: path, text: text)
+  var module: Option[ast.Module] = None
+  if added is Some {
+    module = loader.module_of_file(ctx: ctx, file: 0)
+  }
+  let diagnostics: List[report.Diagnostic] = List.finish(b: ctx.diagnostics)
+  let tab: Dict[Int, loc.LineTable] = loc.line_tables(ctx: ctx)
+  var out: Builder[json.Json] = List.builder()
+  for d: report.Diagnostic in diagnostics {
+    List.push(b: inout out, x: diagjson.to_json(ctx: ctx, tab: tab, d: d))
+  }
+  return Parsed { module: module, diagnostics: diagnostics, json: List.finish(b: out), text: text }
+}
+
+-- The canonical form of `text` (§2.2), or `text` itself when it does not parse.
+pub fn canonical_text(path: Text, text: Text) -> Text may alloc, mutate {
+  var ctx: context.Context = context.new_context(root: None, stdlib: None)
+  let added: Option[Int] = loader.add_file(ctx: inout ctx, path: path, text: text)
+  if added is None {
+    return text
+  }
+  loader.canonical(ctx: inout ctx, file: 0)
+  match Map.find(d: ctx.canonical, key: 0) with
+  | Some(value) -> return value
+  | None -> return text
+}
+
+-- The Onus in a model answer: the first fenced block, or the whole text.
+pub fn extract_code(answer: Text) -> Text may alloc, mutate {
+  match Text.index_of(t: answer, needle: "```", from: 0) with
+  | None -> return Text.trim(t: answer)
+  | Some(value) -> return after_fence(answer: answer, fence: value)
+}
+
+-- The block a fence at `fence` opens: an optional `onus`, whitespace up to a newline, then the text to the closing fence.
+fn after_fence(answer: Text, fence: Int) -> Text may alloc, mutate {
+  let cps: List[Int] = Text.code_points(t: answer)
+  let n: Int = List.len(xs: cps)
+  var i: Int = fence + 3
+  if i < 0 {
+    i = 0
+  }
+  if i > n {
+    i = n
+  }
+  if slice_within(t: answer, from: i, to: i + 4) == "onus" {
+    i = i + 4
+  }
+  var last_newline: Int = -1
+  var scanning: Bool = true
+  for k: Int in 0 ..< n {
+    if k >= i and scanning {
+      let c: Int = List.get(xs: cps, i: k)
+      if c == 32 or c == 9 or c == 13 or c == 10 {
+        if c == 10 {
+          last_newline = k
+        }
+      } else {
+        scanning = false
+      }
+    }
+  }
+  if last_newline < 0 {
+    return Text.trim(t: answer)
+  }
+  return fenced_body(answer: answer, start: last_newline + 1)
+}
+
+fn fenced_body(answer: Text, start: Int) -> Text may alloc {
+  if start < 0 or start > Text.count(t: answer) {
+    return Text.trim(t: answer)
+  }
+  match Text.index_of(t: answer, needle: "```", from: start) with
+  | None -> return Text.trim(t: answer)
+  | Some(value) -> return Text.trim(t: slice_within(t: answer, from: start, to: value))
+}
+
+-- Model output parsed as the items of a module fragment.
+pub fn parse_fragment(text: Text) -> Parsed may alloc, mutate {
+  return parse_module(path: "model-output.onus", text: "module model_output\n\n" ++ text ++ "\n")
+}
+
+pub fn fns_of(m: ast.Module) -> List[ast.FnDecl] may alloc, mutate {
+  var out: Builder[ast.FnDecl] = List.builder()
+  for item: ast.Item in m.items {
+    match item with
+    | ast.FnItem(decl) -> List.push(b: inout out, x: decl)
+    | _ -> skip()
+  }
+  return List.finish(b: out)
+}
+
+fn find_fn(m: ast.Module, name: Text) -> Option[ast.FnDecl] may alloc, mutate {
+  for f: ast.FnDecl in fns_of(m: m) {
+    if f.name.text == name {
+      return Some(value: f)
+    }
+  }
+  return None
+}
+
+fn has_body(f: ast.FnDecl) -> Bool {
+  match f.body with
+  | Some(value) -> return not value.elided
+  | None -> return false
+}
+
+-- `f` with its body elided: the interface rendering of it (§11.1).
+pub fn elide(f: ast.FnDecl) -> ast.FnDecl may alloc {
+  match f.body with
+  | None -> return f
+  | Some(value) -> return { f with
+    body: Some(value: ast.Block { stmts: [], elided: true, span: value.span })
+  }
+}
+
+pub fn with_body(f: ast.FnDecl, body: ast.Block) -> ast.FnDecl may alloc {
+  return { f with body: Some(value: body) }
+}
+
+pub fn item_text(item: ast.Item) -> Text may alloc, mutate {
+  return Text.trim(t: printer.print_item(item: item, tab: Map.empty(), elide: false))
+}
+
+-- The signature with contracts, effects and claims: what the model must not change.
+pub fn signature_text(f: ast.FnDecl) -> Text may alloc, mutate {
+  return item_text(item: ast.FnItem(decl: elide(f: f)))
+}
+
+-- A hash of a body's canonical text, to notice the same body proposed twice (§4).
+pub fn body_hash(f: ast.FnDecl) -> Text may alloc, mutate {
+  return hash.blake3_hex(
+    t: printer.print_item(item: ast.FnItem(decl: f), tab: Map.empty(), elide: false)
+  )
+}
+
+fn slice_within(t: Text, from: Int, to: Int) -> Text may alloc {
+  let n: Int = Text.count(t: t)
+  var a: Int = from
+  var b: Int = to
+  if a < 0 {
+    a = 0
+  }
+  if a > n {
+    a = n
+  }
+  if b < a {
+    b = a
+  }
+  if b > n {
+    b = n
+  }
+  return Text.slice(t: t, from: a, to: b)
+}
+
+-- `text` with the item at `span` replaced by `replacement`, printed canonically.
+pub fn splice_item(text: Text, span: ast.Span, replacement: ast.Item) -> Text may alloc, mutate {
+  return slice_within(t: text, from: 0, to: span.start) ++ trim_end(
+    t: printer.print_item(item: replacement, tab: Map.empty(), elide: false)
+  ) ++ slice_within(t: text, from: span.end, to: Text.count(t: text))
+}
+
+pub record Edit {
+  start: Int
+  end: Int
+  with_text: Text
+}
+
+pub record Applied {
+  text: Text
+  applied: Int
+}
+
+fn sorted_edits(edits: List[Edit]) -> List[Edit] may alloc, mutate {
+  var out: List[Edit] = []
+  for e: Edit in edits {
+    var placed: Bool = false
+    var next_out: Builder[Edit] = List.builder()
+    for y: Edit in out {
+      if not placed and e.start > y.start {
+        List.push(b: inout next_out, x: e)
+        placed = true
+      }
+      List.push(b: inout next_out, x: y)
+    }
+    if not placed {
+      List.push(b: inout next_out, x: e)
+    }
+    out = List.finish(b: next_out)
+  }
+  return out
+}
+
+-- Applies the edits, latest offset first so earlier offsets stay valid;
+-- overlapping edits keep the first applied.
+pub fn apply_repairs(text: Text, edits: List[Edit]) -> Applied may alloc, mutate {
+  var out: Text = text
+  var last: Int = Text.count(t: text) + 1
+  var applied: Int = 0
+  for e: Edit in sorted_edits(edits: edits) {
+    if e.end <= last {
+      out = slice_within(t: out, from: 0, to: e.start) ++ e.with_text ++ slice_within(
+        t: out,
+        from: e.end,
+        to: Text.count(t: out)
+      )
+      last = e.start
+      applied = applied + 1
+    }
+  }
+  return Applied { text: out, applied: applied }
+}
+
+-- The project (§3, §4) ---------------------------------------------------------------
+pub record Project {
+  root: Text
+  scope: List[Text]
+  -- Module name → path of its file.
+  paths: Dict[Text, Text]
+  -- Path → text as found in the working tree (the baseline).
+  texts: Dict[Text, Text]
+}
+
+-- `a.b.c` → `<root>/a/b/c.onus`; under the working directory the relative path alone.
+pub fn module_path(root: Text, name: Text) -> Text may alloc {
+  let rel: Text = Text.replace(t: name, from: ".", to: "/") ++ ".onus"
+  if root == "." {
+    return rel
+  }
+  return root ++ "/" ++ rel
+}
+
+pub fn load_project(
+  files: io.Files,
+  root: Text,
+  scope: List[Text]
+) -> Result[Project, Text] may io.file, alloc, mutate {
+  var paths: Dict[Text, Text] = Map.dict()
+  var texts: Dict[Text, Text] = Map.dict()
+  for name: Text in scope {
+    let path: Text = module_path(root: root, name: name)
+    match io.read(files: files, path: path) with
+    | Err(error) -> return Err(
+      error: "cannot read module " ++ name ++ " at " ++ path ++ ": " ++ io_error_text(e: error)
+    )
+    | Ok(value) -> Map.set(d: inout texts, key: path, value: value)
+    Map.set(d: inout paths, key: name, value: path)
+  }
+  return Ok(value: Project { root: root, scope: scope, paths: paths, texts: texts })
+}
+
+pub record LedgerRow {
+  def: Text
+  kind: Text
+  text: Text
+  status: Text
+}
+
+-- A check of the scope with texts overlaid on the working tree.
+pub record Check {
+  ctx: context.Context
+  tab: Dict[Int, loc.LineTable]
+  diagnostics: List[report.Diagnostic]
+  json: List[json.Json]
+  -- An `E0999` was reported: a compiler bug, filed against the compiler, not the task (§9).
+  internal_error: Bool
+  -- Module name → its interface document, when the program checked.
+  interfaces: Dict[Text, json.Json]
+  ledger: List[LedgerRow]
+  -- Example, property and law outcomes by qualified name; none when the program did not check.
+  tests: Option[Dict[Text, Bool]]
+}
+
+-- How checks reach the compiler: the library, the runtime the generated tests import, the solver budget.
+pub record Tools {
+  stdlib: Option[Text]
+  runtime: Text
+  bundled: Bool
+  budget_ms: Int
+}
+
+fn text_of(texts: Dict[Text, Text], fallback: Dict[Text, Text], path: Text) -> Text {
+  match Map.find(d: texts, key: path) with
+  | Some(value) -> return value
+  | None -> {
+    match Map.find(d: fallback, key: path) with
+    | Some(value) -> return value
+    | None -> return ""
+  }
+}
+
+-- Checks the scope modules with `texts` overlaid on the working tree, and
+-- runs the examples, properties and laws when the program checks and
+-- `run_tests` is set; a build for them goes under `out_dir`.
+pub fn check_project(
+  files: io.Files,
+  console: io.Console,
+  process: io.Process,
+  project: Project,
+  tools: Tools,
+  texts: Dict[Text, Text],
+  run_tests: Bool,
+  out_dir: Text
+) -> Result[Check, io.Error] may io.file, nondet, alloc, mutate {
+  var ctx: context.Context = context.new_context(
+    root: Some(value: project.root),
+    stdlib: tools.stdlib
+  )
+  for name: Text in project.scope {
+    match Map.find(d: project.paths, key: name) with
+    | Some(value) -> {
+      let added: Option[Int] = loader.add_file(
+        ctx: inout ctx,
+        path: value,
+        text: text_of(texts: texts, fallback: project.texts, path: value)
+      )
+    }
+    | None -> skip()
+  }
+  var budget: Int where it >= 0 = 2000
+  if tools.budget_ms >= 0 {
+    budget = tools.budget_ms
+  }
+  check.run_passes(
+    ctx: inout ctx,
+    to: 11,
+    files: files,
+    console: console,
+    process: process,
+    vopts: verifier.Options { z3_path: None, budget_ms: budget, cache_dir: None, dump_dir: None }
+  )
+  let diagnostics: List[report.Diagnostic] = List.finish(b: ctx.diagnostics)
+  let tab: Dict[Int, loc.LineTable] = loc.line_tables(ctx: ctx)
+  var json_out: Builder[json.Json] = List.builder()
+  var internal_error: Bool = false
+  for d: report.Diagnostic in diagnostics {
+    List.push(b: inout json_out, x: diagjson.to_json(ctx: ctx, tab: tab, d: d))
+    if d.code == "E0999" {
+      internal_error = true
+    }
+  }
+  var interfaces: Dict[Text, json.Json] = Map.dict()
+  var ledger: Builder[LedgerRow] = List.builder()
+  let clean: Bool = context.clean(ctx: ctx)
+  if clean {
+    for mid: Int in 0 ..< ctx.module_count {
+      match Map.find(d: ctx.modules, key: mid) with
+      | Some(value) -> {
+        if not value.is_std {
+          let doc: json.Json = interface.interface_of(ctx: ctx, mod: mid)
+          Map.set(d: inout interfaces, key: value.name, value: doc)
+          for l: json.Json in json.list_at(j: doc, key: "ledger") {
+            List.push(
+              b: inout ledger,
+              x: LedgerRow {
+                def: value.name ++ "." ++ json.str_at(j: l, key: "def"),
+                kind: json.str_at(j: l, key: "kind"),
+                text: json.str_at(j: l, key: "text"),
+                status: json.str_at(j: l, key: "status")
+              }
+            )
+          }
+        }
+      }
+      | None -> skip()
+    }
+  }
+  var tests: Option[Dict[Text, Bool]] = None
+  if clean and run_tests {
+    if tools.bundled {
+      try build.write_bundled_runtime(files: files, out_dir: out_dir)
+    }
+    let built: build.Built = try build.emit_all(
+      ctx: ctx,
+      files: files,
+      opts: build.Options {
+        out_dir: out_dir,
+        runtime: tools.runtime,
+        verify_all: false,
+        negate_guard: None
+      }
+    )
+    var any_tests: Bool = false
+    for m: jsemit.Emitted in built.emitted {
+      if m.tests is Some {
+        any_tests = true
+      }
+    }
+    if any_tests {
+      tests = Some(
+        value: testcmd.run_js_examples(
+          files: files,
+          process: process,
+          out_dir: out_dir,
+          emitted: built.emitted,
+          include_properties: true
+        )
+      )
+    } else {
+      tests = Some(value: Map.dict())
+    }
+  }
+  return Ok(
+    value: Check {
+      ctx: ctx,
+      tab: tab,
+      diagnostics: diagnostics,
+      json: List.finish(b: json_out),
+      internal_error: internal_error,
+      interfaces: interfaces,
+      ledger: List.finish(b: ledger),
+      tests: tests
+    }
+  )
+}
+
+fn module_items(c: Check, name: Text) -> List[ast.Item] may alloc {
+  match Map.find(d: c.ctx.by_name, key: name) with
+  | None -> return []
+  | Some(value) -> return module_items_of(c: c, mid: value)
+}
+
+fn module_items_of(c: Check, mid: Int) -> List[ast.Item] may alloc {
+  match Map.find(d: c.ctx.modules, key: mid) with
+  | None -> return []
+  | Some(value) -> return value.tree.items
+}
+
+fn module_name_of(c: Check, mid: Int) -> Text {
+  match Map.find(d: c.ctx.modules, key: mid) with
+  | None -> return ""
+  | Some(value) -> return value.name
+}
+
+fn file_path_of(c: Check, file: Int) -> Text {
+  if file < 0 or file >= List.built(b: c.ctx.files) {
+    return ""
+  }
+  return context.file_at(ctx: c.ctx, id: file).path
+}
+
+-- What the model sees (§3) ------------------------------------------------------------
+pub record TargetInfo {
+  module_name: Text
+  name: Text
+  path: Text
+  -- The declaration with its body elided, from the baseline: the signature the body must fit.
+  decl: ast.FnDecl
+}
+
+pub record HistoryEntry {
+  iteration: Int
+  diagnostics: List[json.Json]
+  failing: List[Text]
+}
+
+pub record ModelContext {
+  system: Text
+  prompt: Text
+  prompt_hash: Text
+}
+
+pub const system_prompt: Text = "You write function bodies in Onus, a language in which a model writes bodies, a human owns the contracts, and the compiler is the only checker.\n\nRules:\n- Write only the bodies of the functions listed under \"Targets\". Return each target function complete, signature and body, inside one fenced code block marked onus, and nothing else.\n- Never change a signature, contract (requires, ensures, decreases), effect list (may ...), claim, type, example or property. Never add functions, types or imports.\n- Use only what the interfaces shown declare. Bodies of imports are not available and not needed.\n- Every obligation must be proved or checked: satisfy every ensures on every path, establish every requires at every call, keep loop invariants, and give every loop a decreases measure.\n- Prefer the simplest body that satisfies the contracts.\n\nOnus syntax notes:\n- Statements end at a newline. A block is { ... }. Comments start with --.\n- let x: T = e   var x: T = e   x = e   return e\n- if c { ... } else { ... }\n- match e { Variant(field: pattern) => expr, _ => expr }; union values are built as Variant(field: value); records as Name { field: value }; a record is copied with { r with field: value }\n- for i in lo ..< hi { ... } iterates a half-open range; loop while c decreases m { ... } is a while loop with a measure; both take invariant e clauses after the header.\n- Calls name every argument: f(a: 1, b: 2). Results are Ok(value: v) and Err(error: e); options Some(value: v) and None. try e unwraps a Result or Option or returns early.\n- Arithmetic on Int is checked; / and % are integer operations; comparison is == != < <= > >=; Bool uses and, or, not.\n- A closure is fn(x: T) -> U { ... }. Text concatenation is ++."
+
+fn target_names(targets: List[TargetInfo]) -> Dict[Text, Bool] may alloc, mutate {
+  var out: Dict[Text, Bool] = Map.dict()
+  for t: TargetInfo in targets {
+    Map.set(d: inout out, key: t.module_name ++ "." ++ t.name, value: true)
+  }
+  return out
+}
+
+fn is_target_name(targets: List[TargetInfo], name: Text) -> Bool {
+  for t: TargetInfo in targets {
+    if t.name == name {
+      return true
+    }
+  }
+  return false
+}
+
+fn fenced(texts: List[Text]) -> Text may alloc {
+  return "```onus\n" ++ Text.join(parts: texts, sep: "\n\n") ++ "\n```"
+}
+
+-- Whether a diagnostic reaches the model: an elided-body notice on a target does not.
+fn relevant(d: json.Json, targets: List[TargetInfo]) -> Bool {
+  let location: json.Json = json.at(j: d, key: "location")
+  if json.str_at(j: d, key: "code") == "E0115" and not json.is_null(
+    j: json.at(j: location, key: "def")
+  ) {
+    return not is_target_name(targets: targets, name: json.str_at(j: location, key: "def"))
+  }
+  return true
+}
+
+fn diagnostic_summary(d: json.Json) -> Text may alloc {
+  var ob: Text = ""
+  if json.has(j: d, key: "obligation") {
+    let o: json.Json = json.at(j: d, key: "obligation")
+    ob = " (" ++ json.str_at(j: o, key: "kind") ++ " " ++ json.str_at(j: o, key: "text") ++ ")"
+  }
+  return json.str_at(j: d, key: "code") ++ " " ++ json.str_at(j: d, key: "title") ++ ob
+}
+
+fn last_segment(name: Text) -> Text may alloc {
+  let parts: List[Text] = Text.split(t: name, sep: ".")
+  return List.get(xs: parts, i: List.len(xs: parts) - 1)
+}
+
+fn mentions(mention: Text, module_name: Text) -> Bool may alloc, mutate {
+  if module_name == "std.text" {
+    return has_word(t: mention, word: "Text", after_only: false)
+  }
+  if module_name == "std.list" {
+    return has_word(t: mention, word: "List", after_only: false)
+  }
+  if module_name == "std.grid" {
+    return has_word(t: mention, word: "Grid", after_only: false) or has_word(
+      t: mention,
+      word: "grid.",
+      after_only: true
+    )
+  }
+  if module_name == "std.map" {
+    return has_word(t: mention, word: "Map", after_only: false) or has_word(
+      t: mention,
+      word: "map.",
+      after_only: true
+    )
+  }
+  if module_name == "std.bytes" {
+    return has_word(t: mention, word: "Bytes", after_only: false)
+  }
+  if module_name == "std.io" {
+    return has_word(t: mention, word: "io.", after_only: true)
+  }
+  if module_name == "std.sql" {
+    return has_word(t: mention, word: "sql.", after_only: true)
+  }
+  if module_name == "std.float" {
+    return has_word(t: mention, word: "Float", after_only: false)
+  }
+  if module_name == "std.int" {
+    return has_word(t: mention, word: "Int", after_only: false)
+  }
+  return false
+}
+
+-- Assembles the model context: the targets in canonical Onus with bodies
+-- elided, the interfaces of every module in scope and every import, sibling
+-- bodies as the context policy allows, every diagnostic of the last check,
+-- failing examples, the counterexamples, the standard library entries the
+-- targets' types select, and the loop's own notes. Never a prose conventions document.
+pub fn assemble(
+  task: Task,
+  baseline: Check,
+  current: Check,
+  targets: List[TargetInfo],
+  ctx_policy: Text,
+  history: List[HistoryEntry],
+  full_history: Bool,
+  messages: List[Text]
+) -> ModelContext may alloc, mutate {
+  var sections: Builder[Text] = List.builder()
+  let names: Dict[Text, Bool] = target_names(targets: targets)
+  -- 1. Targets: signatures, contracts, and the examples and properties that mention them.
+  var target_texts: Builder[Text] = List.builder()
+  for target: TargetInfo in targets {
+    List.push(b: inout target_texts, x: item_text(item: ast.FnItem(decl: elide(f: target.decl))))
+    for item: ast.Item in module_items(c: baseline, name: target.module_name) {
+      match item with
+      | ast.ExampleItem(decl) -> {
+        let text: Text = item_text(item: item)
+        if decl.name.text == target.name or Text.contains(t: text, needle: target.name ++ "(") {
+          List.push(b: inout target_texts, x: text)
+        }
+      }
+      | ast.PropertyItem(decl) -> {
+        let text: Text = item_text(item: item)
+        if decl.name.text == target.name or Text.contains(t: text, needle: target.name ++ "(") {
+          List.push(b: inout target_texts, x: text)
+        }
+      }
+      | _ -> skip()
+    }
+  }
+  let target_list: List[Text] = List.finish(b: target_texts)
+  var task_line: Text = task.kind
+  match task.description with
+  | Some(value) -> task_line = task_line ++ ": " ++ value
+  | None -> skip()
+  List.push(
+    b: inout sections,
+    x: "## Task\n\n" ++ task_line ++ "\n\n## Targets\n\n" ++ fenced(texts: target_list)
+  )
+  -- 2. Interfaces of every module in scope and every import, bodies elided.
+  var wanted: Builder[Text] = List.builder()
+  for name: Text in task.scope {
+    List.push(b: inout wanted, x: name)
+  }
+  for name: Text in task.scope {
+    for imported: Text in imports_of(c: current, name: name) {
+      List.push(b: inout wanted, x: imported)
+    }
+  }
+  var seen: Dict[Text, Bool] = Map.dict()
+  var iface_texts: Builder[Text] = List.builder()
+  for name: Text in List.finish(b: wanted) {
+    if not Map.contains(d: seen, key: name) {
+      Map.set(d: inout seen, key: name, value: true)
+      match Map.find(d: current.ctx.by_name, key: name) with
+      | None -> skip()
+      | Some(value) -> {
+        if not is_std_module(c: current, mid: value) {
+          List.push(
+            b: inout iface_texts,
+            x: Text.trim(t: interface.interface_text(ctx: current.ctx, mod: value))
+          )
+        }
+      }
+    }
+  }
+  if List.built(b: iface_texts) > 0 {
+    List.push(
+      b: inout sections,
+      x: "## Interfaces\n\n" ++ fenced(texts: List.finish(b: iface_texts))
+    )
+  }
+  -- 3. Sibling bodies, per policy.
+  if ctx_policy != "none" {
+    var chosen: Dict[Text, Bool] = Map.dict()
+    if ctx_policy == "module" {
+      for t: TargetInfo in targets {
+        Map.set(d: inout chosen, key: t.module_name, value: true)
+      }
+    } else {
+      for name: Text in task.scope {
+        Map.set(d: inout chosen, key: name, value: true)
+      }
+    }
+    var bodies: Builder[Text] = List.builder()
+    for mid: Int in 0 ..< current.ctx.module_count {
+      let mname: Text = module_name_of(c: current, mid: mid)
+      if Map.contains(d: chosen, key: mname) {
+        for f: ast.FnDecl in fns_of_items(items: module_items_of(c: current, mid: mid)) {
+          if not Map.contains(d: names, key: mname ++ "." ++ f.name.text) and has_body(f: f) {
+            List.push(b: inout bodies, x: item_text(item: ast.FnItem(decl: f)))
+          }
+        }
+      }
+    }
+    if List.built(b: bodies) > 0 {
+      List.push(
+        b: inout sections,
+        x: "## Other functions in scope (for reference)\n\n" ++ fenced(
+          texts: List.finish(b: bodies)
+        )
+      )
+    }
+  }
+  -- 4. Diagnostics of the last check (every one, as JSON), and earlier ones under full history.
+  let n_history: Int = List.len(xs: history)
+  if n_history > 0 {
+    let last: HistoryEntry = List.get(xs: history, i: n_history - 1)
+    var shown: Builder[Text] = List.builder()
+    for d: json.Json in last.diagnostics {
+      if relevant(d: d, targets: targets) {
+        List.push(b: inout shown, x: json.compact(j: d))
+      }
+    }
+    if List.built(b: shown) > 0 {
+      List.push(
+        b: inout sections,
+        x: "## Diagnostics from the last check (" ++ Int.to_text(
+          x: List.built(b: shown)
+        ) ++ ")\n\n" ++ Text.join(parts: List.finish(b: shown), sep: "\n")
+      )
+    } else {
+      if List.len(xs: last.failing) == 0 {
+        List.push(b: inout sections, x: "## Diagnostics from the last check\n\nnone")
+      }
+    }
+    if List.len(xs: last.failing) > 0 {
+      var bodies: Builder[Text] = List.builder()
+      for name: Text in last.failing {
+        let short: Text = last_segment(name: name)
+        for mid: Int in 0 ..< baseline.ctx.module_count {
+          let mname: Text = module_name_of(c: baseline, mid: mid)
+          for item: ast.Item in module_items_of(c: baseline, mid: mid) {
+            match item with
+            | ast.ExampleItem(decl) -> {
+              if mname ++ "." ++ decl.name.text == name {
+                List.push(b: inout bodies, x: item_text(item: item))
+              }
+            }
+            | ast.PropertyItem(decl) -> {
+              if mname ++ "." ++ decl.name.text == name {
+                List.push(b: inout bodies, x: item_text(item: item))
+              }
+            }
+            | ast.ImplItem(decl) -> {
+              if Text.starts_with(t: short, prefix: "law ") {
+                List.push(b: inout bodies, x: item_text(item: item))
+              }
+            }
+            | _ -> skip()
+          }
+        }
+      }
+      List.push(
+        b: inout sections,
+        x: "## Failing examples and properties (" ++ Int.to_text(
+          x: List.len(xs: last.failing)
+        ) ++ ")\n\n" ++ Text.join(parts: last.failing, sep: "\n") ++ "\n\n" ++ fenced(
+          texts: List.finish(b: bodies)
+        )
+      )
+    }
+  }
+  if full_history and n_history > 1 {
+    var earlier: Builder[Text] = List.builder()
+    var i: Int = 0
+    for h: HistoryEntry in history {
+      if i < n_history - 1 {
+        var parts: Builder[Text] = List.builder()
+        for d: json.Json in h.diagnostics {
+          if relevant(d: d, targets: targets) {
+            List.push(b: inout parts, x: diagnostic_summary(d: d))
+          }
+        }
+        var line: Text = Text.join(parts: List.finish(b: parts), sep: "; ")
+        if line == "" {
+          line = "no diagnostics"
+        }
+        if List.len(xs: h.failing) > 0 {
+          line = line ++ "; failing: " ++ Text.join(parts: h.failing, sep: ", ")
+        }
+        List.push(b: inout earlier, x: "iteration " ++ Int.to_text(x: h.iteration) ++ ": " ++ line)
+      }
+      i = i + 1
+    }
+    List.push(
+      b: inout sections,
+      x: "## Earlier iterations\n\n" ++ Text.join(parts: List.finish(b: earlier), sep: "\n")
+    )
+  }
+  -- 5. Counterexamples: the task's, and those of the last diagnostics.
+  var counterexamples: Builder[Text] = List.builder()
+  match task.counterexample with
+  | Some(value) -> List.push(
+    b: inout counterexamples,
+    x: "from " ++ origin_kind(task: task) ++ against_text(task: task) ++ ": " ++ json.compact(
+      j: value
+    )
+  )
+  | None -> skip()
+  if n_history > 0 {
+    let last: HistoryEntry = List.get(xs: history, i: n_history - 1)
+    for d: json.Json in last.diagnostics {
+      if json.has(j: d, key: "obligation") {
+        let o: json.Json = json.at(j: d, key: "obligation")
+        if not json.is_null(j: json.at(j: o, key: "counterexample")) {
+          var in_def: Text = "?"
+          let location: json.Json = json.at(j: d, key: "location")
+          if not json.is_null(j: json.at(j: location, key: "def")) {
+            in_def = json.str_at(j: location, key: "def")
+          }
+          List.push(
+            b: inout counterexamples,
+            x: "against `" ++ json.str_at(j: o, key: "kind") ++ " " ++ json.str_at(
+              j: o,
+              key: "text"
+            ) ++ "` in " ++ in_def ++ ": " ++ json.compact(j: json.at(j: o, key: "counterexample"))
+          )
+        }
+      }
+    }
+  }
+  if List.built(b: counterexamples) > 0 {
+    List.push(
+      b: inout sections,
+      x: "## Counterexamples\n\n" ++ Text.join(parts: List.finish(b: counterexamples), sep: "\n")
+    )
+  }
+  -- 6. Standard library entries, selected by the types the targets mention.
+  let mention: Text = Text.join(parts: target_list, sep: "\n")
+  var std_texts: Builder[Text] = List.builder()
+  for module_name: Text in [
+    "std.text",
+    "std.list",
+    "std.grid",
+    "std.map",
+    "std.bytes",
+    "std.io",
+    "std.sql",
+    "std.float",
+    "std.int"
+  ] {
+    if mentions(mention: mention, module_name: module_name) {
+      match Map.find(d: current.ctx.by_name, key: module_name) with
+      | Some(value) -> List.push(
+        b: inout std_texts,
+        x: Text.trim(t: interface.interface_text(ctx: current.ctx, mod: value))
+      )
+      | None -> skip()
+    }
+  }
+  if List.built(b: std_texts) > 0 {
+    List.push(
+      b: inout sections,
+      x: "## Standard library\n\n" ++ fenced(texts: List.finish(b: std_texts))
+    )
+  }
+  -- 7. The loop's own feedback.
+  if List.len(xs: messages) > 0 {
+    var notes: Builder[Text] = List.builder()
+    for m: Text in messages {
+      List.push(b: inout notes, x: "- " ++ m)
+    }
+    List.push(
+      b: inout sections,
+      x: "## Notes from the loop\n\n" ++ Text.join(parts: List.finish(b: notes), sep: "\n")
+    )
+  }
+  let prompt: Text = Text.join(parts: List.finish(b: sections), sep: "\n\n")
+  return ModelContext {
+    system: system_prompt,
+    prompt: prompt,
+    prompt_hash: "b3:" ++ hash.blake3_hex(t: system_prompt ++ "\n" ++ prompt)
+  }
+}
+
+-- The names of the modules `name` imports, in order.
+fn imports_of(c: Check, name: Text) -> List[Text] may alloc, mutate {
+  match Map.find(d: c.ctx.by_name, key: name) with
+  | None -> return []
+  | Some(value) -> return imports_of_module(c: c, mid: value)
+}
+
+fn imports_of_module(c: Check, mid: Int) -> List[Text] may alloc, mutate {
+  match Map.find(d: c.ctx.modules, key: mid) with
+  | None -> return []
+  | Some(value) -> {
+    var out: Builder[Text] = List.builder()
+    for imp: defs.ImportRecord in value.imports {
+      List.push(b: inout out, x: module_name_of(c: c, mid: imp.mod))
+    }
+    return List.finish(b: out)
+  }
+}
+
+fn origin_kind(task: Task) -> Text {
+  match task.origin with
+  | Some(value) -> return value.kind
+  | None -> return "the task"
+}
+
+fn against_text(task: Task) -> Text may alloc {
+  match task.target with
+  | None -> return ""
+  | Some(value) -> return obligation_text(o: value.obligation)
+}
+
+fn obligation_text(o: Option[Text]) -> Text may alloc {
+  match o with
+  | Some(value) -> return " against `" ++ value ++ "`"
+  | None -> return ""
+}
+
+fn is_std_module(c: Check, mid: Int) -> Bool {
+  match Map.find(d: c.ctx.modules, key: mid) with
+  | Some(value) -> return value.is_std
+  | None -> return true
+}
+
+fn fns_of_items(items: List[ast.Item]) -> List[ast.FnDecl] may alloc, mutate {
+  var out: Builder[ast.FnDecl] = List.builder()
+  for item: ast.Item in items {
+    match item with
+    | ast.FnItem(decl) -> List.push(b: inout out, x: decl)
+    | _ -> skip()
+  }
+  return List.finish(b: out)
+}
+
+-- Changes and blocked reports (§5, §6) -------------------------------------------------
+fn sanitised(id: Text) -> Text may alloc, mutate {
+  var out: Builder[Int] = List.builder()
+  for c: Int in Text.code_points(t: id) {
+    if is_word_char(c: c) or c == 46 or c == 45 {
+      List.push(b: inout out, x: c)
+    } else {
+      List.push(b: inout out, x: 95)
+    }
+  }
+  return Text.of_code_points(cps: List.finish(b: out))
+}
+
+-- The directory a task's change lives in.
+pub fn change_dir(root: Text, task_id: Text) -> Text may alloc, mutate {
+  return root ++ "/.onus/changes/" ++ sanitised(id: task_id)
+}
+
+-- Writes `change.json` for the task; the path written.
+pub fn write_change(
+  files: io.Files,
+  root: Text,
+  task_id: Text,
+  change: json.Json
+) -> Result[Text, io.Error] may io.file, alloc, mutate {
+  let dir: Text = change_dir(root: root, task_id: task_id)
+  try io.mkdir(files: files, path: dir)
+  let path: Text = dir ++ "/change.json"
+  try build.write_file(files: files, path: path, text: json.pretty(j: change) ++ "\n")
+  return Ok(value: path)
+}
+
+fn proposal_json(
+  kind: Text,
+  def: Text,
+  current: Option[Text],
+  proposed: Option[Text],
+  counterexample: json.Json,
+  iterations: Int,
+  finding: Option[Text],
+  rationale: Text
+) -> json.Json may alloc, mutate {
+  var evidence: Builder[json.Field] = List.builder()
+  List.push(b: inout evidence, x: json.field(key: "counterexample", value: counterexample))
+  List.push(b: inout evidence, x: json.field(key: "iterations", value: json.int(v: iterations)))
+  match finding with
+  | Some(value) -> List.push(
+    b: inout evidence,
+    x: json.field(key: "finding", value: json.text(t: value))
+  )
+  | None -> skip()
+  return json.JObject(
+    fields: [
+      json.field(key: "kind", value: json.text(t: kind)),
+      json.field(key: "def", value: json.text(t: def)),
+      json.field(key: "current", value: json.text_or_null(o: current)),
+      json.field(key: "proposed", value: json.text_or_null(o: proposed)),
+      json.field(key: "evidence", value: json.JObject(fields: List.finish(b: evidence))),
+      json.field(key: "rationale", value: json.text(t: rationale))
+    ]
+  )
+}
+
+-- The signature of a check outcome, for noticing an identical one (§4 "stall").
+fn outcome_signature(diagnostics: List[json.Json], failing: List[Text]) -> Text may alloc, mutate {
+  var parts: Builder[Text] = List.builder()
+  for d: json.Json in diagnostics {
+    let location: json.Json = json.at(j: d, key: "location")
+    var ob: Text = ""
+    if json.has(j: d, key: "obligation") {
+      let o: json.Json = json.at(j: d, key: "obligation")
+      ob = "|" ++ json.str_at(j: o, key: "kind") ++ " " ++ json.str_at(j: o, key: "text")
+    }
+    List.push(
+      b: inout parts,
+      x: json.str_at(j: d, key: "code") ++ "@" ++ json.str_at(
+        j: location,
+        key: "def"
+      ) ++ ":" ++ json.compact(j: json.at(j: location, key: "span")) ++ ob
+    )
+  }
+  var all: Builder[Text] = List.builder()
+  for p: Text in sorted_texts(xs: List.finish(b: parts)) {
+    List.push(b: inout all, x: p)
+  }
+  for f: Text in sorted_texts(xs: failing) {
+    List.push(b: inout all, x: "test " ++ f)
+  }
+  return Text.join(parts: List.finish(b: all), sep: "\n")
+}
+
+fn row_key(r: LedgerRow) -> Text may alloc {
+  return r.def ++ "|" ++ r.kind ++ "|" ++ r.text
+}
+
+fn delta_json(r: LedgerRow, before: Option[Text], after: Option[Text]) -> json.Json may alloc {
+  return json.JObject(
+    fields: [
+      json.field(key: "def", value: json.text(t: r.def)),
+      json.field(key: "kind", value: json.text(t: r.kind)),
+      json.field(key: "text", value: json.text(t: r.text)),
+      json.field(key: "before", value: json.text_or_null(o: before)),
+      json.field(key: "after", value: json.text_or_null(o: after))
+    ]
+  )
+}
+
+fn ledger_delta(before: Check, after: Check) -> List[json.Json] may alloc, mutate {
+  var a: Dict[Text, LedgerRow] = Map.dict()
+  for r: LedgerRow in before.ledger {
+    Map.set(d: inout a, key: row_key(r: r), value: r)
+  }
+  var b: Dict[Text, LedgerRow] = Map.dict()
+  for r: LedgerRow in after.ledger {
+    Map.set(d: inout b, key: row_key(r: r), value: r)
+  }
+  var out: Builder[json.Json] = List.builder()
+  for k: Text in Map.keys(d: b) {
+    match Map.find(d: b, key: k) with
+    | None -> skip()
+    | Some(value) -> delta_of(a: a, r: value, out: inout out)
+  }
+  for k: Text in Map.keys(d: a) {
+    if not Map.contains(d: b, key: k) {
+      match Map.find(d: a, key: k) with
+      | None -> skip()
+      | Some(value) -> List.push(
+        b: inout out,
+        x: delta_json(r: value, before: Some(value: value.status), after: None)
+      )
+    }
+  }
+  return List.finish(b: out)
+}
+
+-- The delta of one row of the ledger after, against the rows before.
+fn delta_of(
+  a: Dict[Text, LedgerRow],
+  r: LedgerRow,
+  out: inout Builder[json.Json]
+) -> Unit may alloc, mutate {
+  match Map.find(d: a, key: row_key(r: r)) with
+  | None -> List.push(b: inout out, x: delta_json(r: r, before: None, after: Some(value: r.status)))
+  | Some(value) -> {
+    if value.status != r.status {
+      List.push(
+        b: inout out,
+        x: delta_json(r: r, before: Some(value: value.status), after: Some(value: r.status))
+      )
+    }
+  }
+  return Unit
+}
+
+fn interface_diffs(
+  scope: List[Text],
+  before: Check,
+  after: Check
+) -> List[json.Json] may alloc, mutate {
+  var out: Builder[json.Json] = List.builder()
+  for name: Text in scope {
+    match diff_pair(
+      a: Map.find(d: before.interfaces, key: name),
+      b: Map.find(d: after.interfaces, key: name)
+    ) with
+    | Some(value) -> List.push(b: inout out, x: value)
+    | None -> skip()
+  }
+  return List.finish(b: out)
+}
+
+fn diff_pair(a: Option[json.Json], b: Option[json.Json]) -> Option[json.Json] may alloc, mutate {
+  match a with
+  | None -> return None
+  | Some(value) -> return diff_with(before_doc: value, b: b)
+}
+
+fn diff_with(before_doc: json.Json, b: Option[json.Json]) -> Option[json.Json] may alloc, mutate {
+  match b with
+  | None -> return None
+  | Some(value) -> {
+    let d: idiff.Diff = idiff.interface_diff(before: before_doc, after: value)
+    if List.len(xs: d.added) > 0 or List.len(xs: d.removed) > 0 or List.len(xs: d.changed) > 0 {
+      return Some(value: idiff.diff_json(d: d))
+    }
+    return None
+  }
+}
+
+pub record Finding {
+  finding: Text
+  detail: Text
+}
+
+fn finding_json(f: Finding) -> json.Json may alloc {
+  return json.JObject(
+    fields: [
+      json.field(key: "finding", value: json.text(t: f.finding)),
+      json.field(key: "detail", value: json.text(t: f.detail))
+    ]
+  )
+}
+
+fn def_or_question(d: json.Json) -> Text {
+  let location: json.Json = json.at(j: d, key: "location")
+  if json.is_null(j: json.at(j: location, key: "def")) {
+    return "?"
+  }
+  return json.str_at(j: location, key: "def")
+}
+
+-- Regeneration audit findings (§8): what the interfaces alone could not reconstruct.
+fn audit(baseline: Check, final: Option[Check]) -> List[Finding] may alloc, mutate {
+  match final with
+  | None -> return []
+  | Some(value) -> return audit_of(baseline: baseline, final: value)
+}
+
+fn audit_of(baseline: Check, final: Check) -> List[Finding] may alloc, mutate {
+  var out: Builder[Finding] = List.builder()
+  if List.len(xs: final.diagnostics) > 0 {
+    -- The regenerated program does not check: every diagnostic is a finding.
+    for d: json.Json in final.json {
+      if json.str_at(j: d, key: "code") == "E0702" {
+        List.push(
+          b: inout out,
+          x: Finding {
+            finding: "example_failed",
+            detail: Text.join(
+              parts: json.texts_at(j: d, key: "context"),
+              sep: "; "
+            ) ++ " on the regenerated body of " ++ def_or_question(
+              d: d
+            ) ++ ": something the old body did that no claim required"
+          }
+        )
+      } else {
+        var ob: Text = ""
+        if json.has(j: d, key: "obligation") {
+          let o: json.Json = json.at(j: d, key: "obligation")
+          ob = " (" ++ json.str_at(j: o, key: "kind") ++ " " ++ json.str_at(
+            j: o,
+            key: "text"
+          ) ++ ")"
+        }
+        List.push(
+          b: inout out,
+          x: Finding {
+            finding: "obligation_regressed",
+            detail: json.str_at(j: d, key: "code") ++ " " ++ json.str_at(
+              j: d,
+              key: "title"
+            ) ++ ob ++ " in " ++ def_or_question(
+              d: d
+            ) ++ ": the interfaces were sufficient to check the old body but not to reconstruct it"
+          }
+        )
+      }
+    }
+    return List.finish(b: out)
+  }
+  var after: Dict[Text, Text] = Map.dict()
+  for r: LedgerRow in final.ledger {
+    Map.set(d: inout after, key: row_key(r: r), value: r.status)
+  }
+  for r: LedgerRow in baseline.ledger {
+    if r.status == "proved" or r.status == "checked" {
+      let now: Text = or_empty(o: Map.find(d: after, key: row_key(r: r)))
+      if now == "failed" or now == "unprovable" or (r.status == "proved" and now == "checked") {
+        List.push(
+          b: inout out,
+          x: Finding {
+            finding: "obligation_regressed",
+            detail: r.kind ++ " " ++ r.text ++ " in " ++ r.def ++ ": " ++ r.status ++ " on the old body, " ++ now ++ " on the regenerated one; usually a missing example or invariant"
+          }
+        )
+      }
+    }
+  }
+  match baseline.tests with
+  | None -> skip()
+  | Some(value) -> {
+    for f: Finding in test_regressions(before: value, after: final.tests) {
+      List.push(b: inout out, x: f)
+    }
+  }
+  return List.finish(b: out)
+}
+
+fn test_regressions(
+  before: Dict[Text, Bool],
+  after: Option[Dict[Text, Bool]]
+) -> List[Finding] may alloc, mutate {
+  match after with
+  | None -> return []
+  | Some(value) -> {
+    var out: Builder[Finding] = List.builder()
+    for name: Text in Map.keys(d: before) {
+      if test_passed(tests: before, name: name) and Map.contains(
+        d: value,
+        key: name
+      ) and not test_passed(tests: value, name: name) {
+        List.push(
+          b: inout out,
+          x: Finding {
+            finding: "example_failed",
+            detail: name ++ " passes on the old body and fails on the regenerated one: something the old body did that no claim required"
+          }
+        )
+      }
+    }
+    return List.finish(b: out)
+  }
+}
+
+fn test_passed(tests: Dict[Text, Bool], name: Text) -> Bool {
+  match Map.find(d: tests, key: name) with
+  | Some(value) -> return value
+  | None -> return false
+}
+
+fn proposals_from_audit(
+  findings: List[Finding],
+  target: Text,
+  iterations: Int
+) -> List[json.Json] may alloc, mutate {
+  var out: Builder[json.Json] = List.builder()
+  for f: Finding in findings {
+    var kind: Text = "add_example"
+    if f.finding == "example_failed" {
+      kind = "add_claim"
+    }
+    List.push(
+      b: inout out,
+      x: proposal_json(
+        kind: kind,
+        def: target,
+        current: None,
+        proposed: None,
+        counterexample: json.JNull,
+        iterations: iterations,
+        finding: Some(value: f.finding),
+        rationale: f.detail
+      )
+    )
+  }
+  return List.finish(b: out)
+}
+
+-- The body spans of the targets in the current texts, per file, for mechanical repair (§4 "check").
+fn target_body_spans(
+  c: Check,
+  targets: List[TargetInfo]
+) -> Dict[Text, List[ast.Span]] may alloc, mutate {
+  var out: Dict[Text, List[ast.Span]] = Map.dict()
+  for mid: Int in 0 ..< c.ctx.module_count {
+    match Map.find(d: c.ctx.modules, key: mid) with
+    | None -> skip()
+    | Some(value) -> body_spans_of(c: c, m: value, targets: targets, out: inout out)
+  }
+  return out
+}
+
+fn body_spans_of(
+  c: Check,
+  m: defs.ModuleRecord,
+  targets: List[TargetInfo],
+  out: inout Dict[Text, List[ast.Span]]
+) -> Unit may alloc, mutate {
+  let path: Text = file_path_of(c: c, file: m.file)
+  for f: ast.FnDecl in fns_of(m: m.tree) {
+    if is_target(targets: targets, module_name: m.name, name: f.name.text) {
+      match f.body with
+      | Some(value) -> Map.set(
+        d: inout out,
+        key: path,
+        value: List.append(xs: or_list(o: Map.find(d: out, key: path)), x: value.span)
+      )
+      | None -> skip()
+    }
+  }
+  return Unit
+}
+
+fn is_target(targets: List[TargetInfo], module_name: Text, name: Text) -> Bool {
+  for t: TargetInfo in targets {
+    if t.module_name == module_name and t.name == name {
+      return true
+    }
+  }
+  return false
+}
+
+fn within(spans: List[ast.Span], span: ast.Span) -> Bool {
+  for s: ast.Span in spans {
+    if s.start <= span.start and span.end <= s.end {
+      return true
+    }
+  }
+  return false
+}
+
+record Decl {
+  fn_decl: ast.FnDecl
+  module_name: Text
+  path: Text
+}
+
+fn info(d: Decl) -> TargetInfo may alloc {
+  return TargetInfo {
+    module_name: d.module_name,
+    name: d.fn_decl.name.text,
+    path: d.path,
+    decl: elide(f: d.fn_decl)
+  }
+}
+
+-- The functions a task is about (§2), with their baseline declarations.
+fn select_targets(
+  task: Task,
+  project: Project,
+  baseline: Check,
+  texts: Dict[Text, Text]
+) -> Result[List[TargetInfo], Text] may alloc, mutate {
+  var decls: Dict[Text, Decl] = Map.dict()
+  for name: Text in project.scope {
+    let path: Text = or_empty(o: Map.find(d: project.paths, key: name))
+    let text: Text = text_of(texts: texts, fallback: project.texts, path: path)
+    match parse_module(path: path, text: text).module with
+    | None -> return Err(error: path ++ " does not parse")
+    | Some(value) -> {
+      for f: ast.FnDecl in fns_of(m: value) {
+        Map.set(
+          d: inout decls,
+          key: name ++ "." ++ f.name.text,
+          value: Decl { fn_decl: f, module_name: name, path: path }
+        )
+      }
+    }
+  }
+  if task.kind == "implement" or task.kind == "repair" {
+    var def: Text = ""
+    match task.target with
+    | Some(value) -> def = value.def
+    | None -> skip()
+    match Map.find(d: decls, key: def) with
+    | None -> return Err(error: "target " ++ def ++ " is not a function in scope")
+    | Some(value) -> {
+      if task.kind == "repair" and not has_body(f: value.fn_decl) {
+        return Err(error: "target " ++ def ++ " has no body to repair")
+      }
+      return Ok(value: [info(d: value)])
+    }
+  }
+  var out: Builder[TargetInfo] = List.builder()
+  if task.kind == "interface_change" {
+    for d: Decl in Map.values(d: decls) {
+      if has_body(f: d.fn_decl) and named_in(
+        diagnostics: baseline.json,
+        name: d.fn_decl.name.text,
+        path: d.path
+      ) {
+        List.push(b: inout out, x: info(d: d))
+      }
+    }
+    return Ok(value: List.finish(b: out))
+  }
+  if task.kind == "regenerate" {
+    for d: Decl in Map.values(d: decls) {
+      if has_body(f: d.fn_decl) {
+        List.push(b: inout out, x: info(d: d))
+      }
+    }
+    return Ok(value: List.finish(b: out))
+  }
+  return Ok(value: [])
+}
+
+fn named_in(diagnostics: List[json.Json], name: Text, path: Text) -> Bool {
+  for d: json.Json in diagnostics {
+    let location: json.Json = json.at(j: d, key: "location")
+    if json.str_at(j: location, key: "def") == name and json.str_at(
+      j: location,
+      key: "file"
+    ) == path {
+      return true
+    }
+  }
+  return false
+}
+
+-- One note per syntax diagnostic of a model answer: the line it is on and
+-- the tokens the grammar admits there (§14). The fragment has a two-line
+-- module header before the answer, so its line numbers are two ahead.
+fn syntax_notes(fragment: Parsed) -> List[Text] may alloc, mutate {
+  let lines: List[Text] = Text.split(t: fragment.text, sep: "\n")
+  var out: Builder[Text] = List.builder()
+  var seen_lines: Dict[Int, Bool] = Map.dict()
+  for d: report.Diagnostic in fragment.diagnostics {
+    if List.built(b: out) < 6 {
+      let before: Text = slice_within(t: fragment.text, from: 0, to: d.span.start)
+      let line: Int = List.len(xs: Text.split(t: before, sep: "\n"))
+      if not Map.contains(d: seen_lines, key: line) {
+        Map.set(d: inout seen_lines, key: line, value: true)
+        var text: Text = ""
+        if line >= 1 and line <= List.len(xs: lines) {
+          text = Text.trim(t: List.get(xs: lines, i: line - 1))
+        }
+        var line_start: Int = 0
+        var scan: Int = 0
+        for c: Int in Text.code_points(t: before) {
+          scan = scan + 1
+          if c == 10 {
+            line_start = scan
+          }
+        }
+        if line_start < 0 {
+          line_start = 0
+        }
+        let legal_list: List[Text] = legal_starts(text: fragment.text, line_start: line_start)
+        var context_text: Text = ""
+        if List.len(xs: d.context) > 0 {
+          context_text = ": " ++ Text.join(parts: d.context, sep: "; ")
+        }
+        var admits: Text = ""
+        if List.len(xs: legal_list) > 0 {
+          admits = ". A line here may start with: " ++ Text.join(parts: legal_list, sep: " ")
+        }
+        List.push(
+          b: inout out,
+          x: "line " ++ Int.to_text(
+            x: line - 2
+          ) ++ ": `" ++ text ++ "` — " ++ d.code ++ " " ++ codes.title(
+            code: d.code
+          ) ++ context_text ++ admits
+        )
+      }
+    }
+  }
+  return List.finish(b: out)
+}
+
+-- The decoder names a line may start with at `line_start` of `text`, sorted, without newline and eof.
+fn legal_starts(text: Text, line_start: Int where it >= 0) -> List[Text] may alloc, mutate {
+  let prefix: Text = slice_within(t: text, from: 0, to: line_start)
+  if Text.count(t: prefix) > lexer.max_source {
+    return []
+  }
+  let lexed: lexer.LexResult = lexer.lex(source: prefix)
+  var legal: Builder[Text] = List.builder()
+  for k: Text in Map.keys(
+    d: parser.legal_tokens_at(prefix: parser.prefix_tokens(toks: lexed.tokens), offset: line_start)
+  ) {
+    let name: Text = tokens.decoder_name_of(kind: k)
+    if name != "newline" and name != "eof" {
+      List.push(b: inout legal, x: name)
+    }
+  }
+  return sorted_texts(xs: List.finish(b: legal))
+}
+
+fn best_bodies(texts: Dict[Text, Text], targets: List[TargetInfo]) -> json.Json may alloc, mutate {
+  var fields: Builder[json.Field] = List.builder()
+  for target: TargetInfo in targets {
+    match body_text_of(
+      path: target.path,
+      text: Map.find(d: texts, key: target.path),
+      name: target.name
+    ) with
+    | Some(value) -> List.push(
+      b: inout fields,
+      x: json.field(key: target.module_name ++ "." ++ target.name, value: json.text(t: value))
+    )
+    | None -> skip()
+  }
+  return json.JObject(fields: List.finish(b: fields))
+}
+
+fn body_text_of(path: Text, text: Option[Text], name: Text) -> Option[Text] may alloc, mutate {
+  match text with
+  | None -> return None
+  | Some(value) -> return fn_text(m: parse_module(path: path, text: value).module, name: name)
+}
+
+fn fn_text(m: Option[ast.Module], name: Text) -> Option[Text] may alloc, mutate {
+  match m with
+  | None -> return None
+  | Some(value) -> return fn_item_text(f: find_fn(m: value, name: name))
+}
+
+fn fn_item_text(f: Option[ast.FnDecl]) -> Option[Text] may alloc, mutate {
+  match f with
+  | None -> return None
+  | Some(value) -> return Some(value: item_text(item: ast.FnItem(decl: value)))
+}
+
+-- The effect list of a signature text: what follows `may`, to the end of the line or the body.
+fn effects_of(sig: Text) -> Text may alloc, mutate {
+  let cps: List[Int] = Text.code_points(t: sig)
+  let n: Int = List.len(xs: cps)
+  let may_word: List[Int] = Text.code_points(t: "may")
+  var start: Int = -1
+  for i: Int in 0 ..< n {
+    if start < 0 and matches_at(cps: cps, at: i, word: may_word) {
+      let left_ok: Bool = i == 0 or not is_word_char(c: List.get(xs: cps, i: i - 1))
+      let right_ok: Bool = i + 3 >= n or not is_word_char(c: List.get(xs: cps, i: i + 3))
+      if left_ok and right_ok {
+        start = i + 3
+      }
+    }
+  }
+  if start < 0 {
+    return ""
+  }
+  var end: Int = start
+  var scanning: Bool = true
+  for k: Int in 0 ..< n {
+    if k >= start and scanning {
+      let c: Int = List.get(xs: cps, i: k)
+      if c == 10 or c == 123 {
+        scanning = false
+      } else {
+        end = k + 1
+      }
+    }
+  }
+  return Text.trim(t: slice_within(t: sig, from: start, to: end))
+}
+
+fn signature_proposal(
+  target: TargetInfo,
+  proposed: ast.FnDecl,
+  iteration: Int
+) -> json.Json may alloc, mutate {
+  let a: Text = signature_text(f: target.decl)
+  let b: Text = signature_text(f: proposed)
+  var kind: Text = "weaken_postcondition"
+  if effects_of(sig: a) != effects_of(sig: b) {
+    kind = "widen_effects"
+  }
+  return proposal_json(
+    kind: kind,
+    def: target.module_name ++ "." ++ target.name,
+    current: Some(value: a),
+    proposed: Some(value: b),
+    counterexample: json.JNull,
+    iterations: iteration,
+    finding: None,
+    rationale: "the model changed the signature twice; the loop may not edit a claim, so the change is proposed instead"
+  )
+}
+
+-- A ticket's answer: the first JSON object in it, as a proposal.
+fn parse_proposal(answer: Text, fallback_def: Text) -> Option[json.Json] may alloc, mutate {
+  match Text.index_of(t: answer, needle: "{", from: 0) with
+  | None -> return None
+  | Some(value) -> return proposal_between(
+    answer: answer,
+    open: value,
+    close: last_close(answer: answer, from: value),
+    fallback_def: fallback_def
+  )
+}
+
+-- The offset of the last `}` at or after `from`, or -1.
+fn last_close(answer: Text, from: Int) -> Int may alloc {
+  let cps: List[Int] = Text.code_points(t: answer)
+  let n: Int = List.len(xs: cps)
+  var close: Int = -1
+  for i: Int in 0 ..< n {
+    if close < 0 {
+      let k: Int = n - 1 - i
+      if k >= from and List.get(xs: cps, i: k) == 125 {
+        close = k
+      }
+    }
+  }
+  return close
+}
+
+fn proposal_between(
+  answer: Text,
+  open: Int,
+  close: Int,
+  fallback_def: Text
+) -> Option[json.Json] may alloc, mutate {
+  if close < open {
+    return None
+  }
+  match json.parse(t: slice_within(t: answer, from: open, to: close + 1)) with
+  | None -> return None
+  | Some(value) -> return proposal_of_object(
+    parsed: value,
+    answer: answer,
+    fallback_def: fallback_def
+  )
+}
+
+fn proposal_of_object(
+  parsed: json.Json,
+  answer: Text,
+  fallback_def: Text
+) -> Option[json.Json] may alloc, mutate {
+  if not parsed is json.JObject {
+    return None
+  }
+  let kind_text: Text = json.str_at(j: parsed, key: "kind")
+  var kind: Text = "unsatisfiable"
+  if List.contains(
+    xs: [
+      "weaken_postcondition",
+      "add_precondition",
+      "widen_effects",
+      "add_claim",
+      "add_example",
+      "new_helper",
+      "unsatisfiable"
+    ],
+    x: kind_text
+  ) {
+    kind = kind_text
+  }
+  var def: Text = fallback_def
+  if is_string(j: json.at(j: parsed, key: "def")) {
+    def = json.str_at(j: parsed, key: "def")
+  }
+  var rationale: Text = Text.trim(t: answer)
+  if is_string(j: json.at(j: parsed, key: "rationale")) {
+    rationale = json.str_at(j: parsed, key: "rationale")
+  }
+  return Some(
+    value: proposal_json(
+      kind: kind,
+      def: def,
+      current: str_or_none(j: json.at(j: parsed, key: "current")),
+      proposed: str_or_none(j: json.at(j: parsed, key: "proposed")),
+      counterexample: json.JNull,
+      iterations: 1,
+      finding: None,
+      rationale: rationale
+    )
+  )
+}
+
+-- The cycle (§4) -----------------------------------------------------------------------
+pub record Options {
+  root: Text
+  model: Model
+  tools: Tools
+  -- Write the new bodies and `change.json`; off for dry runs.
+  write: Bool
+}
+
+pub record Outcome {
+  -- `change`, `blocked` or `error`.
+  status: Text
+  change: Option[json.Json]
+  error: Option[Text]
+  -- Path of `change.json` when written.
+  path: Option[Text]
+}
+
+record Best {
+  iteration: Int
+  diagnostics: Int
+  texts: Dict[Text, Text]
+}
+
+-- Everything one run carries between iterations.
+record Run {
+  task: Task
+  project: Project
+  work_dir: Text
+  started: Int
+  texts0: Dict[Text, Text]
+  working: Dict[Text, Text]
+  baseline: Check
+  targets: List[TargetInfo]
+  trace: List[json.Json]
+  history: List[HistoryEntry]
+  proposals: List[json.Json]
+  messages: List[Text]
+  tokens: Int
+  mechanical: Int
+  escalation_steps: Int
+  cause: Option[Text]
+  model_name: Text
+  ctx_policy: Text
+  full_history: Bool
+  ladder: Int
+  pending_escalation: Option[Text]
+  current: Option[Check]
+  grew: Int
+  seen: Dict[Text, Bool]
+  seen_bodies: Dict[Text, Dict[Text, Bool]]
+  claim_edits: Int
+  helper_attempts: Int
+  best: Option[Best]
+  checks: Int
+  calls: Int
+  done: Bool
+  green: Bool
+}
+
+fn copy_texts(d: Dict[Text, Text]) -> Dict[Text, Text] may alloc, mutate {
+  var out: Dict[Text, Text] = Map.dict()
+  for k: Text in Map.keys(d: d) {
+    Map.set(d: inout out, key: k, value: or_empty(o: Map.find(d: d, key: k)))
+  }
+  return out
+}
+
+fn failure(error: Text) -> Outcome {
+  return Outcome { status: "error", change: None, error: Some(value: error), path: None }
+}
+
+fn log(console: io.Console, line: Text) -> Unit may io.file, alloc {
+  io.eprint(console: console, text: line ++ "\n")
+  return Unit
+}
+
+fn diagnostics_of(c: Option[Check], fallback: Check) -> List[json.Json] {
+  match c with
+  | Some(value) -> return value.json
+  | None -> return fallback.json
+}
+
+fn count_of(c: Option[Check], fallback: Check) -> Int {
+  return List.len(xs: diagnostics_of(c: c, fallback: fallback))
+}
+
+-- One rung of the ladder (§4.1) per stall; false when there is none left.
+fn escalate(r: inout Run) -> Bool may alloc, mutate {
+  r = { r with ladder: r.ladder + 1, escalation_steps: r.escalation_steps + 1 }
+  var go: Bool = true
+  var answer: Bool = false
+  var guard: Int = 8
+  loop while go and guard > 0
+    invariant guard >= 0
+    decreases guard
+  {
+    guard = guard - 1
+    if r.ladder == 1 {
+      r = { r with full_history: true, pending_escalation: Some(value: "full diagnostic history") }
+      answer = true
+      go = false
+    } else {
+      if r.ladder == 2 {
+        if r.ctx_policy == "scope" {
+          r = { r with ladder: r.ladder + 1 }
+        } else {
+          var next_policy: Text = "scope"
+          if r.ctx_policy == "none" {
+            next_policy = "module"
+          }
+          r = { r with
+            ctx_policy: next_policy,
+            pending_escalation: Some(value: "context policy " ++ next_policy)
+          }
+          answer = true
+          go = false
+        }
+      } else {
+        if r.ladder == 3 or r.ladder == 4 {
+          -- Helper introduction and an alternate model are configuration in v0 and off (§4.1, §12).
+          r = { r with ladder: r.ladder + 1 }
+        } else {
+          r = { r with cause: Some(value: "stall") }
+          answer = false
+          go = false
+        }
+      }
+    }
+  }
+  return answer
+}
+
+fn record_trace(
+  r: inout Run,
+  console: io.Console,
+  iteration: Int,
+  model: Text,
+  prompt_hash: Text,
+  before: Int,
+  diags: List[json.Json],
+  failing: List[Text],
+  repairs: Int,
+  tokens: Int,
+  ms: Int,
+  classification: Text,
+  escalation: Option[Text]
+) -> Unit may io.file, alloc, mutate {
+  var codes: Builder[Text] = List.builder()
+  for d: json.Json in diags {
+    List.push(b: inout codes, x: json.str_at(j: d, key: "code"))
+  }
+  let entry: json.Json = json.JObject(
+    fields: [
+      json.field(key: "iteration", value: json.int(v: iteration)),
+      json.field(key: "model", value: json.text(t: model)),
+      json.field(key: "prompt_hash", value: json.text(t: prompt_hash)),
+      json.field(key: "diagnostics_before", value: json.int(v: before)),
+      json.field(key: "diagnostics_after", value: json.int(v: List.len(xs: diags))),
+      json.field(key: "codes_after", value: json.texts(ts: List.finish(b: codes))),
+      json.field(key: "failing_tests", value: json.texts(ts: failing)),
+      json.field(key: "mechanical_repairs", value: json.int(v: repairs)),
+      json.field(key: "tokens", value: json.int(v: tokens)),
+      json.field(key: "ms", value: json.int(v: ms)),
+      json.field(key: "classification", value: json.text(t: classification)),
+      json.field(key: "escalation", value: json.text_or_null(o: escalation))
+    ]
+  )
+  r = { r with trace: List.append(xs: r.trace, x: entry) }
+  var failing_text: Text = ""
+  if List.len(xs: failing) > 0 {
+    failing_text = ", " ++ plural(n: List.len(xs: failing), word: "failing test")
+  }
+  log(
+    console: console,
+    line: "onus loop: iteration " ++ Int.to_text(
+      x: iteration
+    ) ++ ": " ++ classification ++ " (" ++ plural(
+      n: List.len(xs: diags),
+      word: "diagnostic"
+    ) ++ failing_text ++ ")"
+  )
+  return Unit
+}
+
+fn check_working(
+  r: inout Run,
+  files: io.Files,
+  console: io.Console,
+  process: io.Process,
+  tools: Tools,
+  texts: Dict[Text, Text]
+) -> Result[Check, io.Error] may io.file, nondet, alloc, mutate {
+  r = { r with checks: r.checks + 1 }
+  return check_project(
+    files: files,
+    console: console,
+    process: process,
+    project: r.project,
+    tools: tools,
+    texts: texts,
+    run_tests: true,
+    out_dir: r.work_dir ++ "/check-" ++ Int.to_text(x: r.checks)
+  )
+}
+
+fn ask(
+  r: inout Run,
+  files: io.Files,
+  process: io.Process,
+  net: io.Net,
+  model: Model,
+  system: Text,
+  prompt: Text,
+  max_tokens: Int
+) -> Result[Answer, Text] may io.file, io.net, nondet, alloc, mutate {
+  let answer: Answer = try generate(
+    m: model,
+    process: process,
+    net: net,
+    call: r.calls,
+    system: system,
+    prompt: prompt,
+    max_tokens: max_tokens
+  )
+  r = { r with calls: r.calls + 1, tokens: r.tokens + answer.tokens, model_name: answer.model }
+  return Ok(value: answer)
+}
+
+fn take_messages(r: inout Run) -> List[Text] may alloc, mutate {
+  let out: List[Text] = r.messages
+  r = { r with messages: [] }
+  return out
+}
+
+fn push_message(r: inout Run, m: Text) -> Unit may alloc, mutate {
+  r = { r with messages: List.append(xs: r.messages, x: m) }
+  return Unit
+}
+
+fn push_proposal(r: inout Run, p: json.Json) -> Unit may alloc, mutate {
+  r = { r with proposals: List.append(xs: r.proposals, x: p) }
+  return Unit
+}
+
+fn push_history(r: inout Run, h: HistoryEntry) -> Unit may alloc, mutate {
+  r = { r with history: List.append(xs: r.history, x: h) }
+  return Unit
+}
+
+fn stop(r: inout Run) -> Unit may alloc, mutate {
+  r = { r with done: true }
+  return Unit
+}
+
+-- The body diff of the working texts against the baseline.
+fn body_diffs(r: Run) -> List[json.Json] may alloc, mutate {
+  var out: Builder[json.Json] = List.builder()
+  for path: Text in Map.keys(d: r.working) {
+    let after: Text = or_empty(o: Map.find(d: r.working, key: path))
+    let before: Text = or_empty(o: Map.find(d: r.texts0, key: path))
+    if before != after {
+      var module_name: Text = ""
+      for name: Text in Map.keys(d: r.project.paths) {
+        if module_name == "" and or_empty(o: Map.find(d: r.project.paths, key: name)) == path {
+          module_name = name
+        }
+      }
+      List.push(
+        b: inout out,
+        x: json.JObject(
+          fields: [
+            json.field(key: "file", value: json.text(t: path)),
+            json.field(key: "module", value: json.text(t: module_name)),
+            json.field(key: "before", value: json.text(t: before)),
+            json.field(key: "after", value: json.text(t: after))
+          ]
+        )
+      )
+    }
+  }
+  return List.finish(b: out)
+}
+
+-- Concludes the run as a change opened or a blocked report (§6): the change
+-- written (and the new bodies, when opened) unless writing is off.
+fn conclude(
+  r: inout Run,
+  files: io.Files,
+  status: Text,
+  final: Option[Check],
+  now: Int,
+  write: Bool
+) -> Result[Outcome, io.Error] may io.file, alloc, mutate {
+  var findings: List[Finding] = []
+  if r.task.kind == "regenerate" {
+    findings = audit(baseline: r.baseline, final: final)
+    if List.len(xs: findings) > 0 {
+      r = { r with
+        proposals: r.proposals ++ proposals_from_audit(
+          findings: findings,
+          target: Text.join(parts: r.task.scope, sep: ", "),
+          iterations: List.len(xs: r.trace)
+        )
+      }
+    }
+  }
+  let diffs: List[json.Json] = body_diffs(r: r)
+  var fields: Builder[json.Field] = List.builder()
+  List.push(b: inout fields, x: json.field(key: "schema_version", value: json.int(v: 1)))
+  List.push(b: inout fields, x: json.field(key: "task", value: task_json(t: r.task)))
+  List.push(b: inout fields, x: json.field(key: "status", value: json.text(t: status)))
+  match r.cause with
+  | Some(value) -> List.push(
+    b: inout fields,
+    x: json.field(key: "cause", value: json.text(t: value))
+  )
+  | None -> skip()
+  List.push(
+    b: inout fields,
+    x: json.field(
+      key: "generated",
+      value: json.JObject(
+        fields: [
+          json.field(key: "at", value: json.text(t: assumptions.iso_of_millis(ms: now))),
+          json.field(key: "model", value: json.text(t: r.model_name))
+        ]
+      )
+    )
+  )
+  var iface: List[json.Json] = []
+  var delta: List[json.Json] = []
+  match final with
+  | Some(value) -> {
+    iface = interface_diffs(scope: r.task.scope, before: r.baseline, after: value)
+    delta = ledger_delta(before: r.baseline, after: value)
+  }
+  | None -> skip()
+  List.push(b: inout fields, x: json.field(key: "interface_diff", value: json.JArray(items: iface)))
+  List.push(b: inout fields, x: json.field(key: "ledger_delta", value: json.JArray(items: delta)))
+  var body_diff: List[json.Json] = []
+  if status == "opened" {
+    body_diff = diffs
+  }
+  List.push(b: inout fields, x: json.field(key: "body_diff", value: json.JArray(items: body_diff)))
+  List.push(b: inout fields, x: json.field(key: "trace", value: json.JArray(items: r.trace)))
+  List.push(
+    b: inout fields,
+    x: json.field(
+      key: "metrics",
+      value: json.JObject(
+        fields: [
+          json.field(key: "iterations", value: json.int(v: List.len(xs: r.trace))),
+          json.field(key: "mechanical_repairs", value: json.int(v: r.mechanical)),
+          json.field(key: "escalation_steps", value: json.int(v: r.escalation_steps)),
+          json.field(key: "proposals", value: json.int(v: List.len(xs: r.proposals))),
+          json.field(key: "tokens", value: json.int(v: r.tokens))
+        ]
+      )
+    )
+  )
+  List.push(
+    b: inout fields,
+    x: json.field(key: "proposals", value: json.JArray(items: r.proposals))
+  )
+  var audit_json: Builder[json.Json] = List.builder()
+  for f: Finding in findings {
+    List.push(b: inout audit_json, x: finding_json(f: f))
+  }
+  List.push(
+    b: inout fields,
+    x: json.field(key: "audit", value: json.JArray(items: List.finish(b: audit_json)))
+  )
+  if status == "blocked" {
+    var last: List[json.Json] = []
+    let n_history: Int = List.len(xs: r.history)
+    if n_history > 0 {
+      last = List.get(xs: r.history, i: n_history - 1).diagnostics
+    } else {
+      match final with
+      | Some(value) -> last = value.json
+      | None -> skip()
+    }
+    List.push(
+      b: inout fields,
+      x: json.field(key: "last_diagnostics", value: json.JArray(items: last))
+    )
+    var best_json: json.Json = json.JNull
+    match r.best with
+    | Some(value) -> best_json = json.JObject(
+      fields: [
+        json.field(key: "iteration", value: json.int(v: value.iteration)),
+        json.field(key: "diagnostics", value: json.int(v: value.diagnostics)),
+        json.field(key: "bodies", value: best_bodies(texts: value.texts, targets: r.targets))
+      ]
+    )
+    | None -> skip()
+    List.push(b: inout fields, x: json.field(key: "best_attempt", value: best_json))
+  }
+  let change: json.Json = json.JObject(fields: List.finish(b: fields))
+  var path: Option[Text] = None
+  if write {
+    if status == "opened" {
+      for d: json.Json in diffs {
+        try build.write_file(
+          files: files,
+          path: json.str_at(j: d, key: "file"),
+          text: json.str_at(j: d, key: "after")
+        )
+      }
+    }
+    let written: Text = try write_change(
+      files: files,
+      root: r.project.root,
+      task_id: r.task.id,
+      change: change
+    )
+    path = Some(value: written)
+  }
+  var outcome_status: Text = "blocked"
+  if status == "opened" {
+    outcome_status = "change"
+  }
+  return Ok(
+    value: Outcome { status: outcome_status, change: Some(value: change), error: None, path: path }
+  )
+}
+
+-- The ticket path (§2, §5): a proposal, never an edit.
+fn ticket(
+  r: inout Run,
+  files: io.Files,
+  process: io.Process,
+  net: io.Net,
+  clock: io.Clock,
+  model: Model,
+  write: Bool
+) -> Result[Outcome, io.Error] may io.file, io.net, io.clock, nondet, alloc, mutate {
+  let ctx_in: ModelContext = assemble(
+    task: r.task,
+    baseline: r.baseline,
+    current: r.baseline,
+    targets: [],
+    ctx_policy: r.task.context_policy,
+    history: [],
+    full_history: false,
+    messages: [
+      "This is a ticket. Do not write code. Answer with one JSON object describing the interface change it needs: {\"kind\": one of weaken_postcondition, add_precondition, widen_effects, add_claim, add_example, new_helper, unsatisfiable; \"def\": qualified name; \"current\": text or null; \"proposed\": text or null; \"rationale\": text}."
+    ]
+  )
+  let t0: Int = io.time(clock: clock)
+  match ask(
+    r: inout r,
+    files: files,
+    process: process,
+    net: net,
+    model: model,
+    system: ctx_in.system,
+    prompt: ctx_in.prompt,
+    max_tokens: 4096
+  ) with
+  | Err(error) -> return Ok(value: failure(error: "model: " ++ error))
+  | Ok(value) -> {
+    let classification: Text = note_proposal(
+      r: inout r,
+      p: parse_proposal(answer: value.text, fallback_def: fallback_def(task: r.task))
+    )
+    let n: Int = List.len(xs: r.baseline.json)
+    r = { r with
+      trace: List.append(
+        xs: r.trace,
+        x: json.JObject(
+          fields: [
+            json.field(key: "iteration", value: json.int(v: 1)),
+            json.field(key: "model", value: json.text(t: value.model)),
+            json.field(key: "prompt_hash", value: json.text(t: ctx_in.prompt_hash)),
+            json.field(key: "diagnostics_before", value: json.int(v: n)),
+            json.field(key: "diagnostics_after", value: json.int(v: n)),
+            json.field(key: "codes_after", value: json.JArray(items: [])),
+            json.field(key: "failing_tests", value: json.JArray(items: [])),
+            json.field(key: "mechanical_repairs", value: json.int(v: 0)),
+            json.field(key: "tokens", value: json.int(v: value.tokens)),
+            json.field(key: "ms", value: json.int(v: io.time(clock: clock) - t0)),
+            json.field(key: "classification", value: json.text(t: classification)),
+            json.field(key: "escalation", value: json.JNull)
+          ]
+        )
+      )
+    }
+    return conclude(
+      r: inout r,
+      files: files,
+      status: "opened",
+      final: Some(value: r.baseline),
+      now: io.time(clock: clock),
+      write: write
+    )
+  }
+}
+
+fn fallback_def(task: Task) -> Text {
+  match task.target with
+  | Some(value) -> return value.def
+  | None -> {
+    if List.len(xs: task.scope) > 0 {
+      return List.get(xs: task.scope, i: 0)
+    }
+    return ""
+  }
+}
+
+-- Records a ticket's proposal; the trace's classification.
+fn note_proposal(r: inout Run, p: Option[json.Json]) -> Text may alloc, mutate {
+  match p with
+  | Some(value) -> {
+    push_proposal(r: inout r, p: value)
+    return "proposal"
+  }
+  | None -> return "no proposal"
+}
+
+record Spliced {
+  texts: Dict[Text, Text]
+  count: Int
+  repeated: Bool
+}
+
+-- Splices the returned bodies of the targets into the working texts.
+fn splice_answers(
+  r: inout Run,
+  returned: List[ast.FnDecl],
+  iteration: Int
+) -> Spliced may alloc, mutate {
+  var sp: Spliced = Spliced { texts: copy_texts(d: r.working), count: 0, repeated: false }
+  for target: TargetInfo in r.targets {
+    match find_in(fns: returned, name: target.name) with
+    | None -> push_message(
+      r: inout r,
+      m: "The answer did not include `" ++ target.name ++ "`; return every target."
+    )
+    | Some(value) -> splice_found(
+      r: inout r,
+      target: target,
+      f: value,
+      iteration: iteration,
+      sp: inout sp
+    )
+  }
+  return sp
+}
+
+fn splice_found(
+  r: inout Run,
+  target: TargetInfo,
+  f: ast.FnDecl,
+  iteration: Int,
+  sp: inout Spliced
+) -> Unit may alloc, mutate {
+  if signature_text(f: f) != signature_text(f: target.decl) {
+    r = { r with claim_edits: r.claim_edits + 1 }
+    push_message(
+      r: inout r,
+      m: "The signature of `" ++ target.name ++ "` was changed; only the body may change. Keep exactly:\n" ++ signature_text(
+        f: target.decl
+      )
+    )
+    if r.claim_edits >= 2 {
+      push_proposal(
+        r: inout r,
+        p: signature_proposal(target: target, proposed: f, iteration: iteration)
+      )
+    }
+    return Unit
+  }
+  match f.body with
+  | None -> push_message(r: inout r, m: "`" ++ target.name ++ "` came back without a body.")
+  | Some(value) -> {
+    if value.elided {
+      push_message(r: inout r, m: "`" ++ target.name ++ "` came back without a body.")
+    } else {
+      splice_body(r: inout r, target: target, body: value, sp: inout sp)
+    }
+  }
+  return Unit
+}
+
+fn splice_body(
+  r: inout Run,
+  target: TargetInfo,
+  body: ast.Block,
+  sp: inout Spliced
+) -> Unit may alloc, mutate {
+  let text: Text = or_empty(o: Map.find(d: sp.texts, key: target.path))
+  match parse_module(path: target.path, text: text).module with
+  | None -> skip()
+  | Some(value) -> splice_into(
+    r: inout r,
+    target: target,
+    body: body,
+    cur: find_fn(m: value, name: target.name),
+    text: text,
+    sp: inout sp
+  )
+  return Unit
+}
+
+fn splice_into(
+  r: inout Run,
+  target: TargetInfo,
+  body: ast.Block,
+  cur: Option[ast.FnDecl],
+  text: Text,
+  sp: inout Spliced
+) -> Unit may alloc, mutate {
+  match cur with
+  | None -> skip()
+  | Some(value) -> {
+    let h: Text = body_hash(f: with_body(f: target.decl, body: body))
+    var hashes: Dict[Text, Bool] = or_dict(o: Map.find(d: r.seen_bodies, key: target.name))
+    var repeated: Bool = sp.repeated
+    if Map.contains(d: hashes, key: h) {
+      repeated = true
+    }
+    Map.set(d: inout hashes, key: h, value: true)
+    var seen_bodies: Dict[Text, Dict[Text, Bool]] = r.seen_bodies
+    Map.set(d: inout seen_bodies, key: target.name, value: hashes)
+    r = { r with seen_bodies: seen_bodies }
+    var texts: Dict[Text, Text] = sp.texts
+    Map.set(
+      d: inout texts,
+      key: target.path,
+      value: canonical_text(
+        path: target.path,
+        text: splice_item(
+          text: text,
+          span: value.span,
+          replacement: ast.FnItem(decl: with_body(f: value, body: body))
+        )
+      )
+    )
+    sp = { sp with texts: texts, count: sp.count + 1, repeated: repeated }
+  }
+  return Unit
+}
+
+fn or_dict(o: Option[Dict[Text, Bool]]) -> Dict[Text, Bool] may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return Map.dict()
+}
+
+fn find_in(fns: List[ast.FnDecl], name: Text) -> Option[ast.FnDecl] {
+  for f: ast.FnDecl in fns {
+    if f.name.text == name {
+      return Some(value: f)
+    }
+  }
+  return None
+}
+
+fn failing_of(c: Check) -> List[Text] may alloc, mutate {
+  var out: Builder[Text] = List.builder()
+  match c.tests with
+  | None -> skip()
+  | Some(value) -> {
+    for name: Text in Map.keys(d: value) {
+      if not test_passed(tests: value, name: name) {
+        List.push(b: inout out, x: name)
+      }
+    }
+  }
+  return List.finish(b: out)
+}
+
+-- Repairs inside the target bodies with high confidence, applied at most three rounds.
+fn repair_rounds(
+  r: inout Run,
+  files: io.Files,
+  console: io.Console,
+  process: io.Process,
+  tools: Tools,
+  first: Check
+) -> Result[Check, io.Error] may io.file, nondet, alloc, mutate {
+  var current: Check = first
+  var repairs: Int = 0
+  var round: Int = 0
+  var go: Bool = true
+  loop while go and round < 3
+    invariant round >= 0 and round <= 3
+    decreases 3 - round
+  {
+    round = round + 1
+    if current.internal_error or List.len(xs: current.diagnostics) == 0 {
+      go = false
+    } else {
+      let spans: Dict[Text, List[ast.Span]] = target_body_spans(c: current, targets: r.targets)
+      var changed: Bool = false
+      for path: Text in Map.keys(d: spans) {
+        let inside: List[ast.Span] = or_list(o: Map.find(d: spans, key: path))
+        match Map.find(d: r.working, key: path) with
+        | None -> skip()
+        | Some(value) -> {
+          let text: Text = value
+          var edits: Builder[Edit] = List.builder()
+          for d: report.Diagnostic in current.diagnostics {
+            if file_path_of(c: current, file: d.file) == path {
+              for rep: report.Repair in d.repairs {
+                if rep.confidence == "high" and within(spans: inside, span: rep.span) {
+                  List.push(
+                    b: inout edits,
+                    x: Edit { start: rep.span.start, end: rep.span.end, with_text: rep.with_text }
+                  )
+                }
+              }
+            }
+          }
+          let applied: Applied = apply_repairs(text: text, edits: List.finish(b: edits))
+          if applied.applied > 0 {
+            var working: Dict[Text, Text] = r.working
+            Map.set(
+              d: inout working,
+              key: path,
+              value: canonical_text(path: path, text: applied.text)
+            )
+            r = { r with working: working }
+            repairs = repairs + applied.applied
+            changed = true
+          }
+        }
+      }
+      if changed {
+        current = try check_working(
+          r: inout r,
+          files: files,
+          console: console,
+          process: process,
+          tools: tools,
+          texts: r.working
+        )
+      } else {
+        go = false
+      }
+    }
+  }
+  r = { r with mechanical: r.mechanical + repairs }
+  return Ok(value: current)
+}
+
+fn or_list(o: Option[List[ast.Span]]) -> List[ast.Span] may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return []
+}
+
+fn set_best(r: inout Run, iteration: Int, size: Int) -> Unit may alloc, mutate {
+  var better: Bool = true
+  match r.best with
+  | Some(value) -> better = size < value.diagnostics
+  | None -> skip()
+  if better {
+    r = { r with
+      best: Some(
+        value: Best { iteration: iteration, diagnostics: size, texts: copy_texts(d: r.working) }
+      )
+    }
+  }
+  return Unit
+}
+
+-- The conflicts of a check: diagnostics on the targets with a counterexample.
+fn conflicts_of(c: Check, targets: List[TargetInfo]) -> List[report.Diagnostic] may alloc, mutate {
+  var out: Builder[report.Diagnostic] = List.builder()
+  for d: report.Diagnostic in c.diagnostics {
+    match d.obligation with
+    | Some(value) -> {
+      if value.has_counterexample and is_target_name(
+        targets: targets,
+        name: or_empty(o: d.def_name)
+      ) {
+        List.push(b: inout out, x: d)
+      }
+    }
+    | None -> skip()
+  }
+  return List.finish(b: out)
+}
+
+fn counterexample_json(c: Check, d: report.Diagnostic) -> json.Json may alloc, mutate {
+  let j: json.Json = diagjson.to_json(ctx: c.ctx, tab: c.tab, d: d)
+  return json.at(j: json.at(j: j, key: "obligation"), key: "counterexample")
+}
+
+-- One iteration of generate → check → classify (§4). The run's `done` ends the loop.
+fn iterate(
+  r: inout Run,
+  files: io.Files,
+  console: io.Console,
+  process: io.Process,
+  net: io.Net,
+  clock: io.Clock,
+  model: Model,
+  tools: Tools,
+  iteration: Int
+) -> Result[Option[Text], io.Error] may io.file, io.net, io.clock, nondet, alloc, mutate {
+  if io.time(clock: clock) - r.started > r.task.budget.wall_ms or r.tokens > r.task.budget.tokens {
+    r = { r with cause: Some(value: "budget") }
+    stop(r: inout r)
+    return Ok(value: None)
+  }
+  var current_check: Check = r.baseline
+  match r.current with
+  | Some(value) -> current_check = value
+  | None -> skip()
+  let ctx_in: ModelContext = assemble(
+    task: r.task,
+    baseline: r.baseline,
+    current: current_check,
+    targets: r.targets,
+    ctx_policy: r.ctx_policy,
+    history: r.history,
+    full_history: r.full_history,
+    messages: take_messages(r: inout r)
+  )
+  let t0: Int = io.time(clock: clock)
+  var answer: Answer = Answer { text: "", model: "", tokens: 0 }
+  match ask(
+    r: inout r,
+    files: files,
+    process: process,
+    net: net,
+    model: model,
+    system: ctx_in.system,
+    prompt: ctx_in.prompt,
+    max_tokens: 8192
+  ) with
+  | Err(error) -> return Ok(value: Some(value: "model: " ++ error))
+  | Ok(value) -> answer = value
+  -- The exchange, for anyone reading the work directory; change.json carries the prompt hash only (§6).
+  try build.write_file(
+    files: files,
+    path: r.work_dir ++ "/prompt-" ++ Int.to_text(x: iteration) ++ ".md",
+    text: ctx_in.system ++ "\n\n---\n\n" ++ ctx_in.prompt ++ "\n"
+  )
+  try build.write_file(
+    files: files,
+    path: r.work_dir ++ "/answer-" ++ Int.to_text(x: iteration) ++ ".md",
+    text: answer.text
+  )
+  let escalation: Option[Text] = r.pending_escalation
+  r = { r with pending_escalation: None }
+  let before: Int = count_of(c: r.current, fallback: r.baseline)
+  -- generate: parse the answer; unparseable output is a syntax diagnostic fed back, not a retry (§4).
+  let fragment: Parsed = parse_fragment(text: extract_code(answer: answer.text))
+  if fragment.module is None or List.len(xs: fragment.diagnostics) > 0 {
+    push_history(
+      r: inout r,
+      h: HistoryEntry { iteration: iteration, diagnostics: fragment.json, failing: [] }
+    )
+    let sig: Text = outcome_signature(diagnostics: fragment.json, failing: [])
+    let stalled: Bool = Map.contains(d: r.seen, key: sig)
+    var seen: Dict[Text, Bool] = r.seen
+    Map.set(d: inout seen, key: sig, value: true)
+    r = { r with seen: seen }
+    push_message(
+      r: inout r,
+      m: "The previous answer did not parse as Onus; the diagnostics above are about that answer, not the file. The offending lines of that answer were:"
+    )
+    for note: Text in syntax_notes(fragment: fragment) {
+      push_message(r: inout r, m: note)
+    }
+    var classification: Text = "progress"
+    if stalled {
+      classification = "stall"
+    }
+    record_trace(
+      r: inout r,
+      console: console,
+      iteration: iteration,
+      model: answer.model,
+      prompt_hash: ctx_in.prompt_hash,
+      before: before,
+      diags: fragment.json,
+      failing: [],
+      repairs: 0,
+      tokens: answer.tokens,
+      ms: io.time(clock: clock) - t0,
+      classification: classification,
+      escalation: escalation
+    )
+    if stalled and not escalate(r: inout r) {
+      stop(r: inout r)
+    }
+    return Ok(value: None)
+  }
+  var returned: List[ast.FnDecl] = []
+  var item_count: Int = 0
+  match fragment.module with
+  | Some(value) -> {
+    returned = fns_of(m: value)
+    item_count = List.len(xs: value.items)
+  }
+  | None -> skip()
+  var extra: Builder[ast.FnDecl] = List.builder()
+  for f: ast.FnDecl in returned {
+    if not is_target_name(targets: r.targets, name: f.name.text) {
+      List.push(b: inout extra, x: f)
+    }
+  }
+  let extras: List[ast.FnDecl] = List.finish(b: extra)
+  if List.len(xs: extras) > 0 {
+    r = { r with helper_attempts: r.helper_attempts + 1 }
+    if r.helper_attempts >= 2 or item_count != List.len(xs: returned) {
+      var first_module: Text = ""
+      if List.len(xs: r.targets) > 0 {
+        first_module = List.get(xs: r.targets, i: 0).module_name
+      }
+      for f: ast.FnDecl in extras {
+        push_proposal(
+          r: inout r,
+          p: proposal_json(
+            kind: "new_helper",
+            def: first_module ++ "." ++ f.name.text,
+            current: None,
+            proposed: Some(value: signature_text(f: f)),
+            counterexample: json.JNull,
+            iterations: iteration,
+            finding: None,
+            rationale: "the model needed a helper it may not introduce (loop spec §4.1 step 3 is off)"
+          )
+        )
+      }
+      r = { r with cause: Some(value: "out_of_scope") }
+      record_trace(
+        r: inout r,
+        console: console,
+        iteration: iteration,
+        model: answer.model,
+        prompt_hash: ctx_in.prompt_hash,
+        before: before,
+        diags: diagnostics_of(c: r.current, fallback: r.baseline),
+        failing: [],
+        repairs: 0,
+        tokens: answer.tokens,
+        ms: io.time(clock: clock) - t0,
+        classification: "unusable",
+        escalation: escalation
+      )
+      stop(r: inout r)
+      return Ok(value: None)
+    }
+    var names: Builder[Text] = List.builder()
+    for f: ast.FnDecl in extras {
+      List.push(b: inout names, x: "`" ++ f.name.text ++ "`")
+    }
+    push_message(
+      r: inout r,
+      m: "The answer added " ++ Text.join(
+        parts: List.finish(b: names),
+        sep: ", "
+      ) ++ "; the loop may not add functions. Return only the targets."
+    )
+  }
+  let spliced: Spliced = splice_answers(r: inout r, returned: returned, iteration: iteration)
+  if r.claim_edits >= 2 {
+    r = { r with cause: Some(value: "out_of_scope") }
+    record_trace(
+      r: inout r,
+      console: console,
+      iteration: iteration,
+      model: answer.model,
+      prompt_hash: ctx_in.prompt_hash,
+      before: before,
+      diags: diagnostics_of(c: r.current, fallback: r.baseline),
+      failing: [],
+      repairs: 0,
+      tokens: answer.tokens,
+      ms: io.time(clock: clock) - t0,
+      classification: "unusable",
+      escalation: escalation
+    )
+    stop(r: inout r)
+    return Ok(value: None)
+  }
+  if spliced.count == 0 {
+    push_history(
+      r: inout r,
+      h: HistoryEntry {
+        iteration: iteration,
+        diagnostics: diagnostics_of(c: r.current, fallback: r.baseline),
+        failing: []
+      }
+    )
+    record_trace(
+      r: inout r,
+      console: console,
+      iteration: iteration,
+      model: answer.model,
+      prompt_hash: ctx_in.prompt_hash,
+      before: before,
+      diags: diagnostics_of(c: r.current, fallback: r.baseline),
+      failing: [],
+      repairs: 0,
+      tokens: answer.tokens,
+      ms: io.time(clock: clock) - t0,
+      classification: "unusable",
+      escalation: escalation
+    )
+    if not escalate(r: inout r) {
+      stop(r: inout r)
+    }
+    return Ok(value: None)
+  }
+  r = { r with working: spliced.texts }
+  -- check, then mechanical repair inside target bodies, at most three rounds.
+  let first: Check = try check_working(
+    r: inout r,
+    files: files,
+    console: console,
+    process: process,
+    tools: tools,
+    texts: r.working
+  )
+  let mechanical_before: Int = r.mechanical
+  let checked: Check = try repair_rounds(
+    r: inout r,
+    files: files,
+    console: console,
+    process: process,
+    tools: tools,
+    first: first
+  )
+  let repairs: Int = r.mechanical - mechanical_before
+  if checked.internal_error {
+    r = { r with cause: Some(value: "compiler_bug"), current: Some(value: checked) }
+    record_trace(
+      r: inout r,
+      console: console,
+      iteration: iteration,
+      model: answer.model,
+      prompt_hash: ctx_in.prompt_hash,
+      before: before,
+      diags: checked.json,
+      failing: [],
+      repairs: repairs,
+      tokens: answer.tokens,
+      ms: io.time(clock: clock) - t0,
+      classification: "unusable",
+      escalation: escalation
+    )
+    stop(r: inout r)
+    return Ok(value: None)
+  }
+  r = { r with current: Some(value: checked) }
+  let failing: List[Text] = failing_of(c: checked)
+  push_history(
+    r: inout r,
+    h: HistoryEntry { iteration: iteration, diagnostics: checked.json, failing: failing }
+  )
+  let size: Int = List.len(xs: checked.json) + List.len(xs: failing)
+  set_best(r: inout r, iteration: iteration, size: size)
+  -- classify
+  let sig: Text = outcome_signature(diagnostics: checked.json, failing: failing)
+  let conflicts: List[report.Diagnostic] = conflicts_of(c: checked, targets: r.targets)
+  var classification: Text = "progress"
+  if List.len(xs: checked.diagnostics) == 0 and List.len(xs: failing) == 0 {
+    classification = "green"
+  } else {
+    if List.len(xs: conflicts) > 0 and spliced.repeated {
+      classification = "contract conflict"
+    } else {
+      if Map.contains(d: r.seen, key: sig) {
+        classification = "stall"
+      } else {
+        let n_history: Int = List.len(xs: r.history)
+        var prev_size: Int = size + 1
+        if n_history >= 2 {
+          let prev: HistoryEntry = List.get(xs: r.history, i: n_history - 2)
+          prev_size = List.len(xs: prev.diagnostics) + List.len(xs: prev.failing)
+        }
+        if size < prev_size {
+          classification = "progress"
+          r = { r with grew: 0 }
+        } else {
+          r = { r with grew: r.grew + 1 }
+          if r.grew >= 2 {
+            classification = "stall"
+          } else {
+            classification = "grew"
+          }
+        }
+      }
+    }
+  }
+  var seen: Dict[Text, Bool] = r.seen
+  Map.set(d: inout seen, key: sig, value: true)
+  r = { r with seen: seen }
+  record_trace(
+    r: inout r,
+    console: console,
+    iteration: iteration,
+    model: answer.model,
+    prompt_hash: ctx_in.prompt_hash,
+    before: before,
+    diags: checked.json,
+    failing: failing,
+    repairs: repairs,
+    tokens: answer.tokens,
+    ms: io.time(clock: clock) - t0,
+    classification: classification,
+    escalation: escalation
+  )
+  if classification == "green" {
+    r = { r with green: true }
+    stop(r: inout r)
+    return Ok(value: None)
+  }
+  if classification == "contract conflict" {
+    for d: report.Diagnostic in conflicts {
+      match d.obligation with
+      | None -> skip()
+      | Some(value) -> {
+        let ob: report.ObligationInfo = value
+        var kind: Text = "unsatisfiable"
+        if ob.kind == "ensures" {
+          kind = "weaken_postcondition"
+        }
+        if ob.kind == "requires" {
+          kind = "add_precondition"
+        }
+        var def: Text = or_empty(o: d.def_name)
+        for t: TargetInfo in r.targets {
+          if t.name == or_empty(o: d.def_name) {
+            def = t.module_name ++ "." ++ t.name
+          }
+        }
+        push_proposal(
+          r: inout r,
+          p: proposal_json(
+            kind: kind,
+            def: def,
+            current: Some(value: ob.kind ++ " " ++ ob.text),
+            proposed: None,
+            counterexample: counterexample_json(c: checked, d: d),
+            iterations: iteration,
+            finding: None,
+            rationale: "the counterexample satisfies every precondition and violates the clause, and the model proposed the same body twice: the contract is likely wrong"
+          )
+        )
+      }
+    }
+    r = { r with cause: Some(value: "contract_conflict") }
+    stop(r: inout r)
+    return Ok(value: None)
+  }
+  if classification == "stall" and not escalate(r: inout r) {
+    stop(r: inout r)
+  }
+  return Ok(value: None)
+}
+
+-- Runs one task to its conclusion. Runs the compiler and the model; writes
+-- checks and builds under the work directory; on a change, writes the new
+-- bodies into the working tree and `change.json`; on a blocked task, writes
+-- `change.json` only and leaves the tree as found. An error names what
+-- stopped the run before it could conclude.
+pub fn run_task(
+  task: Task,
+  files: io.Files,
+  console: io.Console,
+  process: io.Process,
+  net: io.Net,
+  clock: io.Clock,
+  opts: Options
+) -> Result[Outcome, io.Error] may io.file, io.net, io.clock, nondet, alloc, mutate {
+  let started: Int = io.time(clock: clock)
+  var project: Project = Project {
+    root: opts.root,
+    scope: [],
+    paths: Map.dict(),
+    texts: Map.dict()
+  }
+  match load_project(files: files, root: opts.root, scope: task.scope) with
+  | Err(error) -> return Ok(value: failure(error: error))
+  | Ok(value) -> project = value
+  let work_dir: Text = change_dir(root: opts.root, task_id: task.id) ++ "/work"
+  try io.remove_all(files: files, path: work_dir)
+  try io.mkdir(files: files, path: work_dir)
+  -- prepare: canonical form, the baseline, the targets
+  var texts0: Dict[Text, Text] = Map.dict()
+  for path: Text in Map.keys(d: project.texts) {
+    Map.set(
+      d: inout texts0,
+      key: path,
+      value: canonical_text(path: path, text: or_empty(o: Map.find(d: project.texts, key: path)))
+    )
+  }
+  var r: Run = Run {
+    task: task,
+    project: project,
+    work_dir: work_dir,
+    started: started,
+    texts0: texts0,
+    working: copy_texts(d: texts0),
+    baseline: try check_project(
+      files: files,
+      console: console,
+      process: process,
+      project: project,
+      tools: opts.tools,
+      texts: texts0,
+      run_tests: true,
+      out_dir: work_dir ++ "/check-1"
+    ),
+    targets: [],
+    trace: [],
+    history: [],
+    proposals: [],
+    messages: [],
+    tokens: 0,
+    mechanical: 0,
+    escalation_steps: 0,
+    cause: None,
+    model_name: model_name(m: opts.model),
+    ctx_policy: task.context_policy,
+    full_history: false,
+    ladder: 0,
+    pending_escalation: None,
+    current: None,
+    grew: 0,
+    seen: Map.dict(),
+    seen_bodies: Map.dict(),
+    claim_edits: 0,
+    helper_attempts: 0,
+    best: None,
+    checks: 1,
+    calls: 0,
+    done: false,
+    green: false
+  }
+  if r.baseline.internal_error {
+    return Ok(
+      value: failure(
+        error: "the compiler reported E0999 on the baseline; this is filed against the compiler, not the task"
+      )
+    )
+  }
+  match select_targets(task: task, project: project, baseline: r.baseline, texts: texts0) with
+  | Err(error) -> return Ok(value: failure(error: error))
+  | Ok(value) -> r = { r with targets: value }
+  if task.kind == "regenerate" {
+    r = { r with ctx_policy: "none" }
+  }
+  -- A ticket produces a proposal only (§2, §5).
+  if task.kind == "ticket" {
+    return ticket(
+      r: inout r,
+      files: files,
+      process: process,
+      net: net,
+      clock: clock,
+      model: opts.model,
+      write: opts.write
+    )
+  }
+  -- Baseline state: diagnostics may name only the targets (§4 "prepare").
+  var stray: Int = 0
+  for d: json.Json in r.baseline.json {
+    let location: json.Json = json.at(j: d, key: "location")
+    if not is_target_at(
+      targets: r.targets,
+      name: json.str_at(j: location, key: "def"),
+      path: json.str_at(j: location, key: "file")
+    ) {
+      stray = stray + 1
+    }
+  }
+  if stray > 0 and task.kind != "interface_change" {
+    r = { r with cause: Some(value: "baseline") }
+    log(
+      console: console,
+      line: "onus loop: the baseline has " ++ Int.to_text(
+        x: stray
+      ) ++ " diagnostic(s) outside the targets"
+    )
+    return conclude(
+      r: inout r,
+      files: files,
+      status: "blocked",
+      final: Some(value: r.baseline),
+      now: io.time(clock: clock),
+      write: opts.write
+    )
+  }
+  if List.len(xs: r.targets) == 0 {
+    return conclude(
+      r: inout r,
+      files: files,
+      status: "opened",
+      final: Some(value: r.baseline),
+      now: io.time(clock: clock),
+      write: opts.write
+    )
+  }
+  -- implement and regenerate start from elided bodies (§2).
+  if task.kind == "implement" or task.kind == "regenerate" {
+    for target: TargetInfo in r.targets {
+      elide_target(r: inout r, target: target)
+    }
+  }
+  for iteration: Int in 1 ..< task.budget.iterations + 1 {
+    if not r.done {
+      match iterate(
+        r: inout r,
+        files: files,
+        console: console,
+        process: process,
+        net: net,
+        clock: clock,
+        model: opts.model,
+        tools: opts.tools,
+        iteration: iteration
+      ) with
+      | Err(error) -> return Err(error: error)
+      | Ok(value) -> {
+        if value is Some {
+          return Ok(value: failure(error: or_empty(o: value)))
+        }
+      }
+    }
+  }
+  if r.green {
+    return conclude(
+      r: inout r,
+      files: files,
+      status: "opened",
+      final: r.current,
+      now: io.time(clock: clock),
+      write: opts.write
+    )
+  }
+  if r.cause is None {
+    r = { r with cause: Some(value: "budget") }
+  }
+  return conclude(
+    r: inout r,
+    files: files,
+    status: "blocked",
+    final: r.current,
+    now: io.time(clock: clock),
+    write: opts.write
+  )
+}
+
+fn elide_target(r: inout Run, target: TargetInfo) -> Unit may alloc, mutate {
+  match Map.find(d: r.working, key: target.path) with
+  | None -> skip()
+  | Some(value) -> elide_in(r: inout r, target: target, text: value)
+  return Unit
+}
+
+fn elide_in(r: inout Run, target: TargetInfo, text: Text) -> Unit may alloc, mutate {
+  match parse_module(path: target.path, text: text).module with
+  | None -> skip()
+  | Some(value) -> elide_fn(
+    r: inout r,
+    target: target,
+    text: text,
+    f: find_fn(m: value, name: target.name)
+  )
+  return Unit
+}
+
+fn elide_fn(
+  r: inout Run,
+  target: TargetInfo,
+  text: Text,
+  f: Option[ast.FnDecl]
+) -> Unit may alloc, mutate {
+  match f with
+  | None -> skip()
+  | Some(value) -> {
+    if has_body(f: value) {
+      var working: Dict[Text, Text] = r.working
+      Map.set(
+        d: inout working,
+        key: target.path,
+        value: canonical_text(
+          path: target.path,
+          text: splice_item(
+            text: text,
+            span: value.span,
+            replacement: ast.FnItem(decl: elide(f: value))
+          )
+        )
+      )
+      r = { r with working: working }
+    }
+  }
+  return Unit
+}
+
+fn is_target_at(targets: List[TargetInfo], name: Text, path: Text) -> Bool {
+  for t: TargetInfo in targets {
+    if t.name == name and t.path == path {
+      return true
+    }
+  }
+  return false
+}

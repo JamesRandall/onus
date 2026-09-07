@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "task": {
+    "id": "task_test",
+    "kind": "implement",
+    "scope": [
+      "calc"
+    ],
+    "target": {
+      "def": "calc.clamp",
+      "obligation": null
+    },
+    "counterexample": null,
+    "budget": {
+      "iterations": 12,
+      "tokens":0,
+      "wall_ms": 900000
+    },
+    "context_policy": "module",
+    "origin": null,
+    "description": null,
+    "escalation": {
+      "helpers": false,
+      "alternate_model": null
+    }
+  },
+  "status": "opened",
+  "generated": {
+    "at": "<at>",
+    "model": "scripted"
+  },
+  "interface_diff": [],
+  "ledger_delta": [
+    {
+      "def": "calc.clamp",
+      "kind": "representation",
+      "text": "x within ±2^53 - 1",
+      "before": null,
+      "after": "checked"
+    },
+    {
+      "def": "calc.clamp",
+      "kind": "representation",
+      "text": "lo within ±2^53 - 1",
+      "before": null,
+      "after": "checked"
+    },
+    {
+      "def": "calc.clamp",
+      "kind": "representation",
+      "text": "hi within ±2^53 - 1",
+      "before": null,
+      "after": "checked"
+    },
+    {
+      "def": "calc.clamp",
+      "kind": "ensures",
+      "text": "lo <= result and result <= hi",
+      "before": null,
+      "after": "proved"
+    },
+    {
+      "def": "calc.clamp",
+      "kind": "refinement",
+      "text": "lo <= it",
+      "before": null,
+      "after": "proved"
+    },
+    {
+      "def": "calc.clamp",
+      "kind": "assertion",
+      "text": "clamp(x: 5, lo: 0, hi: 3) == 3",
+      "before": null,
+      "after": "checked"
+    },
+    {
+      "def": "calc.clamp",
+      "kind": "assertion",
+      "text": "clamp(x: -1, lo: 0, hi: 3) == 0",
+      "before": null,
+      "after": "checked"
+    },
+    {
+      "def": "calc.clamp",
+      "kind": "assertion",
+      "text": "clamp(x: 2, lo: 0, hi: 3) == 2",
+      "before": null,
+      "after": "checked"
+    }
+  ],
+  "body_diff": [
+    {
+      "file": "calc.onus",
+      "module": "calc",
+      "before": "module calc\n\n-- x held within [lo, hi].\npub fn clamp(x: Int, lo: Int, hi: Int where lo <= it) -> Int\n  ensures proved lo <= result and result <= hi\n{ ... }\n\nexample clamp {\n  clamp(x: 5, lo: 0, hi: 3) == 3\n  clamp(x: -1, lo: 0, hi: 3) == 0\n  clamp(x: 2, lo: 0, hi: 3) == 2\n}\n",
+      "after": "module calc\n\n-- x held within [lo, hi].\npub fn clamp(x: Int, lo: Int, hi: Int where lo <= it) -> Int\n  ensures proved lo <= result and result <= hi\n{\n  if x < lo {\n    return lo\n  }\n  if x > hi {\n    return hi\n  }\n  return x\n}\n\nexample clamp {\n  clamp(x: 5, lo: 0, hi: 3) == 3\n  clamp(x: -1, lo: 0, hi: 3) == 0\n  clamp(x: 2, lo: 0, hi: 3) == 2\n}\n"
+    }
+  ],
+  "trace": [
+    {
+      "iteration": 1,
+      "model": "scripted",
+      "prompt_hash":"<hash>",
+      "diagnostics_before": 1,
+      "diagnostics_after": 1,
+      "codes_after": [
+        "E0702"
+      ],
+      "failing_tests": [],
+      "mechanical_repairs": 0,
+      "tokens":0,
+      "ms":0,
+      "classification": "progress",
+      "escalation": null
+    },
+    {
+      "iteration": 2,
+      "model": "scripted",
+      "prompt_hash":"<hash>",
+      "diagnostics_before": 1,
+      "diagnostics_after": 0,
+      "codes_after": [],
+      "failing_tests": [],
+      "mechanical_repairs": 0,
+      "tokens":0,
+      "ms":0,
+      "classification": "green",
+      "escalation": null
+    }
+  ],
+  "metrics": {
+    "iterations": 2,
+    "mechanical_repairs": 0,
+    "escalation_steps": 0,
+    "proposals": 0,
+    "tokens":0
+  },
+  "proposals": [],
+  "audit": []
+}

@@ -20,18 +20,19 @@ const $ob2 = { kind: "overflow", text: "pc.errors + 1 within Int", at: "self/pat
 const $ob3 = { kind: "overflow", text: "-1 within Int", at: "self/paths.onus:93:20", def: "ref_def" };
 const $ob4 = { kind: "overflow", text: "-1 within Int", at: "self/paths.onus:97:19", def: "ref_def" };
 const $ob5 = { kind: "overflow", text: "pc.errors + 1 within Int", at: "self/paths.onus:259:28", def: "check_path" };
-const $ob6 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/paths.onus:561:12", def: "reach" };
-const $ob7 = { kind: "overflow", text: "head + 1 within Int", at: "self/paths.onus:563:12", def: "reach" };
-const $ob8 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/paths.onus:768:11", def: "sealed_walk" };
-const $ob9 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/paths.onus:779:23", def: "sealed_walk" };
-const $ob10 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/paths.onus:782:11", def: "sealed_walk" };
-const $ob11 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/paths.onus:789:11", def: "sealed_walk" };
-const $ob12 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/paths.onus:796:11", def: "sealed_walk" };
-const $ob13 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/paths.onus:804:25", def: "sealed_walk" };
-const $ob14 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/paths.onus:806:23", def: "sealed_walk" };
-const $ob15 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/paths.onus:827:13", def: "sealed_args" };
-const $ob16 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/paths.onus:850:12", def: "uncovered" };
-const $ob17 = { kind: "overflow", text: "head + 1 within Int", at: "self/paths.onus:852:12", def: "uncovered" };
+const $ob6 = { kind: "overflow", text: "ctx.assumption_max_age_ms + 43200000 within Int", at: "self/paths.onus:402:19", def: "check_path" };
+const $ob7 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/paths.onus:561:12", def: "reach" };
+const $ob8 = { kind: "overflow", text: "head + 1 within Int", at: "self/paths.onus:563:12", def: "reach" };
+const $ob9 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/paths.onus:768:11", def: "sealed_walk" };
+const $ob10 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/paths.onus:779:23", def: "sealed_walk" };
+const $ob11 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/paths.onus:782:11", def: "sealed_walk" };
+const $ob12 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/paths.onus:789:11", def: "sealed_walk" };
+const $ob13 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/paths.onus:796:11", def: "sealed_walk" };
+const $ob14 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/paths.onus:804:25", def: "sealed_walk" };
+const $ob15 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/paths.onus:806:23", def: "sealed_walk" };
+const $ob16 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/paths.onus:827:13", def: "sealed_args" };
+const $ob17 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/paths.onus:850:12", def: "uncovered" };
+const $ob18 = { kind: "overflow", text: "head + 1 within Int", at: "self/paths.onus:852:12", def: "uncovered" };
 export const assumption_max_age_days = 7;
 
 export function skip($args) {
@@ -397,7 +398,7 @@ export function check_path({ pc, ctx }) {
           } else {
             let why = "with no `verify` block";
             if (a.verify_key.tag === "Some") {
-              why = "without a passing verification in the last " + $std_int.to_text({ x: assumption_max_age_days }) + " days";
+              why = "without a passing verification in the last " + $std_int.to_text({ x: Math.trunc($rt.int.add(ctx.assumption_max_age_ms, 43200000, $ob6) / 86400000) }) + " days";
             }
             const [, pc$16, ctx$16] = rep({ pc: pc, ctx: ctx, code: "E0416", at: value, detail: "`" + $context.qualified_name({ ctx: ctx, id: fn_def }) + "` assumes `" + $context.get_def({ ctx: ctx, id: a.claim_def }).name + "` " + why + "; `policy " + $resolve.builtin_policy + "` requires one (§20.3)", def_name: path_name({ pc: pc }) });
             pc = pc$16;
@@ -572,9 +573,9 @@ export function reach({ ctx, entry_fn }) {
   let head = 0;
   let fuel = 10000000;
   while (head < $std_list.built({ b: queue }) && fuel > 0) {
-    fuel = $rt.int.sub(fuel, 1, $ob6);
+    fuel = $rt.int.sub(fuel, 1, $ob7);
     const cur = $std_list.at({ b: queue, i: head });
-    head = $rt.int.add(head, 1, $ob7);
+    head = $rt.int.add(head, 1, $ob8);
     if (!$std_map.contains({ d: seen, key: cur })) {
       const [, seen$21] = $std_map.set({ d: seen, key: cur, value: true });
       seen = seen$21;
@@ -756,7 +757,7 @@ export function sealed_walk({ fuel, ctx, t, seen, out }) {
   $m56$match: {
     if ($m56.tag === "Refined") {
       const base = $m56.base;
-      const [, seen$38, out$38] = sealed_walk({ fuel: $rt.int.sub(fuel, 1, $ob8), ctx: ctx, t: base, seen: seen, out: out });
+      const [, seen$38, out$38] = sealed_walk({ fuel: $rt.int.sub(fuel, 1, $ob9), ctx: ctx, t: base, seen: seen, out: out });
       seen = seen$38;
       out = out$38;
       break $m56$match;
@@ -770,28 +771,28 @@ export function sealed_walk({ fuel, ctx, t, seen, out }) {
         const [, out$40] = $std_list.push({ b: out, x: def });
         out = out$40;
       }
-      const [, seen$41, out$41] = sealed_args({ fuel: $rt.int.sub(fuel, 1, $ob9), ctx: ctx, args: args, seen: seen, out: out });
+      const [, seen$41, out$41] = sealed_args({ fuel: $rt.int.sub(fuel, 1, $ob10), ctx: ctx, args: args, seen: seen, out: out });
       seen = seen$41;
       out = out$41;
       break $m56$match;
     }
     if ($m56.tag === "UnionT") {
       const args = $m56.args;
-      const [, seen$42, out$42] = sealed_args({ fuel: $rt.int.sub(fuel, 1, $ob10), ctx: ctx, args: args, seen: seen, out: out });
+      const [, seen$42, out$42] = sealed_args({ fuel: $rt.int.sub(fuel, 1, $ob11), ctx: ctx, args: args, seen: seen, out: out });
       seen = seen$42;
       out = out$42;
       break $m56$match;
     }
     if ($m56.tag === "Opaque") {
       const args = $m56.args;
-      const [, seen$43, out$43] = sealed_args({ fuel: $rt.int.sub(fuel, 1, $ob11), ctx: ctx, args: args, seen: seen, out: out });
+      const [, seen$43, out$43] = sealed_args({ fuel: $rt.int.sub(fuel, 1, $ob12), ctx: ctx, args: args, seen: seen, out: out });
       seen = seen$43;
       out = out$43;
       break $m56$match;
     }
     if ($m56.tag === "Capability") {
       const args = $m56.args;
-      const [, seen$44, out$44] = sealed_args({ fuel: $rt.int.sub(fuel, 1, $ob12), ctx: ctx, args: args, seen: seen, out: out });
+      const [, seen$44, out$44] = sealed_args({ fuel: $rt.int.sub(fuel, 1, $ob13), ctx: ctx, args: args, seen: seen, out: out });
       seen = seen$44;
       out = out$44;
       break $m56$match;
@@ -800,11 +801,11 @@ export function sealed_walk({ fuel, ctx, t, seen, out }) {
       const params = $m56.params;
       const ret = $m56.ret;
       for (const p of params) {
-        const [, seen$45, out$45] = sealed_walk({ fuel: $rt.int.sub(fuel, 1, $ob13), ctx: ctx, t: p.ty, seen: seen, out: out });
+        const [, seen$45, out$45] = sealed_walk({ fuel: $rt.int.sub(fuel, 1, $ob14), ctx: ctx, t: p.ty, seen: seen, out: out });
         seen = seen$45;
         out = out$45;
       }
-      const [, seen$46, out$46] = sealed_walk({ fuel: $rt.int.sub(fuel, 1, $ob14), ctx: ctx, t: ret, seen: seen, out: out });
+      const [, seen$46, out$46] = sealed_walk({ fuel: $rt.int.sub(fuel, 1, $ob15), ctx: ctx, t: ret, seen: seen, out: out });
       seen = seen$46;
       out = out$46;
       break $m56$match;
@@ -828,7 +829,7 @@ export function sealed_args({ fuel, ctx, args, seen, out }) {
     $m57$match: {
       if ($m57.tag === "TypeA") {
         const ty = $m57.ty;
-        const [, seen$47, out$47] = sealed_walk({ fuel: $rt.int.sub(fuel, 1, $ob15), ctx: ctx, t: ty, seen: seen, out: out });
+        const [, seen$47, out$47] = sealed_walk({ fuel: $rt.int.sub(fuel, 1, $ob16), ctx: ctx, t: ty, seen: seen, out: out });
         seen = seen$47;
         out = out$47;
         break $m57$match;
@@ -853,9 +854,9 @@ export function uncovered({ ctx, entry_fn, claim_def }) {
   let head = 0;
   let fuel = 10000000;
   while (head < $std_list.built({ b: queue }) && fuel > 0) {
-    fuel = $rt.int.sub(fuel, 1, $ob16);
+    fuel = $rt.int.sub(fuel, 1, $ob17);
     const fn_def = $std_list.at({ b: queue, i: head });
-    head = $rt.int.add(head, 1, $ob17);
+    head = $rt.int.add(head, 1, $ob18);
     if (!$std_map.contains({ d: seen, key: fn_def })) {
       const [, seen$49] = $std_map.set({ d: seen, key: fn_def, value: true });
       seen = seen$49;

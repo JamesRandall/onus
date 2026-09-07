@@ -1,0 +1,9 @@
+{
+  "vendor.payments#b3:1b3d423bd92394247f69fa32d921ca8b65f2df5d22203f45be99cd6bf1bac015": {
+    "at": "<at>",
+    "target": "local",
+    "result": "passed",
+    "claim": "app.contracts.Idempotent",
+    "def": "vendor.payments.charge"
+  }
+}

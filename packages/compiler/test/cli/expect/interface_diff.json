@@ -1,0 +1,44 @@
+{
+  "module": "recursion",
+  "old_hash": "b3:a7921a6db306a36f702bc6b5cadc7084c65eec6351d1c7745c08fc57de665b67",
+  "new_hash": "b3:e3ce37b8511dc1ef50ad078eb891e6fdda169ca050b75acb8e8ae10d180ba255",
+  "added": [
+    {
+      "name": "extra",
+      "kind": "fn",
+      "visibility": "pub"
+    }
+  ],
+  "removed": [],
+  "changed": [
+    {
+      "name": "countdown",
+      "kind": "fn",
+      "visibility": "private",
+      "signature": null,
+      "effects": {
+        "added": [],
+        "removed": []
+      },
+      "contracts": [
+        {
+          "kind": "requires",
+          "text": "n < 1000",
+          "change": "added",
+          "compatibility": "breaking"
+        }
+      ],
+      "assumes": {
+        "added": [],
+        "removed": []
+      },
+      "recovers": {
+        "added": 0,
+        "removed": 0
+      },
+      "obligations": [],
+      "breaking": true
+    }
+  ],
+  "breaking": false
+}

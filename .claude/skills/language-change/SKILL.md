@@ -95,7 +95,11 @@ the change is small.
 
 ### 6. Acceptance, all under stage2
 
-- The fixture suite passes under stage2.
+- The fixture suite passes under stage2: `ONUS_FIXTURES=<out>/stage2/run_fixtures.js
+  ONUS_NATIVE_CLI=<out>/native/native/cli scripts/fixtures.sh` (the runner in
+  Onus, `self/fixtures.onus`, which the chain builds at every stage; the
+  command-line cases run the `run_cli.js` beside the runner, the release case
+  the native compiler), and `pnpm -r test` while vitest exists.
 - The differentials under `packages/compiler/test/self/` pass with the
   programs of `self/` running natively: `pnpm --filter compiler
   test:self-native` (`ONUS_SELF_NATIVE=1`), which builds each driver with

@@ -1,0 +1,3 @@
+ok mandelbrot.escape_count
+1 examples, 0 failed
+ok mandelbrot.escape_count (js)

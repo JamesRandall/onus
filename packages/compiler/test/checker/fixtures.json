@@ -1,0 +1,8 @@
+{
+  "kind": "diagnostics",
+  "to": "contracts",
+  "root": ".",
+  "also": ["std/reserved.onus"],
+  "covers": ["E01", "E02", "E03", "E05", "E07"],
+  "except": ["E0203", "E0204", "E0205", "E0206", "E0207", "E0208", "E0102", "E0302", "E0342", "E0343", "E0344", "E0501", "E0703"]
+}

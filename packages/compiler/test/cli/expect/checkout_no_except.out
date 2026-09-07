@@ -1,0 +1,4 @@
+checkout.onus:111:3: E0415 assumption forbidden by path policy
+  in checkout
+  `vendor.payments.charge` assumes `Idempotent` ("Vendor API deduplicates on key for 24h; see contract §4.2") outside the policy's scope and is not listed under `except`
+1 error

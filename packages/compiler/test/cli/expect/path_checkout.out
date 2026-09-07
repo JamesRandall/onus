@@ -1,0 +1,28 @@
+path checkout (ok)
+  entry checkout.handle_checkout
+  reachable (14): checkout.handle_checkout, app.auth.require, checkout.load_basket, std.sql.narrow, std.list.is_empty, vendor.payments.charge, checkout.record_order, std.sql.select, std.sql.text, std.sql.query, std.list.len, std.sql.statement, std.sql.int, std.sql.execute
+  effects: { alloc, io.clock, io.net, sql.read, sql.write } within { alloc, io.clock, io.net, sql.read, sql.write }
+  claims: { app.contracts.Idempotent } satisfied
+  assumes:
+    checkout.load_basket: app.contracts.Idempotent "A select reads only; it has no observable effect." (permitted by scope) — unverifiable
+    vendor.payments.charge: app.contracts.Idempotent "Vendor API deduplicates on key for 24h; see contract §4.2" (permitted by except) — verifiable, not yet verified
+      verify(client: Client, service: auth.Service, clock: io.Clock) may io.net, alloc {
+        let who: auth.AuthedCustomer = try auth.require(
+          service: service,
+          caller: "verify",
+          customer: "verify",
+          clock: clock
+        ) else _: false
+        let a: Receipt = try charge(client: client, key: "verify-1", amount: 100, who: who) else _: false
+        let b: Receipt = try charge(client: client, key: "verify-1", amount: 100, who: who) else _: false
+        a.id == b.id
+      }
+    checkout.record_order: app.contracts.Idempotent "The insert is `on conflict (receipt_id) do nothing`." (permitted by scope) — unverifiable
+  obligations: 8 proved, 1 checked, 0 assumed
+    checked at vendor.payments.charge:20:3
+  coverage: 8 proved, 0 checked (0 exercised by tests), 3 assumptions (1 verifiable, 0 verified)
+  unresolvable calls: none
+  capabilities:
+    sql.Db[ReadOnly] at checkout.handle_checkout:89:44
+  gate: app.auth.AuthedCustomer from app.auth.require guards checkout.load_basket, vendor.payments.charge, checkout.record_order
+  graph: 14 nodes, 15 edges

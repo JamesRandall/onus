@@ -1,0 +1,10 @@
+checkout.onus:109:3: E0412 path effect bound exceeded
+  in checkout
+  `checkout.handle_checkout` is reachable and has effect { sql.write } outside the bound
+checkout.onus:109:3: E0412 path effect bound exceeded
+  in checkout
+  `checkout.record_order` is reachable and has effect { sql.write } outside the bound
+checkout.onus:109:3: E0412 path effect bound exceeded
+  in checkout
+  `std.sql.execute` is reachable and has effect { sql.write } outside the bound
+3 errors

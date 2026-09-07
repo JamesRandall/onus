@@ -162,10 +162,108 @@ pub fn read_ledger(files: io.Files, dir: Text) -> Ledger may io.file, alloc, mut
 -- record's age is not yet checked: that needs a clock the standard library
 -- does not expose (`io.Clock` has no reading primitive), so a passing record
 -- stays current.
-pub fn is_verified(ctx: context.Context, key: Text) -> Bool {
+-- Whether the ledger holds a passing verification of the assumption `key`
+-- no older than the context's maximum age at the context's time (§20.3;
+-- docs/CHANGES.md item 199: the age was not checked before).
+pub fn is_verified(ctx: context.Context, key: Text) -> Bool may alloc {
   match Map.find(d: ctx.assumptions, key: key) with
-  | Some(value) -> return value.outcome == "passed"
+  | Some(value) -> return is_current(
+    r: value,
+    now_ms: ctx.now_ms,
+    max_age_ms: ctx.assumption_max_age_ms
+  )
   | None -> return false
+}
+
+-- Whether a record is a passing verification dated within `max_age_ms` of `now_ms`.
+pub fn is_current(r: tables.VerificationRecord, now_ms: Int, max_age_ms: Int) -> Bool may alloc {
+  if r.outcome != "passed" {
+    return false
+  }
+  match millis_of_iso(t: r.at) with
+  | Some(value) -> return now_ms - value <= max_age_ms
+  | None -> return false
+}
+
+-- Milliseconds since 1970-01-01T00:00:00 UTC of an instant written as
+-- `YYYY-MM-DDTHH:MM:SSZ` or `YYYY-MM-DDTHH:MM:SS.mmmZ` (the inverse of
+-- `assumptions.iso_of_millis`, by Hinnant's days-from-civil), or nothing
+-- for any other text or a year before 1970.
+pub fn millis_of_iso(t: Text) -> Option[Int] may alloc {
+  let cps: List[Int] = Text.code_points(t: t)
+  let n: Int = List.len(xs: cps)
+  if n != 20 and n != 24 {
+    return None
+  }
+  if cp_at(cps: cps, i: 4) != 45 or cp_at(cps: cps, i: 7) != 45 or cp_at(
+    cps: cps,
+    i: 10
+  ) != 84 or cp_at(cps: cps, i: 13) != 58 or cp_at(cps: cps, i: 16) != 58 or cp_at(
+    cps: cps,
+    i: n - 1
+  ) != 90 {
+    return None
+  }
+  if n == 24 and cp_at(cps: cps, i: 19) != 46 {
+    return None
+  }
+  let year: Int = digits_at(cps: cps, from: 0, count: 4)
+  let month: Int = digits_at(cps: cps, from: 5, count: 2)
+  let day: Int = digits_at(cps: cps, from: 8, count: 2)
+  let hours: Int = digits_at(cps: cps, from: 11, count: 2)
+  let minutes: Int = digits_at(cps: cps, from: 14, count: 2)
+  let seconds: Int = digits_at(cps: cps, from: 17, count: 2)
+  var millis: Int = 0
+  if n == 24 {
+    millis = digits_at(cps: cps, from: 20, count: 3)
+  }
+  if year < 1970 or month < 1 or month > 12 or day < 1 or day > 31 or hours < 0 or minutes < 0 or seconds < 0 or millis < 0 {
+    return None
+  }
+  var y: Int = year
+  if month <= 2 {
+    y = year - 1
+  }
+  let era: Int = y / 400
+  let yoe: Int = y - era * 400
+  var mp: Int = month + 9
+  if month > 2 {
+    mp = month - 3
+  }
+  let doy: Int = (153 * mp + 2) / 5 + day - 1
+  let doe: Int = yoe * 365 + yoe / 4 - yoe / 100 + doy
+  let days: Int = era * 146097 + doe - 719468
+  return Some(value: days * 86400000 + hours * 3600000 + minutes * 60000 + seconds * 1000 + millis)
+}
+
+fn cp_at(cps: List[Int], i: Int) -> Int {
+  if i >= 0 and i < List.len(xs: cps) {
+    return List.get(xs: cps, i: i)
+  }
+  return -1
+}
+
+-- The decimal number written by `count` digits from `from`, or -1 when one is not a digit.
+fn digits_at(cps: List[Int], from: Int, count: Int where it >= 0) -> Int {
+  var n: Int = 0
+  for k: Int in 0 ..< count {
+    let cp: Int = cp_at(cps: cps, i: from + k)
+    if cp < 48 or cp > 57 {
+      return -1
+    }
+    n = n * 10 + (cp - 48)
+  }
+  return n
+}
+
+example millis_of_iso {
+  millis_of_iso(t: "1970-01-01T00:00:00.000Z") == Some(value: 0)
+  millis_of_iso(t: "1970-01-02T00:00:00Z") == Some(value: 86400000)
+  millis_of_iso(t: "2026-09-07T11:56:36.099Z") == Some(value: 1788782196099)
+  millis_of_iso(t: "2020-01-01T00:00:00.000Z") == Some(value: 1577836800000)
+  millis_of_iso(t: "2026-09-07") == None
+  millis_of_iso(t: "2026-13-07T11:56:36.099Z") == None
+  millis_of_iso(t: "1969-12-31T23:59:59.999Z") == None
 }
 
 -- The ledger's record for an assumption as the reports show it, or null.

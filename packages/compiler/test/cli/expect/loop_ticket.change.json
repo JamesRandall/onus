@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "task": {
+    "id": "task_test",
+    "kind": "ticket",
+    "scope": [
+      "calc"
+    ],
+    "target": null,
+    "counterexample": null,
+    "budget": {
+      "iterations": 12,
+      "tokens":0,
+      "wall_ms": 900000
+    },
+    "context_policy": "module",
+    "origin": null,
+    "description": "clamp misbehaves on empty ranges",
+    "escalation": {
+      "helpers": false,
+      "alternate_model": null
+    }
+  },
+  "status": "opened",
+  "generated": {
+    "at": "<at>",
+    "model": "scripted"
+  },
+  "interface_diff": [],
+  "ledger_delta": [],
+  "body_diff": [],
+  "trace": [
+    {
+      "iteration": 1,
+      "model": "scripted",
+      "prompt_hash":"<hash>",
+      "diagnostics_before": 1,
+      "diagnostics_after": 1,
+      "codes_after": [],
+      "failing_tests": [],
+      "mechanical_repairs": 0,
+      "tokens":0,
+      "ms":0,
+      "classification": "proposal",
+      "escalation": null
+    }
+  ],
+  "metrics": {
+    "iterations": 1,
+    "mechanical_repairs": 0,
+    "escalation_steps": 0,
+    "proposals": 1,
+    "tokens":0
+  },
+  "proposals": [
+    {
+      "kind": "add_precondition",
+      "def": "calc.clamp",
+      "current": null,
+      "proposed": "requires lo <= hi",
+      "evidence": {
+        "counterexample": null,
+        "iterations": 1
+      },
+      "rationale": "an empty range has no clamp"
+    }
+  ],
+  "audit": []
+}

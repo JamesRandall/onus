@@ -1,0 +1,9 @@
+e0343_needs_panic.onus:4:10: E0343 checked obligation in a function without panic
+  in silent
+  `refinement it >= 0` is checked at runtime (z3: not provable), so `silent` must declare `panic` or the obligation must be proved
+  obligation refinement: it >= 0 [checked]
+checked  representation   e0343_needs_panic.onus:3:11  silent: x within ±2^53 - 1  [z3: not provable]
+checked  refinement       e0343_needs_panic.onus:4:10  silent: it >= 0  [z3: not provable]
+checked  representation   e0343_needs_panic.onus:7:13  declared: x within ±2^53 - 1  [z3: not provable]
+checked  refinement       e0343_needs_panic.onus:8:10  declared: it >= 0  [z3: not provable]
+1 error

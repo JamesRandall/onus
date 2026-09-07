@@ -1,0 +1,6 @@
+M0001 undetected contract weakening: widen field `x_max` from `Float where …` to `Float` in mandelbrot.Viewport: no proved assertion of an example, property or law depends on it
+M0001 undetected contract weakening: widen field `y_max` from `Float where …` to `Float` in mandelbrot.Viewport: no proved assertion of an example, property or law depends on it
+detected: drop `ensures result <= limit` in mandelbrot.escape_count: `escape_count(cx: cx, cy: cy, limit: limit) <= limit` in mandelbrot.escape_bounded no longer follows from the contracts
+M0001 undetected contract weakening: widen the result from `Iter` to `Int` in mandelbrot.escape_count: no proved assertion of an example, property or law depends on it
+detected: negate the guards of `property escape_bounded` in mandelbrot.escape_bounded: the property fails over the complement of its domain
+5 contract mutations: 2 detected, 3 surviving

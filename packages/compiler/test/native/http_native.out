@@ -1,0 +1,4 @@
+status 200
+{"method":"POST","path":"/echo","x-onus":"fixture","body":"{\"n\": 1}"}
+status 404 no such thing
+unreachable: not found http://127.0.0.1:9/

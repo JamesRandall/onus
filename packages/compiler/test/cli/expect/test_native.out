@@ -1,0 +1,6 @@
+ok primitives.text_and_ints
+ok primitives.shapes
+ok primitives.results
+ok primitives.recovers_a_panic
+ok primitives.inout_and_update
+5 examples, 0 failed

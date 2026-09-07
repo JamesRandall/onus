@@ -1,0 +1,187 @@
+{
+  "path": "monthly_report",
+  "entry": "reporting.monthly_totals",
+  "reachable": [
+    "reporting.monthly_totals",
+    "std.sql.select",
+    "std.sql.int",
+    "std.sql.query"
+  ],
+  "effects": {
+    "bound": [
+      "alloc",
+      "sql.read"
+    ],
+    "forbid": [
+      "io.file",
+      "io.net",
+      "sql.write"
+    ],
+    "actual": [
+      "alloc",
+      "sql.read"
+    ]
+  },
+  "claims": {
+    "required": [],
+    "satisfied": true
+  },
+  "assumes": [],
+  "obligations": {
+    "proved": 4,
+    "checked": 0,
+    "assumed": 0,
+    "failed": 0,
+    "checked_at": []
+  },
+  "unresolvable_calls": [],
+  "capabilities": [],
+  "graph": {
+    "nodes": [
+      {
+        "id": "reporting.monthly_totals",
+        "module": "reporting",
+        "kind": "entry",
+        "effects": [
+          "alloc",
+          "sql.read"
+        ],
+        "claims": [],
+        "obligations": {
+          "proved": 4,
+          "checked": 0,
+          "assumed": 0,
+          "failed": 0
+        },
+        "assumes": 0,
+        "recovers": 0,
+        "unresolvable": 0
+      },
+      {
+        "id": "std.sql.select",
+        "module": "std.sql",
+        "kind": "intrinsic",
+        "effects": [],
+        "claims": [],
+        "obligations": {
+          "proved": 0,
+          "checked": 0,
+          "assumed": 0,
+          "failed": 0
+        },
+        "assumes": 0,
+        "recovers": 0,
+        "unresolvable": 0
+      },
+      {
+        "id": "std.sql.int",
+        "module": "std.sql",
+        "kind": "intrinsic",
+        "effects": [],
+        "claims": [],
+        "obligations": {
+          "proved": 0,
+          "checked": 0,
+          "assumed": 0,
+          "failed": 0
+        },
+        "assumes": 0,
+        "recovers": 0,
+        "unresolvable": 0
+      },
+      {
+        "id": "std.sql.query",
+        "module": "std.sql",
+        "kind": "intrinsic",
+        "effects": [
+          "alloc",
+          "sql.read"
+        ],
+        "claims": [],
+        "obligations": {
+          "proved": 0,
+          "checked": 0,
+          "assumed": 0,
+          "failed": 0
+        },
+        "assumes": 0,
+        "recovers": 0,
+        "unresolvable": 0
+      }
+    ],
+    "edges": [
+      {
+        "from": "reporting.monthly_totals",
+        "to": "std.sql.select",
+        "effects": [],
+        "at": "reporting.monthly_totals:23:40"
+      },
+      {
+        "from": "reporting.monthly_totals",
+        "to": "std.sql.int",
+        "effects": [],
+        "at": "reporting.monthly_totals:25:14"
+      },
+      {
+        "from": "reporting.monthly_totals",
+        "to": "std.sql.query",
+        "effects": [
+          "alloc",
+          "sql.read"
+        ],
+        "at": "reporting.monthly_totals:26:10"
+      }
+    ]
+  },
+  "gates": [],
+  "recovers": [],
+  "ledger": [
+    {
+      "kind": "representation",
+      "text": "year within ±2^53 - 1",
+      "def": "reporting.monthly_totals",
+      "status": "proved",
+      "by": "z3",
+      "pinned": false,
+      "at": "reporting.onus:18:3"
+    },
+    {
+      "kind": "requires",
+      "text": "parse_select(text: text) is Ok",
+      "def": "reporting.monthly_totals",
+      "status": "proved",
+      "by": "const evaluator",
+      "pinned": true,
+      "at": "reporting.onus:23:40"
+    },
+    {
+      "kind": "requires",
+      "text": "columns_match(text: text, record: row) is Ok",
+      "def": "reporting.monthly_totals",
+      "status": "proved",
+      "by": "const evaluator",
+      "pinned": true,
+      "at": "reporting.onus:23:40"
+    },
+    {
+      "kind": "ensures",
+      "text": "forall t: MonthlyTotal in result: t.total_pence >= 0",
+      "def": "reporting.monthly_totals",
+      "status": "proved",
+      "by": "z3",
+      "pinned": false,
+      "at": "reporting.onus:26:3"
+    }
+  ],
+  "obligation_coverage": {
+    "proved": 3,
+    "checked": 0,
+    "checked_exercised": 0,
+    "assumptions": 0,
+    "assumptions_verifiable": 0,
+    "assumptions_verified": 0,
+    "mutations_detected": 0,
+    "mutations_surviving": 0
+  },
+  "ok": true
+}

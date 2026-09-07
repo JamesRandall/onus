@@ -89,6 +89,12 @@ pub record Context {
   assumptions: Dict[Text, tables.VerificationRecord]
   coverage: Dict[Text, Int]
   mutations: List[tables.MutationRecord]
+  -- The time the check runs at, in milliseconds since 1970, and how old a
+  -- passing verification may be for `policy verified_assumptions_only`
+  -- (§20.3; `max_assumption_age_days` in onus.json, 7 by default); set by
+  -- the command line, else 0 and 7 days, under which no record is stale.
+  now_ms: Int
+  assumption_max_age_ms: Int
 }
 
 pub fn new_context(root: Option[Text], stdlib: Option[Text]) -> Context may alloc {
@@ -146,7 +152,9 @@ pub fn new_context(root: Option[Text], stdlib: Option[Text]) -> Context may allo
     analyses: Map.dict(),
     assumptions: Map.dict(),
     coverage: Map.dict(),
-    mutations: []
+    mutations: [],
+    now_ms: 0,
+    assumption_max_age_ms: 604800000
   }
 }
 

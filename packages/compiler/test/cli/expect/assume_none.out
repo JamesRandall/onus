@@ -1,0 +1,6 @@
+vendor/payments.onus:26:12: E0603 no environment source for a verify parameter
+  in charge
+  no environment function returns `vendor.payments.Client` for verify parameter `client`; give one with a `test module` (onus.json `test.env` or --env)
+vendor/payments.onus:26:28: E0603 no environment source for a verify parameter
+  in charge
+  no environment function returns `app.auth.Service` for verify parameter `service`; give one with a `test module` (onus.json `test.env` or --env)

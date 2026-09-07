@@ -1,0 +1,37 @@
+{
+  "generated": {
+    "tool": "onus review",
+    "at": "<at>"
+  },
+  "entry": "e0416_unverified",
+  "modules": [],
+  "sources": {},
+  "paths": [],
+  "diagnostics": [
+    {
+      "code": "E0416",
+      "title": "assumption not verified on path",
+      "location": {
+        "file": "e0416_unverified.onus",
+        "def": "p",
+        "span": [
+          [
+            26,
+            3
+          ],
+          [
+            26,
+            35
+          ]
+        ]
+      },
+      "context": [
+        "`e0416_unverified.leaf` assumes `Quiet` without a passing verification in the last 7 days; `policy verified_assumptions_only` requires one (§20.3)"
+      ],
+      "repairs": [],
+      "canonical_hash": "b3:42c9d1e64377ea204d3dc78d80eb9b8300f4b6a8ab89c6d81c44f65185743ee3"
+    }
+  ],
+  "diff": null,
+  "changes": []
+}

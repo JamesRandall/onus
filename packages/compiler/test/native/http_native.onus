@@ -1,0 +1,47 @@
+module http_native
+import std.io
+import std.http
+
+-- `http.request` on both targets (docs/CHANGES.md item 196): a POST to the
+-- local server the test runs comes back with its status and body, a GET of a
+-- missing path with its status, and a port nothing listens on is `NotFound`;
+-- the output is the same on both.
+fn describe(e: io.Error) -> Text may alloc {
+  match e with
+  | NotFound(path) -> return "not found " ++ path
+  | Denied(path) -> return "denied " ++ path
+  | Other(detail) -> return "other " ++ detail
+}
+
+pub fn main(
+  args: List[Text],
+  console: io.Console,
+  net: io.Net
+) -> Result[Unit, io.Error] may io.file, io.net, nondet, alloc {
+  if List.len(xs: args) == 0 {
+    io.print(console: console, text: "usage: http_native <url>\n")
+    return Ok(value: Unit)
+  }
+  let base: Text = List.get(xs: args, i: 0)
+  let echoed: http.Response = try http.post(
+    net: net,
+    url: base ++ "/echo",
+    headers: ["content-type: application/json", "x-onus: fixture"],
+    body: "{\"n\": 1}",
+    timeout_ms: 10000
+  )
+  io.print(
+    console: console,
+    text: "status " ++ Int.to_text(x: echoed.status) ++ "\n" ++ echoed.body ++ "\n"
+  )
+  match http.get(net: net, url: base ++ "/missing", headers: [], timeout_ms: 10000) with
+  | Ok(value) -> io.print(
+    console: console,
+    text: "status " ++ Int.to_text(x: value.status) ++ " " ++ value.body ++ "\n"
+  )
+  | Err(error) -> io.print(console: console, text: "missing: " ++ describe(e: error) ++ "\n")
+  match http.get(net: net, url: "http://127.0.0.1:9/", headers: [], timeout_ms: 3000) with
+  | Ok(_) -> io.print(console: console, text: "reached port 9\n")
+  | Err(error) -> io.print(console: console, text: "unreachable: " ++ describe(e: error) ++ "\n")
+  return Ok(value: Unit)
+}

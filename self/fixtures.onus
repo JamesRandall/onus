@@ -1,0 +1,3051 @@
+module fixtures
+import std.io
+import ast
+import context
+import loader
+import check
+import verifier
+import report
+import diagjson
+import diagtext
+import json
+import loc
+import obligations
+import codes
+import build
+import jsemit
+import nativebuild
+import testcmd
+import lowerir
+import irtext
+import z3
+import std.hash
+import lexer
+import tokens
+import parser
+import nextcmd
+import assumptions
+
+-- The fixture runner (impl spec §10; M15.7, docs/CHANGES.md item 198): the
+-- compiler's own test suite run by the compiler in Onus, in place of vitest
+-- over the TypeScript library. `run_fixtures <dir>... [--stdlib <dir>]
+-- [--out <dir>] [--runtime <path>] [--update]` reads `<dir>/fixtures.json`
+-- in each directory and runs its fixtures by kind:
+--
+--   - `diagnostics`: every `.onus` file (or the manifest's `sources`) is
+--     checked to the pass `to` under the directory as root (`root`), and its
+--     diagnostics — `{code, span, file?}` in order — must be the ones in its
+--     `.expect.json`, with the obligations of the file when `ledger` is set;
+--     an `ok_` fixture, or every fixture when `expect_none` is set, must
+--     produce none; every code of the catalogue under the `covers` prefixes,
+--     less `except`, must be produced by some fixture. `--update` rewrites
+--     the expectation files from what the compiler produced.
+--   - `canonical`: every fixture is its own canonical form and parses
+--     clean; each `messy/<name>.onus` prints as `messy/<name>.canonical.onus`.
+--   - `lowered`: each source's entry module lowers to the target-neutral form
+--     pinned in `<golden>/<name>.ir.txt` (`<repo>/` in the golden is the
+--     working directory).
+--   - `examples`: every fixture with examples, properties or laws under the
+--     listed `dirs` (or `sources`) passes them on both targets and the
+--     targets agree; with `allow_refusal`, a program the native backend
+--     refuses (E0800) counts as agreed.
+--   - `programs`: each case's `main` runs on the listed targets with `args`
+--     and must write `stdout` (a file's text) and exit with `status`; `via`
+--     names a shell script that runs the program (a server beside it).
+--
+-- A manifest is one section or `sections`, a list of them. A section that
+-- `requires` a tool (`z3`, `clang`) that is not on the path is skipped with
+-- a notice. Paths in manifests are relative to their directory; the runner
+-- is meant to run from the repository root. Exit status 1 when any fixture
+-- failed, else 0.
+pub record Options {
+  stdlib: Option[Text]
+  runtime: Text
+  bundled: Bool
+  runtime_dir: Option[Text]
+  out_root: Text
+  update: Bool
+  root: Text
+  cli: Option[Text]
+  native_cli: Option[Text]
+  now: Text
+}
+
+pub record Tally {
+  passed: Int
+  failed: Int
+  skipped: Int
+}
+
+fn skip() -> Unit {
+  return Unit
+}
+
+fn or_empty(o: Option[Text]) -> Text {
+  match o with
+  | Some(value) -> return value
+  | None -> return ""
+}
+
+fn add(a: Tally, b: Tally) -> Tally {
+  return Tally {
+    passed: a.passed + b.passed,
+    failed: a.failed + b.failed,
+    skipped: a.skipped + b.skipped
+  }
+}
+
+fn one(ok: Bool) -> Tally {
+  if ok {
+    return Tally { passed: 1, failed: 0, skipped: 0 }
+  }
+  return Tally { passed: 0, failed: 1, skipped: 0 }
+}
+
+fn skipped() -> Tally {
+  return Tally { passed: 0, failed: 0, skipped: 1 }
+}
+
+fn nothing() -> Tally {
+  return Tally { passed: 0, failed: 0, skipped: 0 }
+}
+
+fn say(console: io.Console, line: Text) -> Unit may io.file, alloc {
+  io.print(console: console, text: line ++ "\n")
+  return Unit
+}
+
+fn ok_line(console: io.Console, what: Text) -> Tally may io.file, alloc {
+  say(console: console, line: "ok " ++ what)
+  return one(ok: true)
+}
+
+fn fail_line(console: io.Console, what: Text, why: Text) -> Tally may io.file, alloc {
+  say(console: console, line: "FAIL " ++ what ++ ": " ++ why)
+  return one(ok: false)
+}
+
+-- `base/rel` with `.` and `..` segments folded, so a path the manifest names
+-- through its parents is the working directory's own.
+fn join_path(base: Text, rel: Text) -> Text may alloc, mutate {
+  if Text.starts_with(t: rel, prefix: "/") {
+    return rel
+  }
+  var out: List[Text] = []
+  for seg: Text in Text.split(t: base ++ "/" ++ rel, sep: "/") {
+    if seg == ".." and List.len(xs: out) > 0 and List.get(
+      xs: out,
+      i: List.len(xs: out) - 1
+    ) != ".." {
+      out = drop_last(xs: out)
+    } else {
+      if seg != "." and seg != "" {
+        out = List.append(xs: out, x: seg)
+      }
+    }
+  }
+  if List.len(xs: out) == 0 {
+    return "."
+  }
+  var joined: Text = Text.join(parts: out, sep: "/")
+  if Text.starts_with(t: base, prefix: "/") {
+    joined = "/" ++ joined
+  }
+  return joined
+}
+
+fn drop_last(xs: List[Text]) -> List[Text] may alloc, mutate {
+  var out: Builder[Text] = List.builder()
+  let n: Int = List.len(xs: xs)
+  var i: Int = 0
+  for x: Text in xs {
+    if i < n - 1 {
+      List.push(b: inout out, x: x)
+    }
+    i = i + 1
+  }
+  return List.finish(b: out)
+}
+
+fn dir_of(path: Text) -> Text may alloc, mutate {
+  return nativebuild.dir_of(path: path)
+}
+
+fn base_name(path: Text) -> Text may alloc {
+  let parts: List[Text] = Text.split(t: path, sep: "/")
+  return List.get(xs: parts, i: List.len(xs: parts) - 1)
+}
+
+fn without_suffix(name: Text, suffix: Text) -> Text may alloc {
+  if Text.ends_with(t: name, suffix: suffix) and Text.count(t: suffix) <= Text.count(t: name) {
+    return Text.slice(t: name, from: 0, to: Text.count(t: name) - Text.count(t: suffix))
+  }
+  return name
+}
+
+-- The `.onus` files directly in `dir`, sorted, as names; dot-names (caches) are not fixtures.
+fn onus_files(files: io.Files, dir: Text) -> List[Text] may io.file, alloc, mutate {
+  var out: Builder[Text] = List.builder()
+  match io.list_dir(files: files, path: dir) with
+  | Err(_) -> skip()
+  | Ok(value) -> {
+    for name: Text in value {
+      if Text.ends_with(t: name, suffix: ".onus") and not Text.starts_with(t: name, prefix: ".") {
+        List.push(b: inout out, x: name)
+      }
+    }
+  }
+  return List.finish(b: out)
+}
+
+fn has_tool(
+  files: io.Files,
+  process: io.Process,
+  env: io.Env,
+  opts: Options,
+  tool: Text
+) -> Bool may io.file, io.env, nondet, alloc, mutate {
+  if tool == "libpq" {
+    return nativebuild.find_libpq(files: files, process: process, env: env) is Some
+  }
+  if tool == "z3" {
+    return z3.find_z3(process: process, explicit: None) is Some
+  }
+  if tool == "clang" {
+    return nativebuild.find_clang(process: process, explicit: None) is Some
+  }
+  if tool == "cli" {
+    return opts.cli is Some
+  }
+  if tool == "native_cli" {
+    return opts.native_cli is Some
+  }
+  if tool == "unicode16" {
+    match io.run(
+      process: process,
+      program: "node",
+      args: ["-p", "process.versions.unicode"],
+      stdin: "",
+      timeout_ms: 60000
+    ) with
+    | Ok(value) -> return Text.trim(t: value.stdout) == "16.0"
+    | Err(_) -> return false
+  }
+  return true
+}
+
+-- The tool a manifest requires that is not on the path, if any: `z3`,
+-- `clang`, `libpq`, `cli` and `native_cli` (the compilers under test, given
+-- on the command line), `unicode16` (a node whose Unicode data is 16.0).
+fn missing_tool(
+  files: io.Files,
+  process: io.Process,
+  env: io.Env,
+  opts: Options,
+  m: json.Json
+) -> Option[Text] may io.file, io.env, nondet, alloc, mutate {
+  for tool: Text in json.texts_at(j: m, key: "requires") {
+    if not has_tool(files: files, process: process, env: env, opts: opts, tool: tool) {
+      return Some(value: tool)
+    }
+  }
+  return None
+}
+
+-- A checked program: its context, line tables and diagnostics as JSON.
+record Checked {
+  ctx: context.Context
+  tab: Dict[Int, loc.LineTable]
+  diagnostics: List[json.Json]
+  path: Text
+}
+
+fn check_source(
+  files: io.Files,
+  console: io.Console,
+  process: io.Process,
+  opts: Options,
+  path: Text,
+  root: Option[Text],
+  to: Int,
+  budget_ms: Int where it >= 0
+) -> Result[Checked, io.Error] may io.file, nondet, alloc, mutate {
+  var ctx: context.Context = context.new_context(root: root, stdlib: opts.stdlib)
+  let text: Text = try io.read(files: files, path: path)
+  if loader.add_file(ctx: inout ctx, path: path, text: text) is None {
+    return Err(error: Other(detail: path ++ " is too long"))
+  }
+  check.run_passes(
+    ctx: inout ctx,
+    to: to,
+    files: files,
+    console: console,
+    process: process,
+    vopts: verifier.Options {
+      z3_path: None,
+      budget_ms: budget_ms,
+      cache_dir: Some(value: opts.out_root ++ "/cache"),
+      dump_dir: None
+    }
+  )
+  let tab: Dict[Int, loc.LineTable] = loc.line_tables(ctx: ctx)
+  var out: Builder[json.Json] = List.builder()
+  for d: report.Diagnostic in List.finish(b: ctx.diagnostics) {
+    List.push(b: inout out, x: diagjson.to_json(ctx: ctx, tab: tab, d: d))
+  }
+  return Ok(value: Checked { ctx: ctx, tab: tab, diagnostics: List.finish(b: out), path: path })
+}
+
+fn diagnostic_texts(c: Checked) -> Text may alloc, mutate {
+  var parts: Builder[Text] = List.builder()
+  for d: report.Diagnostic in List.finish(b: c.ctx.diagnostics) {
+    List.push(b: inout parts, x: diagtext.to_text(ctx: c.ctx, tab: c.tab, d: d))
+  }
+  return Text.join(parts: List.finish(b: parts), sep: " | ")
+}
+
+-- Diagnostics (§10) -------------------------------------------------------------------
+-- A diagnostic as the expectation file records it: its code, its span, and
+-- its file when that is not the fixture (relative to the fixture's directory).
+fn expected_entry(c: Checked, dir: Text, d: json.Json) -> json.Json may alloc, mutate {
+  let location: json.Json = json.at(j: d, key: "location")
+  let file: Text = json.str_at(j: location, key: "file")
+  var fields: Builder[json.Field] = List.builder()
+  List.push(b: inout fields, x: json.field(key: "code", value: json.at(j: d, key: "code")))
+  List.push(b: inout fields, x: json.field(key: "span", value: json.at(j: location, key: "span")))
+  if file != c.path {
+    var rel: Text = file
+    if Text.starts_with(t: file, prefix: dir ++ "/") {
+      rel = Text.slice(t: file, from: Text.count(t: dir) + 1, to: Text.count(t: file))
+    }
+    List.push(b: inout fields, x: json.field(key: "file", value: json.text(t: rel)))
+  }
+  return json.JObject(fields: List.finish(b: fields))
+}
+
+-- The obligations located in the fixture, in creation order, as the expectation records them.
+fn ledger_entries(c: Checked) -> List[json.Json] may alloc, mutate {
+  var out: Builder[json.Json] = List.builder()
+  for i: Int in 0 ..< c.ctx.obligation_count {
+    let o: obligations.Obligation = context.get_obligation(ctx: c.ctx, id: i)
+    if o.at_file == 0 {
+      let lc: loc.LineCol = loc.line_col(tables: c.tab, file: 0, offset: o.at_span.start)
+      List.push(
+        b: inout out,
+        x: json.JObject(
+          fields: [
+            json.field(key: "kind", value: json.text(t: obligations.kind_text(k: o.kind))),
+            json.field(
+              key: "at",
+              value: json.JArray(items: [json.int(v: lc.line), json.int(v: lc.col)])
+            ),
+            json.field(key: "text", value: json.text(t: o.text)),
+            json.field(key: "status", value: json.text(t: obligations.status_text(s: o.status)))
+          ]
+        )
+      )
+    }
+  }
+  return List.finish(b: out)
+}
+
+fn budget_for(m: json.Json, name: Text) -> Int where it >= 0 may alloc {
+  var budget: Int = 500
+  if json.has(j: m, key: "budget") {
+    budget = json.int_at(j: m, key: "budget")
+  }
+  match json.at(j: m, key: "budgets") with
+  | json.JObject(fields) -> {
+    for f: json.Field in fields {
+      if Text.starts_with(t: name, prefix: f.key) {
+        budget = json_int(j: f.value)
+      }
+    }
+  }
+  | _ -> skip()
+  if budget < 0 {
+    return 0
+  }
+  return budget
+}
+
+fn json_int(j: json.Json) -> Int {
+  match j with
+  | json.JNumber(text) -> {
+    match Int.parse(t: text) with
+    | Some(value) -> return value
+    | None -> return 0
+  }
+  | _ -> return 0
+}
+
+fn root_of(dir: Text, m: json.Json) -> Option[Text] may alloc, mutate {
+  if not json.has(j: m, key: "root") {
+    return None
+  }
+  let rel: Text = json.str_at(j: m, key: "root")
+  if rel == "." {
+    return Some(value: dir)
+  }
+  return Some(value: join_path(base: dir, rel: rel))
+}
+
+fn sources_of(files: io.Files, dir: Text, m: json.Json) -> List[Text] may io.file, alloc, mutate {
+  var out: Builder[Text] = List.builder()
+  if json.has(j: m, key: "sources") {
+    for rel: Text in json.texts_at(j: m, key: "sources") {
+      List.push(b: inout out, x: join_path(base: dir, rel: rel))
+    }
+  } else {
+    var base: Text = dir
+    if json.has(j: m, key: "dir") {
+      base = join_path(base: dir, rel: json.str_at(j: m, key: "dir"))
+    }
+    for name: Text in onus_files(files: files, dir: base) {
+      List.push(b: inout out, x: base ++ "/" ++ name)
+    }
+  }
+  for rel: Text in json.texts_at(j: m, key: "also") {
+    List.push(b: inout out, x: join_path(base: dir, rel: rel))
+  }
+  return List.finish(b: out)
+}
+
+-- Whether a fixture's name says it must produce no diagnostics: `ok_` by
+-- default, or the manifest's `clean` prefixes.
+fn is_clean_name(m: json.Json, name: Text) -> Bool may alloc {
+  var prefixes: List[Text] = ["ok_"]
+  if json.has(j: m, key: "clean") {
+    prefixes = json.texts_at(j: m, key: "clean")
+  }
+  return covered_by(code: name, prefixes: prefixes)
+}
+
+-- Compares a fixture's diagnostics (and ledger) with its expectation file, or rewrites it.
+fn compare_expectation(
+  files: io.Files,
+  console: io.Console,
+  opts: Options,
+  what: Text,
+  expect_path: Text,
+  got: List[json.Json],
+  ledger: Option[List[json.Json]],
+  detail: Text
+) -> Result[Tally, io.Error] may io.file, alloc, mutate {
+  if opts.update {
+    var fields: Builder[json.Field] = List.builder()
+    List.push(b: inout fields, x: json.field(key: "diagnostics", value: json.JArray(items: got)))
+    match ledger with
+    | Some(value) -> List.push(
+      b: inout fields,
+      x: json.field(key: "obligations", value: json.JArray(items: value))
+    )
+    | None -> skip()
+    try build.write_file(
+      files: files,
+      path: expect_path,
+      text: json.pretty(j: json.JObject(fields: List.finish(b: fields))) ++ "\n"
+    )
+    return Ok(value: ok_line(console: console, what: what ++ " (updated)"))
+  }
+  var expected_text: Text = ""
+  match io.read(files: files, path: expect_path) with
+  | Err(_) -> return Ok(
+    value: fail_line(
+      console: console,
+      what: what,
+      why: "missing " ++ expect_path ++ "; actual: " ++ json.compact(j: json.JArray(items: got))
+    )
+  )
+  | Ok(value) -> expected_text = value
+  var expected: json.Json = json.JNull
+  match json.parse(t: expected_text) with
+  | None -> return Ok(
+    value: fail_line(
+      console: console,
+      what: what,
+      why: expect_path ++ " is not an expectation file"
+    )
+  )
+  | Some(value) -> expected = value
+  let want: json.Json = json.JArray(items: json.list_at(j: expected, key: "diagnostics"))
+  let got_json: json.Json = json.JArray(items: got)
+  if json.compact(j: want) != json.compact(j: got_json) {
+    return Ok(
+      value: fail_line(
+        console: console,
+        what: what,
+        why: "expected " ++ json.compact(j: want) ++ "\n   actual " ++ json.compact(
+          j: got_json
+        ) ++ "\n   (" ++ detail ++ ")"
+      )
+    )
+  }
+  match ledger with
+  | None -> skip()
+  | Some(value) -> {
+    let want_ledger: json.Json = json.JArray(items: json.list_at(j: expected, key: "obligations"))
+    let got_ledger: json.Json = json.JArray(items: value)
+    if json.compact(j: want_ledger) != json.compact(j: got_ledger) {
+      return Ok(
+        value: fail_line(
+          console: console,
+          what: what,
+          why: "ledger differs:\n   expected " ++ json.compact(
+            j: want_ledger
+          ) ++ "\n   actual " ++ json.compact(j: got_ledger)
+        )
+      )
+    }
+  }
+  return Ok(value: ok_line(console: console, what: what))
+}
+
+fn diagnostics_dir(
+  files: io.Files,
+  console: io.Console,
+  process: io.Process,
+  opts: Options,
+  dir: Text,
+  m: json.Json
+) -> Result[Tally, io.Error] may io.file, nondet, alloc, mutate {
+  let to: Int = check.pass_index(name: json_text_or(j: json.at(j: m, key: "to"), dflt: "paths"))
+  let root: Option[Text] = root_of(dir: dir, m: m)
+  let ledger: Bool = json.bool_at(j: m, key: "ledger")
+  let expect_none: Bool = json.bool_at(j: m, key: "expect_none")
+  var seen: Dict[Text, Bool] = Map.dict()
+  var tally: Tally = nothing()
+  for path: Text in sources_of(files: files, dir: dir, m: m) {
+    let name: Text = base_name(path: path)
+    let c: Checked = try check_source(
+      files: files,
+      console: console,
+      process: process,
+      opts: opts,
+      path: path,
+      root: root,
+      to: to,
+      budget_ms: budget_for(m: m, name: name)
+    )
+    var got: Builder[json.Json] = List.builder()
+    for d: json.Json in c.diagnostics {
+      Map.set(d: inout seen, key: json.str_at(j: d, key: "code"), value: true)
+      List.push(b: inout got, x: expected_entry(c: c, dir: dir, d: d))
+    }
+    let got_list: List[json.Json] = List.finish(b: got)
+    if expect_none or is_clean_name(m: m, name: name) {
+      if List.len(xs: got_list) > 0 {
+        tally = add(
+          a: tally,
+          b: fail_line(
+            console: console,
+            what: path,
+            why: "expected no diagnostics: " ++ diagnostic_texts(c: c)
+          )
+        )
+      } else {
+        if expect_none {
+          tally = add(a: tally, b: ok_line(console: console, what: path))
+        } else {
+          var led: Option[List[json.Json]] = None
+          if ledger {
+            led = Some(value: ledger_entries(c: c))
+          }
+          tally = add(
+            a: tally,
+            b: try compare_expectation(
+              files: files,
+              console: console,
+              opts: opts,
+              what: path,
+              expect_path: without_suffix(name: path, suffix: ".onus") ++ ".expect.json",
+              got: got_list,
+              ledger: led,
+              detail: ""
+            )
+          )
+        }
+      }
+    } else {
+      var led: Option[List[json.Json]] = None
+      if ledger {
+        led = Some(value: ledger_entries(c: c))
+      }
+      tally = add(
+        a: tally,
+        b: try compare_expectation(
+          files: files,
+          console: console,
+          opts: opts,
+          what: path,
+          expect_path: without_suffix(name: path, suffix: ".onus") ++ ".expect.json",
+          got: got_list,
+          ledger: led,
+          detail: diagnostic_texts(c: c)
+        )
+      )
+    }
+  }
+  -- Coverage: every code under the prefixes, less the exceptions, was produced.
+  let prefixes: List[Text] = json.texts_at(j: m, key: "covers")
+  if List.len(xs: prefixes) > 0 {
+    let except: List[Text] = json.texts_at(j: m, key: "except")
+    var missing: Builder[Text] = List.builder()
+    for code: Text in codes.all_codes() {
+      if covered_by(code: code, prefixes: prefixes) and not List.contains(
+        xs: except,
+        x: code
+      ) and not Map.contains(d: seen, key: code) {
+        List.push(b: inout missing, x: code)
+      }
+    }
+    let missing_list: List[Text] = List.finish(b: missing)
+    if List.len(xs: missing_list) > 0 {
+      tally = add(
+        a: tally,
+        b: fail_line(
+          console: console,
+          what: dir,
+          why: "codes without a fixture: " ++ Text.join(parts: missing_list, sep: " ")
+        )
+      )
+    } else {
+      tally = add(
+        a: tally,
+        b: ok_line(
+          console: console,
+          what: dir ++ " covers " ++ Text.join(parts: prefixes, sep: " ")
+        )
+      )
+    }
+  }
+  return Ok(value: tally)
+}
+
+fn covered_by(code: Text, prefixes: List[Text]) -> Bool {
+  for p: Text in prefixes {
+    if Text.starts_with(t: code, prefix: p) {
+      return true
+    }
+  }
+  return false
+}
+
+fn json_text_or(j: json.Json, dflt: Text) -> Text {
+  match j with
+  | json.JString(value) -> return value
+  | _ -> return dflt
+}
+
+-- Canonical form (§2.2) -------------------------------------------------------------
+record Canonical {
+  text: Text
+  diagnostics: Text
+  clean: Bool
+}
+
+fn canonical_of(path: Text, text: Text) -> Canonical may alloc, mutate {
+  var ctx: context.Context = context.new_context(root: None, stdlib: None)
+  if loader.add_file(ctx: inout ctx, path: path, text: text) is None {
+    return Canonical { text: text, diagnostics: "too long", clean: false }
+  }
+  loader.canonical(ctx: inout ctx, file: 0)
+  let tab: Dict[Int, loc.LineTable] = loc.line_tables(ctx: ctx)
+  var parts: Builder[Text] = List.builder()
+  var clean: Bool = true
+  for d: report.Diagnostic in List.finish(b: ctx.diagnostics) {
+    if d.code != "E0001" {
+      clean = false
+    }
+    List.push(b: inout parts, x: diagtext.to_text(ctx: ctx, tab: tab, d: d))
+  }
+  var out: Text = text
+  match Map.find(d: ctx.canonical, key: 0) with
+  | Some(value) -> out = value
+  | None -> skip()
+  return Canonical {
+    text: out,
+    diagnostics: Text.join(parts: List.finish(b: parts), sep: " | "),
+    clean: clean
+  }
+}
+
+fn canonical_dir(
+  files: io.Files,
+  console: io.Console,
+  dir: Text
+) -> Result[Tally, io.Error] may io.file, alloc, mutate {
+  var tally: Tally = nothing()
+  for name: Text in onus_files(files: files, dir: dir) {
+    let path: Text = dir ++ "/" ++ name
+    let text: Text = try io.read(files: files, path: path)
+    let c: Canonical = canonical_of(path: path, text: text)
+    if not c.clean or c.diagnostics != "" {
+      tally = add(
+        a: tally,
+        b: fail_line(console: console, what: path, why: "diagnostics: " ++ c.diagnostics)
+      )
+    } else {
+      if c.text != text {
+        tally = add(
+          a: tally,
+          b: fail_line(console: console, what: path, why: "is not its own canonical form")
+        )
+      } else {
+        tally = add(a: tally, b: ok_line(console: console, what: path))
+      }
+    }
+  }
+  -- The messy sources print as their canonical partners.
+  for name: Text in onus_files(files: files, dir: dir ++ "/messy") {
+    if not Text.ends_with(t: name, suffix: ".canonical.onus") {
+      let path: Text = dir ++ "/messy/" ++ name
+      let partner: Text = dir ++ "/messy/" ++ without_suffix(
+        name: name,
+        suffix: ".onus"
+      ) ++ ".canonical.onus"
+      let text: Text = try io.read(files: files, path: path)
+      match io.read(files: files, path: partner) with
+      | Err(_) -> tally = add(
+        a: tally,
+        b: fail_line(console: console, what: path, why: "no canonical partner " ++ partner)
+      )
+      | Ok(value) -> {
+        let c: Canonical = canonical_of(path: path, text: text)
+        if not c.clean {
+          tally = add(
+            a: tally,
+            b: fail_line(console: console, what: path, why: "diagnostics: " ++ c.diagnostics)
+          )
+        } else {
+          if c.text != value {
+            tally = add(
+              a: tally,
+              b: fail_line(console: console, what: path, why: "prints differently from " ++ partner)
+            )
+          } else {
+            let again: Canonical = canonical_of(path: partner, text: value)
+            if again.text != value {
+              tally = add(
+                a: tally,
+                b: fail_line(console: console, what: partner, why: "is not its own canonical form")
+              )
+            } else {
+              tally = add(a: tally, b: ok_line(console: console, what: path))
+            }
+          }
+        }
+      }
+    }
+  }
+  return Ok(value: tally)
+}
+
+-- Lowered goldens ----------------------------------------------------------------------
+fn entry_module_ir(c: Checked) -> Text may alloc, mutate {
+  for mid: Int in 0 ..< c.ctx.module_count {
+    match Map.find(d: c.ctx.modules, key: mid) with
+    | Some(value) -> {
+      if value.file == 0 {
+        return irtext.print_ir(
+          ctx: c.ctx,
+          m: lowerir.lower_module(
+            ctx: c.ctx,
+            m: value,
+            tables: c.tab,
+            opts: lowerir.Options { verify_all: true, negate_guard: None }
+          )
+        )
+      }
+    }
+    | None -> skip()
+  }
+  return ""
+}
+
+fn lowered_dir(
+  files: io.Files,
+  console: io.Console,
+  process: io.Process,
+  opts: Options,
+  dir: Text,
+  m: json.Json
+) -> Result[Tally, io.Error] may io.file, nondet, alloc, mutate {
+  let golden_dir: Text = join_path(
+    base: dir,
+    rel: json_text_or(j: json.at(j: m, key: "golden"), dflt: "lowered")
+  )
+  var tally: Tally = nothing()
+  for src: json.Json in json.list_at(j: m, key: "sources") {
+    let name: Text = json.str_at(j: src, key: "name")
+    let path: Text = join_path(base: dir, rel: json.str_at(j: src, key: "path"))
+    let c: Checked = try check_source(
+      files: files,
+      console: console,
+      process: process,
+      opts: opts,
+      path: path,
+      root: Some(value: dir_of(path: path)),
+      to: check.pass_index(name: "paths"),
+      budget_ms: 2000
+    )
+    if List.len(xs: c.diagnostics) > 0 {
+      tally = add(
+        a: tally,
+        b: fail_line(console: console, what: path, why: "diagnostics: " ++ diagnostic_texts(c: c))
+      )
+    } else {
+      let text: Text = entry_module_ir(c: c)
+      let golden_path: Text = golden_dir ++ "/" ++ name ++ ".ir.txt"
+      if opts.update {
+        try build.write_file(files: files, path: golden_path, text: text)
+        tally = add(a: tally, b: ok_line(console: console, what: path ++ " (updated)"))
+      } else {
+        match io.read(files: files, path: golden_path) with
+        | Err(_) -> tally = add(
+          a: tally,
+          b: fail_line(console: console, what: path, why: "no golden " ++ golden_path)
+        )
+        | Ok(value) -> {
+          if Text.replace(t: value, from: "<repo>/", to: "") == text {
+            tally = add(a: tally, b: ok_line(console: console, what: path))
+          } else {
+            tally = add(
+              a: tally,
+              b: fail_line(console: console, what: path, why: "differs from " ++ golden_path)
+            )
+          }
+        }
+      }
+    }
+  }
+  return Ok(value: tally)
+}
+
+-- Examples on both targets (§19.5) ------------------------------------------------------
+fn has_tests(text: Text) -> Bool may alloc {
+  for line: Text in Text.split(t: text, sep: "\n") {
+    let t: Text = Text.trim(t: line)
+    if Text.starts_with(t: t, prefix: "example ") or Text.starts_with(
+      t: t,
+      prefix: "property "
+    ) or Text.starts_with(t: t, prefix: "law ") {
+      return true
+    }
+  }
+  return false
+}
+
+fn all_pass(results: Dict[Text, Bool]) -> Bool may alloc {
+  for name: Text in Map.keys(d: results) {
+    match Map.find(d: results, key: name) with
+    | Some(value) -> {
+      if not value {
+        return false
+      }
+    }
+    | None -> skip()
+  }
+  return true
+}
+
+fn failing_names(results: Dict[Text, Bool]) -> Text may alloc, mutate {
+  var out: Builder[Text] = List.builder()
+  for name: Text in Map.keys(d: results) {
+    match Map.find(d: results, key: name) with
+    | Some(value) -> {
+      if not value {
+        List.push(b: inout out, x: name)
+      }
+    }
+    | None -> skip()
+  }
+  return Text.join(parts: List.finish(b: out), sep: ", ")
+}
+
+fn has_code(diagnostics: List[json.Json], code: Text) -> Bool {
+  for d: json.Json in diagnostics {
+    if json.str_at(j: d, key: "code") == code {
+      return true
+    }
+  }
+  return false
+}
+
+-- Builds and runs one program's examples on both targets.
+fn examples_of(
+  files: io.Files,
+  console: io.Console,
+  process: io.Process,
+  env: io.Env,
+  opts: Options,
+  path: Text,
+  allow_refusal: Bool,
+  properties: Bool,
+  native_too: Bool,
+  cflags: List[Text],
+  expect_disagreement: Bool
+) -> Result[Tally, io.Error] may io.file, io.env, nondet, alloc, mutate {
+  var c: Checked = try check_source(
+    files: files,
+    console: console,
+    process: process,
+    opts: opts,
+    path: path,
+    root: Some(value: dir_of(path: path)),
+    to: check.pass_index(name: "paths"),
+    budget_ms: 2000
+  )
+  if List.len(xs: c.diagnostics) > 0 {
+    say(console: console, line: "skip " ++ path ++ ": it does not check")
+    return Ok(value: skipped())
+  }
+  let out_dir: Text = opts.out_root ++ "/examples/" ++ without_suffix(
+    name: base_name(path: path),
+    suffix: ".onus"
+  )
+  try io.remove_all(files: files, path: out_dir)
+  try io.mkdir(files: files, path: out_dir)
+  if opts.bundled {
+    try build.write_bundled_runtime(files: files, out_dir: out_dir)
+  }
+  let built: build.Built = try build.emit_all(
+    ctx: c.ctx,
+    files: files,
+    opts: build.Options {
+      out_dir: out_dir,
+      runtime: opts.runtime,
+      verify_all: false,
+      negate_guard: None
+    }
+  )
+  let js: Dict[Text, Bool] = testcmd.run_js_examples(
+    files: files,
+    process: process,
+    out_dir: out_dir,
+    emitted: built.emitted,
+    include_properties: properties
+  )
+  if not all_pass(results: js) {
+    return Ok(
+      value: fail_line(
+        console: console,
+        what: path,
+        why: "failing on js: " ++ failing_names(results: js)
+      )
+    )
+  }
+  if Map.count(d: js) == 0 {
+    return Ok(value: fail_line(console: console, what: path, why: "no examples ran"))
+  }
+  if not native_too {
+    return Ok(value: ok_line(console: console, what: path ++ " (js)"))
+  }
+  var ctx: context.Context = c.ctx
+  let native: nativebuild.Built = try nativebuild.build_native(
+    ctx: inout ctx,
+    files: files,
+    process: process,
+    env: env,
+    tab: c.tab,
+    out_dir: out_dir,
+    runtime_dir: opts.runtime_dir,
+    target: "native",
+    cflags: cflags
+  )
+  match native.exe with
+  | None -> {
+    var refused: Bool = false
+    for d: report.Diagnostic in List.finish(b: ctx.diagnostics) {
+      if d.code == "E0800" {
+        refused = true
+      }
+    }
+    if allow_refusal and refused {
+      return Ok(value: ok_line(console: console, what: path ++ " (refused natively)"))
+    }
+    let tab: Dict[Int, loc.LineTable] = loc.line_tables(ctx: ctx)
+    var parts: Builder[Text] = List.builder()
+    for d: report.Diagnostic in List.finish(b: ctx.diagnostics) {
+      List.push(b: inout parts, x: diagtext.to_text(ctx: ctx, tab: tab, d: d))
+    }
+    return Ok(
+      value: fail_line(
+        console: console,
+        what: path,
+        why: "native build failed: " ++ Text.join(parts: List.finish(b: parts), sep: " | ")
+      )
+    )
+  }
+  | Some(value) -> {
+    let run: testcmd.NativeRun = testcmd.run_native_examples(process: process, exe: value)
+    if not all_pass(results: run.results) and not expect_disagreement {
+      return Ok(
+        value: fail_line(
+          console: console,
+          what: path,
+          why: "failing natively: " ++ failing_names(results: run.results)
+        )
+      )
+    }
+    if expect_disagreement {
+      let found: Int = testcmd.compare_targets(ctx: inout ctx, js: js, native: run.results)
+      var reported: Bool = false
+      for d: report.Diagnostic in List.finish(b: ctx.diagnostics) {
+        if d.code == "E0801" {
+          reported = true
+        }
+      }
+      if found > 0 and reported {
+        return Ok(value: ok_line(console: console, what: path ++ " (the targets disagree, E0801)"))
+      }
+      return Ok(
+        value: fail_line(
+          console: console,
+          what: path,
+          why: "expected the targets to disagree with E0801"
+        )
+      )
+    }
+    let disagreements: Int = testcmd.compare_targets(ctx: inout ctx, js: js, native: run.results)
+    if disagreements > 0 {
+      return Ok(
+        value: fail_line(
+          console: console,
+          what: path,
+          why: Int.to_text(x: disagreements) ++ " disagreement(s) between the targets"
+        )
+      )
+    }
+    return Ok(value: ok_line(console: console, what: path))
+  }
+}
+
+fn examples_dir(
+  files: io.Files,
+  console: io.Console,
+  process: io.Process,
+  env: io.Env,
+  opts: Options,
+  dir: Text,
+  m: json.Json
+) -> Result[Tally, io.Error] may io.file, io.env, nondet, alloc, mutate {
+  let allow_refusal: Bool = json.bool_at(j: m, key: "allow_refusal")
+  let properties: Bool = json.bool_at(j: m, key: "properties")
+  var native_too: Bool = true
+  if json.has(j: m, key: "targets") {
+    native_too = List.contains(xs: json.texts_at(j: m, key: "targets"), x: "native")
+  }
+  let skip_prefixes: List[Text] = json.texts_at(j: m, key: "skip_prefixes")
+  let cflags: List[Text] = json.texts_at(j: m, key: "cflags")
+  let expect_disagreement: Bool = json.bool_at(j: m, key: "expect_disagreement")
+  var tally: Tally = nothing()
+  var paths: Builder[Text] = List.builder()
+  for rel: Text in json.texts_at(j: m, key: "sources") {
+    List.push(b: inout paths, x: join_path(base: dir, rel: rel))
+  }
+  for sub: Text in json.texts_at(j: m, key: "dirs") {
+    let d: Text = join_path(base: dir, rel: sub)
+    for name: Text in onus_files(files: files, dir: d) {
+      if not covered_by(code: name, prefixes: skip_prefixes) {
+        let path: Text = d ++ "/" ++ name
+        match io.read(files: files, path: path) with
+        | Ok(value) -> {
+          if has_tests(text: value) {
+            List.push(b: inout paths, x: path)
+          }
+        }
+        | Err(_) -> skip()
+      }
+    }
+  }
+  for path: Text in List.finish(b: paths) {
+    tally = add(
+      a: tally,
+      b: try examples_of(
+        files: files,
+        console: console,
+        process: process,
+        env: env,
+        opts: opts,
+        path: path,
+        allow_refusal: allow_refusal,
+        properties: properties,
+        native_too: native_too,
+        cflags: cflags,
+        expect_disagreement: expect_disagreement
+      )
+    )
+  }
+  return Ok(value: tally)
+}
+
+-- Substitutions and staging ---------------------------------------------------------------
+-- The names a manifest may use in arguments, written texts and expected
+-- outputs: `$root` the repository root, `$dir` the manifest's directory,
+-- `$stage` the case's working directory, `$out` the section's output
+-- directory, `$cli` and `$native_cli` the compilers under test, `$offset`
+-- a computed offset, `$now` the time the run started, ISO 8601.
+record Subst {
+  root: Text
+  dir: Text
+  stage: Text
+  out: Text
+  cli: Text
+  native_cli: Text
+  offset: Text
+  now: Text
+}
+
+fn subst(t: Text, s: Subst) -> Text may alloc {
+  var r: Text = Text.replace(t: t, from: "$native_cli", to: s.native_cli)
+  r = Text.replace(t: r, from: "$root", to: s.root)
+  r = Text.replace(t: r, from: "$dir", to: s.dir)
+  r = Text.replace(t: r, from: "$stage", to: s.stage)
+  r = Text.replace(t: r, from: "$out", to: s.out)
+  r = Text.replace(t: r, from: "$cli", to: s.cli)
+  r = Text.replace(t: r, from: "$offset", to: s.offset)
+  r = Text.replace(t: r, from: "$now", to: s.now)
+  return r
+}
+
+fn subst_all(xs: List[Text], s: Subst) -> List[Text] may alloc, mutate {
+  var out: Builder[Text] = List.builder()
+  for x: Text in xs {
+    List.push(b: inout out, x: subst(t: x, s: s))
+  }
+  return List.finish(b: out)
+}
+
+-- `p` made absolute under `root` when it is relative.
+fn absolute(root: Text, p: Text) -> Text may alloc, mutate {
+  if Text.starts_with(t: p, prefix: "/") {
+    return p
+  }
+  return join_path(base: root, rel: p)
+}
+
+fn base_subst(opts: Options, dir: Text, stage: Text, out: Text) -> Subst may alloc, mutate {
+  return Subst {
+    root: opts.root,
+    dir: absolute(root: opts.root, p: dir),
+    stage: stage,
+    out: out,
+    cli: or_empty(o: opts.cli),
+    native_cli: or_empty(o: opts.native_cli),
+    offset: "",
+    now: opts.now
+  }
+}
+
+-- `KEY=VALUE` pairs from a manifest's `env` object, substituted.
+fn env_list(j: json.Json, s: Subst) -> List[Text] may alloc, mutate {
+  var out: Builder[Text] = List.builder()
+  match j with
+  | json.JObject(fields) -> {
+    for f: json.Field in fields {
+      List.push(b: inout out, x: f.key ++ "=" ++ subst(t: json_text_or(j: f.value, dflt: ""), s: s))
+    }
+  }
+  | _ -> skip()
+  return List.finish(b: out)
+}
+
+-- Runs `program args` in `cwd` with `env` (`KEY=VALUE` pairs) added, through `sh`.
+fn run_in(
+  process: io.Process,
+  cwd: Text,
+  env: List[Text],
+  program: Text,
+  args: List[Text],
+  stdin: Text
+) -> Result[io.Output, io.Error] may io.file, nondet, alloc, mutate {
+  var argv: Builder[Text] = List.builder()
+  List.push(b: inout argv, x: "-c")
+  List.push(b: inout argv, x: "cd \"$0\" && exec \"$@\"")
+  List.push(b: inout argv, x: cwd)
+  if List.len(xs: env) > 0 {
+    List.push(b: inout argv, x: "env")
+    for e: Text in env {
+      List.push(b: inout argv, x: e)
+    }
+  }
+  List.push(b: inout argv, x: program)
+  for a: Text in args {
+    List.push(b: inout argv, x: a)
+  }
+  return io.run(
+    process: process,
+    program: "sh",
+    args: List.finish(b: argv),
+    stdin: stdin,
+    timeout_ms: 900000
+  )
+}
+
+-- The program to run: `via` wraps it (`sh <via> <program> <args>`), a
+-- `.js` program runs under node.
+fn run_program_in(
+  process: io.Process,
+  cwd: Text,
+  env: List[Text],
+  via: Option[Text],
+  program: Text,
+  args: List[Text],
+  stdin: Text
+) -> Result[io.Output, io.Error] may io.file, nondet, alloc, mutate {
+  var exe: Text = program
+  var argv: List[Text] = args
+  if Text.ends_with(t: program, suffix: ".js") {
+    exe = "node"
+    argv = [program] ++ args
+  }
+  match via with
+  | Some(value) -> return run_in(
+    process: process,
+    cwd: cwd,
+    env: env,
+    program: "sh",
+    args: [value, exe] ++ argv,
+    stdin: stdin
+  )
+  | None -> return run_in(
+    process: process,
+    cwd: cwd,
+    env: env,
+    program: exe,
+    args: argv,
+    stdin: stdin
+  )
+}
+
+-- Copies a tree, `depth` levels at most, leaving out dot-names and generated directories.
+fn copy_tree(
+  files: io.Files,
+  from: Text,
+  to: Text,
+  depth: Int where it >= 0
+) -> Result[Unit, io.Error] may io.file, alloc, mutate
+  decreases depth
+{
+  try io.mkdir(files: files, path: to)
+  if depth == 0 {
+    return Ok(value: Unit)
+  }
+  let names: List[Text] = try io.list_dir(files: files, path: from)
+  for name: Text in names {
+    if not Text.starts_with(
+      t: name,
+      prefix: "."
+    ) and name != "review" and name != "out" and name != "node_modules" {
+      match io.read(files: files, path: from ++ "/" ++ name) with
+      | Ok(value) -> try build.write_file(files: files, path: to ++ "/" ++ name, text: value)
+      | Err(_) -> try copy_tree(
+        files: files,
+        from: from ++ "/" ++ name,
+        to: to ++ "/" ++ name,
+        depth: depth - 1
+      )
+    }
+  }
+  return Ok(value: Unit)
+}
+
+-- A fresh, empty directory.
+fn fresh_dir(files: io.Files, path: Text) -> Result[Unit, io.Error] may io.file, alloc {
+  try io.remove_all(files: files, path: path)
+  try io.mkdir(files: files, path: path)
+  return Ok(value: Unit)
+}
+
+-- `t[from, to)` with the bounds clamped into the text.
+fn slice_within(t: Text, from: Int, to: Int) -> Text may alloc {
+  let n: Int = Text.count(t: t)
+  var a: Int = from
+  if a < 0 {
+    a = 0
+  }
+  if a > n {
+    a = n
+  }
+  var b: Int = to
+  if b < a {
+    b = a
+  }
+  if b > n {
+    b = n
+  }
+  return Text.slice(t: t, from: a, to: b)
+}
+
+fn cp_at(cps: List[Int], i: Int) -> Int {
+  if i >= 0 and i < List.len(xs: cps) {
+    return List.get(xs: cps, i: i)
+  }
+  return -1
+}
+
+fn is_digit(cp: Int) -> Bool {
+  return cp >= 48 and cp <= 57
+}
+
+-- The length of an ISO 8601 instant (`2026-09-07T10:00:00Z`, with or
+-- without milliseconds) starting at `i`, else 0.
+fn date_len_at(cps: List[Int], i: Int) -> Int may alloc {
+  for k: Int in [0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18] {
+    if not is_digit(cp: cp_at(cps: cps, i: i + k)) {
+      return 0
+    }
+  }
+  if cp_at(cps: cps, i: i + 4) != 45 or cp_at(cps: cps, i: i + 7) != 45 or cp_at(
+    cps: cps,
+    i: i + 10
+  ) != 84 or cp_at(cps: cps, i: i + 13) != 58 or cp_at(cps: cps, i: i + 16) != 58 {
+    return 0
+  }
+  if cp_at(cps: cps, i: i + 19) == 90 {
+    return 20
+  }
+  if cp_at(cps: cps, i: i + 19) == 46 and is_digit(cp: cp_at(cps: cps, i: i + 20)) and is_digit(
+    cp: cp_at(cps: cps, i: i + 21)
+  ) and is_digit(cp: cp_at(cps: cps, i: i + 22)) and cp_at(cps: cps, i: i + 23) == 90 {
+    return 24
+  }
+  return 0
+}
+
+-- Every ISO 8601 instant in `text` replaced by `to`.
+fn replace_dates(text: Text, to: Text) -> Text may alloc, mutate {
+  let cps: List[Int] = Text.code_points(t: text)
+  let n: Int = List.len(xs: cps)
+  var parts: Builder[Text] = List.builder()
+  var run_start: Int = 0
+  var skip_until: Int = 0
+  for i: Int in 0 ..< n {
+    if i >= skip_until {
+      let len: Int = date_len_at(cps: cps, i: i)
+      if len > 0 {
+        List.push(b: inout parts, x: slice_within(t: text, from: run_start, to: i))
+        List.push(b: inout parts, x: to)
+        run_start = i + len
+        skip_until = i + len
+      }
+    }
+  }
+  List.push(b: inout parts, x: slice_within(t: text, from: run_start, to: n))
+  return Text.join(parts: List.finish(b: parts), sep: "")
+}
+
+fn matches_at(cps: List[Int], i: Int, pat: List[Int]) -> Bool {
+  for j: Int in 0 ..< List.len(xs: pat) {
+    if cp_at(cps: cps, i: i + j) != List.get(xs: pat, i: j) {
+      return false
+    }
+  }
+  return true
+}
+
+-- Every JSON scalar (a number or a string) following `prefix` — such as
+-- `"ms":` — replaced by `placeholder`, the spaces between them dropped.
+fn replace_scalar_after(text: Text, prefix: Text, placeholder: Text) -> Text may alloc, mutate {
+  let cps: List[Int] = Text.code_points(t: text)
+  let pat: List[Int] = Text.code_points(t: prefix)
+  let n: Int = List.len(xs: cps)
+  let m: Int = List.len(xs: pat)
+  var parts: Builder[Text] = List.builder()
+  var run_start: Int = 0
+  var skip_until: Int = 0
+  var state: Int = 0
+  var pstart: Int = 0
+  var esc: Bool = false
+  for i: Int in 0 ..< n {
+    if i >= skip_until {
+      let cp: Int = cp_at(cps: cps, i: i)
+      if state == 0 {
+        if m > 0 and matches_at(cps: cps, i: i, pat: pat) {
+          pstart = i
+          skip_until = i + m
+          state = 1
+        }
+      } else {
+        if state == 1 {
+          if cp == 34 {
+            state = 2
+            esc = false
+          } else {
+            if is_digit(cp: cp) {
+              state = 3
+            } else {
+              if cp != 32 {
+                state = 0
+              }
+            }
+          }
+        } else {
+          if state == 2 {
+            if esc {
+              esc = false
+            } else {
+              if cp == 92 {
+                esc = true
+              } else {
+                if cp == 34 {
+                  List.push(b: inout parts, x: slice_within(t: text, from: run_start, to: pstart))
+                  List.push(b: inout parts, x: prefix ++ placeholder)
+                  run_start = i + 1
+                  state = 0
+                }
+              }
+            }
+          } else {
+            if not is_digit(cp: cp) {
+              List.push(b: inout parts, x: slice_within(t: text, from: run_start, to: pstart))
+              List.push(b: inout parts, x: prefix ++ placeholder)
+              run_start = i
+              state = 0
+            }
+          }
+        }
+      }
+    }
+  }
+  if state == 3 {
+    List.push(b: inout parts, x: slice_within(t: text, from: run_start, to: pstart))
+    List.push(b: inout parts, x: prefix ++ placeholder)
+    run_start = n
+  }
+  List.push(b: inout parts, x: slice_within(t: text, from: run_start, to: n))
+  return Text.join(parts: List.finish(b: parts), sep: "")
+}
+
+-- Every decimal number immediately before `suffix` (such as ` tokens`)
+-- replaced by `placeholder`.
+fn replace_number_before(text: Text, suffix: Text, placeholder: Text) -> Text may alloc, mutate {
+  let cps: List[Int] = Text.code_points(t: text)
+  let pat: List[Int] = Text.code_points(t: suffix)
+  let n: Int = List.len(xs: cps)
+  var parts: Builder[Text] = List.builder()
+  var run_start: Int = 0
+  for i: Int in 0 ..< n {
+    if List.len(xs: pat) > 0 and matches_at(cps: cps, i: i, pat: pat) and is_digit(
+      cp: cp_at(cps: cps, i: i - 1)
+    ) {
+      var j: Int = i
+      for k: Int in 0 ..< i {
+        if j == i - k and is_digit(cp: cp_at(cps: cps, i: i - k - 1)) {
+          j = i - k - 1
+        }
+      }
+      if j >= run_start {
+        List.push(b: inout parts, x: slice_within(t: text, from: run_start, to: j))
+        List.push(b: inout parts, x: placeholder)
+        run_start = i
+      }
+    }
+  }
+  List.push(b: inout parts, x: slice_within(t: text, from: run_start, to: n))
+  return Text.join(parts: List.finish(b: parts), sep: "")
+}
+
+fn last_line(t: Text) -> Text may alloc {
+  let lines: List[Text] = Text.split(t: Text.trim(t: t), sep: "\n")
+  if List.len(xs: lines) == 0 {
+    return ""
+  }
+  return List.get(xs: lines, i: List.len(xs: lines) - 1) ++ "\n"
+}
+
+-- A text with the manifest's `normalise` rules applied: `dates` (every ISO
+-- instant becomes `<at>`), `ms`, `tokens` and `hash` (the values of those
+-- JSON keys), `stage`, `out`, `root` (those directories' prefixes dropped),
+-- `last_line` (only the last line is kept), `token_counts` (a number before
+-- ` tokens` becomes `<n>`).
+fn normalise(text: Text, rules: List[Text], s: Subst) -> Text may alloc, mutate {
+  var r: Text = text
+  for rule: Text in rules {
+    if rule == "dates" {
+      r = replace_dates(text: r, to: "<at>")
+    }
+    if rule == "ms" {
+      r = replace_scalar_after(text: r, prefix: "\"ms\":", placeholder: "0")
+    }
+    if rule == "tokens" {
+      r = replace_scalar_after(text: r, prefix: "\"tokens\":", placeholder: "0")
+    }
+    if rule == "hash" {
+      r = replace_scalar_after(text: r, prefix: "\"prompt_hash\":", placeholder: "\"<hash>\"")
+    }
+    if rule == "stage" {
+      r = Text.replace(t: r, from: s.stage ++ "/", to: "")
+      r = Text.replace(t: r, from: s.stage, to: "<stage>")
+    }
+    if rule == "out" {
+      r = Text.replace(t: r, from: s.out ++ "/", to: "")
+    }
+    if rule == "root" {
+      r = Text.replace(t: r, from: s.root ++ "/", to: "")
+    }
+    if rule == "last_line" {
+      r = last_line(t: r)
+    }
+    if rule == "token_counts" {
+      r = replace_number_before(text: r, suffix: " tokens", placeholder: "<n>")
+    }
+  }
+  return r
+}
+
+-- The first line at which two texts differ, for a failure message.
+fn first_difference(expected: Text, actual: Text) -> Text may alloc {
+  let a: List[Text] = Text.split(t: expected, sep: "\n")
+  let b: List[Text] = Text.split(t: actual, sep: "\n")
+  let n: Int = List.len(xs: a)
+  let m: Int = List.len(xs: b)
+  for i: Int in 0 ..< n {
+    if i < m {
+      if List.get(xs: a, i: i) != List.get(xs: b, i: i) {
+        return "line " ++ Int.to_text(x: i + 1) ++ ":\n   expected " ++ json.quote(
+          t: List.get(xs: a, i: i)
+        ) ++ "\n   actual   " ++ json.quote(t: List.get(xs: b, i: i))
+      }
+    } else {
+      return "line " ++ Int.to_text(x: i + 1) ++ ": expected " ++ json.quote(
+        t: List.get(xs: a, i: i)
+      ) ++ ", actual ends"
+    }
+  }
+  if m > n {
+    return "line " ++ Int.to_text(x: n + 1) ++ ": expected ends, actual " ++ json.quote(
+      t: List.get(xs: b, i: n)
+    )
+  }
+  return "no difference"
+}
+
+-- Compares a text with the expectation file `expect` (relative to the
+-- manifest's directory), or rewrites it under `--update`; nothing when they agree.
+fn pin_text(
+  files: io.Files,
+  opts: Options,
+  dir: Text,
+  expect: Text,
+  actual: Text
+) -> Result[Option[Text], io.Error] may io.file, alloc, mutate {
+  let path: Text = join_path(base: dir, rel: expect)
+  if opts.update {
+    try build.write_file(files: files, path: path, text: actual)
+    return Ok(value: None)
+  }
+  match io.read(files: files, path: path) with
+  | Err(_) -> return Ok(value: Some(value: "missing " ++ path ++ "; actual:\n" ++ actual))
+  | Ok(value) -> {
+    if value != actual {
+      return Ok(
+        value: Some(
+          value: "differs from " ++ path ++ " at " ++ first_difference(
+            expected: value,
+            actual: actual
+          )
+        )
+      )
+    }
+    return Ok(value: None)
+  }
+}
+
+-- The checks a case may make on a run's output and the files it left; the
+-- first failure's reason, or nothing.
+fn check_run(
+  files: io.Files,
+  opts: Options,
+  dir: Text,
+  cwd: Text,
+  case: json.Json,
+  out: io.Output,
+  s: Subst,
+  target: Text
+) -> Result[Option[Text], io.Error] may io.file, alloc, mutate {
+  let rules: List[Text] = json.texts_at(j: case, key: "normalise")
+  var status: Int = 0
+  if json.has(j: case, key: "status") {
+    status = json.int_at(j: case, key: "status")
+  }
+  let stdout: Text = normalise(text: out.stdout, rules: rules, s: s)
+  let stderr: Text = normalise(text: out.stderr, rules: rules, s: s)
+  if out.status != status {
+    return Ok(
+      value: Some(
+        value: "exit status " ++ Int.to_text(x: out.status) ++ ", expected " ++ Int.to_text(
+          x: status
+        ) ++ "\n   stdout " ++ json.quote(t: stdout) ++ "\n   stderr " ++ json.quote(t: stderr)
+      )
+    )
+  }
+  if json.has(j: case, key: "stdout") {
+    var expect: Text = json.str_at(j: case, key: "stdout")
+    if target != "" {
+      expect = Text.replace(t: expect, from: "$target", to: target)
+    }
+    match try pin_text(files: files, opts: opts, dir: dir, expect: expect, actual: stdout) with
+    | Some(value) -> return Ok(
+      value: Some(value: "stdout " ++ value ++ "\n   stderr " ++ json.quote(t: stderr))
+    )
+    | None -> skip()
+  }
+  if json.has(j: case, key: "stdout_text") {
+    let want: Text = subst(t: json.str_at(j: case, key: "stdout_text"), s: s)
+    if stdout != want {
+      return Ok(
+        value: Some(
+          value: "stdout differs: expected " ++ json.quote(t: want) ++ ", actual " ++ json.quote(
+            t: stdout
+          ) ++ "\n   stderr " ++ json.quote(t: stderr)
+        )
+      )
+    }
+  }
+  for needle: Text in json.texts_at(j: case, key: "stdout_contains") {
+    if not Text.contains(t: stdout, needle: subst(t: needle, s: s)) {
+      return Ok(
+        value: Some(
+          value: "stdout lacks " ++ json.quote(
+            t: needle
+          ) ++ ":\n" ++ stdout ++ "\n   stderr " ++ json.quote(t: stderr)
+        )
+      )
+    }
+  }
+  for needle: Text in json.texts_at(j: case, key: "stdout_lacks") {
+    if Text.contains(t: stdout, needle: subst(t: needle, s: s)) {
+      return Ok(value: Some(value: "stdout contains " ++ json.quote(t: needle) ++ ":\n" ++ stdout))
+    }
+  }
+  if json.bool_at(j: case, key: "stdout_canonical") {
+    let c: Canonical = canonical_of(path: "stdout.onus", text: stdout)
+    if not c.clean or c.text != stdout {
+      return Ok(value: Some(value: "stdout is not canonical Onus: " ++ c.diagnostics))
+    }
+  }
+  if json.has(j: case, key: "stderr_text") {
+    let want: Text = subst(t: json.str_at(j: case, key: "stderr_text"), s: s)
+    if stderr != want {
+      return Ok(
+        value: Some(
+          value: "stderr differs: expected " ++ json.quote(t: want) ++ ", actual " ++ json.quote(
+            t: stderr
+          )
+        )
+      )
+    }
+  }
+  for needle: Text in json.texts_at(j: case, key: "stderr_contains") {
+    if not Text.contains(t: stderr, needle: subst(t: needle, s: s)) {
+      return Ok(value: Some(value: "stderr lacks " ++ json.quote(t: needle) ++ ":\n" ++ stderr))
+    }
+  }
+  return check_files(files: files, opts: opts, dir: dir, cwd: cwd, case: case, s: s)
+}
+
+-- Pins a file's (normalised) content against an expectation file; the reason it does not agree, if any.
+fn pin_file(
+  files: io.Files,
+  opts: Options,
+  dir: Text,
+  expect: Text,
+  path: Text,
+  rules: List[Text],
+  s: Subst
+) -> Result[Option[Text], io.Error] may io.file, alloc, mutate {
+  var text: Text = ""
+  match io.read(files: files, path: path) with
+  | Err(_) -> return Ok(value: Some(value: "no file " ++ path))
+  | Ok(value) -> text = value
+  return pin_text(
+    files: files,
+    opts: opts,
+    dir: dir,
+    expect: expect,
+    actual: normalise(text: text, rules: rules, s: s)
+  )
+}
+
+fn check_files(
+  files: io.Files,
+  opts: Options,
+  dir: Text,
+  cwd: Text,
+  case: json.Json,
+  s: Subst
+) -> Result[Option[Text], io.Error] may io.file, alloc, mutate {
+  let rules: List[Text] = json.texts_at(j: case, key: "normalise")
+  match json.at(j: case, key: "files") with
+  | json.JObject(fields) -> {
+    for f: json.Field in fields {
+      match try pin_file(
+        files: files,
+        opts: opts,
+        dir: dir,
+        expect: json_text_or(j: f.value, dflt: ""),
+        path: cwd ++ "/" ++ f.key,
+        rules: rules,
+        s: s
+      ) with
+      | Some(value) -> return Ok(value: Some(value: f.key ++ " " ++ value))
+      | None -> skip()
+    }
+  }
+  | _ -> skip()
+  match json.at(j: case, key: "files_text") with
+  | json.JObject(fields) -> {
+    for f: json.Field in fields {
+      match io.read(files: files, path: cwd ++ "/" ++ f.key) with
+      | Err(_) -> return Ok(value: Some(value: "no file " ++ f.key))
+      | Ok(value) -> {
+        let want: Text = subst(t: json_text_or(j: f.value, dflt: ""), s: s)
+        if normalise(text: value, rules: rules, s: s) != want {
+          return Ok(
+            value: Some(
+              value: f.key ++ " differs: expected " ++ json.quote(
+                t: want
+              ) ++ ", actual " ++ json.quote(t: value)
+            )
+          )
+        }
+      }
+    }
+  }
+  | _ -> skip()
+  match json.at(j: case, key: "files_contain") with
+  | json.JObject(fields) -> {
+    for f: json.Field in fields {
+      match io.read(files: files, path: cwd ++ "/" ++ f.key) with
+      | Err(_) -> return Ok(value: Some(value: "no file " ++ f.key))
+      | Ok(value) -> {
+        for needle: Text in json_texts(j: f.value) {
+          if not Text.contains(t: value, needle: subst(t: needle, s: s)) {
+            return Ok(value: Some(value: f.key ++ " lacks " ++ json.quote(t: needle)))
+          }
+        }
+      }
+    }
+  }
+  | _ -> skip()
+  match json.at(j: case, key: "file_hashes") with
+  | json.JObject(fields) -> {
+    for f: json.Field in fields {
+      match io.read(files: files, path: cwd ++ "/" ++ f.key) with
+      | Err(_) -> return Ok(value: Some(value: "no file " ++ f.key))
+      | Ok(value) -> {
+        let got: Text = "b3:" ++ hash.blake3_hex(t: value)
+        if got != json_text_or(j: f.value, dflt: "") {
+          return Ok(
+            value: Some(
+              value: f.key ++ " hashes to " ++ got ++ ", expected " ++ json_text_or(
+                j: f.value,
+                dflt: ""
+              )
+            )
+          )
+        }
+      }
+    }
+  }
+  | _ -> skip()
+  for rel: Text in json.texts_at(j: case, key: "files_exist") {
+    if io.read(files: files, path: cwd ++ "/" ++ rel) is Err and io.list_dir(
+      files: files,
+      path: cwd ++ "/" ++ rel
+    ) is Err {
+      return Ok(value: Some(value: "missing " ++ rel))
+    }
+  }
+  for rel: Text in json.texts_at(j: case, key: "files_absent") {
+    if io.read(files: files, path: cwd ++ "/" ++ rel) is Ok or io.list_dir(
+      files: files,
+      path: cwd ++ "/" ++ rel
+    ) is Ok {
+      return Ok(value: Some(value: rel ++ " exists"))
+    }
+  }
+  match json.at(j: case, key: "count_files") with
+  | json.JObject(fields) -> {
+    let sub: Text = json.str_at(j: case, key: "count_dir")
+    for f: json.Field in fields {
+      var count: Int = 0
+      match io.list_dir(files: files, path: cwd ++ "/" ++ sub) with
+      | Ok(value) -> {
+        for name: Text in value {
+          if Text.ends_with(t: name, suffix: f.key) {
+            count = count + 1
+          }
+        }
+      }
+      | Err(_) -> skip()
+      if count != json_int(j: f.value) {
+        return Ok(
+          value: Some(
+            value: Int.to_text(
+              x: count
+            ) ++ " files " ++ f.key ++ " under " ++ sub ++ ", expected " ++ Int.to_text(
+              x: json_int(j: f.value)
+            )
+          )
+        )
+      }
+    }
+  }
+  | _ -> skip()
+  return Ok(value: None)
+}
+
+fn json_texts(j: json.Json) -> List[Text] may alloc, mutate {
+  var out: Builder[Text] = List.builder()
+  match j with
+  | json.JArray(items) -> {
+    for item: json.Json in items {
+      List.push(b: inout out, x: json_text_or(j: item, dflt: ""))
+    }
+  }
+  | json.JString(value) -> List.push(b: inout out, x: value)
+  | _ -> skip()
+  return List.finish(b: out)
+}
+
+-- Applies a case's `edit` list to the files of its stage: `from`/`to`
+-- replaces text, `dates_to` rewrites every ISO instant, `append` adds text.
+fn apply_edits(
+  files: io.Files,
+  stage: Text,
+  edits: List[json.Json],
+  s: Subst
+) -> Result[Unit, io.Error] may io.file, alloc, mutate {
+  for e: json.Json in edits {
+    let path: Text = stage ++ "/" ++ json.str_at(j: e, key: "file")
+    var text: Text = try io.read(files: files, path: path)
+    if json.has(j: e, key: "from") {
+      let from: Text = subst(t: json.str_at(j: e, key: "from"), s: s)
+      if not Text.contains(t: text, needle: from) {
+        return Err(
+          error: Other(detail: "edit of " ++ path ++ ": " ++ json.quote(t: from) ++ " not found")
+        )
+      }
+      text = Text.replace(t: text, from: from, to: subst(t: json.str_at(j: e, key: "to"), s: s))
+    }
+    if json.has(j: e, key: "dates_to") {
+      text = replace_dates(text: text, to: subst(t: json.str_at(j: e, key: "dates_to"), s: s))
+    }
+    if json.has(j: e, key: "append") {
+      text = text ++ subst(t: json.str_at(j: e, key: "append"), s: s)
+    }
+    try build.write_file(files: files, path: path, text: text)
+  }
+  return Ok(value: Unit)
+}
+
+-- Prepares a case's working directory: a fresh copy of `stage_dir`, or an
+-- earlier case's directory (`in`); then the `stage` files are copied in,
+-- `remove` removes, `write` writes and `edit` edits.
+fn prepare_stage(
+  files: io.Files,
+  opts: Options,
+  dir: Text,
+  section_out: Text,
+  case: json.Json,
+  stages: inout Dict[Text, Text]
+) -> Result[Text, io.Error] may io.file, alloc, mutate {
+  let name: Text = json.str_at(j: case, key: "name")
+  var stage: Text = section_out ++ "/" ++ name
+  if json.has(j: case, key: "in") {
+    match Map.find(d: stages, key: json.str_at(j: case, key: "in")) with
+    | Some(value) -> stage = value
+    | None -> return Err(
+      error: Other(
+        detail: "case " ++ name ++ " is in an unknown stage " ++ json.str_at(j: case, key: "in")
+      )
+    )
+  } else {
+    try fresh_dir(files: files, path: stage)
+    if json.has(j: case, key: "stage_dir") {
+      try copy_tree(
+        files: files,
+        from: join_path(
+          base: absolute(root: opts.root, p: dir),
+          rel: json.str_at(j: case, key: "stage_dir")
+        ),
+        to: stage,
+        depth: 6
+      )
+    }
+  }
+  for rel: Text in json.texts_at(j: case, key: "stage") {
+    let from: Text = join_path(base: absolute(root: opts.root, p: dir), rel: rel)
+    let text: Text = try io.read(files: files, path: from)
+    try build.write_file(files: files, path: stage ++ "/" ++ base_name(path: from), text: text)
+  }
+  for rel: Text in json.texts_at(j: case, key: "remove") {
+    try io.remove_all(files: files, path: stage ++ "/" ++ rel)
+  }
+  Map.set(d: inout stages, key: name, value: stage)
+  let s: Subst = base_subst(opts: opts, dir: dir, stage: stage, out: section_out)
+  match json.at(j: case, key: "write") with
+  | json.JObject(fields) -> {
+    for f: json.Field in fields {
+      let path: Text = stage ++ "/" ++ f.key
+      try io.mkdir(files: files, path: dir_of(path: path))
+      try build.write_file(
+        files: files,
+        path: path,
+        text: subst(t: json_text_or(j: f.value, dflt: ""), s: s)
+      )
+    }
+  }
+  | _ -> skip()
+  try apply_edits(files: files, stage: stage, edits: json.list_at(j: case, key: "edit"), s: s)
+  return Ok(value: stage)
+}
+
+-- The offset a case computes from a marker in a staged file: just after its
+-- `occurrence`th occurrence (0-based), `back` code points earlier.
+fn offset_after(
+  files: io.Files,
+  stage: Text,
+  spec: json.Json
+) -> Result[Int, io.Error] may io.file, alloc {
+  let text: Text = try io.read(
+    files: files,
+    path: stage ++ "/" ++ json.str_at(j: spec, key: "file")
+  )
+  let marker: Text = json.str_at(j: spec, key: "marker")
+  var occurrence: Int = 0
+  if json.has(j: spec, key: "occurrence") {
+    occurrence = json.int_at(j: spec, key: "occurrence")
+  }
+  var back: Int = 0
+  if json.has(j: spec, key: "back") {
+    back = json.int_at(j: spec, key: "back")
+  }
+  var from: Int where it >= 0 = 0
+  for i: Int in 0 ..< occurrence + 1 {
+    if from > Text.count(t: text) {
+      return Err(error: Other(detail: "marker not found: " ++ json.quote(t: marker)))
+    }
+    match Text.index_of(t: text, needle: marker, from: from) with
+    | None -> return Err(error: Other(detail: "marker not found: " ++ json.quote(t: marker)))
+    | Some(value) -> from = value + Text.count(t: marker)
+  }
+  return Ok(value: from - back)
+}
+
+-- Command-line cases (`cli`) ---------------------------------------------------------------
+fn cli_case(
+  files: io.Files,
+  console: io.Console,
+  process: io.Process,
+  opts: Options,
+  dir: Text,
+  section_out: Text,
+  case: json.Json,
+  stages: inout Dict[Text, Text]
+) -> Result[Tally, io.Error] may io.file, nondet, alloc, mutate {
+  let name: Text = json.str_at(j: case, key: "name")
+  let what: Text = dir ++ ": " ++ name
+  let stage: Text = try prepare_stage(
+    files: files,
+    opts: opts,
+    dir: dir,
+    section_out: section_out,
+    case: case,
+    stages: inout stages
+  )
+  var s: Subst = base_subst(opts: opts, dir: dir, stage: stage, out: section_out)
+  if json.has(j: case, key: "offset_after") {
+    let offset: Int = try offset_after(
+      files: files,
+      stage: stage,
+      spec: json.at(j: case, key: "offset_after")
+    )
+    s = { s with offset: Int.to_text(x: offset) }
+  }
+  var program: Text = "node"
+  var args: List[Text] = [s.cli] ++ subst_all(xs: json.texts_at(j: case, key: "args"), s: s)
+  if json.has(j: case, key: "program") {
+    program = subst(t: json.str_at(j: case, key: "program"), s: s)
+    args = subst_all(xs: json.texts_at(j: case, key: "args"), s: s)
+  }
+  var via: Option[Text] = None
+  if json.has(j: case, key: "via") {
+    via = Some(value: join_path(base: s.dir, rel: json.str_at(j: case, key: "via")))
+  }
+  var cwd: Text = stage
+  if json.has(j: case, key: "cwd") {
+    cwd = subst(t: json.str_at(j: case, key: "cwd"), s: s)
+  }
+  var stdin: Text = ""
+  if json.has(j: case, key: "stdin") {
+    stdin = subst(t: json.str_at(j: case, key: "stdin"), s: s)
+  }
+  let env: List[Text] = env_list(j: json.at(j: case, key: "env"), s: s)
+  var out: io.Output = io.Output { stdout: "", stderr: "", status: 0 }
+  match via with
+  | Some(value) -> out = try run_in(
+    process: process,
+    cwd: cwd,
+    env: env,
+    program: "sh",
+    args: [value, program] ++ args,
+    stdin: stdin
+  )
+  | None -> out = try run_in(
+    process: process,
+    cwd: cwd,
+    env: env,
+    program: program,
+    args: args,
+    stdin: stdin
+  )
+  match try check_run(
+    files: files,
+    opts: opts,
+    dir: dir,
+    cwd: cwd,
+    case: case,
+    out: out,
+    s: s,
+    target: ""
+  ) with
+  | Some(value) -> return Ok(value: fail_line(console: console, what: what, why: value))
+  | None -> return Ok(value: ok_line(console: console, what: what))
+}
+
+fn cli_dir(
+  files: io.Files,
+  console: io.Console,
+  process: io.Process,
+  env: io.Env,
+  opts: Options,
+  dir: Text,
+  m: json.Json
+) -> Result[Tally, io.Error] may io.file, io.env, nondet, alloc, mutate {
+  let section_out: Text = opts.out_root ++ "/cli/" ++ section_name(dir: dir, m: m)
+  try io.mkdir(files: files, path: section_out)
+  var stages: Dict[Text, Text] = Map.dict()
+  var tally: Tally = nothing()
+  for case: json.Json in json.list_at(j: m, key: "cases") {
+    if not json.has(j: case, key: "requires") or missing_tool(
+      files: files,
+      process: process,
+      env: env,
+      opts: opts,
+      m: case
+    ) is None {
+      tally = add(
+        a: tally,
+        b: try cli_case(
+          files: files,
+          console: console,
+          process: process,
+          opts: opts,
+          dir: dir,
+          section_out: section_out,
+          case: case,
+          stages: inout stages
+        )
+      )
+    } else {
+      say(
+        console: console,
+        line: "skip " ++ dir ++ ": " ++ json.str_at(j: case, key: "name") ++ ": " ++ or_empty(
+          o: missing_tool(files: files, process: process, env: env, opts: opts, m: case)
+        ) ++ " is not available"
+      )
+      tally = add(a: tally, b: skipped())
+    }
+  }
+  return Ok(value: tally)
+}
+
+-- A section's name for its output directory: the manifest's `name`, else the directory's base name.
+fn section_name(dir: Text, m: json.Json) -> Text may alloc {
+  if json.has(j: m, key: "name") {
+    return json.str_at(j: m, key: "name")
+  }
+  return base_name(path: dir)
+}
+
+-- Programs with expected output (`programs`) ------------------------------------------------
+-- Builds a program for the JavaScript target into `out_dir`; the launcher.
+fn build_js(
+  files: io.Files,
+  opts: Options,
+  c: Checked,
+  out_dir: Text
+) -> Result[Option[Text], io.Error] may io.file, alloc, mutate {
+  if opts.bundled {
+    try build.write_bundled_runtime(files: files, out_dir: out_dir)
+  }
+  let built: build.Built = try build.emit_all(
+    ctx: c.ctx,
+    files: files,
+    opts: build.Options {
+      out_dir: out_dir,
+      runtime: opts.runtime,
+      verify_all: false,
+      negate_guard: None
+    }
+  )
+  return Ok(value: built.launcher)
+}
+
+-- Builds a program natively into `out_dir`; the executable, or the diagnostics that refused it.
+fn build_exe(
+  files: io.Files,
+  process: io.Process,
+  env: io.Env,
+  opts: Options,
+  c: Checked,
+  out_dir: Text,
+  cflags: List[Text]
+) -> Result[Result[Text, Text], io.Error] may io.file, io.env, nondet, alloc, mutate {
+  var ctx: context.Context = c.ctx
+  let native: nativebuild.Built = try nativebuild.build_native(
+    ctx: inout ctx,
+    files: files,
+    process: process,
+    env: env,
+    tab: c.tab,
+    out_dir: out_dir,
+    runtime_dir: opts.runtime_dir,
+    target: "native",
+    cflags: cflags
+  )
+  match native.exe with
+  | Some(value) -> return Ok(value: Ok(value: value))
+  | None -> {
+    let tab: Dict[Int, loc.LineTable] = loc.line_tables(ctx: ctx)
+    var parts: Builder[Text] = List.builder()
+    for d: report.Diagnostic in List.finish(b: ctx.diagnostics) {
+      List.push(b: inout parts, x: diagtext.to_text(ctx: ctx, tab: tab, d: d))
+    }
+    return Ok(value: Err(error: Text.join(parts: List.finish(b: parts), sep: " | ")))
+  }
+}
+
+fn program_case(
+  files: io.Files,
+  console: io.Console,
+  process: io.Process,
+  env: io.Env,
+  opts: Options,
+  dir: Text,
+  section_out: Text,
+  case: json.Json
+) -> Result[Tally, io.Error] may io.file, io.env, nondet, alloc, mutate {
+  let path: Text = join_path(base: dir, rel: json.str_at(j: case, key: "source"))
+  var name: Text = without_suffix(name: base_name(path: path), suffix: ".onus")
+  if json.has(j: case, key: "name") {
+    name = json.str_at(j: case, key: "name")
+  }
+  let what: Text = path ++ " (" ++ name ++ ")"
+  var targets: List[Text] = ["js", "native"]
+  if json.has(j: case, key: "targets") {
+    targets = json.texts_at(j: case, key: "targets")
+  }
+  let c: Checked = try check_source(
+    files: files,
+    console: console,
+    process: process,
+    opts: opts,
+    path: path,
+    root: Some(value: dir_of(path: path)),
+    to: check.pass_index(name: "paths"),
+    budget_ms: 2000
+  )
+  if List.len(xs: c.diagnostics) > 0 {
+    return Ok(
+      value: fail_line(console: console, what: what, why: "diagnostics: " ++ diagnostic_texts(c: c))
+    )
+  }
+  let out_dir: Text = section_out ++ "/" ++ name
+  try fresh_dir(files: files, path: out_dir)
+  let s: Subst = base_subst(opts: opts, dir: dir, stage: out_dir, out: section_out)
+  let args: List[Text] = subst_all(xs: json.texts_at(j: case, key: "args"), s: s)
+  let env_pairs: List[Text] = env_list(j: json.at(j: case, key: "env"), s: s)
+  var via: Option[Text] = None
+  if json.has(j: case, key: "via") {
+    via = Some(value: join_path(base: s.dir, rel: json.str_at(j: case, key: "via")))
+  }
+  var stdin: Text = ""
+  if json.has(j: case, key: "stdin") {
+    stdin = json.str_at(j: case, key: "stdin")
+  }
+  var outputs: Dict[Text, io.Output] = Map.dict()
+  var tally: Tally = nothing()
+  for target: Text in targets {
+    let run_dir: Text = out_dir ++ "/" ++ target ++ "-run"
+    try fresh_dir(files: files, path: run_dir)
+    var program: Option[Text] = None
+    var refusal: Text = ""
+    if target == "js" {
+      program = try build_js(files: files, opts: opts, c: c, out_dir: out_dir)
+      if program is None {
+        refusal = "no main to run"
+      }
+    } else {
+      match try build_exe(
+        files: files,
+        process: process,
+        env: env,
+        opts: opts,
+        c: c,
+        out_dir: out_dir,
+        cflags: json.texts_at(j: case, key: "cflags")
+      ) with
+      | Ok(value) -> program = Some(value: value)
+      | Err(error) -> refusal = "native build failed: " ++ error
+    }
+    match program with
+    | None -> tally = add(
+      a: tally,
+      b: fail_line(console: console, what: what ++ " " ++ target, why: refusal)
+    )
+    | Some(value) -> {
+      let out: io.Output = try run_program_in(
+        process: process,
+        cwd: run_dir,
+        env: env_pairs,
+        via: via,
+        program: value,
+        args: args,
+        stdin: stdin
+      )
+      Map.set(d: inout outputs, key: target, value: out)
+      tally = add(
+        a: tally,
+        b: try judge_run(
+          files: files,
+          console: console,
+          opts: opts,
+          dir: dir,
+          cwd: run_dir,
+          case: case,
+          out: out,
+          s: { s with stage: run_dir },
+          target: target,
+          what: what ++ " " ++ target
+        )
+      )
+    }
+  }
+  -- The targets agree on what they wrote.
+  if json.bool_at(j: case, key: "same_stdout") or List.len(
+    xs: json.texts_at(j: case, key: "same_files")
+  ) > 0 {
+    tally = add(
+      a: tally,
+      b: try targets_agree(
+        files: files,
+        console: console,
+        what: what,
+        case: case,
+        out_dir: out_dir,
+        outputs: outputs
+      )
+    )
+  }
+  return Ok(value: tally)
+}
+
+-- A run judged by its case: an `ok` or `FAIL` line.
+fn judge_run(
+  files: io.Files,
+  console: io.Console,
+  opts: Options,
+  dir: Text,
+  cwd: Text,
+  case: json.Json,
+  out: io.Output,
+  s: Subst,
+  target: Text,
+  what: Text
+) -> Result[Tally, io.Error] may io.file, alloc, mutate {
+  match try check_run(
+    files: files,
+    opts: opts,
+    dir: dir,
+    cwd: cwd,
+    case: case,
+    out: out,
+    s: s,
+    target: target
+  ) with
+  | Some(value) -> return Ok(value: fail_line(console: console, what: what, why: value))
+  | None -> return Ok(value: ok_line(console: console, what: what))
+}
+
+fn output_of(outputs: Dict[Text, io.Output], target: Text) -> Option[io.Output] {
+  return Map.find(d: outputs, key: target)
+}
+
+-- Whether the JavaScript and native runs wrote the same output and files.
+fn targets_agree(
+  files: io.Files,
+  console: io.Console,
+  what: Text,
+  case: json.Json,
+  out_dir: Text,
+  outputs: Dict[Text, io.Output]
+) -> Result[Tally, io.Error] may io.file, alloc, mutate {
+  var js_out: io.Output = io.Output { stdout: "", stderr: "", status: 0 }
+  match output_of(outputs: outputs, target: "js") with
+  | None -> return Ok(value: fail_line(console: console, what: what, why: "no js run to compare"))
+  | Some(value) -> js_out = value
+  var native_out: io.Output = io.Output { stdout: "", stderr: "", status: 0 }
+  match output_of(outputs: outputs, target: "native") with
+  | None -> return Ok(
+    value: fail_line(console: console, what: what, why: "no native run to compare")
+  )
+  | Some(value) -> native_out = value
+  if json.bool_at(j: case, key: "same_stdout") and js_out.stdout != native_out.stdout {
+    return Ok(
+      value: fail_line(
+        console: console,
+        what: what,
+        why: "the targets' outputs differ at " ++ first_difference(
+          expected: js_out.stdout,
+          actual: native_out.stdout
+        )
+      )
+    )
+  }
+  for rel: Text in json.texts_at(j: case, key: "same_files") {
+    let a: Text = try io.read(files: files, path: out_dir ++ "/js-run/" ++ rel)
+    let b: Text = try io.read(files: files, path: out_dir ++ "/native-run/" ++ rel)
+    if a != b {
+      return Ok(
+        value: fail_line(console: console, what: what, why: rel ++ " differs between the targets")
+      )
+    }
+  }
+  return Ok(value: ok_line(console: console, what: what ++ " (targets agree)"))
+}
+
+-- A section's `probe`: a program that must exit 0 for the section to run
+-- (a database answering, say); its stderr is the notice otherwise.
+fn probe_ok(
+  files: io.Files,
+  console: io.Console,
+  process: io.Process,
+  env: io.Env,
+  opts: Options,
+  dir: Text,
+  section_out: Text,
+  m: json.Json
+) -> Result[Bool, io.Error] may io.file, io.env, nondet, alloc, mutate {
+  if not json.has(j: m, key: "probe") {
+    return Ok(value: true)
+  }
+  let probe: json.Json = json.at(j: m, key: "probe")
+  let path: Text = join_path(base: dir, rel: json.str_at(j: probe, key: "source"))
+  let c: Checked = try check_source(
+    files: files,
+    console: console,
+    process: process,
+    opts: opts,
+    path: path,
+    root: Some(value: dir_of(path: path)),
+    to: check.pass_index(name: "paths"),
+    budget_ms: 2000
+  )
+  if List.len(xs: c.diagnostics) > 0 {
+    say(
+      console: console,
+      line: "skip " ++ dir ++ ": the probe does not check: " ++ diagnostic_texts(c: c)
+    )
+    return Ok(value: false)
+  }
+  let out_dir: Text = section_out ++ "/probe"
+  try fresh_dir(files: files, path: out_dir)
+  let s: Subst = base_subst(opts: opts, dir: dir, stage: out_dir, out: section_out)
+  match try build_js(files: files, opts: opts, c: c, out_dir: out_dir) with
+  | None -> {
+    say(console: console, line: "skip " ++ dir ++ ": the probe has no main")
+    return Ok(value: false)
+  }
+  | Some(value) -> {
+    let out: io.Output = try run_program_in(
+      process: process,
+      cwd: out_dir,
+      env: env_list(j: json.at(j: probe, key: "env"), s: s),
+      via: None,
+      program: value,
+      args: [],
+      stdin: ""
+    )
+    if out.status != 0 {
+      say(
+        console: console,
+        line: "skip " ++ dir ++ ": " ++ Text.trim(t: out.stderr ++ " " ++ out.stdout)
+      )
+      return Ok(value: false)
+    }
+    return Ok(value: true)
+  }
+}
+
+-- A section's options: `runtime` names the JavaScript runtime its programs
+-- import instead of the one the compiler carries (`$root` substituted), for
+-- programs whose runtime needs packages installed beside it (`pg`).
+fn section_options(base: Options, dir: Text, m: json.Json) -> Options may alloc, mutate {
+  if not json.has(j: m, key: "runtime") {
+    return base
+  }
+  let s: Subst = base_subst(opts: base, dir: dir, stage: "", out: "")
+  let runtime: Text = subst(t: json.str_at(j: m, key: "runtime"), s: s)
+  return { base with
+    runtime: runtime,
+    bundled: false,
+    runtime_dir: Some(value: dir_of(path: dir_of(path: runtime)) ++ "/native")
+  }
+}
+
+fn programs_dir(
+  files: io.Files,
+  console: io.Console,
+  process: io.Process,
+  env: io.Env,
+  opts: Options,
+  dir: Text,
+  m: json.Json
+) -> Result[Tally, io.Error] may io.file, io.env, nondet, alloc, mutate {
+  let section_out: Text = opts.out_root ++ "/programs/" ++ section_name(dir: dir, m: m)
+  try io.mkdir(files: files, path: section_out)
+  let section_opts: Options = section_options(base: opts, dir: dir, m: m)
+  if not (try probe_ok(
+    files: files,
+    console: console,
+    process: process,
+    env: env,
+    opts: section_opts,
+    dir: dir,
+    section_out: section_out,
+    m: m
+  )) {
+    return Ok(value: skipped())
+  }
+  var tally: Tally = nothing()
+  for case: json.Json in json.list_at(j: m, key: "cases") {
+    match missing_tool(files: files, process: process, env: env, opts: section_opts, m: case) with
+    | Some(value) -> {
+      say(
+        console: console,
+        line: "skip " ++ dir ++ ": " ++ json.str_at(
+          j: case,
+          key: "source"
+        ) ++ ": " ++ value ++ " is not available"
+      )
+      tally = add(a: tally, b: skipped())
+    }
+    | None -> tally = add(
+      a: tally,
+      b: try program_case(
+        files: files,
+        console: console,
+        process: process,
+        env: env,
+        opts: section_opts,
+        dir: dir,
+        section_out: section_out,
+        case: case
+      )
+    )
+  }
+  return Ok(value: tally)
+}
+
+-- Programs that must build (`builds`) ----------------------------------------------------
+fn builds_dir(
+  files: io.Files,
+  console: io.Console,
+  process: io.Process,
+  env: io.Env,
+  opts: Options,
+  dir: Text,
+  m: json.Json
+) -> Result[Tally, io.Error] may io.file, io.env, nondet, alloc, mutate {
+  let section_out: Text = opts.out_root ++ "/builds/" ++ section_name(dir: dir, m: m)
+  try io.mkdir(files: files, path: section_out)
+  var tally: Tally = nothing()
+  for case: json.Json in json.list_at(j: m, key: "cases") {
+    let path: Text = join_path(base: dir, rel: json.str_at(j: case, key: "source"))
+    let name: Text = without_suffix(name: base_name(path: path), suffix: ".onus")
+    var targets: List[Text] = ["js"]
+    if json.has(j: case, key: "targets") {
+      targets = json.texts_at(j: case, key: "targets")
+    }
+    let c: Checked = try check_source(
+      files: files,
+      console: console,
+      process: process,
+      opts: opts,
+      path: path,
+      root: Some(value: dir_of(path: path)),
+      to: check.pass_index(name: "paths"),
+      budget_ms: 2000
+    )
+    if List.len(xs: c.diagnostics) > 0 {
+      tally = add(
+        a: tally,
+        b: fail_line(console: console, what: path, why: "diagnostics: " ++ diagnostic_texts(c: c))
+      )
+    } else {
+      let out_dir: Text = section_out ++ "/" ++ name
+      try fresh_dir(files: files, path: out_dir)
+      var problem: Option[Text] = None
+      if List.contains(xs: targets, x: "js") {
+        let launcher: Option[Text] = try build_js(files: files, opts: opts, c: c, out_dir: out_dir)
+        if launcher is None and json.bool_at(j: case, key: "main") {
+          problem = Some(value: "no main")
+        }
+      }
+      if List.contains(xs: targets, x: "native") and problem is None {
+        let want: List[Text] = json.texts_at(j: case, key: "expect")
+        match try build_exe(
+          files: files,
+          process: process,
+          env: env,
+          opts: opts,
+          c: c,
+          out_dir: out_dir,
+          cflags: json.texts_at(j: case, key: "cflags")
+        ) with
+        | Ok(value) -> {
+          if List.len(xs: want) > 0 {
+            problem = Some(value: "built natively, expected " ++ Text.join(parts: want, sep: " "))
+          }
+        }
+        | Err(error) -> {
+          if not codes_match(text: error, want: want) {
+            problem = Some(
+              value: "native build: " ++ error ++ "; expected " ++ Text.join(parts: want, sep: " ")
+            )
+          }
+        }
+      }
+      if problem is None {
+        let s: Subst = base_subst(opts: opts, dir: dir, stage: out_dir, out: section_out)
+        problem = try check_files(
+          files: files,
+          opts: opts,
+          dir: dir,
+          cwd: out_dir,
+          case: case,
+          s: s
+        )
+      }
+      match problem with
+      | Some(value) -> tally = add(a: tally, b: fail_line(console: console, what: path, why: value))
+      | None -> tally = add(a: tally, b: ok_line(console: console, what: path ++ " builds"))
+    }
+  }
+  return Ok(value: tally)
+}
+
+-- Whether a diagnostics text mentions every wanted code and no other code.
+fn codes_match(text: Text, want: List[Text]) -> Bool may alloc {
+  if List.len(xs: want) == 0 {
+    return false
+  }
+  for code: Text in want {
+    if not Text.contains(t: text, needle: code) {
+      return false
+    }
+  }
+  for code: Text in codes.all_codes() {
+    if Text.contains(t: text, needle: code) and not List.contains(xs: want, x: code) {
+      return false
+    }
+  }
+  return true
+}
+
+-- Legal next tokens (`next_sweep`, §14) ----------------------------------------------
+-- The tokens of a source that carry text: no comment, no empty newline.
+fn token_starts(text: Text) -> List[tokens.Token] may alloc, mutate {
+  var out: Builder[tokens.Token] = List.builder()
+  if Text.count(t: text) > lexer.max_source {
+    return List.finish(b: out)
+  }
+  for t: tokens.Token in lexer.lex(source: text).tokens {
+    if not (t.kind is tokens.Newline and t.start == t.end) and not t.kind is tokens.Eof {
+      List.push(b: inout out, x: t)
+    }
+  }
+  return List.finish(b: out)
+}
+
+-- Whether the token present at its offset is among the legal ones there.
+fn legal_here(text: Text, t: tokens.Token) -> Bool may alloc, mutate {
+  let n: Int = Text.count(t: text)
+  if n > lexer.max_source or t.start > n {
+    return false
+  }
+  let prefix: List[tokens.Token] = parser.prefix_tokens(
+    toks: lexer.lex(source: Text.slice(t: text, from: 0, to: t.start)).tokens
+  )
+  let legal: Dict[Text, Bool] = parser.legal_tokens_at(prefix: prefix, offset: t.start)
+  let want: Text = tokens.decoder_name(kind: t.kind)
+  for k: Text in Map.keys(d: legal) {
+    if tokens.decoder_name_of(kind: k) == want {
+      return true
+    }
+    if k == "name" and tokens.is_name_kind(kind: t.kind) {
+      return true
+    }
+  }
+  return false
+}
+
+fn next_line(
+  files: io.Files,
+  opts: Options,
+  path: Text,
+  text: Text,
+  offset: Int
+) -> Text may io.file, alloc, mutate {
+  var ctx: context.Context = context.new_context(root: None, stdlib: opts.stdlib)
+  let r: nextcmd.NextResult = nextcmd.next(
+    ctx: inout ctx,
+    files: files,
+    path: path,
+    text: text,
+    offset: offset
+  )
+  var expected: Text = "-"
+  match r.expected_type with
+  | Some(value) -> expected = value
+  | None -> skip()
+  return Int.to_text(x: offset) ++ "\t" ++ Text.join(
+    parts: r.tokens,
+    sep: " "
+  ) ++ "\t" ++ expected ++ "\t" ++ Text.join(parts: r.in_scope, sep: " ")
+}
+
+fn next_sweep_dir(
+  files: io.Files,
+  console: io.Console,
+  opts: Options,
+  dir: Text,
+  m: json.Json
+) -> Result[Tally, io.Error] may io.file, alloc, mutate {
+  var tally: Tally = nothing()
+  var paths: Builder[Text] = List.builder()
+  for rel: Text in json.texts_at(j: m, key: "sources") {
+    List.push(b: inout paths, x: join_path(base: dir, rel: rel))
+  }
+  for sub: Text in json.texts_at(j: m, key: "dirs") {
+    let d: Text = join_path(base: dir, rel: sub)
+    for name: Text in onus_files(files: files, dir: d) {
+      List.push(b: inout paths, x: d ++ "/" ++ name)
+    }
+  }
+  for path: Text in List.finish(b: paths) {
+    let text: Text = try io.read(files: files, path: path)
+    let toks: List[tokens.Token] = token_starts(text: text)
+    var misses: Builder[Text] = List.builder()
+    for t: tokens.Token in toks {
+      if not legal_here(text: text, t: t) {
+        List.push(
+          b: inout misses,
+          x: Int.to_text(x: t.start) ++ ": " ++ tokens.describe_kind(kind: t.kind)
+        )
+      }
+    }
+    let missed: List[Text] = List.finish(b: misses)
+    if List.len(xs: toks) <= 2 {
+      tally = add(a: tally, b: fail_line(console: console, what: path, why: "too few tokens"))
+    } else {
+      if List.len(xs: missed) > 0 {
+        tally = add(
+          a: tally,
+          b: fail_line(
+            console: console,
+            what: path,
+            why: "tokens not legal at their offsets: " ++ Text.join(parts: missed, sep: "; ")
+          )
+        )
+      } else {
+        tally = add(a: tally, b: ok_line(console: console, what: path ++ " (every token legal)"))
+      }
+    }
+  }
+  -- The pinned sources: the complete answer at every token start and at the end.
+  for rel: Text in json.texts_at(j: m, key: "pinned") {
+    let path: Text = join_path(base: dir, rel: rel)
+    let text: Text = try io.read(files: files, path: path)
+    var lines: Builder[Text] = List.builder()
+    for t: tokens.Token in token_starts(text: text) {
+      List.push(
+        b: inout lines,
+        x: next_line(files: files, opts: opts, path: path, text: text, offset: t.start)
+      )
+    }
+    List.push(
+      b: inout lines,
+      x: next_line(files: files, opts: opts, path: path, text: text, offset: Text.count(t: text))
+    )
+    let actual: Text = Text.join(parts: List.finish(b: lines), sep: "\n") ++ "\n"
+    match try pin_text(
+      files: files,
+      opts: opts,
+      dir: dir,
+      expect: without_suffix(name: rel, suffix: ".onus") ++ ".next.txt",
+      actual: actual
+    ) with
+    | Some(value) -> tally = add(a: tally, b: fail_line(console: console, what: path, why: value))
+    | None -> tally = add(
+      a: tally,
+      b: ok_line(console: console, what: path ++ " (next at every token)")
+    )
+  }
+  return Ok(value: tally)
+}
+
+-- Scripts (`script`) --------------------------------------------------------------------
+fn script_dir(
+  files: io.Files,
+  console: io.Console,
+  process: io.Process,
+  env: io.Env,
+  opts: Options,
+  dir: Text,
+  m: json.Json
+) -> Result[Tally, io.Error] may io.file, io.env, nondet, alloc, mutate {
+  let section_out: Text = opts.out_root ++ "/script/" ++ section_name(dir: dir, m: m)
+  try io.mkdir(files: files, path: section_out)
+  var tally: Tally = nothing()
+  for case: json.Json in json.list_at(j: m, key: "cases") {
+    let name: Text = json.str_at(j: case, key: "name")
+    let what: Text = dir ++ ": " ++ name
+    match missing_tool(files: files, process: process, env: env, opts: opts, m: case) with
+    | Some(value) -> {
+      say(console: console, line: "skip " ++ what ++ ": " ++ value ++ " is not available")
+      tally = add(a: tally, b: skipped())
+    }
+    | None -> {
+      let stage: Text = section_out ++ "/" ++ name
+      try fresh_dir(files: files, path: stage)
+      let s: Subst = base_subst(opts: opts, dir: dir, stage: stage, out: section_out)
+      let script: Text = join_path(base: s.dir, rel: json.str_at(j: case, key: "run"))
+      let out: io.Output = try run_in(
+        process: process,
+        cwd: opts.root,
+        env: env_list(j: json.at(j: case, key: "env"), s: s),
+        program: "sh",
+        args: [script] ++ subst_all(xs: json.texts_at(j: case, key: "args"), s: s),
+        stdin: ""
+      )
+      match try check_run(
+        files: files,
+        opts: opts,
+        dir: dir,
+        cwd: stage,
+        case: case,
+        out: out,
+        s: s,
+        target: ""
+      ) with
+      | Some(value) -> tally = add(a: tally, b: fail_line(console: console, what: what, why: value))
+      | None -> tally = add(a: tally, b: ok_line(console: console, what: what))
+    }
+  }
+  return Ok(value: tally)
+}
+
+-- One section of a manifest, dispatched by kind; skipped when it requires a tool that is absent.
+fn run_section(
+  files: io.Files,
+  console: io.Console,
+  process: io.Process,
+  env: io.Env,
+  opts: Options,
+  dir: Text,
+  m: json.Json
+) -> Result[Tally, io.Error] may io.file, io.env, nondet, alloc, mutate {
+  let kind: Text = json.str_at(j: m, key: "kind")
+  match missing_tool(files: files, process: process, env: env, opts: opts, m: m) with
+  | Some(value) -> {
+    say(
+      console: console,
+      line: "skip " ++ dir ++ " (" ++ kind ++ "): " ++ value ++ " is not available"
+    )
+    return Ok(value: skipped())
+  }
+  | None -> skip()
+  if kind == "diagnostics" {
+    return diagnostics_dir(
+      files: files,
+      console: console,
+      process: process,
+      opts: opts,
+      dir: dir,
+      m: m
+    )
+  }
+  if kind == "canonical" {
+    return canonical_dir(files: files, console: console, dir: dir)
+  }
+  if kind == "lowered" {
+    return lowered_dir(files: files, console: console, process: process, opts: opts, dir: dir, m: m)
+  }
+  if kind == "examples" {
+    return examples_dir(
+      files: files,
+      console: console,
+      process: process,
+      env: env,
+      opts: opts,
+      dir: dir,
+      m: m
+    )
+  }
+  if kind == "programs" {
+    return programs_dir(
+      files: files,
+      console: console,
+      process: process,
+      env: env,
+      opts: opts,
+      dir: dir,
+      m: m
+    )
+  }
+  if kind == "builds" {
+    return builds_dir(
+      files: files,
+      console: console,
+      process: process,
+      env: env,
+      opts: opts,
+      dir: dir,
+      m: m
+    )
+  }
+  if kind == "cli" {
+    return cli_dir(
+      files: files,
+      console: console,
+      process: process,
+      env: env,
+      opts: opts,
+      dir: dir,
+      m: m
+    )
+  }
+  if kind == "next_sweep" {
+    return next_sweep_dir(files: files, console: console, opts: opts, dir: dir, m: m)
+  }
+  if kind == "script" {
+    return script_dir(
+      files: files,
+      console: console,
+      process: process,
+      env: env,
+      opts: opts,
+      dir: dir,
+      m: m
+    )
+  }
+  return Ok(value: fail_line(console: console, what: dir, why: "unknown kind `" ++ kind ++ "`"))
+}
+
+-- One directory: its manifest, one section or a list of `sections`.
+fn run_dir(
+  files: io.Files,
+  console: io.Console,
+  process: io.Process,
+  env: io.Env,
+  opts: Options,
+  dir: Text
+) -> Result[Tally, io.Error] may io.file, io.env, nondet, alloc, mutate {
+  var text: Text = ""
+  match io.read(files: files, path: dir ++ "/fixtures.json") with
+  | Err(_) -> return Ok(value: fail_line(console: console, what: dir, why: "no fixtures.json"))
+  | Ok(value) -> text = value
+  var m: json.Json = json.JNull
+  match json.parse(t: text) with
+  | None -> return Ok(
+    value: fail_line(console: console, what: dir, why: "fixtures.json is not JSON")
+  )
+  | Some(value) -> m = value
+  if not json.has(j: m, key: "sections") {
+    return run_section(
+      files: files,
+      console: console,
+      process: process,
+      env: env,
+      opts: opts,
+      dir: dir,
+      m: m
+    )
+  }
+  var tally: Tally = nothing()
+  for section: json.Json in json.list_at(j: m, key: "sections") {
+    tally = add(
+      a: tally,
+      b: try run_section(
+        files: files,
+        console: console,
+        process: process,
+        env: env,
+        opts: opts,
+        dir: dir,
+        m: section
+      )
+    )
+  }
+  return Ok(value: tally)
+}
+
+record Args {
+  dirs: List[Text]
+  stdlib: Option[Text]
+  runtime: Option[Text]
+  out_root: Text
+  root: Text
+  cli: Option[Text]
+  native_cli: Option[Text]
+  update: Bool
+}
+
+fn parse_args(argv: List[Text]) -> Args may alloc, mutate {
+  var dirs: Builder[Text] = List.builder()
+  var stdlib: Option[Text] = None
+  var runtime: Option[Text] = None
+  var out_root: Text = ".onus-tmp/fixtures"
+  var root: Text = "."
+  var cli: Option[Text] = None
+  var native_cli: Option[Text] = None
+  var update: Bool = false
+  var pending: Text = ""
+  for a: Text in argv {
+    if pending != "" {
+      if pending == "stdlib" {
+        stdlib = Some(value: a)
+      }
+      if pending == "runtime" {
+        runtime = Some(value: a)
+      }
+      if pending == "out" {
+        out_root = a
+      }
+      if pending == "root" {
+        root = a
+      }
+      if pending == "cli" {
+        cli = Some(value: a)
+      }
+      if pending == "native-cli" {
+        native_cli = Some(value: a)
+      }
+      pending = ""
+    } else {
+      if a == "--stdlib" or a == "--runtime" or a == "--out" or a == "--root" or a == "--cli" or a == "--native-cli" {
+        pending = Text.slice(t: a, from: 2, to: Text.count(t: a))
+      } else {
+        if a == "--update" {
+          update = true
+        } else {
+          List.push(b: inout dirs, x: a)
+        }
+      }
+    }
+  }
+  return Args {
+    dirs: List.finish(b: dirs),
+    stdlib: stdlib,
+    runtime: runtime,
+    out_root: out_root,
+    root: root,
+    cli: cli,
+    native_cli: native_cli,
+    update: update
+  }
+}
+
+pub fn main(
+  args: List[Text],
+  files: io.Files,
+  console: io.Console,
+  process: io.Process,
+  env: io.Env,
+  clock: io.Clock
+) -> Result[Int, io.Error] may io.file, io.env, io.clock, nondet, alloc, mutate {
+  let a: Args = parse_args(argv: args)
+  if List.len(xs: a.dirs) == 0 {
+    io.eprint(
+      console: console,
+      text: "usage: run_fixtures <dir>... [--root <absolute dir>] [--stdlib <dir>] [--out <dir>] [--runtime <path>] [--cli <run_cli.js>] [--native-cli <exe>] [--update]\n"
+    )
+    return Ok(value: 2)
+  }
+  var stdlib: Option[Text] = a.stdlib
+  if stdlib is None {
+    stdlib = io.get_env(env: env, name: "ONUS_STDLIB")
+  }
+  var runtime_opt: Option[Text] = a.runtime
+  if runtime_opt is None {
+    runtime_opt = io.get_env(env: env, name: "ONUS_RUNTIME")
+  }
+  var cli: Option[Text] = a.cli
+  match cli with
+  | Some(value) -> cli = Some(value: absolute(root: a.root, p: value))
+  | None -> skip()
+  var native_cli: Option[Text] = a.native_cli
+  match native_cli with
+  | Some(value) -> native_cli = Some(value: absolute(root: a.root, p: value))
+  | None -> skip()
+  var opts: Options = Options {
+    stdlib: stdlib,
+    runtime: "./onus-runtime/index.js",
+    bundled: true,
+    runtime_dir: None,
+    out_root: absolute(root: a.root, p: a.out_root),
+    update: a.update,
+    root: a.root,
+    cli: cli,
+    native_cli: native_cli,
+    now: assumptions.iso_of_millis(ms: io.time(clock: clock))
+  }
+  match runtime_opt with
+  | Some(value) -> opts = { opts with
+    runtime: value,
+    bundled: false,
+    runtime_dir: Some(value: dir_of(path: dir_of(path: value)) ++ "/native")
+  }
+  | None -> skip()
+  try io.mkdir(files: files, path: opts.out_root)
+  var tally: Tally = nothing()
+  for dir: Text in a.dirs {
+    tally = add(
+      a: tally,
+      b: try run_dir(
+        files: files,
+        console: console,
+        process: process,
+        env: env,
+        opts: opts,
+        dir: dir
+      )
+    )
+  }
+  say(
+    console: console,
+    line: Int.to_text(x: tally.passed) ++ " passed, " ++ Int.to_text(
+      x: tally.failed
+    ) ++ " failed, " ++ Int.to_text(x: tally.skipped) ++ " skipped"
+  )
+  if tally.failed > 0 {
+    return Ok(value: 1)
+  }
+  return Ok(value: 0)
+}

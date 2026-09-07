@@ -9,7 +9,26 @@ import * as $std_text from "./std/text.js";
 import * as $context from "./context.js";
 import * as $loc from "./loc.js";
 
-const $ob1 = { kind: "overflow", text: "-1 within Int", at: "self/ledger.onus:239:20", def: "or_int" };
+const $ob1 = { kind: "overflow", text: "now_ms - value within Int", at: "self/ledger.onus:184:27", def: "is_current" };
+const $ob2 = { kind: "overflow", text: "year - 1 within Int", at: "self/ledger.onus:225:9", def: "millis_of_iso" };
+const $ob3 = { kind: "overflow", text: "era * 400 within Int", at: "self/ledger.onus:228:22", def: "millis_of_iso" };
+const $ob4 = { kind: "overflow", text: "era * 146097 within Int", at: "self/ledger.onus:235:19", def: "millis_of_iso" };
+const $ob5 = { kind: "overflow", text: "era * 146097 + doe within Int", at: "self/ledger.onus:235:19", def: "millis_of_iso" };
+const $ob6 = { kind: "overflow", text: "era * 146097 + doe - 719468 within Int", at: "self/ledger.onus:235:19", def: "millis_of_iso" };
+const $ob7 = { kind: "overflow", text: "days * 86400000 within Int", at: "self/ledger.onus:236:22", def: "millis_of_iso" };
+const $ob8 = { kind: "overflow", text: "hours * 3600000 within Int", at: "self/ledger.onus:236:40", def: "millis_of_iso" };
+const $ob9 = { kind: "overflow", text: "days * 86400000 + hours * 3600000 within Int", at: "self/ledger.onus:236:22", def: "millis_of_iso" };
+const $ob10 = { kind: "overflow", text: "minutes * 60000 within Int", at: "self/ledger.onus:236:58", def: "millis_of_iso" };
+const $ob11 = { kind: "overflow", text: "days * 86400000 + hours * 3600000 + minutes * 60000 within Int", at: "self/ledger.onus:236:22", def: "millis_of_iso" };
+const $ob12 = { kind: "overflow", text: "seconds * 1000 within Int", at: "self/ledger.onus:236:76", def: "millis_of_iso" };
+const $ob13 = { kind: "overflow", text: "days * 86400000 + hours * 3600000 + minutes * 60000 + seconds * 1000 within Int", at: "self/ledger.onus:236:22", def: "millis_of_iso" };
+const $ob14 = { kind: "overflow", text: "days * 86400000 + hours * 3600000 + minutes * 60000 + seconds * 1000 + millis within Int", at: "self/ledger.onus:236:22", def: "millis_of_iso" };
+const $ob15 = { kind: "overflow", text: "-1 within Int", at: "self/ledger.onus:243:10", def: "cp_at" };
+const $ob16 = { kind: "overflow", text: "from + k within Int", at: "self/ledger.onus:250:38", def: "digits_at" };
+const $ob17 = { kind: "overflow", text: "-1 within Int", at: "self/ledger.onus:252:14", def: "digits_at" };
+const $ob18 = { kind: "overflow", text: "n * 10 within Int", at: "self/ledger.onus:254:9", def: "digits_at" };
+const $ob19 = { kind: "overflow", text: "n * 10 + (cp - 48) within Int", at: "self/ledger.onus:254:9", def: "digits_at" };
+const $ob20 = { kind: "overflow", text: "-1 within Int", at: "self/ledger.onus:337:20", def: "or_int" };
 export function skip($args) {
   return undefined;
 }
@@ -195,7 +214,7 @@ export function is_verified({ ctx, key }) {
   $m17$match: {
     if ($m17.tag === "Some") {
       const value = $m17.value;
-      return value.outcome === "passed";
+      return is_current({ r: value, now_ms: ctx.now_ms, max_age_ms: ctx.assumption_max_age_ms });
       break $m17$match;
     }
     if ($m17.tag === "None") {
@@ -206,17 +225,96 @@ export function is_verified({ ctx, key }) {
   }
 }
 
-export function verified_json({ ctx, key }) {
-  const $m18 = $std_map.find({ d: ctx.assumptions, key: key });
+export function is_current({ r, now_ms, max_age_ms }) {
+  if (r.outcome !== "passed") {
+    return false;
+  }
+  const $m18 = millis_of_iso({ t: r.at });
   $m18$match: {
     if ($m18.tag === "Some") {
       const value = $m18.value;
-      return { tag: "JObject", fields: [$json.field({ key: "at", value: $json.text({ t: value.at }) }), $json.field({ key: "target", value: $json.text({ t: value.target }) }), $json.field({ key: "result", value: $json.text({ t: value.outcome }) })] };
+      return $rt.int.sub(now_ms, value, $ob1) <= max_age_ms;
       break $m18$match;
     }
     if ($m18.tag === "None") {
-      return { tag: "JNull" };
+      return false;
       break $m18$match;
+    }
+    $rt.unreachable();
+  }
+}
+
+export function millis_of_iso({ t }) {
+  const cps = $std_text.code_points({ t: t });
+  const n = $std_list.len({ xs: cps });
+  if (n !== 20 && n !== 24) {
+    return { tag: "None" };
+  }
+  if (cp_at({ cps: cps, i: 4 }) !== 45 || cp_at({ cps: cps, i: 7 }) !== 45 || cp_at({ cps: cps, i: 10 }) !== 84 || cp_at({ cps: cps, i: 13 }) !== 58 || cp_at({ cps: cps, i: 16 }) !== 58 || cp_at({ cps: cps, i: n - 1 }) !== 90) {
+    return { tag: "None" };
+  }
+  if (n === 24 && cp_at({ cps: cps, i: 19 }) !== 46) {
+    return { tag: "None" };
+  }
+  const year = digits_at({ cps: cps, from: 0, count: 4 });
+  const month = digits_at({ cps: cps, from: 5, count: 2 });
+  const day = digits_at({ cps: cps, from: 8, count: 2 });
+  const hours = digits_at({ cps: cps, from: 11, count: 2 });
+  const minutes = digits_at({ cps: cps, from: 14, count: 2 });
+  const seconds = digits_at({ cps: cps, from: 17, count: 2 });
+  let millis = 0;
+  if (n === 24) {
+    millis = digits_at({ cps: cps, from: 20, count: 3 });
+  }
+  if (year < 1970 || month < 1 || month > 12 || day < 1 || day > 31 || hours < 0 || minutes < 0 || seconds < 0 || millis < 0) {
+    return { tag: "None" };
+  }
+  let y = year;
+  if (month <= 2) {
+    y = $rt.int.sub(year, 1, $ob2);
+  }
+  const era = Math.trunc(y / 400);
+  const yoe = y - $rt.int.mul(era, 400, $ob3);
+  let mp = month + 9;
+  if (month > 2) {
+    mp = month - 3;
+  }
+  const doy = Math.trunc((153 * mp + 2) / 5) + day - 1;
+  const doe = yoe * 365 + Math.trunc(yoe / 4) - Math.trunc(yoe / 100) + doy;
+  const days = $rt.int.sub($rt.int.add($rt.int.mul(era, 146097, $ob4), doe, $ob5), 719468, $ob6);
+  return { tag: "Some", value: $rt.int.add($rt.int.add($rt.int.add($rt.int.add($rt.int.mul(days, 86400000, $ob7), $rt.int.mul(hours, 3600000, $ob8), $ob9), $rt.int.mul(minutes, 60000, $ob10), $ob11), $rt.int.mul(seconds, 1000, $ob12), $ob13), millis, $ob14) };
+}
+
+export function cp_at({ cps, i }) {
+  if (i >= 0 && i < $std_list.len({ xs: cps })) {
+    return $std_list.get({ xs: cps, i: i });
+  }
+  return $rt.int.neg(1, $ob15);
+}
+
+export function digits_at({ cps, from, count }) {
+  let n = 0;
+  for (let k = 0; k < count; k++) {
+    const cp = cp_at({ cps: cps, i: $rt.int.add(from, k, $ob16) });
+    if (cp < 48 || cp > 57) {
+      return $rt.int.neg(1, $ob17);
+    }
+    n = $rt.int.add($rt.int.mul(n, 10, $ob18), cp - 48, $ob19);
+  }
+  return n;
+}
+
+export function verified_json({ ctx, key }) {
+  const $m24 = $std_map.find({ d: ctx.assumptions, key: key });
+  $m24$match: {
+    if ($m24.tag === "Some") {
+      const value = $m24.value;
+      return { tag: "JObject", fields: [$json.field({ key: "at", value: $json.text({ t: value.at }) }), $json.field({ key: "target", value: $json.text({ t: value.target }) }), $json.field({ key: "result", value: $json.text({ t: value.outcome }) })] };
+      break $m24$match;
+    }
+    if ($m24.tag === "None") {
+      return { tag: "JNull" };
+      break $m24$match;
     }
     $rt.unreachable();
   }
@@ -232,16 +330,16 @@ export function site_key_at({ ctx, node }) {
 }
 
 export function in_scope({ scope, def }) {
-  const $m21 = scope.prefix;
-  $m21$match: {
-    if ($m21.tag === "Some") {
-      const value = $m21.value;
+  const $m27 = scope.prefix;
+  $m27$match: {
+    if ($m27.tag === "Some") {
+      const value = $m27.value;
       return $std_text.starts_with({ t: def, prefix: value });
-      break $m21$match;
+      break $m27$match;
     }
-    if ($m21.tag === "None") {
+    if ($m27.tag === "None") {
       return $std_map.contains({ d: scope.names, key: def });
-      break $m21$match;
+      break $m27$match;
     }
     $rt.unreachable();
   }
@@ -251,18 +349,18 @@ export function check_site({ ctx, tab, o }) {
   let file = o.at_file;
   let span = o.at_span;
   if (o.callee.tag === "Some" && o.param.tag === "Some") {
-    const $m22 = param_def({ ctx: ctx, callee: or_int({ o: o.callee }), name: or_text({ o: o.param }) });
-    $m22$match: {
-      if ($m22.tag === "Some") {
-        const value = $m22.value;
+    const $m28 = param_def({ ctx: ctx, callee: or_int({ o: o.callee }), name: or_text({ o: o.param }) });
+    $m28$match: {
+      if ($m28.tag === "Some") {
+        const value = $m28.value;
         const d = $context.get_def({ ctx: ctx, id: value });
         file = d.file;
         span = d.span;
-        break $m22$match;
+        break $m28$match;
       }
-      if ($m22.tag === "None") {
+      if ($m28.tag === "None") {
         skip({  });
-        break $m22$match;
+        break $m28$match;
       }
       $rt.unreachable();
     }
@@ -271,54 +369,54 @@ export function check_site({ ctx, tab, o }) {
 }
 
 export function param_def({ ctx, callee, name }) {
-  const $m23 = $std_map.find({ d: ctx.signatures, key: callee });
-  $m23$match: {
-    if ($m23.tag === "Some") {
-      const value = $m23.value;
-      const $hi24 = $std_list.len({ xs: value.params });
-      for (let i = 0; i < $hi24; i++) {
+  const $m29 = $std_map.find({ d: ctx.signatures, key: callee });
+  $m29$match: {
+    if ($m29.tag === "Some") {
+      const value = $m29.value;
+      const $hi30 = $std_list.len({ xs: value.params });
+      for (let i = 0; i < $hi30; i++) {
         if ($std_list.get({ xs: value.params, i: i }).name === name && i < $std_list.len({ xs: value.param_defs })) {
           return { tag: "Some", value: $std_list.get({ xs: value.param_defs, i: i }) };
         }
       }
       return { tag: "None" };
-      break $m23$match;
+      break $m29$match;
     }
-    if ($m23.tag === "None") {
+    if ($m29.tag === "None") {
       return { tag: "None" };
-      break $m23$match;
+      break $m29$match;
     }
     $rt.unreachable();
   }
 }
 
 export function or_int({ o }) {
-  const $m28 = o;
-  $m28$match: {
-    if ($m28.tag === "Some") {
-      const value = $m28.value;
+  const $m34 = o;
+  $m34$match: {
+    if ($m34.tag === "Some") {
+      const value = $m34.value;
       return value;
-      break $m28$match;
+      break $m34$match;
     }
-    if ($m28.tag === "None") {
-      return $rt.int.neg(1, $ob1);
-      break $m28$match;
+    if ($m34.tag === "None") {
+      return $rt.int.neg(1, $ob20);
+      break $m34$match;
     }
     $rt.unreachable();
   }
 }
 
 export function or_text({ o }) {
-  const $m29 = o;
-  $m29$match: {
-    if ($m29.tag === "Some") {
-      const value = $m29.value;
+  const $m35 = o;
+  $m35$match: {
+    if ($m35.tag === "Some") {
+      const value = $m35.value;
       return value;
-      break $m29$match;
+      break $m35$match;
     }
-    if ($m29.tag === "None") {
+    if ($m35.tag === "None") {
       return "";
-      break $m29$match;
+      break $m35$match;
     }
     $rt.unreachable();
   }

@@ -399,7 +399,7 @@ fn check_path(pc: inout Checker, ctx: inout context.Context) -> Unit may mutate,
           var why: Text = "with no `verify` block"
           if a.verify_key is Some {
             why = "without a passing verification in the last " ++ Int.to_text(
-              x: assumption_max_age_days
+              x: (ctx.assumption_max_age_ms + 43200000) / 86400000
             ) ++ " days"
           }
           rep(

@@ -1,0 +1,3 @@
+tokens: fn ident type-ident
+expected: (none)
+in scope: 

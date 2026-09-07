@@ -1,0 +1,55 @@
+module std.http
+import std.io
+
+-- HTTP over the network capability (§19.1; docs/CHANGES.md item 196): one
+-- request, one response. Any HTTP status is a response; only a request that
+-- never completes is an error: `NotFound` names the URL when the host cannot
+-- be reached, `Other` says why otherwise, or that `timeout_ms` passed.
+pub record Response {
+  status: Int
+  body: Text
+}
+
+-- Sends `body` with `headers` (`name: value` each) by `method` to `url` and
+-- waits for the whole response; `timeout_ms` of 0 is no limit.
+pub intrinsic fn request(
+  net: io.Net,
+  method: Text,
+  url: Text,
+  headers: List[Text],
+  body: Text,
+  timeout_ms: Int where it >= 0
+) -> Result[Response, io.Error] may io.net, nondet, alloc
+
+pub fn post(
+  net: io.Net,
+  url: Text,
+  headers: List[Text],
+  body: Text,
+  timeout_ms: Int where it >= 0
+) -> Result[Response, io.Error] may io.net, nondet, alloc {
+  return request(
+    net: net,
+    method: "POST",
+    url: url,
+    headers: headers,
+    body: body,
+    timeout_ms: timeout_ms
+  )
+}
+
+pub fn get(
+  net: io.Net,
+  url: Text,
+  headers: List[Text],
+  timeout_ms: Int where it >= 0
+) -> Result[Response, io.Error] may io.net, nondet, alloc {
+  return request(
+    net: net,
+    method: "GET",
+    url: url,
+    headers: headers,
+    body: "",
+    timeout_ms: timeout_ms
+  )
+}

@@ -1,0 +1,6 @@
+status 0 out hello native
+cat fed through stdin
+sh 3 oops
+missing: not found onus-no-such-program
+slow: other `sleep` did not finish within 200 ms
+args 2

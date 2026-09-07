@@ -184,6 +184,8 @@ fn entry_name(entry: Option[ir.Module]) -> Text may alloc {
 
 -- Builds the native executable for the program in `ctx`.
 -- Preconditions: the pipeline ran to `paths` without diagnostics.
+-- `cflags` are passed to clang before the sources (the fixture runner's
+-- deliberately broken runtime, docs/CHANGES.md item 199).
 -- Effects: writes `<out_dir>/native/program.ll` and the executable; runs
 -- `pg_config` and `clang`; reports E0800 and E0999.
 pub fn build_native(
@@ -194,7 +196,8 @@ pub fn build_native(
   tab: Dict[Int, loc.LineTable],
   out_dir: Text,
   runtime_dir: Option[Text],
-  target: Text
+  target: Text,
+  cflags: List[Text]
 ) -> Result[Built, io.Error] may io.file, io.env, nondet, alloc, mutate {
   var lowered: Builder[ir.Module] = List.builder()
   var entry_ir: Option[ir.Module] = None
@@ -242,7 +245,8 @@ pub fn build_native(
     ll: ll,
     runtime_dir: runtime_dir,
     libpq: libpq,
-    wasm: wasm
+    wasm: wasm,
+    cflags: cflags
   )
 }
 
@@ -257,7 +261,8 @@ fn build_with(
   ll: Text,
   runtime_dir: Option[Text],
   libpq: Option[Libpq],
-  wasm: Bool
+  wasm: Bool,
+  cflags: List[Text]
 ) -> Result[Built, io.Error] may io.file, io.env, nondet, alloc, mutate {
   try io.mkdir(files: files, path: dir)
   try build.write_file(files: files, path: ll, text: program.ll)
@@ -332,6 +337,9 @@ fn build_with(
   var args: Builder[Text] = List.builder()
   List.push(b: inout args, x: "-O1")
   List.push(b: inout args, x: "-Wno-override-module")
+  for f: Text in cflags {
+    List.push(b: inout args, x: f)
+  }
   if wasm and sdk is Some {
     List.push(b: inout args, x: "--target=wasm32-wasi")
     List.push(b: inout args, x: "--sysroot=" ++ or_empty(o: sdk) ++ "/share/wasi-sysroot")

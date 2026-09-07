@@ -1,0 +1,5 @@
+M0001 undetected contract weakening: widen the result from `Int where …` to `Int` in unexercised.half: no proved assertion of an example, property or law depends on it
+M0001 undetected contract weakening: widen the result from `Int where …` to `Int` in unexercised.step: no proved assertion of an example, property or law depends on it
+detected: negate the guards of `property half_is_smaller` in unexercised.half_is_smaller: the property fails over the complement of its domain
+M0001 undetected contract weakening: negate the guards of `property plus_zero` in unexercised.plus_zero: the property still passes over the complement of its domain
+4 contract mutations: 1 detected, 3 surviving

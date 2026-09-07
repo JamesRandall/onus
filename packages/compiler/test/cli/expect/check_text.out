@@ -1,0 +1,5 @@
+e0302_ensures_pinned.onus:6:3: E0302 postcondition not established
+  in halve
+  `ensures proved result >= 0` does not hold on every path
+  obligation ensures: result >= 0 [unprovable]
+1 error

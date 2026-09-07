@@ -1,0 +1,3 @@
+broken.onus:3:7: E0003 unexpected token
+  in f
+  expected a name, found `->`

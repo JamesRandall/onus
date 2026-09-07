@@ -1,0 +1,2 @@
+{"code":"E0002","title":"expression statement has no effect","location":{"file":"e0002_expression_statement.onus","def":"f","span":[[4,3],[4,8]]},"context":["a bare expression statement must be a call (or `try` of a call)"],"repairs":[]}
+{"code":"E0002","title":"expression statement has no effect","location":{"file":"e0002_expression_statement.onus","def":"f","span":[[7,3],[7,4]]},"context":["a bare expression statement must be a call (or `try` of a call)"],"repairs":[]}

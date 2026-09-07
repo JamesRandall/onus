@@ -67,13 +67,21 @@ export function statement(text, params) {
 // The synchronous bridge
 // ---------------------------------------------------------------------------
 let bridge = null;
+/** How long the worker may take to start before the bridge gives up on it. */
+const START_TIMEOUT_MS = 30000;
 function request(req) {
     if (bridge === null) {
         const channel = new MessageChannel();
         const signal = new SharedArrayBuffer(4);
+        const flag = new Int32Array(signal);
         const worker = new Worker(new URL('./sql-worker.js', import.meta.url), { workerData: { port: channel.port2, signal }, transferList: [channel.port2] });
         worker.unref();
-        bridge = { worker, port: channel.port1, flag: new Int32Array(signal) };
+        // The worker signals once when it has started; a worker that cannot start never does.
+        if (Atomics.wait(flag, 0, 0, START_TIMEOUT_MS) === 'timed-out') {
+            void worker.terminate();
+            return { ok: false, error: `the SQL worker did not start within ${START_TIMEOUT_MS / 1000} s (is the runtime beside the program complete?)`, code: null };
+        }
+        bridge = { worker, port: channel.port1, flag };
     }
     Atomics.store(bridge.flag, 0, 0);
     bridge.port.postMessage(req);

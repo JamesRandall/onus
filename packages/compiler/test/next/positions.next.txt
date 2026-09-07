@@ -1,0 +1,345 @@
+0	module test	-	
+7	ident	-	
+16	. newline	-	
+17	capability claim const eof example fn impl import interface intrinsic path policy property pub record sealed type union	-	
+24	ident	-	
+27	. newline	-	
+28	ident	-	
+30	. newline	-	
+32	capability claim const eof example fn impl import interface intrinsic path policy property pub record sealed type union	-	
+39	type-ident	-	
+45	[ {	-	
+46	ident newline }	-	
+49	ident }	-	
+50	:	-	
+52	fn ident type-ident	-	
+55	[ newline where }	-	
+58	ident }	-	
+59	:	-	
+61	fn ident type-ident	-	
+65	[ newline where }	-	
+71	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	Bool	x
+74	!= % ( * + ++ - . / < <= == > >= [ and implies is newline or }	-	
+77	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text old recover result true try type-ident {	Int	x
+78	% ( * + ++ - . / [ and implies newline or }	-	
+79	ident }	-	
+80	newline	-	
+82	capability claim const eof example fn impl interface intrinsic path policy property pub record sealed type union	-	
+88	type-ident	-	
+94	= [	-	
+95	newline	-	
+98	capability claim const eof example fn impl interface intrinsic path policy property pub record sealed type union |	-	
+100	type-ident	-	
+104	newline of	-	
+107	ident	-	
+109	:	-	
+111	fn ident type-ident	-	
+116	, [ newline where	-	
+119	capability claim const eof example fn impl interface intrinsic path policy property pub record sealed type union |	-	
+121	type-ident	-	
+126	newline of	-	
+129	ident	-	
+133	:	-	
+135	fn ident type-ident	-	
+140	, [ newline where	-	
+142	ident	-	
+144	:	-	
+146	fn ident type-ident	-	
+151	, [ newline where	-	
+153	capability claim const eof example fn impl interface intrinsic path policy property pub record sealed type union |	-	
+156	ident	-	
+161	( [	-	
+162	) ident	-	
+163	:	-	
+165	fn ident inout type-ident	-	
+170	) , [ where	-	
+172	ident	-	
+173	:	-	
+175	fn ident inout type-ident	-	
+179	) , [ where	-	
+185	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	-	
+188	!= % ( ) * + ++ , - . / < <= == > >= [ and implies is or	-	
+190	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text old recover result true try type-ident {	-	
+191	% ( ) * + ++ , - . / [ and implies or	-	
+193	->	-	
+196	fn ident type-ident	-	
+202	[ claims decreases ensures may requires where {	-	
+203	( - ... [ assume exists fake false fn for forall ident if it let literal:duration literal:float literal:int literal:text loop match newline not old recover result return true try type-ident var { }	-	
+206	( - [ assume exists fake false fn for forall ident if it let literal:duration literal:float literal:int literal:text loop match not old recover result return true try type-ident var { }	-	p k
+213	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	Point	p k
+219	!= % ( * + ++ - . / < <= == > >= [ and implies is newline or { }	-	
+221	ident newline }	-	
+222	:	-	
+224	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	Int	p k
+225	!= % ( * + ++ , - . / < <= == > >= [ and implies is newline or }	-	
+226	ident type-ident	-	
+228	!= % ( * + ++ , - . / < <= == > >= [ and implies is newline or }	-	
+230	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text old recover result true try type-ident {	Int	p k
+231	!= % ( * + ++ , - . / < <= == > >= [ and implies is newline or }	-	
+233	ident newline	-	
+234	:	-	
+236	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	Int where it >= 0	p k
+237	!= % ( * + ++ , - . / < <= == > >= [ and implies is newline or }	-	
+238	ident type-ident	-	
+240	!= % ( * + ++ , - . / < <= == > >= [ and implies is newline or }	-	
+242	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text old recover result true try type-ident {	Int	p k
+244	!= % ( * + ++ , - . / < <= == > >= [ and implies is newline or }	-	
+245	!= % ( * + ++ - . / < <= == > >= [ and implies is newline or }	-	
+246	( - [ assume exists fake false fn for forall ident if it let literal:duration literal:float literal:int literal:text loop match not old recover result return true try type-ident var { }	-	p k
+247	newline	-	
+249	capability claim const eof example fn impl interface intrinsic path policy property pub record sealed type union	-	
+252	ident	-	
+257	( [	-	
+258	) ident	-	
+259	:	-	
+261	fn ident inout type-ident	-	
+266	) , [ where	-	
+268	ident	-	
+272	:	-	
+274	fn ident inout type-ident	-	
+278	) , [ where	-	
+280	->	-	
+283	fn ident type-ident	-	
+288	[ claims decreases ensures may requires where {	-	
+292	ident recover	-	
+298	, . claims decreases ensures requires {	-	
+299	( - ... [ assume exists fake false fn for forall ident if it let literal:duration literal:float literal:int literal:text loop match newline not old recover result return true try type-ident var { }	-	
+302	( - [ assume exists fake false fn for forall ident if it let literal:duration literal:float literal:int literal:text loop match not old recover result return true try type-ident var { }	-	s name
+308	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text not old recover result true try type-ident	-	
+310	!= % ( * + ++ - . / < <= == > >= [ and implies is or with	-	
+314	newline	-	
+317	( - [ assume exists fake false fn for forall ident if it let literal:duration literal:float literal:int literal:text loop match not old recover result return true try type-ident var { | }	-	s name
+319	- _ false ident literal:duration literal:float literal:int literal:text true type-ident	-	
+322	( -> when	-	
+323	.. _ ident	-	
+325	) ,	-	
+327	-> when	-	
+330	( - [ assume exists fake false fn for forall ident if it let literal:duration literal:float literal:int literal:text loop match not old recover result return true try type-ident var {	-	s name at
+337	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	Text	s name at
+342	!= % ( * + ++ - . / < <= == > >= [ and implies is newline or }	-	
+345	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text old recover result true try type-ident {	Text	s name at
+348	!= % ( * + ++ - . / < <= == > >= [ and implies is newline or }	-	
+351	( - [ assume exists fake false fn for forall ident if it let literal:duration literal:float literal:int literal:text loop match not old recover result return true try type-ident var { | }	-	s name
+353	- _ false ident literal:duration literal:float literal:int literal:text true type-ident	-	
+357	( -> when	-	
+358	.. _ ident	-	
+362	) ,	-	
+364	.. _ ident	-	
+366	) ,	-	
+368	-> when	-	
+371	( - [ assume exists fake false fn for forall ident if it let literal:duration literal:float literal:int literal:text loop match not old recover result return true try type-ident var {	-	s name from to
+378	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	Text	s name from to
+383	!= % ( * + ++ - . / < <= == > >= [ and implies is newline or }	-	
+386	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text old recover result true try type-ident {	Text	s name from to
+389	!= % ( * + ++ - . / < <= == > >= [ and implies is newline or }	-	
+390	( - [ assume exists fake false fn for forall ident if it let literal:duration literal:float literal:int literal:text loop match not old recover result return true try type-ident var { | }	-	s name
+391	newline	-	
+393	capability claim const eof example fn impl interface intrinsic path policy property pub record sealed type union	-	
+396	ident	-	
+403	( [	-	
+404	) ident	-	
+406	:	-	
+408	fn ident inout type-ident	-	
+412	) , [ where	-	
+413	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	-	
+416	, [ ] where	-	
+417	) , where	-	
+419	ident	-	
+424	:	-	
+426	fn ident inout type-ident	-	
+431	) , [ where	-	
+433	ident	-	
+437	:	-	
+439	fn ident inout type-ident	-	
+443	) , [ where	-	
+445	->	-	
+448	fn ident type-ident	-	
+452	[ claims decreases ensures may requires where {	-	
+458	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text not old recover result true try type-ident	-	
+461	!= % ( * + ++ - . / < <= == > >= [ and claims decreases ensures implies is may or requires {	-	
+464	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text old recover result true try type-ident	-	
+466	% ( * + ++ - . / [ and claims decreases ensures implies may or requires {	-	
+467	( - ... [ assume exists fake false fn for forall ident if it let literal:duration literal:float literal:int literal:text loop match newline not old recover result return true try type-ident var { }	-	
+470	( - [ assume exists fake false fn for forall ident if it let literal:duration literal:float literal:int literal:text loop match not old recover result return true try type-ident var { }	-	xs ratio flag
+474	ident	-	
+479	:	-	
+481	fn ident type-ident	-	
+485	= [ where	-	
+491	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	-	
+494	!= % ( * + ++ - . / < <= = == > >= [ and implies is or	-	
+497	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text old recover result true try type-ident {	-	
+499	% ( * + ++ - . / = [ and implies or	-	
+501	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	Int where it >= 0	xs ratio flag
+502	!= % ( * + ++ - . / < <= == > >= [ and implies is newline or }	-	
+505	( - [ assume exists fake false fn for forall ident if it let literal:duration literal:float literal:int literal:text loop match not old recover result return true try type-ident var { }	-	xs ratio flag total
+509	ident	-	
+510	:	-	
+512	fn ident type-ident	-	
+516	[ in where	-	
+519	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text not old recover result true try type-ident	-	
+522	!= % ( * + ++ - . ..< / < <= == > >= [ and implies is or {	-	
+523	( - [ assume exists fake false fn for forall ident if it let literal:duration literal:float literal:int literal:text loop match newline not old recover result return true try type-ident var { }	-	
+528	( - [ assume exists fake false fn for forall ident if it let literal:duration literal:float literal:int literal:text loop match not old recover result return true try type-ident var { }	-	xs ratio flag total x
+532	ident	-	
+538	:	-	
+540	fn ident type-ident	-	
+544	= [ where	-	
+546	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	Int	xs ratio flag total x
+548	!= % ( * + ++ - . / < <= == > >= [ and implies is newline or }	-	
+550	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text old recover result true try type-ident {	Int	xs ratio flag total x
+551	!= % ( * + ++ - . / < <= == > >= [ and implies is newline or }	-	
+556	( - [ assume exists fake false fn for forall ident if it let literal:duration literal:float literal:int literal:text loop match not old recover result return true try type-ident var { }	-	xs ratio flag total x bumped
+562	!= % ( * + ++ - . / < <= = == > >= [ and implies is newline or }	-	
+564	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	Int where it >= 0	xs ratio flag total x bumped
+570	!= % ( * + ++ - . / < <= == > >= [ and implies is newline or }	-	
+572	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text old recover result true try type-ident {	Int	xs ratio flag total x bumped
+573	!= % ( * + ++ - . / < <= == > >= [ and implies is newline or }	-	
+576	( - [ assume exists fake false fn for forall ident if it let literal:duration literal:float literal:int literal:text loop match not old recover result return true try type-ident var { }	-	xs ratio flag total x bumped
+577	newline }	-	
+580	( - [ assume exists fake false fn for forall ident if it let literal:duration literal:float literal:int literal:text loop match not old recover result return true try type-ident var { }	-	xs ratio flag total
+584	ident	-	
+589	:	-	
+591	fn ident type-ident	-	
+597	= [ where	-	
+598	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	-	
+602	, [ ] where	-	
+604	= where	-	
+606	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	Option[Text]	xs ratio flag total
+610	!= % ( * + ++ - . / < <= == > >= [ and implies is newline or { }	-	
+613	( - [ assume exists fake false fn for forall ident if it let literal:duration literal:float literal:int literal:text loop match not old recover result return true try type-ident var { }	-	xs ratio flag total maybe
+617	ident	-	
+618	:	-	
+620	fn ident type-ident	-	
+626	= [ where	-	
+627	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	-	
+630	, [ ] where	-	
+632	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	-	
+636	, [ ] where	-	
+638	= where	-	
+640	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	Result[Int, Text]	xs ratio flag total maybe
+642	!= % ( * + ++ - . / < <= == > >= [ and implies is newline or { }	-	
+643	) ident	-	
+648	:	-	
+650	( - [ exists fake false fn forall ident inout it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	Int	xs ratio flag total maybe
+651	!= % ( ) * + ++ , - . / < <= == > >= [ and implies is or	-	
+652	!= % ( * + ++ - . / < <= == > >= [ and implies is newline or { }	-	
+655	( - [ assume exists fake false fn for forall ident if it let literal:duration literal:float literal:int literal:text loop match not old recover result return true try type-ident var { }	-	xs ratio flag total maybe r
+662	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	Int where it >= 0	xs ratio flag total maybe r
+667	!= % ( * + ++ - . / < <= == > >= [ and implies is newline or }	-	
+668	( - [ assume exists fake false fn for forall ident if it let literal:duration literal:float literal:int literal:text loop match not old recover result return true try type-ident var { }	-	xs ratio flag total maybe r
+669	newline	-	
+671	capability claim const eof example fn impl interface intrinsic path policy property pub record sealed type union	-	
+675	capability claim const fn interface intrinsic record sealed type union	-	
+678	ident	-	
+682	( [	-	
+683	) ident	-	
+687	:	-	
+689	fn ident inout type-ident	-	
+693	) , [ where	-	
+694	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	-	
+698	, [ ] where	-	
+699	) , where	-	
+701	ident	-	
+706	:	-	
+708	fn ident inout type-ident	-	
+710	.	-	
+711	ident type-ident	-	
+716	) , [ where	-	
+718	->	-	
+721	fn ident type-ident	-	
+727	[ claims decreases ensures may requires where {	-	
+728	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	-	
+732	, [ ] where	-	
+734	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	-	
+736	!= % ( * + ++ , - . / : < <= == > >= [ ] and implies is or	-	
+737	ident type-ident	-	
+742	, [ ] where	-	
+744	claims decreases ensures may requires where {	-	
+748	ident recover	-	
+750	, . claims decreases ensures requires {	-	
+751	ident	-	
+755	, . claims decreases ensures requires {	-	
+757	ident recover	-	
+763	, . : claims decreases ensures requires {	-	
+764	( - ... [ assume exists fake false fn for forall ident if it let literal:duration literal:float literal:int literal:text loop match newline not old recover result return true try type-ident var { }	-	
+767	( - [ assume exists fake false fn for forall ident if it let literal:duration literal:float literal:int literal:text loop match not old recover result return true try type-ident var { }	-	args files
+771	ident	-	
+772	:	-	
+774	fn ident type-ident	-	
+780	= [ where	-	
+782	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	Point	args files
+787	!= % ( * + ++ - . / < <= == > >= [ and implies is newline or }	-	
+788	) ident	-	
+789	:	-	
+791	( - [ exists fake false fn forall ident inout it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	Point	args files
+797	!= % ( ) * + ++ , - . / < <= == > >= [ and implies is or {	-	
+799	ident newline }	-	
+800	:	-	
+802	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	Int	args files
+803	!= % ( * + ++ , - . / < <= == > >= [ and implies is newline or }	-	
+805	ident newline	-	
+806	:	-	
+808	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	Int where it >= 0	args files
+810	!= % ( * + ++ , - . / < <= == > >= [ and implies is newline or }	-	
+811	!= % ( ) * + ++ , - . / < <= == > >= [ and implies is or	-	
+813	ident	-	
+814	:	-	
+816	( - [ exists fake false fn forall ident inout it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	Int where it > 0	args files
+817	!= % ( ) * + ++ , - . / < <= == > >= [ and implies is or	-	
+818	!= % ( * + ++ - . / < <= == > >= [ and implies is newline or }	-	
+821	( - [ assume exists fake false fn for forall ident if it let literal:duration literal:float literal:int literal:text loop match not old recover result return true try type-ident var { }	-	args files p
+825	ident	-	
+826	:	-	
+828	fn ident type-ident	-	
+833	= [ where	-	
+835	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	Text	args files p
+840	!= % ( * + ++ - . / < <= == > >= [ and implies is newline or }	-	
+841	) ident	-	
+842	:	-	
+844	( - [ exists fake false fn forall ident inout it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	Shape	args files p
+847	!= % ( ) * + ++ , - . / < <= == > >= [ and implies is or {	-	
+848	) ident	-	
+850	:	-	
+852	( - [ exists fake false fn forall ident inout it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	Point	args files p
+853	!= % ( ) * + ++ , - . / < <= == > >= [ and implies is or	-	
+854	!= % ( ) * + ++ , - . / < <= == > >= [ and implies is or {	-	
+856	ident	-	
+860	:	-	
+862	( - [ exists fake false fn forall ident inout it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	Text	args files p
+865	!= % ( ) * + ++ , - . / < <= == > >= [ and implies is or	-	
+866	!= % ( * + ++ - . / < <= == > >= [ and implies is newline or }	-	
+869	( - [ assume exists fake false fn for forall ident if it let literal:duration literal:float literal:int literal:text loop match not old recover result return true try type-ident var { }	-	args files p t
+873	ident	-	
+874	:	-	
+876	fn ident type-ident	-	
+880	= [ where	-	
+882	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	Int	args files p t
+889	!= % ( * + ++ - . / < <= == > >= [ and implies is newline or }	-	
+890	) ident	-	
+892	:	-	
+894	( - [ exists fake false fn forall ident inout it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	List[Int]	args files p t
+895	( - [ ] exists fake false fn forall ident it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	Int	args files p t
+896	!= % ( * + ++ , - . / < <= == > >= [ ] and implies is or	-	
+898	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	Int	args files p t
+899	!= % ( * + ++ , - . / < <= == > >= [ ] and implies is or	-	
+900	!= % ( ) * + ++ , - . / < <= == > >= [ and implies is or	-	
+902	ident	-	
+907	:	-	
+909	( - [ exists fake false fn forall ident inout it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	Float	args files p t
+912	!= % ( ) * + ++ , - . / < <= == > >= [ and implies is or	-	
+914	ident	-	
+918	:	-	
+920	( - [ exists fake false fn forall ident inout it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	Bool	args files p t
+924	!= % ( ) * + ++ , - . / < <= == > >= [ and implies is or	-	
+925	!= % ( * + ++ - . / < <= == > >= [ and implies is newline or }	-	
+928	( - [ assume exists fake false fn for forall ident if it let literal:duration literal:float literal:int literal:text loop match not old recover result return true try type-ident var { }	-	args files p t n
+935	( - [ exists fake false fn forall ident it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	Result[Unit, Error]	args files p t n
+937	!= % ( * + ++ - . / < <= == > >= [ and implies is newline or { }	-	
+938	) ident	-	
+943	:	-	
+945	( - [ exists fake false fn forall ident inout it literal:duration literal:float literal:int literal:text not old recover result true try type-ident {	Unit	args files p t n
+949	!= % ( ) * + ++ , - . / < <= == > >= [ and implies is or {	-	
+950	!= % ( * + ++ - . / < <= == > >= [ and implies is newline or { }	-	
+951	( - [ assume exists fake false fn for forall ident if it let literal:duration literal:float literal:int literal:text loop match not old recover result return true try type-ident var { }	-	args files p t n
+952	newline	-	
+953	capability claim const eof example fn impl interface intrinsic path policy property pub record sealed type union	-	

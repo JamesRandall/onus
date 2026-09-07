@@ -1,0 +1,610 @@
+{
+  "module": "unexercised",
+  "hash": "b3:1664f56db310810ea5804585a01a99775ff9aa8817d647bbd468e225fa9915f8",
+  "imports": [],
+  "items": [
+    {
+      "effects": [],
+      "claims": [],
+      "contracts": [],
+      "examples": [],
+      "properties": [],
+      "assumes": [],
+      "recovers": [],
+      "obligations": {
+        "proved": 2,
+        "checked": 1,
+        "assumed": 0,
+        "failed": 0
+      },
+      "at": {
+        "file": "unexercised.onus",
+        "span": [
+          [
+            5,
+            1
+          ],
+          [
+            7,
+            2
+          ]
+        ]
+      },
+      "kind": "fn",
+      "name": "half",
+      "visibility": "private",
+      "signature": "fn half(n: Int where it >= 0) -> Int where it >= 0"
+    },
+    {
+      "effects": [
+        "panic"
+      ],
+      "claims": [],
+      "contracts": [],
+      "examples": [],
+      "properties": [],
+      "assumes": [],
+      "recovers": [],
+      "obligations": {
+        "proved": 0,
+        "checked": 3,
+        "assumed": 0,
+        "failed": 0
+      },
+      "at": {
+        "file": "unexercised.onus",
+        "span": [
+          [
+            11,
+            1
+          ],
+          [
+            13,
+            2
+          ]
+        ]
+      },
+      "kind": "fn",
+      "name": "step",
+      "visibility": "private",
+      "signature": "fn step(n: Int) -> Int where it >= 0 may panic"
+    },
+    {
+      "effects": [],
+      "claims": [],
+      "contracts": [],
+      "examples": [
+        {
+          "name": "halves",
+          "status": "passed",
+          "at": {
+            "file": "unexercised.onus",
+            "span": [
+              [
+                15,
+                1
+              ],
+              [
+                17,
+                2
+              ]
+            ]
+          }
+        }
+      ],
+      "properties": [],
+      "assumes": [],
+      "recovers": [],
+      "obligations": {
+        "proved": 1,
+        "checked": 1,
+        "assumed": 0,
+        "failed": 0
+      },
+      "at": {
+        "file": "unexercised.onus",
+        "span": [
+          [
+            15,
+            1
+          ],
+          [
+            17,
+            2
+          ]
+        ]
+      },
+      "kind": "example",
+      "name": "halves",
+      "visibility": "private",
+      "signature": "example halves {\n  half(n: 4) == 2\n}"
+    },
+    {
+      "effects": [],
+      "claims": [],
+      "contracts": [],
+      "examples": [
+        {
+          "name": "steps",
+          "status": "deferred",
+          "at": {
+            "file": "unexercised.onus",
+            "span": [
+              [
+                19,
+                1
+              ],
+              [
+                21,
+                2
+              ]
+            ]
+          }
+        }
+      ],
+      "properties": [],
+      "assumes": [],
+      "recovers": [],
+      "obligations": {
+        "proved": 0,
+        "checked": 1,
+        "assumed": 0,
+        "failed": 0
+      },
+      "at": {
+        "file": "unexercised.onus",
+        "span": [
+          [
+            19,
+            1
+          ],
+          [
+            21,
+            2
+          ]
+        ]
+      },
+      "kind": "example",
+      "name": "steps",
+      "visibility": "private",
+      "signature": "example steps {\n  step(n: 5) == 4\n}"
+    },
+    {
+      "effects": [],
+      "claims": [],
+      "contracts": [],
+      "examples": [],
+      "properties": [
+        {
+          "name": "half_is_smaller",
+          "status": "checked",
+          "at": {
+            "file": "unexercised.onus",
+            "span": [
+              [
+                24,
+                1
+              ],
+              [
+                26,
+                2
+              ]
+            ]
+          }
+        }
+      ],
+      "assumes": [],
+      "recovers": [],
+      "obligations": {
+        "proved": 1,
+        "checked": 2,
+        "assumed": 0,
+        "failed": 0
+      },
+      "at": {
+        "file": "unexercised.onus",
+        "span": [
+          [
+            24,
+            1
+          ],
+          [
+            26,
+            2
+          ]
+        ]
+      },
+      "kind": "property",
+      "name": "half_is_smaller",
+      "visibility": "private",
+      "signature": "-- The guard matters: `half` refuses a negative `n`.\nproperty half_is_smaller(n: Int where it >= 0) {\n  half(n: n) <= n\n}"
+    },
+    {
+      "effects": [],
+      "claims": [],
+      "contracts": [],
+      "examples": [],
+      "properties": [
+        {
+          "name": "plus_zero",
+          "status": "checked",
+          "at": {
+            "file": "unexercised.onus",
+            "span": [
+              [
+                29,
+                1
+              ],
+              [
+                31,
+                2
+              ]
+            ]
+          }
+        }
+      ],
+      "assumes": [],
+      "recovers": [],
+      "obligations": {
+        "proved": 1,
+        "checked": 2,
+        "assumed": 0,
+        "failed": 0
+      },
+      "at": {
+        "file": "unexercised.onus",
+        "span": [
+          [
+            29,
+            1
+          ],
+          [
+            31,
+            2
+          ]
+        ]
+      },
+      "kind": "property",
+      "name": "plus_zero",
+      "visibility": "private",
+      "signature": "-- The guard carries nothing: the assertion holds for every Int.\nproperty plus_zero(n: Int where it >= 0) {\n  n + 0 == n\n}"
+    }
+  ],
+  "assumes": [],
+  "recovers": [],
+  "sealed_types": [],
+  "test_module": false,
+  "obligations": {
+    "proved": 5,
+    "checked": 10,
+    "assumed": 0,
+    "failed": 0
+  },
+  "ledger": [
+    {
+      "kind": "representation",
+      "text": "n within ±2^53 - 1",
+      "def": "half",
+      "status": "checked",
+      "by": "z3: not provable",
+      "pinned": false,
+      "at": {
+        "file": "unexercised.onus",
+        "span": [
+          [
+            5,
+            9
+          ],
+          [
+            5,
+            29
+          ]
+        ]
+      }
+    },
+    {
+      "kind": "refinement",
+      "text": "it >= 0",
+      "def": "half",
+      "status": "proved",
+      "by": "z3",
+      "pinned": false,
+      "at": {
+        "file": "unexercised.onus",
+        "span": [
+          [
+            6,
+            10
+          ],
+          [
+            6,
+            15
+          ]
+        ]
+      }
+    },
+    {
+      "kind": "overflow",
+      "text": "2 != 0",
+      "def": "half",
+      "status": "proved",
+      "by": "z3",
+      "pinned": false,
+      "at": {
+        "file": "unexercised.onus",
+        "span": [
+          [
+            6,
+            10
+          ],
+          [
+            6,
+            15
+          ]
+        ]
+      }
+    },
+    {
+      "kind": "representation",
+      "text": "n within ±2^53 - 1",
+      "def": "step",
+      "status": "checked",
+      "by": "z3: not provable",
+      "pinned": false,
+      "at": {
+        "file": "unexercised.onus",
+        "span": [
+          [
+            11,
+            9
+          ],
+          [
+            11,
+            15
+          ]
+        ]
+      }
+    },
+    {
+      "kind": "refinement",
+      "text": "it >= 0",
+      "def": "step",
+      "status": "checked",
+      "by": "z3: not provable",
+      "pinned": false,
+      "at": {
+        "file": "unexercised.onus",
+        "span": [
+          [
+            12,
+            10
+          ],
+          [
+            12,
+            15
+          ]
+        ]
+      }
+    },
+    {
+      "kind": "overflow",
+      "text": "n - 1 within Int",
+      "def": "step",
+      "status": "checked",
+      "by": "z3: not provable",
+      "pinned": false,
+      "at": {
+        "file": "unexercised.onus",
+        "span": [
+          [
+            12,
+            10
+          ],
+          [
+            12,
+            15
+          ]
+        ]
+      }
+    },
+    {
+      "kind": "refinement",
+      "text": "it >= 0",
+      "def": "halves",
+      "status": "proved",
+      "by": "z3",
+      "pinned": false,
+      "at": {
+        "file": "unexercised.onus",
+        "span": [
+          [
+            16,
+            11
+          ],
+          [
+            16,
+            12
+          ]
+        ]
+      }
+    },
+    {
+      "kind": "assertion",
+      "text": "half(n: 4) == 2",
+      "def": "halves",
+      "status": "checked",
+      "by": "run as a test",
+      "pinned": false,
+      "at": {
+        "file": "unexercised.onus",
+        "span": [
+          [
+            16,
+            3
+          ],
+          [
+            16,
+            18
+          ]
+        ]
+      }
+    },
+    {
+      "kind": "assertion",
+      "text": "step(n: 5) == 4",
+      "def": "steps",
+      "status": "checked",
+      "by": "run as a test",
+      "pinned": false,
+      "at": {
+        "file": "unexercised.onus",
+        "span": [
+          [
+            20,
+            3
+          ],
+          [
+            20,
+            18
+          ]
+        ]
+      }
+    },
+    {
+      "kind": "property",
+      "text": "half_is_smaller",
+      "def": "half_is_smaller",
+      "status": "checked",
+      "by": "milestone 5: run under generated inputs",
+      "pinned": false,
+      "at": {
+        "file": "unexercised.onus",
+        "span": [
+          [
+            24,
+            1
+          ],
+          [
+            26,
+            2
+          ]
+        ]
+      }
+    },
+    {
+      "kind": "refinement",
+      "text": "it >= 0",
+      "def": "half_is_smaller",
+      "status": "proved",
+      "by": "z3",
+      "pinned": false,
+      "at": {
+        "file": "unexercised.onus",
+        "span": [
+          [
+            25,
+            11
+          ],
+          [
+            25,
+            12
+          ]
+        ]
+      }
+    },
+    {
+      "kind": "assertion",
+      "text": "half(n: n) <= n",
+      "def": "half_is_smaller",
+      "status": "checked",
+      "by": "run as a test",
+      "pinned": false,
+      "at": {
+        "file": "unexercised.onus",
+        "span": [
+          [
+            25,
+            3
+          ],
+          [
+            25,
+            18
+          ]
+        ]
+      }
+    },
+    {
+      "kind": "property",
+      "text": "plus_zero",
+      "def": "plus_zero",
+      "status": "checked",
+      "by": "milestone 5: run under generated inputs",
+      "pinned": false,
+      "at": {
+        "file": "unexercised.onus",
+        "span": [
+          [
+            29,
+            1
+          ],
+          [
+            31,
+            2
+          ]
+        ]
+      }
+    },
+    {
+      "kind": "overflow",
+      "text": "n + 0 within Int",
+      "def": "plus_zero",
+      "status": "checked",
+      "by": "z3: not provable",
+      "pinned": false,
+      "at": {
+        "file": "unexercised.onus",
+        "span": [
+          [
+            30,
+            3
+          ],
+          [
+            30,
+            8
+          ]
+        ]
+      }
+    },
+    {
+      "kind": "assertion",
+      "text": "n + 0 == n",
+      "def": "plus_zero",
+      "status": "proved",
+      "by": "z3",
+      "pinned": false,
+      "at": {
+        "file": "unexercised.onus",
+        "span": [
+          [
+            30,
+            3
+          ],
+          [
+            30,
+            13
+          ]
+        ]
+      }
+    }
+  ],
+  "obligation_coverage": {
+    "proved": 4,
+    "checked": 3,
+    "checked_exercised": 0,
+    "assumptions": 0,
+    "assumptions_verifiable": 0,
+    "assumptions_verified": 0,
+    "mutations_detected": 1,
+    "mutations_surviving": 3
+  }
+}

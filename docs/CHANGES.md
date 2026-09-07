@@ -2160,6 +2160,144 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     Onus: M15.6 is complete, and M15.7 — retiring the TypeScript compiler
     behind a fixture runner in Onus — is next.
 
+198. **The fixture runner in Onus (M15.7, first step; impl spec §10).**
+    `self/fixtures.onus` is a program, `run_fixtures <dir>... [--stdlib]
+    [--out] [--runtime] [--update]`, that runs the compiler's own test
+    suite from a `fixtures.json` manifest in each fixture directory, in
+    place of vitest over the TypeScript library. A manifest is one section
+    or a list of `sections`, each of a kind: `diagnostics` (every `.onus`
+    file, or `sources`, checked to the pass `to` under `root`, its
+    diagnostics as `{code, span, file?}` and with `ledger` its obligations
+    compared with `.expect.json`; `ok_` fixtures, or the `clean` prefixes,
+    and everything under `expect_none` must produce none; every code of
+    the catalogue under the `covers` prefixes less `except` must be
+    produced; `budget`/`budgets`, `also`, `dir`), `canonical` (own
+    canonical form, `messy/` pairs), `lowered` (the entry module's
+    target-neutral form against `<golden>/<name>.ir.txt`, `<repo>/`
+    standing for the working directory), `examples` (each source's
+    examples pass on the `targets` and the targets agree; `dirs` sweeps
+    directories for sources with examples, `skip_prefixes`,
+    `allow_refusal` admits E0800, `properties` includes properties and
+    laws), and `programs` (cases whose `main` runs with `args` on the
+    targets, writing the `stdout` file's text and exiting with `status`;
+    `via` a wrapper script). A section that `requires` z3 or clang that is
+    absent is skipped with a notice; `--update` rewrites the expectation
+    files exactly as the TypeScript harness did (verified byte for byte
+    over every expectation in the tree). `self/codes.onus` gains
+    `all_codes()`, the catalogue in order, for the coverage check. The
+    manifests cover the fixture-shaped suites of `test/syntax`,
+    `roundtrip`, `checker` (with `std/reserved.onus`, whose expectation
+    is now a file), `paths`, `verify`, `examples`, `codegen` (goldens and
+    the generated tests), `stdlib` (every std module checks; the examples
+    of the five fixture modules) and `native` (the twelve programs that
+    must agree on both targets, and the sweep of every fixture with
+    examples under checker, paths, codegen, stdlib and native, refusal
+    allowed); every existing expectation passes unchanged. Not
+    reproduced: the AST equality of the round-trip property (the printed
+    text's equality with the fixture and its idempotence are), and the
+    bespoke vitest cases (counterexample text, the worked-example paths,
+    the native primitive programs, `next`, `loop`, `review`, `mutate`,
+    the assumptions ledger), which become `programs` cases and CLI
+    expectation fixtures in the next changes of M15.7. `scripts/bootstrap.sh`
+    builds `self/fixtures.onus` at every stage beside `self/cli.onus`, so
+    `run_fixtures.js` is in the fixed point, in the native compiler's
+    JavaScript build, and in `bootstrap/`; `scripts/fixtures.sh` runs the
+    suite with it (`ONUS_FIXTURES` names another runner, such as a chain's
+    stage2 for the acceptance step of the skill); `test/self/fixtures.test.ts`
+    builds the runner with stage0 and requires the suite to pass under it,
+    the bridge while vitest exists. Review artefacts under
+    `.onus/changes/198/`: the interface diff of `codes` is `all_codes`
+    added; `fixtures` is new with 36 obligations (18 proved, the index
+    refinements; 18 checked, the overflow obligations of counters and
+    lengths and the representation obligations of pass indices, budgets
+    and statuses, as everywhere in `self/`). Fixed point reached from
+    `bootstrap/`, native stage agrees; promoted.
+
+199. **The bespoke tests as fixtures (M15.7, second step; impl spec §10).**
+    Every vitest case that asserted something in code rather than through
+    a fixture is now a manifest case the runner in Onus (item 198) runs,
+    and the runner grew the kinds they need. `cli` cases run the compiler
+    under test (`--cli`, the `run_cli.js` beside the runner) in a staged
+    working directory — a copy of `stage_dir` or the `stage` files, an
+    earlier case's directory (`in`), then `write`, `remove` and `edit`
+    (`from`/`to`, `dates_to`, `append`) — with `$dir`, `$stage`, `$root`,
+    `$now` and a marker-computed `$offset` substituted into the arguments,
+    and check the exit status, the standard streams (`stdout` pinned to a
+    file, `stdout_text`, `stdout_contains`, `stdout_lacks`,
+    `stdout_canonical`, `stderr_*`) and the files left behind (`files`
+    pinned, `files_text`, `files_contain`, `files_exist`, `files_absent`,
+    `file_hashes`, `count_files`) after `normalise` rules (`dates`, `ms`,
+    `tokens`, `hash`, `stage`, `out`, `root`, `last_line`). `programs`
+    cases run each target in its own directory with `env`, `via` (a
+    wrapper script: the `std.http` fixture's local server), `cflags`, and
+    compare the targets (`same_stdout`, `same_files`); a section may name
+    the `runtime` its programs import and a `probe` program that must exit
+    0 for it to run (the `std.sql` cases lay out their schema in the
+    probe and are skipped with its reason when no Postgres answers).
+    `builds` cases must build, or be refused natively with the `expect`ed
+    codes (E0800 for a `Dict` keyed by a record); `examples` sections take
+    `cflags` and `expect_disagreement` (E0801 from the deliberately broken
+    runtime); `next_sweep` checks that the token present is legal at every
+    position of every source and pins the complete answer of `onus next`
+    at every token of `positions.onus`; `script` cases pin a shell
+    script's output (the bundle's freshness; the released native compiler
+    with clang alone on the path, when `--native-cli` names one).
+    `requires` may also name `libpq`, `cli`, `native_cli` and
+    `unicode16`, on a section or a case. `nativebuild.build_native` takes
+    `cflags`. The manifests: `test/cli` (the command line: check, fmt,
+    `--emit ir`, interface and its diffs, path, build and run on both
+    targets with the image's hash, test with its coverage ledger, the
+    assumptions of checkout and its path report, the policy
+    `verified_assumptions_only` with a fresh, a stale and a failed record,
+    mutation and the interface's coverage counts, review with a loop
+    change, against a previous document and of an invalid program, `next`
+    at twenty-five positions, and the loop with a scripted model — 93
+    cases, 9 more needing z3), `test/native` (the primitive programs, the
+    Unicode probe compared with the host's tables on both targets, the
+    broken runtime), `test/codegen` (the worked examples build, a violated
+    `requires` panics with its obligation), `test/stdlib` (the process
+    and file programs, BLAKE3 over the lengths that exercise every branch
+    of the algorithm on both targets, `blake3_lengths.onus`), `test/sql`
+    and `test/next`. The expectation files were generated with `--update`
+    and read. Found by the conversion and fixed: the compiler in Onus
+    never checked a verification record's age — `ledger.is_verified` took
+    any passing record — where the TypeScript compiler required one no
+    older than `max_assumption_age_days` (§20.3); `Context` gains `now_ms`
+    and `assumption_max_age_ms`, set by the command line from the clock
+    and `onus.json`, `ledger.is_current` and `ledger.millis_of_iso` (the
+    inverse of `assumptions.iso_of_millis`, with an example) decide, and
+    the policy cases pin it. Also found: a program whose bundled runtime
+    could not load `pg` hung forever in `std.sql.connect`, the main thread
+    waiting on a worker that had died importing it; the worker now signals
+    when it starts (the bridge gives up after 30 s) and imports `pg` on the
+    first connect, so the failure is the connect's `Connection` error. Not
+    reproduced, and dropped with the TypeScript compiler: the fast-check
+    round-trip over generated syntax trees, the JSON-schema validation of
+    the interface, diagnostic and path documents (their shapes are pinned
+    by the `cli` cases), the E0999 injection (the compiler in Onus has no
+    exception to catch), and `--emit ts`. Review artefacts under
+    `.onus/changes/199/`: the interface diffs are `nativebuild.build_native`
+    and `build_with` taking `cflags` (breaking, two callers in `cli`),
+    `Context` gaining `now_ms` and `assumption_max_age_ms`,
+    `ledger.is_verified` gaining `alloc` with `is_current`,
+    `millis_of_iso` and two helpers added, `cli.setup` and the five
+    commands that call it taking the clock, and `fixtures` reworked (46
+    definitions added, `run_program` and `outcome_ok` removed, `Options`,
+    `Args` and `main` changed). The ledger deltas: `cli` 68 → 69 (one
+    overflow of the configured age in milliseconds, checked); `paths` 88 →
+    90 (the days of the message, one proved, one overflow checked);
+    `ledger` 5 → 76 (27 proved: the index refinements and the
+    day-of-year arithmetic; 49 checked: the representation and overflow
+    obligations of the parsed fields and the millisecond products, and the
+    seven assertions of the example); `fixtures` 36 → 125 (42 proved: the
+    index and slice refinements, `copy_tree`'s `decreases` and the lexer's
+    precondition; 83 checked: the representation and overflow obligations
+    of scanner indices and counters, as everywhere in `self/`); `context`,
+    `assumptions`, `config` and `nativebuild` unchanged. The suite under
+    stage2: 445 passed, 3 skipped (the fixture that does not check, the
+    two Postgres sections). Fixed point reached from `bootstrap/`, native
+    stage agrees; promoted.
+
 ### Deferred, not changed
 
 - Decided 2026-09-06, to apply in M15.5: generics compile natively by

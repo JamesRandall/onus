@@ -1,0 +1,33 @@
+{
+  "at": "<at>",
+  "results": [
+    {
+      "kind": "widen-return",
+      "def": "unexercised.half",
+      "text": "widen the result from `Int where …` to `Int`",
+      "detected": false,
+      "by": "no proved assertion of an example, property or law depends on it"
+    },
+    {
+      "kind": "widen-return",
+      "def": "unexercised.step",
+      "text": "widen the result from `Int where …` to `Int`",
+      "detected": false,
+      "by": "no proved assertion of an example, property or law depends on it"
+    },
+    {
+      "kind": "negate-guard",
+      "def": "unexercised.half_is_smaller",
+      "text": "negate the guards of `property half_is_smaller`",
+      "detected": true,
+      "by": "the property fails over the complement of its domain"
+    },
+    {
+      "kind": "negate-guard",
+      "def": "unexercised.plus_zero",
+      "text": "negate the guards of `property plus_zero`",
+      "detected": false,
+      "by": "the property still passes over the complement of its domain"
+    }
+  ]
+}

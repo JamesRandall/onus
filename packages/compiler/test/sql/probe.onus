@@ -1,0 +1,94 @@
+module probe
+import std.io
+import std.sql
+
+-- The probe of the `std.sql` fixtures (docs/CHANGES.md item 199): connects
+-- to the Postgres at ONUS_TEST_DSN as a superuser and lays out the schemas
+-- the cases read — `orders` with four orders and `bad` with a negative
+-- amount, readable by the role `reporter` — exiting 0 when it could, so
+-- that the section runs; otherwise the section is skipped with the reason.
+fn setup(db: sql.Db[ReadWrite]) -> Result[Unit, sql.Error] may sql.write, alloc {
+  try sql.execute(
+    db: db,
+    statement: sql.statement[text: "drop schema if exists orders cascade"](params: [])
+  )
+  try sql.execute(
+    db: db,
+    statement: sql.statement[text: "drop schema if exists bad cascade"](params: [])
+  )
+  try sql.execute(
+    db: db,
+    statement: sql.statement[
+      text: "do $$ begin if not exists (select 1 from pg_roles where rolname = 'reporter') then create role reporter login password 'reporter'; end if; end $$"
+    ](params: [])
+  )
+  try sql.execute(db: db, statement: sql.statement[text: "create schema orders"](params: []))
+  try sql.execute(
+    db: db,
+    statement: sql.statement[
+      text: "create table orders.orders (created timestamp not null, amount_pence bigint not null, customer_id text not null)"
+    ](params: [])
+  )
+  try sql.execute(
+    db: db,
+    statement: sql.statement[
+      text: "insert into orders.orders values ('2026-01-05', 100, 'c1'), ('2026-01-20', 250, 'c2'), ('2026-02-01', 50, 'c1'), ('2025-12-31', 999, 'c3')"
+    ](params: [])
+  )
+  try sql.execute(db: db, statement: sql.statement[text: "create schema bad"](params: []))
+  try sql.execute(
+    db: db,
+    statement: sql.statement[
+      text: "create table bad.orders (created timestamp not null, amount_pence bigint not null)"
+    ](params: [])
+  )
+  try sql.execute(
+    db: db,
+    statement: sql.statement[text: "insert into bad.orders values ('2026-03-01', -5)"](params: [])
+  )
+  try sql.execute(
+    db: db,
+    statement: sql.statement[text: "grant usage on schema orders, bad to reporter"](params: [])
+  )
+  try sql.execute(
+    db: db,
+    statement: sql.statement[text: "grant select on all tables in schema orders, bad to reporter"](
+      params: []
+    )
+  )
+  return Ok(value: Unit)
+}
+
+pub fn main(
+  env: io.Env,
+  console: io.Console,
+  net: io.Net
+) -> Result[Int, io.Error] may io.env, io.file, io.net, sql.write, alloc {
+  var dsn: Text = "postgres://postgres:onus@localhost:5432/postgres"
+  match io.get_env(env: env, name: "ONUS_TEST_DSN") with
+  | Some(value) -> dsn = value
+  | None -> skip()
+  match sql.connect(net: net, dsn: dsn, mode: ReadWrite) with
+  | Err(_) -> {
+    io.eprint(
+      console: console,
+      text: "no Postgres answering at " ++ dsn ++ " (docker run -d -e POSTGRES_PASSWORD=onus -p 5432:5432 postgres:17)\n"
+    )
+    return Ok(value: 1)
+  }
+  | Ok(value) -> {
+    match setup(db: value) with
+    | Ok(_) -> return Ok(value: 0)
+    | Err(_) -> {
+      io.eprint(
+        console: console,
+        text: "the Postgres at " ++ dsn ++ " refused the fixture schema\n"
+      )
+      return Ok(value: 1)
+    }
+  }
+}
+
+fn skip() -> Unit {
+  return Unit
+}

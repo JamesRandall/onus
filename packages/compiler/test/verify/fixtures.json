@@ -1,0 +1,9 @@
+{
+  "kind": "diagnostics",
+  "to": "verify",
+  "root": ".",
+  "ledger": true,
+  "requires": ["z3"],
+  "clean": ["ok_", "checked_"],
+  "budgets": { "e0501": 200 }
+}

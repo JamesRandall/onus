@@ -12,6 +12,10 @@
 # it. Skipped with a notice when `clang` is not on PATH.
 #   scripts/bootstrap.sh [out-dir]      (default .onus-tmp/bootstrap)
 #
+# Every stage also builds the fixture runner (`self/fixtures.onus`,
+# docs/CHANGES.md item 198) into the same directory, so `run_fixtures.js` is
+# part of the fixed point and of bootstrap/ (see scripts/fixtures.sh).
+#
 # Every stage after the first is built by the compiler in Onus with no
 # runtime given, so it carries its own JavaScript runtime (`onus-runtime/`,
 # docs/CHANGES.md item 181) and imports it relatively, and the chain runs from
@@ -24,6 +28,7 @@ out=${1:-$root/.onus-tmp/bootstrap}
 stdlib=packages/stdlib
 budget=${ONUS_BUDGET:-3000}
 entry=self/cli.onus
+runner=self/fixtures.onus
 rm -rf "$out"
 mkdir -p "$out"
 
@@ -31,15 +36,18 @@ mkdir -p "$out"
 stage() {
   local n=$1 prev=$2
   echo "bootstrap: stage$n"
-  if [ "$prev" = ts ]; then
-    node packages/compiler/dist/cli/main.js build "$entry" --out "$out/stage$n" --root self --stdlib "$stdlib" --budget "$budget"
-  else
-    if ! node "$prev" build "$entry" --out "$out/stage$n" --root self --stdlib "$stdlib" --budget "$budget" > "$out/stage$n.diagnostics"; then
-      echo "bootstrap: stage$n failed:"
-      head -20 "$out/stage$n.diagnostics"
-      exit 1
+  local e
+  for e in "$entry" "$runner"; do
+    if [ "$prev" = ts ]; then
+      node packages/compiler/dist/cli/main.js build "$e" --out "$out/stage$n" --root self --stdlib "$stdlib" --budget "$budget"
+    else
+      if ! node "$prev" build "$e" --out "$out/stage$n" --root self --stdlib "$stdlib" --budget "$budget" > "$out/stage$n.diagnostics"; then
+        echo "bootstrap: stage$n failed on $e:"
+        head -20 "$out/stage$n.diagnostics"
+        exit 1
+      fi
     fi
-  fi
+  done
 }
 
 if [ -f "$root/bootstrap/run_cli.js" ]; then stage0=$root/bootstrap/run_cli.js; else stage0=ts; fi
@@ -68,11 +76,13 @@ native=$out/native/native/cli
 # The native compiler runs with node and clang's directory alone on PATH (z3 beside them when present): no node, no TypeScript.
 z3dir=$(dirname "$(command -v z3 || echo /nonexistent/z3)")
 bare_path=$(dirname "$(command -v clang)"):$z3dir:/usr/bin:/bin
-if ! env PATH="$bare_path" "$native" build "$entry" --out "$out/stage4" --root self --stdlib "$stdlib" --budget "$budget" > "$out/stage4.diagnostics"; then
-  echo "bootstrap: the native compiler failed to build the compiler for JavaScript:"
-  head -20 "$out/stage4.diagnostics"
-  exit 1
-fi
+for e in "$entry" "$runner"; do
+  if ! env PATH="$bare_path" "$native" build "$e" --out "$out/stage4" --root self --stdlib "$stdlib" --budget "$budget" > "$out/stage4.diagnostics"; then
+    echo "bootstrap: the native compiler failed to build $e for JavaScript:"
+    head -20 "$out/stage4.diagnostics"
+    exit 1
+  fi
+done
 if ! diff -r "$out/stage2" "$out/stage4" > "$out/diff-native.txt"; then
   echo "bootstrap: the native compiler's JavaScript build differs from stage2's:"
   head -40 "$out/diff-native.txt"

@@ -1,0 +1,10 @@
+{
+  "kind": "diagnostics",
+  "to": "paths",
+  "expect_none": true,
+  "sources": [
+    "../../../../examples/mandelbrot/mandelbrot.onus",
+    "../../../../examples/reporting/reporting.onus",
+    "../../../../examples/checkout/checkout.onus"
+  ]
+}

@@ -1,0 +1,34 @@
+module reporting
+import std.sql
+import std.io
+import app.config
+
+record MonthlyTotal {
+  month: Text
+  total_pence: Int where it >= 0
+}
+
+union AppError =
+  | Config of detail: config.Error
+  | Storage of detail: sql.Error
+  | Io of detail: io.Error
+
+pub fn monthly_totals(
+  db: sql.Db[ReadOnly, schema: "orders"],
+  year: Int where 2000 <= it and it <= 2100
+) -> Result[List[MonthlyTotal], sql.Error] may sql.read, alloc
+  ensures forall t: MonthlyTotal in result: t.total_pence >= 0
+{ ... }
+
+-- Root capabilities are supplied by the runtime to main and nowhere else (§8.3).
+pub fn main(
+  args: List[Text],
+  env: io.Env,
+  files: io.Files,
+  net: io.Net
+) -> Result[Unit, AppError] may io.env, io.file, io.net, sql.read, alloc { ... }
+
+path monthly_report
+  entry monthly_totals
+  effects <= { sql.read, alloc }
+  forbid { sql.write, io.net, io.file }

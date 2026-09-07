@@ -1,0 +1,26 @@
+module superuser
+import std.io
+import std.sql
+
+-- A superuser cannot open a read-only session (§8.1): `connect` with
+-- `ReadOnly` refuses the DSN at ONUS_TEST_DSN, which is the superuser's.
+pub fn main(
+  env: io.Env,
+  console: io.Console,
+  net: io.Net
+) -> Result[Unit, io.Error] may io.env, io.file, io.net, alloc {
+  var dsn: Text = ""
+  match io.get_env(env: env, name: "ONUS_TEST_DSN") with
+  | Some(value) -> dsn = value
+  | None -> skip()
+  match sql.connect(net: net, dsn: dsn, mode: ReadOnly) with
+  | Ok(_) -> io.print(console: console, text: "connected\n")
+  | Err(error) -> match error with
+  | Connection(detail) -> io.print(console: console, text: "connection refused\n")
+  | _ -> io.print(console: console, text: "other error\n")
+  return Ok(value: Unit)
+}
+
+fn skip() -> Unit {
+  return Unit
+}

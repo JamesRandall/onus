@@ -1,0 +1,60 @@
+module blake3_lengths
+import std.io
+import std.hash
+
+-- BLAKE3 over texts of the lengths that exercise every branch of the
+-- algorithm (docs/CHANGES.md items 180 and 199): an empty input, a partial
+-- block, block boundaries, a chunk boundary, several chunks, and enough
+-- chunks for the tree to merge at every level. Each text is ASCII from a
+-- Lehmer generator (modulus 65537) seeded by its length, so the JavaScript
+-- runtime's BLAKE3 and the C runtime's must print the same digests, and
+-- the pinned output is the reference implementation's (blake3_lengths.out
+-- was checked against @noble/hashes when it was written).
+fn input(n: Int where it >= 0, seed: Int) -> Text may alloc, mutate {
+  var parts: Builder[Text] = List.builder()
+  var x: Int = seed
+  for i: Int in 0 ..< n {
+    x = (x * 75 + 74) % 65537
+    List.push(b: inout parts, x: Text.of_code_point(cp: 32 + x % 95))
+  }
+  return Text.join(parts: List.finish(b: parts), sep: "")
+}
+
+pub fn main(console: io.Console) -> Result[Unit, io.Error] may io.file, alloc, mutate {
+  io.print(console: console, text: "abc " ++ hash.blake3_hex(t: "abc") ++ "\n")
+  for n: Int in [
+    0,
+    1,
+    3,
+    31,
+    63,
+    64,
+    65,
+    127,
+    128,
+    129,
+    1023,
+    1024,
+    1025,
+    2047,
+    2048,
+    2049,
+    3072,
+    4096,
+    4097,
+    5000,
+    8191,
+    8192,
+    8193,
+    16384,
+    65536,
+    100000,
+    131073
+  ] {
+    io.print(
+      console: console,
+      text: Int.to_text(x: n) ++ " " ++ hash.blake3_hex(t: input(n: n, seed: n + 7)) ++ "\n"
+    )
+  }
+  return Ok(value: Unit)
+}

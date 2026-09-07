@@ -3,15 +3,29 @@
  * owns the `pg` clients and answers the main thread's requests. Onus calls
  * are synchronous, so the main thread posts a request, blocks on
  * `Atomics.wait`, and reads the reply; this worker runs the asynchronous
- * driver and signals when the reply is posted.
+ * driver and signals when the reply is posted. The worker signals once on
+ * starting, before any request, so the main thread can tell a worker that
+ * never started from a slow reply; `pg` is imported on the first connect,
+ * so a runtime installed without it answers that connect with the reason
+ * rather than dying before it can answer (docs/CHANGES.md item 199).
  */
 import { parentPort, workerData } from 'node:worker_threads';
-import pg from 'pg';
 const data = workerData;
 const port = data.port;
 const flag = new Int32Array(data.signal);
 const clients = new Map();
 let nextConn = 1;
+let driver = null;
+/** The `pg` driver, imported on first use; throws with the resolution error when it is not installed. */
+async function pgDriver() {
+    if (driver === null) {
+        const loaded = await import('pg');
+        if (typeof loaded !== 'object' || loaded === null || !('default' in loaded))
+            throw new Error('the pg package has no default export');
+        driver = loaded.default;
+    }
+    return driver;
+}
 function fail(e) {
     const code = typeof e === 'object' && e !== null && 'code' in e && typeof e.code === 'string' ? e.code : null;
     return { ok: false, error: e instanceof Error ? e.message : String(e), code };
@@ -19,7 +33,8 @@ function fail(e) {
 async function handle(req) {
     switch (req.op) {
         case 'connect': {
-            const client = new pg.Client({ connectionString: req.dsn });
+            const driverModule = await pgDriver();
+            const client = new driverModule.Client({ connectionString: req.dsn });
             await client.connect();
             const conn = nextConn++;
             clients.set(conn, client);
@@ -55,4 +70,7 @@ port.on('message', (req) => {
     });
 });
 void parentPort;
+// Started: the main thread's first wait ends here, before any request is answered.
+Atomics.store(flag, 0, 1);
+Atomics.notify(flag, 0);
 //# sourceMappingURL=sql-worker.js.map

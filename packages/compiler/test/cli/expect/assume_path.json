@@ -1,0 +1,571 @@
+{
+  "path": "checkout",
+  "entry": "checkout.handle_checkout",
+  "reachable": [
+    "checkout.handle_checkout",
+    "app.auth.require",
+    "checkout.load_basket",
+    "std.sql.narrow",
+    "std.list.is_empty",
+    "vendor.payments.charge",
+    "checkout.record_order",
+    "std.sql.select",
+    "std.sql.text",
+    "std.sql.query",
+    "std.list.len",
+    "std.sql.statement",
+    "std.sql.int",
+    "std.sql.execute"
+  ],
+  "effects": {
+    "bound": [
+      "alloc",
+      "io.clock",
+      "io.net",
+      "sql.read",
+      "sql.write"
+    ],
+    "forbid": [],
+    "actual": [
+      "alloc",
+      "io.clock",
+      "io.net",
+      "sql.read",
+      "sql.write"
+    ]
+  },
+  "claims": {
+    "required": [
+      "app.contracts.Idempotent"
+    ],
+    "satisfied": true
+  },
+  "assumes": [
+    {
+      "claim": "app.contracts.Idempotent",
+      "at": "checkout.load_basket",
+      "justification": "A select reads only; it has no observable effect.",
+      "permitted_by": "scope",
+      "verifiable": false,
+      "verify": null,
+      "last_verified": null
+    },
+    {
+      "claim": "app.contracts.Idempotent",
+      "at": "vendor.payments.charge",
+      "justification": "Vendor API deduplicates on key for 24h; see contract §4.2",
+      "permitted_by": "except",
+      "verifiable": true,
+      "verify": "verify(client: Client, service: auth.Service, clock: io.Clock) may io.net, alloc {\n  let who: auth.AuthedCustomer = try auth.require(\n    service: service,\n    caller: \"verify\",\n    customer: \"verify\",\n    clock: clock\n  ) else _: false\n  let a: Receipt = try charge(client: client, key: \"verify-1\", amount: 100, who: who) else _: false\n  let b: Receipt = try charge(client: client, key: \"verify-1\", amount: 100, who: who) else _: false\n  a.id == b.id\n}",
+      "last_verified": {
+        "at": "<at>",
+        "target": "local",
+        "result": "passed"
+      }
+    },
+    {
+      "claim": "app.contracts.Idempotent",
+      "at": "checkout.record_order",
+      "justification": "The insert is `on conflict (receipt_id) do nothing`.",
+      "permitted_by": "scope",
+      "verifiable": false,
+      "verify": null,
+      "last_verified": null
+    }
+  ],
+  "obligations": {
+    "proved": 8,
+    "checked": 1,
+    "assumed": 0,
+    "failed": 0,
+    "checked_at": [
+      "vendor.payments.charge:20:3"
+    ]
+  },
+  "unresolvable_calls": [],
+  "capabilities": [
+    {
+      "type": "sql.Db[ReadOnly]",
+      "constructed_at": "checkout.handle_checkout:89:44",
+      "assumes": []
+    }
+  ],
+  "graph": {
+    "nodes": [
+      {
+        "id": "checkout.handle_checkout",
+        "module": "checkout",
+        "kind": "entry",
+        "effects": [
+          "alloc",
+          "io.clock",
+          "io.net",
+          "sql.read",
+          "sql.write"
+        ],
+        "claims": [
+          "app.contracts.Idempotent"
+        ],
+        "obligations": {
+          "proved": 1,
+          "checked": 0,
+          "assumed": 0,
+          "failed": 0
+        },
+        "assumes": 0,
+        "recovers": 0,
+        "unresolvable": 0
+      },
+      {
+        "id": "app.auth.require",
+        "module": "app.auth",
+        "kind": "fn",
+        "effects": [
+          "io.net"
+        ],
+        "claims": [
+          "app.contracts.Idempotent"
+        ],
+        "obligations": {
+          "proved": 2,
+          "checked": 0,
+          "assumed": 0,
+          "failed": 0
+        },
+        "assumes": 0,
+        "recovers": 0,
+        "unresolvable": 0
+      },
+      {
+        "id": "checkout.load_basket",
+        "module": "checkout",
+        "kind": "fn",
+        "effects": [
+          "alloc",
+          "sql.read"
+        ],
+        "claims": [
+          "app.contracts.Idempotent"
+        ],
+        "obligations": {
+          "proved": 3,
+          "checked": 0,
+          "assumed": 0,
+          "failed": 0
+        },
+        "assumes": 1,
+        "recovers": 0,
+        "unresolvable": 0
+      },
+      {
+        "id": "std.sql.narrow",
+        "module": "std.sql",
+        "kind": "intrinsic",
+        "effects": [],
+        "claims": [],
+        "obligations": {
+          "proved": 0,
+          "checked": 0,
+          "assumed": 0,
+          "failed": 0
+        },
+        "assumes": 0,
+        "recovers": 0,
+        "unresolvable": 0
+      },
+      {
+        "id": "std.list.is_empty",
+        "module": "std.list",
+        "kind": "fn",
+        "effects": [],
+        "claims": [],
+        "obligations": {
+          "proved": 1,
+          "checked": 0,
+          "assumed": 0,
+          "failed": 0
+        },
+        "assumes": 0,
+        "recovers": 0,
+        "unresolvable": 0
+      },
+      {
+        "id": "vendor.payments.charge",
+        "module": "vendor.payments",
+        "kind": "fn",
+        "effects": [
+          "alloc",
+          "io.net"
+        ],
+        "claims": [
+          "app.contracts.Idempotent"
+        ],
+        "obligations": {
+          "proved": 1,
+          "checked": 1,
+          "assumed": 0,
+          "failed": 0
+        },
+        "assumes": 1,
+        "recovers": 0,
+        "unresolvable": 0
+      },
+      {
+        "id": "checkout.record_order",
+        "module": "checkout",
+        "kind": "fn",
+        "effects": [
+          "alloc",
+          "sql.write"
+        ],
+        "claims": [
+          "app.contracts.Idempotent"
+        ],
+        "obligations": {
+          "proved": 0,
+          "checked": 0,
+          "assumed": 0,
+          "failed": 0
+        },
+        "assumes": 1,
+        "recovers": 0,
+        "unresolvable": 0
+      },
+      {
+        "id": "std.sql.select",
+        "module": "std.sql",
+        "kind": "intrinsic",
+        "effects": [],
+        "claims": [],
+        "obligations": {
+          "proved": 0,
+          "checked": 0,
+          "assumed": 0,
+          "failed": 0
+        },
+        "assumes": 0,
+        "recovers": 0,
+        "unresolvable": 0
+      },
+      {
+        "id": "std.sql.text",
+        "module": "std.sql",
+        "kind": "intrinsic",
+        "effects": [],
+        "claims": [],
+        "obligations": {
+          "proved": 0,
+          "checked": 0,
+          "assumed": 0,
+          "failed": 0
+        },
+        "assumes": 0,
+        "recovers": 0,
+        "unresolvable": 0
+      },
+      {
+        "id": "std.sql.query",
+        "module": "std.sql",
+        "kind": "intrinsic",
+        "effects": [
+          "alloc",
+          "sql.read"
+        ],
+        "claims": [],
+        "obligations": {
+          "proved": 0,
+          "checked": 0,
+          "assumed": 0,
+          "failed": 0
+        },
+        "assumes": 0,
+        "recovers": 0,
+        "unresolvable": 0
+      },
+      {
+        "id": "std.list.len",
+        "module": "std.list",
+        "kind": "intrinsic",
+        "effects": [],
+        "claims": [],
+        "obligations": {
+          "proved": 0,
+          "checked": 0,
+          "assumed": 0,
+          "failed": 0
+        },
+        "assumes": 0,
+        "recovers": 0,
+        "unresolvable": 0
+      },
+      {
+        "id": "std.sql.statement",
+        "module": "std.sql",
+        "kind": "intrinsic",
+        "effects": [],
+        "claims": [],
+        "obligations": {
+          "proved": 0,
+          "checked": 0,
+          "assumed": 0,
+          "failed": 0
+        },
+        "assumes": 0,
+        "recovers": 0,
+        "unresolvable": 0
+      },
+      {
+        "id": "std.sql.int",
+        "module": "std.sql",
+        "kind": "intrinsic",
+        "effects": [],
+        "claims": [],
+        "obligations": {
+          "proved": 0,
+          "checked": 0,
+          "assumed": 0,
+          "failed": 0
+        },
+        "assumes": 0,
+        "recovers": 0,
+        "unresolvable": 0
+      },
+      {
+        "id": "std.sql.execute",
+        "module": "std.sql",
+        "kind": "intrinsic",
+        "effects": [
+          "alloc",
+          "sql.write"
+        ],
+        "claims": [],
+        "obligations": {
+          "proved": 0,
+          "checked": 0,
+          "assumed": 0,
+          "failed": 0
+        },
+        "assumes": 0,
+        "recovers": 0,
+        "unresolvable": 0
+      }
+    ],
+    "edges": [
+      {
+        "from": "checkout.handle_checkout",
+        "to": "app.auth.require",
+        "effects": [
+          "io.net"
+        ],
+        "at": "checkout.handle_checkout:83:38"
+      },
+      {
+        "from": "checkout.handle_checkout",
+        "to": "checkout.load_basket",
+        "effects": [
+          "alloc",
+          "sql.read"
+        ],
+        "at": "checkout.handle_checkout:89:28"
+      },
+      {
+        "from": "checkout.handle_checkout",
+        "to": "std.sql.narrow",
+        "effects": [],
+        "at": "checkout.handle_checkout:89:44"
+      },
+      {
+        "from": "checkout.handle_checkout",
+        "to": "std.list.is_empty",
+        "effects": [],
+        "at": "checkout.handle_checkout:91:6"
+      },
+      {
+        "from": "checkout.handle_checkout",
+        "to": "vendor.payments.charge",
+        "effects": [
+          "alloc",
+          "io.net"
+        ],
+        "at": "checkout.handle_checkout:94:39"
+      },
+      {
+        "from": "checkout.handle_checkout",
+        "to": "checkout.record_order",
+        "effects": [
+          "alloc",
+          "sql.write"
+        ],
+        "at": "checkout.handle_checkout:100:7"
+      },
+      {
+        "from": "checkout.load_basket",
+        "to": "std.sql.select",
+        "effects": [],
+        "at": "checkout.load_basket:45:33"
+      },
+      {
+        "from": "checkout.load_basket",
+        "to": "std.sql.text",
+        "effects": [],
+        "at": "checkout.load_basket:46:14"
+      },
+      {
+        "from": "checkout.load_basket",
+        "to": "std.sql.query",
+        "effects": [
+          "alloc",
+          "sql.read"
+        ],
+        "at": "checkout.load_basket:49:32"
+      },
+      {
+        "from": "std.list.is_empty",
+        "to": "std.list.len",
+        "effects": [],
+        "at": "std.list.is_empty:12:10"
+      },
+      {
+        "from": "checkout.record_order",
+        "to": "std.sql.statement",
+        "effects": [],
+        "at": "checkout.record_order:62:29"
+      },
+      {
+        "from": "checkout.record_order",
+        "to": "std.sql.text",
+        "effects": [],
+        "at": "checkout.record_order:64:14"
+      },
+      {
+        "from": "checkout.record_order",
+        "to": "std.sql.text",
+        "effects": [],
+        "at": "checkout.record_order:64:35"
+      },
+      {
+        "from": "checkout.record_order",
+        "to": "std.sql.int",
+        "effects": [],
+        "at": "checkout.record_order:64:60"
+      },
+      {
+        "from": "checkout.record_order",
+        "to": "std.sql.execute",
+        "effects": [
+          "alloc",
+          "sql.write"
+        ],
+        "at": "checkout.record_order:65:10"
+      }
+    ]
+  },
+  "gates": [
+    {
+      "evidence": "app.auth.AuthedCustomer",
+      "producers": [
+        "app.auth.require"
+      ],
+      "guarded": [
+        "checkout.load_basket",
+        "vendor.payments.charge",
+        "checkout.record_order"
+      ]
+    }
+  ],
+  "recovers": [],
+  "ledger": [
+    {
+      "kind": "requires",
+      "text": "parse_select(text: text) is Ok",
+      "def": "checkout.load_basket",
+      "status": "proved",
+      "by": "const evaluator",
+      "pinned": true,
+      "at": "checkout.onus:45:33"
+    },
+    {
+      "kind": "requires",
+      "text": "columns_match(text: text, record: row) is Ok",
+      "def": "checkout.load_basket",
+      "status": "proved",
+      "by": "const evaluator",
+      "pinned": true,
+      "at": "checkout.onus:45:33"
+    },
+    {
+      "kind": "refinement",
+      "text": "it >= 0",
+      "def": "checkout.load_basket",
+      "status": "proved",
+      "by": "z3",
+      "pinned": false,
+      "at": "checkout.onus:50:50"
+    },
+    {
+      "kind": "refinement",
+      "text": "it >= 0",
+      "def": "checkout.handle_checkout",
+      "status": "proved",
+      "by": "z3",
+      "pinned": false,
+      "at": "checkout.onus:97:13"
+    },
+    {
+      "kind": "ensures",
+      "text": "result is Ok implies caller == customer",
+      "def": "app.auth.require",
+      "status": "proved",
+      "by": "z3",
+      "pinned": false,
+      "at": "app/auth.onus:27:5"
+    },
+    {
+      "kind": "ensures",
+      "text": "result is Ok implies caller == customer",
+      "def": "app.auth.require",
+      "status": "proved",
+      "by": "z3",
+      "pinned": false,
+      "at": "app/auth.onus:29:3"
+    },
+    {
+      "kind": "representation",
+      "text": "amount within ±2^53 - 1",
+      "def": "vendor.payments.charge",
+      "status": "checked",
+      "by": "z3: not provable",
+      "pinned": false,
+      "at": "vendor/payments.onus:20:3"
+    },
+    {
+      "kind": "refinement",
+      "text": "it >= 0",
+      "def": "vendor.payments.charge",
+      "status": "proved",
+      "by": "z3",
+      "pinned": false,
+      "at": "vendor/payments.onus:39:64"
+    },
+    {
+      "kind": "ensures",
+      "text": "result == (len(xs: xs) == 0)",
+      "def": "std.list.is_empty",
+      "status": "proved",
+      "by": "z3",
+      "pinned": false,
+      "at": "onus:std/list.onus:12:3"
+    }
+  ],
+  "obligation_coverage": {
+    "proved": 8,
+    "checked": 0,
+    "checked_exercised": 0,
+    "assumptions": 3,
+    "assumptions_verifiable": 1,
+    "assumptions_verified": 1,
+    "mutations_detected": 0,
+    "mutations_surviving": 0
+  },
+  "ok": true
+}

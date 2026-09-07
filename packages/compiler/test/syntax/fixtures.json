@@ -1,0 +1,5 @@
+{
+  "kind": "diagnostics",
+  "to": "canonical",
+  "covers": ["E00"]
+}

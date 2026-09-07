@@ -1,0 +1,3 @@
+tokens: ( - [ assume exists fake false fn for forall ident if it let literal:duration literal:float literal:int literal:text loop match not old recover result return true try type-ident var { }
+expected: (none)
+in scope: xs, ratio, flag, total

@@ -1,0 +1,36 @@
+module mandelbrot
+import std.io
+
+type Iter = Int where 0 <= it and it <= 10000
+
+type Coord = Int where 0 <= it
+
+record Viewport {
+  x_min: Float
+  x_max: Float where it > x_min
+  y_min: Float
+  y_max: Float where it > y_min
+}
+
+pub fn escape_count(cx: Float, cy: Float, limit: Iter) -> Iter
+  requires limit > 0
+  ensures result <= limit
+{ ... }
+
+example escape_count {
+  escape_count(cx: 0.0, cy: 0.0, limit: 100) == 100
+  escape_count(cx: 2.0, cy: 2.0, limit: 100) == 1
+}
+
+property escape_bounded(cx: Float, cy: Float, limit: Iter where it > 0) {
+  escape_count(cx: cx, cy: cy, limit: limit) <= limit
+}
+
+pub fn render(
+  view: Viewport,
+  width: Coord where it > 0,
+  height: Coord where it > 0,
+  limit: Iter where it > 0
+) -> Grid[Iter, width, height] may alloc { ... }
+
+pub fn main(args: List[Text], files: io.Files) -> Result[Unit, io.Error] may io.file, alloc { ... }

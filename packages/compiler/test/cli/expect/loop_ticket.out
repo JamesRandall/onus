@@ -1,0 +1,3 @@
+change opened: 1 iteration, 0 mechanical repairs, 0 escalation steps, 1 proposal, <n> tokens
+  proposal add_precondition for calc.clamp: an empty range has no clamp
+  .onus/changes/task_test/change.json

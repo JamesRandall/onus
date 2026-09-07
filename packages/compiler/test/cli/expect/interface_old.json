@@ -1,0 +1,572 @@
+{
+  "module": "recursion",
+  "hash": "b3:a7921a6db306a36f702bc6b5cadc7084c65eec6351d1c7745c08fc57de665b67",
+  "imports": [],
+  "items": [
+    {
+      "effects": [
+        "panic"
+      ],
+      "claims": [],
+      "contracts": [
+        {
+          "kind": "decreases",
+          "text": "n",
+          "pinned": false,
+          "status": "checked",
+          "sites": 2,
+          "checked_at": "recursion.onus:10:10"
+        }
+      ],
+      "examples": [],
+      "properties": [],
+      "assumes": [],
+      "recovers": [],
+      "obligations": {
+        "proved": 4,
+        "checked": 1,
+        "assumed": 0,
+        "failed": 0
+      },
+      "at": {
+        "file": "recursion.onus",
+        "span": [
+          [
+            4,
+            1
+          ],
+          [
+            11,
+            2
+          ]
+        ]
+      },
+      "kind": "fn",
+      "name": "climb",
+      "visibility": "private",
+      "signature": "fn climb(n: Int where 0 <= it and it <= 10) -> Int may panic"
+    },
+    {
+      "effects": [],
+      "claims": [],
+      "contracts": [
+        {
+          "kind": "decreases",
+          "text": "n",
+          "pinned": false,
+          "status": "proved",
+          "sites": 2
+        }
+      ],
+      "examples": [],
+      "properties": [],
+      "assumes": [],
+      "recovers": [],
+      "obligations": {
+        "proved": 3,
+        "checked": 2,
+        "assumed": 0,
+        "failed": 0
+      },
+      "at": {
+        "file": "recursion.onus",
+        "span": [
+          [
+            13,
+            1
+          ],
+          [
+            20,
+            2
+          ]
+        ]
+      },
+      "kind": "fn",
+      "name": "countdown",
+      "visibility": "private",
+      "signature": "fn countdown(n: Int where it >= 0) -> Int"
+    },
+    {
+      "effects": [],
+      "claims": [],
+      "contracts": [],
+      "examples": [],
+      "properties": [],
+      "assumes": [],
+      "recovers": [
+        {
+          "def": "caught",
+          "at": {
+            "file": "recursion.onus",
+            "span": [
+              [
+                23,
+                34
+              ],
+              [
+                25,
+                4
+              ]
+            ]
+          }
+        }
+      ],
+      "obligations": {
+        "proved": 1,
+        "checked": 0,
+        "assumed": 0,
+        "failed": 0
+      },
+      "at": {
+        "file": "recursion.onus",
+        "span": [
+          [
+            22,
+            1
+          ],
+          [
+            27,
+            2
+          ]
+        ]
+      },
+      "kind": "fn",
+      "name": "caught",
+      "visibility": "private",
+      "signature": "fn caught() -> Result[Int, Panicked]"
+    },
+    {
+      "effects": [],
+      "claims": [],
+      "contracts": [],
+      "examples": [
+        {
+          "name": "a_bad_measure_panics",
+          "status": "deferred",
+          "at": {
+            "file": "recursion.onus",
+            "span": [
+              [
+                29,
+                1
+              ],
+              [
+                31,
+                2
+              ]
+            ]
+          }
+        }
+      ],
+      "properties": [],
+      "assumes": [],
+      "recovers": [],
+      "obligations": {
+        "proved": 0,
+        "checked": 1,
+        "assumed": 0,
+        "failed": 0
+      },
+      "at": {
+        "file": "recursion.onus",
+        "span": [
+          [
+            29,
+            1
+          ],
+          [
+            31,
+            2
+          ]
+        ]
+      },
+      "kind": "example",
+      "name": "a_bad_measure_panics",
+      "visibility": "private",
+      "signature": "example a_bad_measure_panics {\n  caught() is Err\n}"
+    },
+    {
+      "effects": [],
+      "claims": [],
+      "contracts": [],
+      "examples": [
+        {
+          "name": "a_good_measure_recurses",
+          "status": "passed",
+          "at": {
+            "file": "recursion.onus",
+            "span": [
+              [
+                33,
+                1
+              ],
+              [
+                35,
+                2
+              ]
+            ]
+          }
+        }
+      ],
+      "properties": [],
+      "assumes": [],
+      "recovers": [],
+      "obligations": {
+        "proved": 1,
+        "checked": 1,
+        "assumed": 0,
+        "failed": 0
+      },
+      "at": {
+        "file": "recursion.onus",
+        "span": [
+          [
+            33,
+            1
+          ],
+          [
+            35,
+            2
+          ]
+        ]
+      },
+      "kind": "example",
+      "name": "a_good_measure_recurses",
+      "visibility": "private",
+      "signature": "example a_good_measure_recurses {\n  countdown(n: 5) == 0\n}"
+    }
+  ],
+  "assumes": [],
+  "recovers": [
+    {
+      "def": "caught",
+      "at": {
+        "file": "recursion.onus",
+        "span": [
+          [
+            23,
+            34
+          ],
+          [
+            25,
+            4
+          ]
+        ]
+      }
+    }
+  ],
+  "sealed_types": [],
+  "test_module": false,
+  "obligations": {
+    "proved": 9,
+    "checked": 5,
+    "assumed": 0,
+    "failed": 0
+  },
+  "ledger": [
+    {
+      "kind": "decreases",
+      "text": "n >= 0 at entry",
+      "def": "climb",
+      "status": "proved",
+      "by": "z3",
+      "pinned": false,
+      "at": {
+        "file": "recursion.onus",
+        "span": [
+          [
+            5,
+            3
+          ],
+          [
+            5,
+            14
+          ]
+        ]
+      }
+    },
+    {
+      "kind": "representation",
+      "text": "n within ±2^53 - 1",
+      "def": "climb",
+      "status": "proved",
+      "by": "z3",
+      "pinned": false,
+      "at": {
+        "file": "recursion.onus",
+        "span": [
+          [
+            4,
+            10
+          ],
+          [
+            4,
+            43
+          ]
+        ]
+      }
+    },
+    {
+      "kind": "refinement",
+      "text": "0 <= it and it <= 10",
+      "def": "climb",
+      "status": "proved",
+      "by": "z3",
+      "pinned": false,
+      "at": {
+        "file": "recursion.onus",
+        "span": [
+          [
+            10,
+            19
+          ],
+          [
+            10,
+            24
+          ]
+        ]
+      }
+    },
+    {
+      "kind": "decreases",
+      "text": "n at the call to climb",
+      "def": "climb",
+      "status": "checked",
+      "by": "z3: not provable",
+      "pinned": false,
+      "at": {
+        "file": "recursion.onus",
+        "span": [
+          [
+            10,
+            10
+          ],
+          [
+            10,
+            25
+          ]
+        ]
+      }
+    },
+    {
+      "kind": "overflow",
+      "text": "n + 1 within Int",
+      "def": "climb",
+      "status": "proved",
+      "by": "z3",
+      "pinned": false,
+      "at": {
+        "file": "recursion.onus",
+        "span": [
+          [
+            10,
+            19
+          ],
+          [
+            10,
+            24
+          ]
+        ]
+      }
+    },
+    {
+      "kind": "decreases",
+      "text": "n >= 0 at entry",
+      "def": "countdown",
+      "status": "proved",
+      "by": "z3",
+      "pinned": false,
+      "at": {
+        "file": "recursion.onus",
+        "span": [
+          [
+            14,
+            3
+          ],
+          [
+            14,
+            14
+          ]
+        ]
+      }
+    },
+    {
+      "kind": "representation",
+      "text": "n within ±2^53 - 1",
+      "def": "countdown",
+      "status": "checked",
+      "by": "z3: not provable",
+      "pinned": false,
+      "at": {
+        "file": "recursion.onus",
+        "span": [
+          [
+            13,
+            14
+          ],
+          [
+            13,
+            34
+          ]
+        ]
+      }
+    },
+    {
+      "kind": "refinement",
+      "text": "it >= 0",
+      "def": "countdown",
+      "status": "proved",
+      "by": "z3",
+      "pinned": false,
+      "at": {
+        "file": "recursion.onus",
+        "span": [
+          [
+            19,
+            23
+          ],
+          [
+            19,
+            28
+          ]
+        ]
+      }
+    },
+    {
+      "kind": "decreases",
+      "text": "n at the call to countdown",
+      "def": "countdown",
+      "status": "proved",
+      "by": "z3",
+      "pinned": false,
+      "at": {
+        "file": "recursion.onus",
+        "span": [
+          [
+            19,
+            10
+          ],
+          [
+            19,
+            29
+          ]
+        ]
+      }
+    },
+    {
+      "kind": "overflow",
+      "text": "n - 1 within Int",
+      "def": "countdown",
+      "status": "checked",
+      "by": "z3: not provable",
+      "pinned": false,
+      "at": {
+        "file": "recursion.onus",
+        "span": [
+          [
+            19,
+            23
+          ],
+          [
+            19,
+            28
+          ]
+        ]
+      }
+    },
+    {
+      "kind": "refinement",
+      "text": "0 <= it and it <= 10",
+      "def": "caught",
+      "status": "proved",
+      "by": "constant evaluation",
+      "pinned": false,
+      "at": {
+        "file": "recursion.onus",
+        "span": [
+          [
+            24,
+            14
+          ],
+          [
+            24,
+            15
+          ]
+        ]
+      }
+    },
+    {
+      "kind": "assertion",
+      "text": "caught() is Err",
+      "def": "a_bad_measure_panics",
+      "status": "checked",
+      "by": "run as a test",
+      "pinned": false,
+      "at": {
+        "file": "recursion.onus",
+        "span": [
+          [
+            30,
+            3
+          ],
+          [
+            30,
+            18
+          ]
+        ]
+      }
+    },
+    {
+      "kind": "refinement",
+      "text": "it >= 0",
+      "def": "a_good_measure_recurses",
+      "status": "proved",
+      "by": "z3",
+      "pinned": false,
+      "at": {
+        "file": "recursion.onus",
+        "span": [
+          [
+            34,
+            16
+          ],
+          [
+            34,
+            17
+          ]
+        ]
+      }
+    },
+    {
+      "kind": "assertion",
+      "text": "countdown(n: 5) == 0",
+      "def": "a_good_measure_recurses",
+      "status": "checked",
+      "by": "run as a test",
+      "pinned": false,
+      "at": {
+        "file": "recursion.onus",
+        "span": [
+          [
+            34,
+            3
+          ],
+          [
+            34,
+            23
+          ]
+        ]
+      }
+    }
+  ],
+  "obligation_coverage": {
+    "proved": 8,
+    "checked": 2,
+    "checked_exercised": 0,
+    "assumptions": 0,
+    "assumptions_verifiable": 0,
+    "assumptions_verified": 0,
+    "mutations_detected": 0,
+    "mutations_surviving": 0
+  }
+}
