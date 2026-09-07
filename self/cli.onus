@@ -22,6 +22,7 @@ import obligations
 import ledger
 import bundle
 import testcmd
+import regen
 import nextcmd
 import review
 import z3
@@ -35,14 +36,14 @@ import jsemit
 -- The `onus` command line in Onus (impl spec §2, M15.4; `cli/main.ts`):
 -- `check`, `fmt`, `build`, `run`, `test` (examples, properties and laws,
 -- docs/CHANGES.md item 189; `--assumptions`, item 191; `--mutate`, item
--- 192), `interface`, `path`, `review` (item 193) and `next` (item 195).
--- `loop` stays with the TypeScript `onus` until M15.6 completes.
+-- 192), `interface`, `path`, `review` (item 193), `next` (item 195) and
+-- `loop` (item 197): every command of the TypeScript `onus`.
 --
 -- Exit status, as the TypeScript command line reports it (docs/CHANGES.md
 -- item 187): 0 success, 1 diagnostics (or a breaking interface, or a native
 -- build that failed), 2 usage or I/O failure, and for `run` the program's own,
 -- since `run` hands the program the terminal through `io.exec`.
-pub const usage: Text = "usage:\n  onus check <file.onus>... [--json] [--root <dir>] [--stdlib <dir>] [--to <pass>] [--budget <ms>] [--ledger] [--no-cache]\n      report every diagnostic; exit 1 if any. Passes: parse, canonical, load, resolve, types, consteval, effects, contracts, claims, capabilities, verify, paths\n  onus fmt <file.onus>... [--stdout]\n      rewrite files in canonical form\n  onus build <entry.onus> [--out <dir>] [--emit js|ir] [--target js|native|wasm] [--root <dir>] [--stdlib <dir>] [--runtime <path>]\n      check, then emit JavaScript for every module into <dir> (default: <entry dir>/out); --target native compiles\n      an executable with clang into <dir>/native (§19); --emit ir prints the target-neutral form\n  onus run <entry.onus> [--out <dir>] [--target js|native|wasm] [-- args...]\n      build, then run the entry module's main\n  onus test <entry.onus> [--out <dir>] [--target js|native|all] [--root <dir>] [--stdlib <dir>]\n      build, then run the generated example, property and law tests (§20.6); --target all runs the examples on\n      both targets and reports any disagreement as E0801 (§19.5)\n  onus test <entry.onus> --mutate [--out <dir>] [--root <dir>] [--stdlib <dir>] [--budget <ms>]\n      weaken each contract in turn and report the weakenings no example, property or law detects (§20.4)\n  onus test <entry.onus> --assumptions [--env <test module>] [--out <dir>] [--root <dir>] [--stdlib <dir>]\n      run every verify block against capabilities from the environment module and record the results in .onus/ledger/ (§20.2–§20.3)\n  onus interface <file.onus> [--json] [--diff <old-interface.json>] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]\n      check, then print the entry module's interface: canonical source with bodies elided, or the §11.1 JSON;\n      with --diff, the changes since a previous interface document (§11.1, §15.1)\n  onus path <file.onus> [<name>] [--json] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]\n      check, then print the §9.1 report of the entry module's paths (or of the named one)\n  onus --version\n      print the compiler's version\n  onus review <entry.onus> [--out <dir>] [--against <interface.json>] [--root <dir>] [--stdlib <dir>] [--budget <ms>]\n      check, then write the review page and its bundle (§15) into <dir> (default: <entry dir>/review)\n  onus next <file.onus> --offset <n> [--json] [--root <dir>] [--stdlib <dir>]\n      the legal next tokens at the offset (in code points), the expected type there and the names in scope (§14)\n  loop: run the TypeScript `onus` until M15.6 completes\nThe standard library is --stdlib or ONUS_STDLIB, else the one the compiler carries; the runtime for build and run is --runtime or ONUS_RUNTIME, else the one the compiler carries, written beside the program.\n"
+pub const usage: Text = "usage:\n  onus check <file.onus>... [--json] [--root <dir>] [--stdlib <dir>] [--to <pass>] [--budget <ms>] [--ledger] [--no-cache]\n      report every diagnostic; exit 1 if any. Passes: parse, canonical, load, resolve, types, consteval, effects, contracts, claims, capabilities, verify, paths\n  onus fmt <file.onus>... [--stdout]\n      rewrite files in canonical form\n  onus build <entry.onus> [--out <dir>] [--emit js|ir] [--target js|native|wasm] [--root <dir>] [--stdlib <dir>] [--runtime <path>]\n      check, then emit JavaScript for every module into <dir> (default: <entry dir>/out); --target native compiles\n      an executable with clang into <dir>/native (§19); --emit ir prints the target-neutral form\n  onus run <entry.onus> [--out <dir>] [--target js|native|wasm] [-- args...]\n      build, then run the entry module's main\n  onus test <entry.onus> [--out <dir>] [--target js|native|all] [--root <dir>] [--stdlib <dir>]\n      build, then run the generated example, property and law tests (§20.6); --target all runs the examples on\n      both targets and reports any disagreement as E0801 (§19.5)\n  onus test <entry.onus> --mutate [--out <dir>] [--root <dir>] [--stdlib <dir>] [--budget <ms>]\n      weaken each contract in turn and report the weakenings no example, property or law detects (§20.4)\n  onus test <entry.onus> --assumptions [--env <test module>] [--out <dir>] [--root <dir>] [--stdlib <dir>]\n      run every verify block against capabilities from the environment module and record the results in .onus/ledger/ (§20.2–§20.3)\n  onus interface <file.onus> [--json] [--diff <old-interface.json>] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]\n      check, then print the entry module's interface: canonical source with bodies elided, or the §11.1 JSON;\n      with --diff, the changes since a previous interface document (§11.1, §15.1)\n  onus path <file.onus> [<name>] [--json] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]\n      check, then print the §9.1 report of the entry module's paths (or of the named one)\n  onus --version\n      print the compiler's version\n  onus review <entry.onus> [--out <dir>] [--against <interface.json>] [--root <dir>] [--stdlib <dir>] [--budget <ms>]\n      check, then write the review page and its bundle (§15) into <dir> (default: <entry dir>/review)\n  onus next <file.onus> --offset <n> [--json] [--root <dir>] [--stdlib <dir>]\n      the legal next tokens at the offset (in code points), the expected type there and the names in scope (§14)\n  onus loop run <task.json> [--root <dir>] [--model claude-code[:<model>]|anthropic[:<model>]|openrouter[:<model>]|scripted:<file.json>] [--budget <ms>] [--json] [--no-write]\n      run one task of the regeneration loop to its conclusion (docs/onus-loop-v0.md); exit 0 when a change is opened, 2 when blocked, 1 on error.\n      Keys are read from the environment, or from .env and .env.local in the project root and the current directory:\n      ANTHROPIC_API_KEY, OPENROUTER_API_KEY (and OPENROUTER_MODEL for the default model).\nThe standard library is --stdlib or ONUS_STDLIB, else the one the compiler carries; the runtime for build and run is --runtime or ONUS_RUNTIME, else the one the compiler carries, written beside the program.\n"
 
 pub const passes: List[Text] = [
   "parse",
@@ -71,7 +72,7 @@ fn skip() -> Unit {
 }
 
 fn is_value_flag(name: Text) -> Bool {
-  return name == "root" or name == "stdlib" or name == "to" or name == "out" or name == "emit" or name == "budget" or name == "offset" or name == "diff" or name == "against" or name == "env" or name == "target" or name == "runtime"
+  return name == "root" or name == "stdlib" or name == "to" or name == "out" or name == "emit" or name == "budget" or name == "offset" or name == "diff" or name == "against" or name == "env" or name == "target" or name == "runtime" or name == "model"
 }
 
 fn parse_args(argv: List[Text]) -> Args may alloc, mutate {
@@ -1185,6 +1186,206 @@ fn interface_command(
   return Ok(value: Unit)
 }
 
+-- `onus loop run <task.json>` (docs/onus-loop-v0.md §10; item 197): one task
+-- of the regeneration loop to its conclusion. Exit 0 when a change is opened,
+-- 2 when blocked, 1 on error; `watch` is not in v0.
+fn loop_command(
+  args: Args,
+  files: io.Files,
+  console: io.Console,
+  process: io.Process,
+  env: io.Env,
+  clock: io.Clock,
+  net: io.Net
+) -> Result[Int, io.Error] may io.file, io.env, io.clock, io.net, nondet, alloc, mutate {
+  if List.len(xs: args.files) < 2 or List.get(xs: args.files, i: 0) != "run" {
+    io.eprint(console: console, text: usage)
+    if List.len(xs: args.files) > 0 and List.get(xs: args.files, i: 0) == "watch" {
+      return Ok(value: 2)
+    }
+    return Ok(value: 1)
+  }
+  let task_path: Text = List.get(xs: args.files, i: 1)
+  var task_text: Text = ""
+  match io.read(files: files, path: task_path) with
+  | Err(error) -> {
+    io.eprint(
+      console: console,
+      text: "onus-loop: cannot read " ++ task_path ++ ": " ++ io_error_detail(e: error) ++ "\n"
+    )
+    return Ok(value: 1)
+  }
+  | Ok(value) -> task_text = value
+  var task_json: json.Json = json.JNull
+  match json.parse(t: task_text) with
+  | None -> {
+    io.eprint(console: console, text: "onus-loop: cannot read " ++ task_path ++ ": not JSON\n")
+    return Ok(value: 1)
+  }
+  | Some(value) -> task_json = value
+  var task: regen.Task = regen.Task {
+    id: "",
+    kind: "",
+    scope: [],
+    target: None,
+    counterexample: None,
+    budget: regen.Budget { iterations: 0, tokens: 0, wall_ms: 0 },
+    context_policy: "",
+    origin: None,
+    description: None,
+    helpers: false,
+    alternate_model: None
+  }
+  match regen.parse_task(j: task_json) with
+  | Err(error) -> {
+    io.eprint(console: console, text: "onus-loop: " ++ error ++ "\n")
+    return Ok(value: 1)
+  }
+  | Ok(value) -> task = value
+  let root: Text = value_or(args: args, name: "root", fallback: ".")
+  var model: regen.Model = regen.Scripted(answers: [])
+  match regen.model_from_spec(
+    spec: value_or(args: args, name: "model", fallback: "claude-code"),
+    env: env,
+    files: files,
+    env_dirs: [root, "."]
+  ) with
+  | Err(error) -> {
+    io.eprint(console: console, text: "onus-loop: " ++ error ++ "\n")
+    return Ok(value: 1)
+  }
+  | Ok(value) -> model = value
+  var budget: Int = 2000
+  match value(args: args, name: "budget") with
+  | Some(value) -> budget = parse_int_or(t: value, dflt: 2000)
+  | None -> skip()
+  var stdlib: Option[Text] = value(args: args, name: "stdlib")
+  if stdlib is None {
+    stdlib = io.get_env(env: env, name: "ONUS_STDLIB")
+  }
+  let rt: RuntimeChoice = runtime_choice(args: args, env: env)
+  let outcome: regen.Outcome = try regen.run_task(
+    task: task,
+    files: files,
+    console: console,
+    process: process,
+    net: net,
+    clock: clock,
+    opts: regen.Options {
+      root: root,
+      model: model,
+      tools: regen.Tools {
+        stdlib: stdlib,
+        runtime: rt.runtime,
+        bundled: rt.bundled,
+        budget_ms: budget
+      },
+      write: not flag(args: args, name: "no-write")
+    }
+  )
+  if outcome.status == "error" {
+    io.eprint(
+      console: console,
+      text: "onus-loop: " ++ value_or_text(o: outcome.error, dflt: "error") ++ "\n"
+    )
+    return Ok(value: 1)
+  }
+  match outcome.change with
+  | None -> skip()
+  | Some(value) -> {
+    if flag(args: args, name: "json") {
+      io.print(console: console, text: json.compact(j: value) ++ "\n")
+    } else {
+      let m: json.Json = json.at(j: value, key: "metrics")
+      var head: Text = "blocked (" ++ value_or_text(
+        o: str_or_none(j: json.at(j: value, key: "cause")),
+        dflt: "unknown"
+      ) ++ ")"
+      if json.str_at(j: value, key: "status") == "opened" {
+        head = "change opened"
+      }
+      io.print(
+        console: console,
+        text: head ++ ": " ++ counted(
+          n: json.int_at(j: m, key: "iterations"),
+          word: "iteration"
+        ) ++ ", " ++ counted(
+          n: json.int_at(j: m, key: "mechanical_repairs"),
+          word: "mechanical repair"
+        ) ++ ", " ++ counted(
+          n: json.int_at(j: m, key: "escalation_steps"),
+          word: "escalation step"
+        ) ++ ", " ++ counted(
+          n: json.int_at(j: m, key: "proposals"),
+          word: "proposal"
+        ) ++ ", " ++ Int.to_text(x: json.int_at(j: m, key: "tokens")) ++ " tokens\n"
+      )
+      for p: json.Json in json.list_at(j: value, key: "proposals") {
+        io.print(
+          console: console,
+          text: "  proposal " ++ json.str_at(j: p, key: "kind") ++ " for " ++ json.str_at(
+            j: p,
+            key: "def"
+          ) ++ ": " ++ json.str_at(j: p, key: "rationale") ++ "\n"
+        )
+      }
+      for f: json.Json in json.list_at(j: value, key: "audit") {
+        io.print(
+          console: console,
+          text: "  audit " ++ json.str_at(j: f, key: "finding") ++ ": " ++ json.str_at(
+            j: f,
+            key: "detail"
+          ) ++ "\n"
+        )
+      }
+      print_path(console: console, path: outcome.path)
+    }
+  }
+  if outcome.status == "change" {
+    return Ok(value: 0)
+  }
+  return Ok(value: 2)
+}
+
+fn parse_int_or(t: Text, dflt: Int) -> Int {
+  match Int.parse(t: t) with
+  | Some(value) -> return value
+  | None -> return dflt
+}
+
+fn print_path(console: io.Console, path: Option[Text]) -> Unit may io.file, alloc {
+  match path with
+  | Some(value) -> io.print(console: console, text: "  " ++ value ++ "\n")
+  | None -> skip()
+  return Unit
+}
+
+fn counted(n: Int, word: Text) -> Text may alloc {
+  if n == 1 {
+    return Int.to_text(x: n) ++ " " ++ word
+  }
+  return Int.to_text(x: n) ++ " " ++ word ++ "s"
+}
+
+fn value_or_text(o: Option[Text], dflt: Text) -> Text {
+  match o with
+  | Some(value) -> return value
+  | None -> return dflt
+}
+
+fn str_or_none(j: json.Json) -> Option[Text] {
+  match j with
+  | json.JString(value) -> return Some(value: value)
+  | _ -> return None
+}
+
+fn io_error_detail(e: io.Error) -> Text may alloc {
+  match e with
+  | NotFound(path) -> return "not found: " ++ path
+  | Denied(path) -> return "denied: " ++ path
+  | Other(detail) -> return detail
+}
+
 -- `onus next` (§14; item 195): the completion state at an offset of a file.
 fn next_command(
   args: Args,
@@ -1393,8 +1594,9 @@ pub fn main(
   console: io.Console,
   process: io.Process,
   env: io.Env,
-  clock: io.Clock
-) -> Result[Int, io.Error] may io.file, io.env, io.clock, nondet, alloc, mutate {
+  clock: io.Clock,
+  net: io.Net
+) -> Result[Int, io.Error] may io.file, io.env, io.clock, io.net, nondet, alloc, mutate {
   let a: Args = parse_args(argv: args)
   if flag(args: a, name: "version") {
     io.print(console: console, text: "onus " ++ bundle.version ++ "\n")
@@ -1463,6 +1665,17 @@ pub fn main(
           console: console,
           r: path_command(args: a, files: files, console: console, process: process, env: env)
         )
+      )
+    }
+    if value == "loop" {
+      return loop_command(
+        args: a,
+        files: files,
+        console: console,
+        process: process,
+        env: env,
+        clock: clock,
+        net: net
       )
     }
     if value == "next" {

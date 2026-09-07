@@ -79,15 +79,15 @@ describe('the command line in Onus (M15.4)', () => {
   const clang = findClang();
 
   /** Runs one command line with the same arguments on both sides; `--stdlib` and `--no-cache` are added to both. */
-  function both(args: readonly string[], cwd: { ts: string; onus: string } = { ts: repoRoot, onus: repoRoot }): { ts: Run; onus: Run } {
-    const common = [...args, '--stdlib', STDLIB_ROOT, '--no-cache'];
+  function both(args: readonly string[], cwd: { ts: string; onus: string } = { ts: repoRoot, onus: repoRoot }, extra: { ts: readonly string[]; onus: readonly string[] } = { ts: [], onus: [] }): { ts: Run; onus: Run } {
+    const common = ['--stdlib', STDLIB_ROOT, '--no-cache'];
     const run = (cmd: string, argv: string[], dir: string, env: NodeJS.ProcessEnv): Run => {
       const r = spawnSync(cmd, argv, { encoding: 'utf8', cwd: dir, env });
       return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', ok: r.status === 0, status: r.status };
     };
     return {
-      ts: run(process.execPath, [tsCli, ...common], cwd.ts, process.env),
-      onus: run(driver.cmd, [...driver.prefix, ...common], cwd.onus, { ...process.env, ONUS_RUNTIME: runtime }),
+      ts: run(process.execPath, [tsCli, ...args, ...extra.ts, ...common], cwd.ts, process.env),
+      onus: run(driver.cmd, [...driver.prefix, ...args, ...extra.onus, ...common], cwd.onus, { ...process.env, ONUS_RUNTIME: runtime }),
     };
   }
 
@@ -197,7 +197,8 @@ describe('the command line in Onus (M15.4)', () => {
 
   /** A program copied into two fresh directories so that `.onus/ledger` lands there rather than in the tree. */
   function staged(source: string, name: string): { ts: string; onus: string } {
-    const dirs = { ts: fresh(`${name}-ts`), onus: fresh(`${name}-onus`) };
+    // Directory names of equal length: a loop's token estimate counts the absolute paths in its prompts.
+    const dirs = { ts: fresh(`${name}-ts`), onus: fresh(`${name}-on`) };
     for (const d of [dirs.ts, dirs.onus]) writeFileSync(join(d, basename(source)), readFileSync(source, 'utf8'));
     return dirs;
   }
@@ -378,6 +379,63 @@ describe('the command line in Onus (M15.4)', () => {
     agree(both(['next', 'positions.onus', '--offset', '-1'], cwd));
     agree(both(['next', 'positions.onus', '--offset', 'x'], cwd));
     agree(both(['next', 'positions.onus'], cwd));
+  }, 900000);
+
+  it.skipIf(findZ3() === null)('loop run: the regeneration loop with a scripted model, on both compilers (item 197)', () => {
+    // The loop's own fixture and answers (packages/loop/test): a wrong body, then a right one.
+    const sig = 'pub fn clamp(x: Int, lo: Int, hi: Int where lo <= it) -> Int\n  ensures proved lo <= result and result <= hi';
+    const wrong = `\`\`\`onus\n${sig}\n{\n  return x\n}\n\`\`\``;
+    const right = `\`\`\`onus\n${sig}\n{\n  if x < lo {\n    return lo\n  }\n  if x > hi {\n    return hi\n  }\n  return x\n}\n\`\`\``;
+    const stage = (name: string, answers: string[], task: Record<string, unknown>): { ts: string; onus: string } => {
+      const dirs = staged(join(repoRoot, 'packages/loop/test/fixtures/implement/calc.onus'), name);
+      for (const d of [dirs.ts, dirs.onus]) {
+        writeFileSync(join(d, 'answers.json'), JSON.stringify(answers));
+        writeFileSync(join(d, 'task.json'), JSON.stringify(task));
+      }
+      return dirs;
+    };
+    // change.json without the run's times, and with the TypeScript loop's absolute paths made relative.
+    const normalised = (dir: string, text: string): string =>
+      text
+        .split(dir + '/')
+        .join('')
+        .replace(/"at":\s*"\d{4}-[^"]*"/g, '"at":"<at>"')
+        .replace(/"ms":\s*\d+/g, '"ms":0')
+        .replace(/"prompt_hash":\s*"[^"]*"/g, '"prompt_hash":"<hash>"');
+    const compare = (dirs: { ts: string; onus: string }): void => {
+      const ts = readFileSync(join(dirs.ts, '.onus', 'changes', 'task_test', 'change.json'), 'utf8');
+      const onus = readFileSync(join(dirs.onus, '.onus', 'changes', 'task_test', 'change.json'), 'utf8');
+      expect(normalised(dirs.onus, onus)).toBe(normalised(dirs.ts, ts));
+    };
+    const implement = stage('loop-implement', [wrong, right], { id: 'task_test', kind: 'implement', scope: ['calc'], target: { def: 'calc.clamp' } });
+    const rooted = (dirs: { ts: string; onus: string }): { ts: string[]; onus: string[] } => ({ ts: ['--root', dirs.ts], onus: ['--root', dirs.onus] });
+    const r = both(['loop', 'run', 'task.json', '--model', 'scripted:answers.json', '--budget', '2000'], implement, rooted(implement));
+    expect(r.ts.status, r.ts.stdout + r.ts.stderr).toBe(0);
+    expect(r.onus.status, r.onus.stdout + r.onus.stderr).toBe(0);
+    expect(r.onus.stdout.split(implement.onus + '/').join('')).toBe(r.ts.stdout.split(implement.ts + '/').join(''));
+    expect(r.ts.stdout).toContain('change opened: 2 iterations');
+    compare(implement);
+    expect(readFileSync(join(implement.onus, 'calc.onus'), 'utf8')).toContain('if x < lo {');
+    // A stall walks the ladder and is blocked; the file is left as found.
+    const stall = stage('loop-stall', [wrong], { id: 'task_test', kind: 'implement', scope: ['calc'], target: { def: 'calc.clamp' }, budget: { iterations: 4, tokens: 400000, wall_ms: 900000 } });
+    const s = both(['loop', 'run', 'task.json', '--model', 'scripted:answers.json', '--budget', '2000', '--json'], stall, rooted(stall));
+    expect(s.ts.status).toBe(2);
+    expect(s.onus.status).toBe(2);
+    expect(normalised(stall.onus, s.onus.stdout)).toBe(normalised(stall.ts, s.ts.stdout));
+    compare(stall);
+    expect(readFileSync(join(stall.onus, 'calc.onus'), 'utf8')).toContain('{ ... }');
+    // A ticket is a proposal, never an edit; an invalid task and an unknown model are refused.
+    const answer = 'The clamp should accept an empty range.\n{"kind": "add_precondition", "def": "calc.clamp", "current": null, "proposed": "requires lo <= hi", "rationale": "an empty range has no clamp"}';
+    const ticket = stage('loop-ticket', [answer], { id: 'task_test', kind: 'ticket', scope: ['calc'], description: 'clamp misbehaves on empty ranges' });
+    const t = both(['loop', 'run', 'task.json', '--model', 'scripted:answers.json'], ticket, rooted(ticket));
+    expect(t.ts.status).toBe(0);
+    expect(t.onus.status).toBe(0);
+    expect(t.onus.stdout.split(ticket.onus + '/').join('')).toBe(t.ts.stdout.split(ticket.ts + '/').join(''));
+    compare(ticket);
+    const bad = stage('loop-bad', [], { id: 'task_test', kind: 'polish', scope: ['calc'] });
+    expect(both(['loop', 'run', 'task.json', '--model', 'scripted:answers.json'], bad, rooted(bad)).onus.status).toBe(1);
+    expect(both(['loop', 'run', 'task.json', '--model', 'nowhere'], implement, rooted(implement)).onus.status).toBe(1);
+    expect(both(['loop', 'watch'], implement).onus.status).toBe(2);
   }, 900000);
 
   it.skipIf(clang === null)('the released compiler needs no repository: no --stdlib, no --runtime, no node on the path (item 180)', () => {

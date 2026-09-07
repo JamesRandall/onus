@@ -8,6 +8,7 @@ export * as duration from './duration.js';
 export * as grid from './grid.js';
 export * as map from './map.js';
 export * as hash from './hash.js';
+export * as http from './http.js';
 export * as io from './io.js';
 export * as sql from './sql.js';
 export * as typeinfo from './typeinfo.js';

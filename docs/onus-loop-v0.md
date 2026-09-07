@@ -168,7 +168,7 @@ Each finding becomes a proposal. A module that survives regeneration with no fin
 
 ## 10. Interfaces
 
-- `onus loop run <task.json>` — runs one task to conclusion; exits 0 on change opened, 2 on blocked, 1 on error.
+- `onus loop run <task.json>` — runs one task to conclusion; exits 0 on change opened, 2 on blocked, 1 on error. <!-- changed: 2026-09-07, docs/CHANGES.md item 197 — the loop runs inside the compiler in Onus (`self/regen.onus`); the TypeScript `onus` still forwards to `packages/loop` until M15.7 -->
 - `onus loop watch` — consumes tasks from intake as they arrive; concurrency limited by repository setting; tasks with overlapping scope are serialised. <!-- changed: 2026-09-05, item 117 — deferred with intake; `onus loop run` forwards to `onus-loop run` in `packages/loop` -->
 - Task schema, change schema and proposal schema are versioned JSON schemas in `packages/loop/schema/`.
 - Model access is behind one interface: `generate(context) → text`, with an optional `next(offset)` hook for constrained decoding. First implementation: the Anthropic API; second: Claude Code as a subprocess, for repositories that already use it.

@@ -2081,6 +2081,85 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     5 checked representations). Fixed point reached from `bootstrap/`,
     native stage agrees; promoted. `loop` remains.
 
+196. **`std.http` (§19.1; an M15.6 language change).** `http.request(net:
+    io.Net, method: Text, url: Text, headers: List[Text], body: Text,
+    timeout_ms: Int) -> Result[http.Response, io.Error] may io.net, nondet,
+    alloc` sends one request and waits for the whole response, `Response
+    {status, body}`; `http.post` and `http.get` are the two shapes over it.
+    Any HTTP status is a response; a host that cannot be reached is
+    `NotFound` naming the URL, a request that does not complete within
+    `timeout_ms` (0 for no limit) is `Other`, as is anything else that
+    keeps the request from completing. The regeneration loop in Onus (item
+    197) needs it for the Anthropic and OpenRouter providers; the loop in
+    TypeScript used `fetch`. The JavaScript runtime is synchronous, so the
+    request runs in a child `node` doing `fetch`, the request on its
+    standard input and the answer one JSON line back; the native runtime
+    runs `curl` with its options in a configuration file (the headers,
+    which carry keys, never touch a command line) and reads the status
+    code `--write-out` appends to the captured body; `curl` must be on the
+    path, as `clang` and `z3` must. Neither compiler changes: the
+    intrinsic is declared in `std.http` and both emitters map it as they
+    map every primitive (`$rt.http.request`, `@onus_http_request`).
+    Fixture: `test/native/http_native.onus`, a `main` that posts to a
+    server the test starts on a local port, gets a missing path and a port
+    nothing listens on, with the same output on both targets. Process:
+    through the skill with the chain's native stage and the native
+    differentials; `self/bundle.onus` regenerated; `self/` does not use
+    `std.http` in this change.
+
+197. **`onus loop` in Onus (M15.6; docs/onus-loop-v0.md).** `self/regen.onus`
+    (new; `packages/loop/src`: `task`, `env`, `model`, `edit`, `project`,
+    `context`, `change`, `cycle`) and `self/cli.onus` provide `onus loop run
+    <task.json> [--root <dir>] [--model <spec>] [--budget <ms>] [--json]
+    [--no-write]`, the regeneration loop of the loop spec run in the
+    compiler's own process: the task validated as `task.schema.json`
+    admits it (by hand: the same required keys, enumerations, minimums and
+    forbidden extras), the scope read and put in canonical form, the
+    baseline checked through paths with the working texts as entries (an
+    import of a scope module finds the entry already registered, so the
+    texts overlay the tree as the TypeScript `readFile` hook did), the
+    targets selected, then the cycle of §4 — the model context of §3
+    assembled from the compiler's own interface documents and reports, the
+    answer's fenced Onus parsed as a fragment, the target bodies spliced
+    under their baseline signatures and the file put back in canonical
+    form, the check with up to three rounds of high-confidence repairs
+    inside the target bodies, the classification, the ladder of §4.1, the
+    budgets of §4.2 — and the conclusion: the bodies written and
+    `change.json` under `.onus/changes/<task>/`, or a blocked report with
+    the last diagnostics and the best attempt. Proposals (§5), the
+    regeneration audit (§8), tickets and the syntax notes with the legal
+    tokens at the offending line (`onus next`, item 195) are as the
+    TypeScript loop has them; `change.json` is the same document, byte
+    for byte but for the time and the milliseconds, the prompt hash
+    carrying the `b3:` prefix of the compiler's hashes. The model sits
+    behind `generate`: a scripted list of answers (the tests), Claude Code
+    as a subprocess (`sh` unsets the `CLAUDE*` markers so a nested run may
+    start), and the Anthropic and OpenRouter APIs over `std.http` (item
+    196), the keys from the environment or `.env`/`.env.local` in the
+    root and the working directory, never a command line. Two deliberate
+    differences: `--root` is taken as given rather than resolved, so the
+    files a change names are as the root names them (the differential
+    passes each side its own absolute root), and the model's request
+    timeout is the loop's constant on every provider. The command line's
+    `main` takes `io.Net` for it. Fixtures: `test/self/cli.test.ts` gains
+    `loop run` on the loop package's `calc` fixture with a scripted model:
+    a wrong body then a right one opening a change in two iterations
+    (standard output, the written body and `change.json` identical), a
+    stall walking the ladder to a blocked report (`--json` identical), a
+    ticket answered with a proposal and no edit, an invalid task, an
+    unknown model and `watch`. Review artefacts under
+    `.onus/changes/197/`: the interface diff of `cli` is `loop_command`
+    and six helpers added, `main` taking `net: io.Net` and claiming
+    `io.net`, and the usage text; the ledger delta is `cli` 62 → 68 (35
+    proved, 33 checked: three index refinements proved, three
+    representations checked) and `regen` new with 218 obligations (58
+    proved, 160 checked: the representation and overflow obligations of
+    offsets, counters and budgets throughout, as everywhere in `self/`).
+    Fixed point reached from `bootstrap/`, native stage agrees; promoted.
+    With it every command of the TypeScript `onus` has its counterpart in
+    Onus: M15.6 is complete, and M15.7 — retiring the TypeScript compiler
+    behind a fixture runner in Onus — is next.
+
 ### Deferred, not changed
 
 - Decided 2026-09-06, to apply in M15.5: generics compile natively by

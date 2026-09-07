@@ -5,7 +5,9 @@
  * `Dict` keyed by a record is E0800. Skipped when `clang` is not on PATH.
  */
 import { describe, expect, it } from 'vitest';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -119,6 +121,75 @@ describe.skipIf(clang === null)('native target (§19)', () => {
     expect(r.stderr).toBe('');
     expect(r.stdout).toBe('ok\n');
     expect(r.status).toBe(0);
+  }, 120000);
+
+  /** A local HTTP server for the `std.http` fixture: echoes a POST as JSON, answers 404 elsewhere. */
+  function localServer(): Promise<{ server: Server; url: string }> {
+    return new Promise((resolve) => {
+      const server = createServer((req, res) => {
+        let body = '';
+        req.setEncoding('utf8');
+        req.on('data', (chunk: string) => {
+          body += chunk;
+        });
+        req.on('end', () => {
+          if (req.method === 'POST' && req.url === '/echo') {
+            res.writeHead(200, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ method: req.method, path: req.url, 'x-onus': req.headers['x-onus'] ?? null, body }));
+          } else {
+            res.writeHead(404, { 'content-type': 'text/plain' });
+            res.end('no such thing');
+          }
+        });
+      });
+      server.listen(0, '127.0.0.1', () => {
+        const address = server.address() as AddressInfo;
+        resolve({ server, url: `http://127.0.0.1:${address.port}` });
+      });
+    });
+  }
+
+  /** Runs a program without blocking the event loop, which the test's own server needs. */
+  function runAsync(cmd: string, args: readonly string[]): Promise<{ stdout: string; stderr: string; status: number | null }> {
+    return new Promise((resolve) => {
+      const child = spawn(cmd, args);
+      let stdout = '';
+      let stderr = '';
+      child.stdout.setEncoding('utf8');
+      child.stderr.setEncoding('utf8');
+      child.stdout.on('data', (d: string) => {
+        stdout += d;
+      });
+      child.stderr.on('data', (d: string) => {
+        stderr += d;
+      });
+      child.on('close', (status) => resolve({ stdout, stderr, status }));
+    });
+  }
+
+  it('`http.request` posts and gets on both targets, and an unreachable host is NotFound (item 196)', async () => {
+    const out = fresh('http');
+    const entry = join(repoRoot, 'packages', 'compiler', 'test', 'native', 'http_native.onus');
+    const ctx = checked(entry);
+    const js = emitAll(ctx, { outDir: out, ts: false });
+    if (js.launcher === null) throw new Error('js build failed');
+    const { server, url } = await localServer();
+    try {
+      const expected = `status 200\n{"method":"POST","path":"/echo","x-onus":"fixture","body":"{\\"n\\": 1}"}\nstatus 404 no such thing\nunreachable: not found http://127.0.0.1:9/\n`;
+      const jsRun = await runAsync(process.execPath, [js.launcher, url]);
+      expect(jsRun.stderr).toBe('');
+      expect(jsRun.stdout).toBe(expected);
+      expect(jsRun.status).toBe(0);
+      const native = buildNative(ctx, { outDir: out });
+      expect(ctx.sink.all().map((d) => toText(ctx, d))).toEqual([]);
+      if (native.exe === null) throw new Error('native build failed');
+      const r = await runAsync(native.exe, [url]);
+      expect(r.stderr).toBe('');
+      expect(r.stdout).toBe(expected);
+      expect(r.status).toBe(0);
+    } finally {
+      server.close();
+    }
   }, 120000);
 
   it('`io.exec` hands the child the standard streams on both targets', () => {

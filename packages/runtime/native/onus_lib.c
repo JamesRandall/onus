@@ -460,6 +460,126 @@ onus_slot onus_io_run(onus_slot process, onus_slot program, onus_slot args, onus
 
 #endif
 
+/* ---------------------------------------------------------------------------
+ * std.http (docs/CHANGES.md item 196): one request through `curl`, its
+ * options in a configuration file (the headers never touch a command line),
+ * the status code appended to the captured body by `--write-out`.
+ * ------------------------------------------------------------------------- */
+
+static void config_quoted(buf *b, const char *bytes, int64_t len) {
+  buf_push(b, "\"", 1);
+  for (int64_t i = 0; i < len; i++) {
+    char c = bytes[i];
+    if (c == '\\' || c == '"') buf_push(b, "\\", 1);
+    if (c == '\n') { buf_push(b, "\\n", 2); continue; }
+    buf_push(b, &c, 1);
+  }
+  buf_push(b, "\"\n", 2);
+}
+
+#ifdef __wasi__
+onus_slot onus_http_request(onus_slot net, onus_slot method, onus_slot url, onus_slot headers, onus_slot body, onus_slot timeout_ms) {
+  (void)net; (void)method; (void)url; (void)headers; (void)body; (void)timeout_ms;
+  return onus_err(other_error("the network is not available on this target"));
+}
+#else
+onus_slot onus_http_request(onus_slot net, onus_slot method, onus_slot url, onus_slot headers, onus_slot body, onus_slot timeout_ms) {
+  (void)net;
+  onus_text *m = onus_slot_ptr(method);
+  onus_text *u = onus_slot_ptr(url);
+  onus_list *hs = onus_slot_ptr(headers);
+  onus_text *payload = onus_slot_ptr(body);
+  const char *tmp = getenv("TMPDIR");
+  if (tmp == NULL || tmp[0] == 0) tmp = "/tmp";
+  char dir[4096];
+  snprintf(dir, sizeof dir, "%s/onus-http-XXXXXX", tmp);
+  if (mkdtemp(dir) == NULL) return onus_err(other_error(strerror(errno)));
+  char body_path[4200], cfg_path[4200];
+  snprintf(body_path, sizeof body_path, "%s/body", dir);
+  snprintf(cfg_path, sizeof cfg_path, "%s/config", dir);
+  FILE *bf = fopen(body_path, "wb");
+  if (bf == NULL) { rmdir(dir); return onus_err(other_error(strerror(errno))); }
+  fwrite(payload->bytes, 1, (size_t)payload->len, bf);
+  fclose(bf);
+  buf cfg = {NULL, 0, 0};
+  buf_push(&cfg, "request = ", 10);
+  config_quoted(&cfg, m->bytes, m->len);
+  buf_push(&cfg, "url = ", 6);
+  config_quoted(&cfg, u->bytes, u->len);
+  for (int64_t i = 0; i < hs->len; i++) {
+    onus_text *h = onus_slot_ptr(hs->slots[i]);
+    buf_push(&cfg, "header = ", 9);
+    config_quoted(&cfg, h->bytes, h->len);
+  }
+  int has_body = !(m->len == 3 && memcmp(m->bytes, "GET", 3) == 0) && !(m->len == 4 && memcmp(m->bytes, "HEAD", 4) == 0);
+  if (has_body) {
+    buf_push(&cfg, "data-binary = ", 14);
+    char at[4300];
+    snprintf(at, sizeof at, "@%s", body_path);
+    config_quoted(&cfg, at, (int64_t)strlen(at));
+  }
+  if (timeout_ms > 0) {
+    char line[64];
+    snprintf(line, sizeof line, "max-time = %lld\n", (long long)((timeout_ms + 999) / 1000));
+    buf_push(&cfg, line, (int64_t)strlen(line));
+  }
+  const char *tail = "silent\nshow-error\nwrite-out = \"\\n%{http_code}\"\n";
+  buf_push(&cfg, tail, (int64_t)strlen(tail));
+  FILE *cf = fopen(cfg_path, "wb");
+  if (cf == NULL) { unlink(body_path); rmdir(dir); return onus_err(other_error(strerror(errno))); }
+  fwrite(cfg.data, 1, (size_t)cfg.len, cf);
+  fclose(cf);
+  onus_list *args = onus_rt_list_new(2);
+  args->slots[0] = onus_ptr_slot(onus_text_from("-K", 2));
+  args->slots[1] = onus_ptr_slot(onus_text_from(cfg_path, (int64_t)strlen(cfg_path)));
+  onus_slot ran = onus_io_run(0, onus_ptr_slot(onus_text_from("curl", 4)), onus_ptr_slot(args), onus_ptr_slot(onus_text_from("", 0)), timeout_ms > 0 ? timeout_ms + 5000 : 0);
+  unlink(cfg_path);
+  unlink(body_path);
+  rmdir(dir);
+  onus_slot *r = onus_slot_ptr(ran);
+  if (r[0] != 0) {
+    /* Err: curl itself could not run. */
+    return onus_err(other_error("curl is not on PATH"));
+  }
+  onus_slot *out = onus_slot_ptr(r[1]);
+  int64_t status = out[0];
+  onus_text *so = onus_slot_ptr(out[1]);
+  onus_text *se = onus_slot_ptr(out[2]);
+  if (status == 28) {
+    buf msg = {NULL, 0, 0};
+    char num[32];
+    snprintf(num, sizeof num, "%lld", (long long)timeout_ms);
+    buf_push(&msg, "the request to ", 15);
+    buf_push(&msg, u->bytes, u->len);
+    buf_push(&msg, " did not complete within ", 25);
+    buf_push(&msg, num, (int64_t)strlen(num));
+    buf_push(&msg, " ms", 3);
+    onus_slot d = buf_text(&msg);
+    return onus_err(onus_ptr_slot(onus_union_new(2, 1, &d)));
+  }
+  if (status == 6 || status == 7) {
+    onus_slot p = onus_ptr_slot(onus_text_from(u->bytes, u->len));
+    return onus_err(onus_ptr_slot(onus_union_new(0, 1, &p)));
+  }
+  if (status != 0) {
+    int64_t n = se->len;
+    while (n > 0 && (se->bytes[n - 1] == '\n' || se->bytes[n - 1] == ' ')) n--;
+    onus_slot d = onus_ptr_slot(onus_text_from(se->bytes, n));
+    return onus_err(onus_ptr_slot(onus_union_new(2, 1, &d)));
+  }
+  /* The body, then a newline and the status code. */
+  int64_t cut = so->len;
+  while (cut > 0 && so->bytes[cut - 1] != '\n') cut--;
+  int64_t code = 0;
+  for (int64_t i = cut; i < so->len; i++) if (so->bytes[i] >= '0' && so->bytes[i] <= '9') code = code * 10 + (so->bytes[i] - '0');
+  int64_t body_len = cut > 0 ? cut - 1 : 0;
+  onus_slot *rec = onus_alloc(2 * (int64_t)sizeof(onus_slot));
+  rec[0] = code;
+  rec[1] = onus_ptr_slot(onus_text_from(so->bytes, body_len));
+  return onus_ok(onus_ptr_slot(rec));
+}
+#endif
+
 #ifdef __wasi__
 onus_slot onus_io_exec(onus_slot process, onus_slot program, onus_slot args) {
   (void)process; (void)program; (void)args;
