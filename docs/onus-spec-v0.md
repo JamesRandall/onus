@@ -824,7 +824,7 @@ Bodies are not in the interface. If an interface is insufficient to trust a modu
 }
 ```
 
-Every item carries its own obligation counts; the module totals are the sum. Diffing two interface documents is how the compiler enforces the compatibility rule below. <!-- changed: M10, docs/CHANGES.md items 84–85 — each item carries `at`; `onus interface --diff` produces the diff document, deciding compatibility textually in v0 --> <!-- changed: 2026-09-07, docs/CHANGE-LOG-03.md, docs/CHANGES.md item 202 — the document carries the module's `zone`, and each item `zone` and `hardened` (§21.5) -->
+Every item carries its own obligation counts; the module totals are the sum. Diffing two interface documents is how the compiler enforces the compatibility rule below. <!-- changed: M10, docs/CHANGES.md items 84–85 — each item carries `at`; `onus interface --diff` produces the diff document, deciding compatibility textually in v0 --> <!-- changed: 2026-09-07, docs/CHANGE-LOG-03.md, docs/CHANGES.md item 202 — the document carries the module's `zone`, and each item `zone` and `hardened` (§21.5) --> <!-- changed: 2026-09-08, docs/CHANGES.md item 207 — each function item carries `callees`, the sorted qualified names of the functions its body calls, and the interface diff reports callees added and removed (compatible), so the review tool's diff can surface a body that is green but different -->
 
 Visibility: items are private unless marked `pub`. Private items may have weaker contracts; public ones may not be weakened once published without a major version change (the compiler diffs interfaces and refuses a compatible-version bump that weakens a contract or widens an effect set).
 

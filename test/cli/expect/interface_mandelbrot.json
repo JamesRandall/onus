@@ -37,6 +37,7 @@
       "kind": "type",
       "name": "Iter",
       "visibility": "private",
+      "callees": [],
       "hardened": false,
       "zone": "draft",
       "signature": "type Iter = Int where 0 <= it and it <= 10000"
@@ -71,6 +72,7 @@
       "kind": "type",
       "name": "Coord",
       "visibility": "private",
+      "callees": [],
       "hardened": false,
       "zone": "draft",
       "signature": "type Coord = Int where 0 <= it"
@@ -105,6 +107,7 @@
       "kind": "record",
       "name": "Viewport",
       "visibility": "private",
+      "callees": [],
       "hardened": false,
       "zone": "draft",
       "signature": "record Viewport {\n  x_min: Float\n  x_max: Float where it > x_min\n  y_min: Float\n  y_max: Float where it > y_min\n}"
@@ -190,6 +193,7 @@
       "kind": "fn",
       "name": "escape_count",
       "visibility": "pub",
+      "callees": [],
       "hardened": false,
       "zone": "draft",
       "signature": "fn escape_count(cx: Float, cy: Float, limit: Iter) -> Iter"
@@ -242,6 +246,7 @@
       "kind": "property",
       "name": "escape_bounded",
       "visibility": "private",
+      "callees": [],
       "hardened": false,
       "zone": "draft",
       "signature": "property escape_bounded(cx: Float, cy: Float, limit: Iter where it > 0) {\n  escape_count(cx: cx, cy: cy, limit: limit) <= limit\n}"
@@ -278,6 +283,12 @@
       "kind": "fn",
       "name": "render",
       "visibility": "pub",
+      "callees": [
+        "mandelbrot.escape_count",
+        "std.float.of",
+        "std.grid.filled",
+        "std.grid.set"
+      ],
       "hardened": false,
       "zone": "draft",
       "signature": "fn render(\n  view: Viewport,\n  width: Coord where it > 0,\n  height: Coord where it > 0,\n  limit: Iter where it > 0\n) -> Grid[Iter, width, height] may alloc"
@@ -315,6 +326,13 @@
       "kind": "fn",
       "name": "main",
       "visibility": "pub",
+      "callees": [
+        "mandelbrot.render",
+        "std.grid.get",
+        "std.int.to_text",
+        "std.io.create",
+        "std.io.write"
+      ],
       "hardened": false,
       "zone": "draft",
       "signature": "fn main(args: List[Text], files: io.Files) -> Result[Unit, io.Error] may io.file, alloc"

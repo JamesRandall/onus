@@ -35,6 +35,7 @@
       "kind": "fn",
       "name": "half",
       "visibility": "private",
+      "callees": [],
       "hardened": false,
       "zone": "draft",
       "signature": "fn half(n: Int where it >= 0) -> Int where it >= 0"
@@ -71,6 +72,7 @@
       "kind": "fn",
       "name": "step",
       "visibility": "private",
+      "callees": [],
       "hardened": false,
       "zone": "draft",
       "signature": "fn step(n: Int) -> Int where it >= 0 may panic"
@@ -123,6 +125,7 @@
       "kind": "example",
       "name": "halves",
       "visibility": "private",
+      "callees": [],
       "hardened": false,
       "zone": "draft",
       "signature": "example halves {\n  half(n: 4) == 2\n}"
@@ -175,6 +178,7 @@
       "kind": "example",
       "name": "steps",
       "visibility": "private",
+      "callees": [],
       "hardened": false,
       "zone": "draft",
       "signature": "example steps {\n  step(n: 5) == 4\n}"
@@ -227,6 +231,7 @@
       "kind": "property",
       "name": "half_is_smaller",
       "visibility": "private",
+      "callees": [],
       "hardened": false,
       "zone": "draft",
       "signature": "-- The guard matters: `half` refuses a negative `n`.\nproperty half_is_smaller(n: Int where it >= 0) {\n  half(n: n) <= n\n}"
@@ -279,6 +284,7 @@
       "kind": "property",
       "name": "plus_zero",
       "visibility": "private",
+      "callees": [],
       "hardened": false,
       "zone": "draft",
       "signature": "-- The guard carries nothing: the assertion holds for every Int.\nproperty plus_zero(n: Int where it >= 0) {\n  n + 0 == n\n}"

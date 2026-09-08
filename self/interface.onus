@@ -555,6 +555,7 @@ fn item_json(
       json.field(key: "kind", value: json.text(t: kind)),
       json.field(key: "name", value: json.text(t: name)),
       json.field(key: "visibility", value: json.text(t: visibility)),
+      json.field(key: "callees", value: json.texts(ts: item_callees(ctx: ctx, c: c, item: item))),
       json.field(key: "hardened", value: json.bool(b: is_hardened(item: item))),
       json.field(key: "zone", value: json.text(t: item_zone(ctx: ctx, c: c, item: item))),
       json.field(key: "signature", value: json.text(t: signature))
@@ -909,4 +910,159 @@ fn ledger_entry(
       )
     ]
   )
+}
+
+-- The functions an item's body calls (§11.1, docs/CHANGES.md item 207): nothing for items without a body.
+fn item_callees(ctx: context.Context, c: Ctx, item: ast.Item) -> List[Text] may alloc, mutate {
+  match item with
+  | ast.FnItem(decl) -> {
+    let def: Int = or_neg(
+      o: Map.find(
+        d: ctx.def_of,
+        key: defs.node_key(file: c.file, tag: defs.tag_item, span: decl.span)
+      )
+    )
+    if def < 0 {
+      return []
+    }
+    return callees_of(ctx: ctx, def: def)
+  }
+  | _ -> return []
+}
+
+-- The qualified names of the functions a function's body calls, sorted: every
+-- resolved reference inside its body that names a function (item 207).
+pub fn callees_of(ctx: context.Context, def: Int) -> List[Text] may alloc, mutate {
+  let d: defs.Def = context.get_def(ctx: ctx, id: def)
+  var seen: Dict[Text, Bool] = Map.dict()
+  match body_span_of(d: d) with
+  | None -> skip()
+  | Some(value) -> collect_callees(ctx: ctx, file: d.file, outer: value, seen: inout seen)
+  return sorted_texts(xs: Map.keys(d: seen))
+}
+
+fn collect_callees(
+  ctx: context.Context,
+  file: Int,
+  outer: ast.Span,
+  seen: inout Dict[Text, Bool]
+) -> Unit may alloc, mutate {
+  for k: Int in Map.keys(d: ctx.refs) {
+    if defs.key_file(key: k) == file and inside(span: defs.key_span(key: k), outer: outer) {
+      match callee_at(ctx: ctx, key: k) with
+      | Some(value) -> Map.set(
+        d: inout seen,
+        key: context.qualified_name(ctx: ctx, id: value),
+        value: true
+      )
+      | None -> skip()
+    }
+  }
+  return Unit
+}
+
+-- The function a recorded reference names, if it names one.
+fn callee_at(ctx: context.Context, key: Int) -> Option[Int] {
+  match Map.find(d: ctx.refs, key: key) with
+  | None -> return None
+  | Some(value) -> return fn_callee(ctx: ctx, res: value)
+}
+
+fn fn_callee(ctx: context.Context, res: defs.Resolution) -> Option[Int] {
+  match callee_of(res: res) with
+  | None -> return None
+  | Some(value) -> {
+    if context.get_def(ctx: ctx, id: value).kind is defs.Fn {
+      return Some(value: value)
+    }
+    return None
+  }
+}
+
+fn callee_of(res: defs.Resolution) -> Option[Int] {
+  match res with
+  | defs.DefRes(def) -> return Some(value: def)
+  | defs.CompanionRes(owner, fn_def) -> return Some(value: fn_def)
+  | defs.IfaceFnRes(iface, fn_def) -> return Some(value: fn_def)
+  | _ -> return None
+}
+
+fn body_span_of(d: defs.Def) -> Option[ast.Span] {
+  match d.node with
+  | defs.FnNode(decl) -> {
+    match decl.body with
+    | Some(value) -> return Some(value: value.span)
+    | None -> return None
+  }
+  | _ -> return None
+}
+
+fn inside(span: ast.Span, outer: ast.Span) -> Bool {
+  return span.start >= outer.start and span.end <= outer.end
+}
+
+-- The literal constants a function's body writes, as the printer prints them, sorted and distinct (item 207).
+pub fn constants_of(ctx: context.Context, def: Int) -> List[Text] may alloc, mutate {
+  let d: defs.Def = context.get_def(ctx: ctx, id: def)
+  var seen: Dict[Text, Bool] = Map.dict()
+  match d.node with
+  | defs.FnNode(decl) -> {
+    match decl.body with
+    | Some(value) -> {
+      for n: walk.Node in walk.nodes_in_block(b: value, into_verify: false) {
+        match n with
+        | walk.NExpr(e) -> {
+          if is_literal(e: e) {
+            Map.set(d: inout seen, key: printer.print_expr(e: e), value: true)
+          }
+        }
+        | _ -> skip()
+      }
+    }
+    | None -> skip()
+  }
+  | _ -> skip()
+  return sorted_texts(xs: Map.keys(d: seen))
+}
+
+fn is_literal(e: ast.Expr) -> Bool {
+  match e with
+  | ast.IntLit(value, text, span) -> return true
+  | ast.FloatLit(value, span) -> return true
+  | ast.TextLit(value, span) -> return true
+  | ast.DurationLit(nanos, span) -> return true
+  | _ -> return false
+}
+
+-- The names of the effects a function uses, from the effects pass, sorted (item 207).
+pub fn effects_used(ctx: context.Context, def: Int) -> List[Text] may alloc, mutate {
+  var out: Builder[Text] = List.builder()
+  match Map.find(d: ctx.inferred, key: def) with
+  | Some(value) -> {
+    for e: defs.Effect in effectset.values(s: value) {
+      List.push(b: inout out, x: effect_name(ctx: ctx, e: e))
+    }
+  }
+  | None -> skip()
+  return sorted_texts(xs: List.finish(b: out))
+}
+
+fn sorted_texts(xs: List[Text]) -> List[Text] may alloc, mutate {
+  var out: List[Text] = []
+  for x: Text in xs {
+    var placed: Bool = false
+    var next: Builder[Text] = List.builder()
+    for y: Text in out {
+      if not placed and Text.compare(a: x, b: y) < 0 {
+        List.push(b: inout next, x: x)
+        placed = true
+      }
+      List.push(b: inout next, x: y)
+    }
+    if not placed {
+      List.push(b: inout next, x: x)
+    }
+    out = List.finish(b: next)
+  }
+  return out
 }

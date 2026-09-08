@@ -39,6 +39,7 @@
       "kind": "record",
       "name": "MonthlyTotal",
       "visibility": "private",
+      "callees": [],
       "hardened": false,
       "zone": "hardened",
       "signature": "record MonthlyTotal {\n  month: Text\n  total_pence: Int where it >= 0\n}"
@@ -73,6 +74,7 @@
       "kind": "union",
       "name": "AppError",
       "visibility": "private",
+      "callees": [],
       "hardened": false,
       "zone": "hardened",
       "signature": "union AppError =\n  | Config of detail: config.Error\n  | Storage of detail: sql.Error\n  | Io of detail: io.Error"
@@ -119,6 +121,11 @@
       "kind": "fn",
       "name": "monthly_totals",
       "visibility": "pub",
+      "callees": [
+        "std.sql.int",
+        "std.sql.query",
+        "std.sql.select"
+      ],
       "hardened": false,
       "zone": "hardened",
       "signature": "fn monthly_totals(\n  db: sql.Db[ReadOnly, schema: \"orders\"],\n  year: Int where 2000 <= it and it <= 2100\n) -> Result[List[MonthlyTotal], sql.Error] may sql.read, alloc"
@@ -159,6 +166,15 @@
       "kind": "fn",
       "name": "main",
       "visibility": "pub",
+      "callees": [
+        "app.config.load",
+        "reporting.monthly_totals",
+        "std.int.to_text",
+        "std.io.create",
+        "std.io.write",
+        "std.sql.connect",
+        "std.sql.restrict"
+      ],
       "hardened": false,
       "zone": "hardened",
       "signature": "fn main(\n  args: List[Text],\n  env: io.Env,\n  files: io.Files,\n  net: io.Net\n) -> Result[Unit, AppError] may io.env, io.file, io.net, sql.read, alloc"
@@ -193,6 +209,7 @@
       "kind": "path",
       "name": "monthly_report",
       "visibility": "private",
+      "callees": [],
       "hardened": false,
       "zone": "hardened",
       "signature": "path monthly_report\n  entry monthly_totals\n  effects <= { sql.read, alloc }\n  forbid { sql.write, io.net, io.file }"

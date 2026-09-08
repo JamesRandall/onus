@@ -6,8 +6,8 @@ import * as $json from "./json.js";
 import * as $std_text from "./std/text.js";
 import * as $std_int from "./std/int.js";
 
-const $ob1 = { kind: "overflow", text: "new_r - old_r within Int", at: "self/idiff.onus:236:22", def: "item_change" };
-const $ob2 = { kind: "overflow", text: "old_r - new_r within Int", at: "self/idiff.onus:239:24", def: "item_change" };
+const $ob1 = { kind: "overflow", text: "new_r - old_r within Int", at: "self/idiff.onus:243:22", def: "item_change" };
+const $ob2 = { kind: "overflow", text: "old_r - new_r within Int", at: "self/idiff.onus:246:24", def: "item_change" };
 export function keyed({ items, by }) {
   let keys = $std_list.builder({  });
   let map = $std_map.dict({  });
@@ -138,6 +138,10 @@ export function item_change({ o, n }) {
   const new_effects = $json.texts_at({ j: n, key: "effects" });
   const effects_added = missing({ xs: new_effects, ys: old_effects });
   const effects_removed = missing({ xs: old_effects, ys: new_effects });
+  const old_callees = $json.texts_at({ j: o, key: "callees" });
+  const new_callees = $json.texts_at({ j: n, key: "callees" });
+  const callees_added = missing({ xs: new_callees, ys: old_callees });
+  const callees_removed = missing({ xs: old_callees, ys: new_callees });
   const old_c = keyed({ items: $json.list_at({ j: o, key: "contracts" }), by: "text" });
   const new_c = keyed({ items: $json.list_at({ j: n, key: "contracts" }), by: "text" });
   let contracts = $std_list.builder({  });
@@ -190,7 +194,7 @@ export function item_change({ o, n }) {
   }
   const contract_list = $std_list.finish({ b: contracts });
   const obligation_list = $std_list.finish({ b: obligations });
-  const nothing = signature.tag === "None" && $std_list.len({ xs: effects_added }) === 0 && $std_list.len({ xs: effects_removed }) === 0 && $std_list.len({ xs: contract_list }) === 0 && $std_list.len({ xs: assumes_added }) === 0 && $std_list.len({ xs: assumes_removed }) === 0 && recovers_added === 0 && recovers_removed === 0 && $std_list.len({ xs: obligation_list }) === 0;
+  const nothing = signature.tag === "None" && $std_list.len({ xs: effects_added }) === 0 && $std_list.len({ xs: effects_removed }) === 0 && $std_list.len({ xs: callees_added }) === 0 && $std_list.len({ xs: callees_removed }) === 0 && $std_list.len({ xs: contract_list }) === 0 && $std_list.len({ xs: assumes_added }) === 0 && $std_list.len({ xs: assumes_removed }) === 0 && recovers_added === 0 && recovers_removed === 0 && $std_list.len({ xs: obligation_list }) === 0;
   if (nothing) {
     return { tag: "None" };
   }
@@ -205,7 +209,7 @@ export function item_change({ o, n }) {
       breaking = true;
     }
   }
-  return { tag: "Some", value: { name: $json.str_at({ j: n, key: "name" }), kind: $json.str_at({ j: n, key: "kind" }), visibility: $json.str_at({ j: n, key: "visibility" }), signature: signature, effects_added: effects_added, effects_removed: effects_removed, contracts: contract_list, assumes_added: assumes_added, assumes_removed: assumes_removed, recovers_added: recovers_added, recovers_removed: recovers_removed, obligations: obligation_list, breaking: breaking } };
+  return { tag: "Some", value: { name: $json.str_at({ j: n, key: "name" }), kind: $json.str_at({ j: n, key: "kind" }), visibility: $json.str_at({ j: n, key: "visibility" }), signature: signature, effects_added: effects_added, effects_removed: effects_removed, callees_added: callees_added, callees_removed: callees_removed, contracts: contract_list, assumes_added: assumes_added, assumes_removed: assumes_removed, recovers_added: recovers_added, recovers_removed: recovers_removed, obligations: obligation_list, breaking: breaking } };
 }
 
 export function ref_json({ r }) {
@@ -246,7 +250,7 @@ export function change_json({ c }) {
     const [, obligations$14] = $std_list.push({ b: obligations, x: { tag: "JObject", fields: [$json.field({ key: "kind", value: $json.text({ t: x.kind }) }), $json.field({ key: "text", value: $json.text({ t: x.text }) }), $json.field({ key: "from", value: $json.text({ t: x.from }) }), $json.field({ key: "to", value: $json.text({ t: x.to }) })] } });
     obligations = obligations$14;
   }
-  return { tag: "JObject", fields: [$json.field({ key: "name", value: $json.text({ t: c.name }) }), $json.field({ key: "kind", value: $json.text({ t: c.kind }) }), $json.field({ key: "visibility", value: $json.text({ t: c.visibility }) }), $json.field({ key: "signature", value: signature }), $json.field({ key: "effects", value: { tag: "JObject", fields: [$json.field({ key: "added", value: $json.texts({ ts: c.effects_added }) }), $json.field({ key: "removed", value: $json.texts({ ts: c.effects_removed }) })] } }), $json.field({ key: "contracts", value: { tag: "JArray", items: $std_list.finish({ b: contracts }) } }), $json.field({ key: "assumes", value: { tag: "JObject", fields: [$json.field({ key: "added", value: $json.texts({ ts: c.assumes_added }) }), $json.field({ key: "removed", value: $json.texts({ ts: c.assumes_removed }) })] } }), $json.field({ key: "recovers", value: { tag: "JObject", fields: [$json.field({ key: "added", value: $json.int({ v: c.recovers_added }) }), $json.field({ key: "removed", value: $json.int({ v: c.recovers_removed }) })] } }), $json.field({ key: "obligations", value: { tag: "JArray", items: $std_list.finish({ b: obligations }) } }), $json.field({ key: "breaking", value: $json.bool({ b: c.breaking }) })] };
+  return { tag: "JObject", fields: [$json.field({ key: "name", value: $json.text({ t: c.name }) }), $json.field({ key: "kind", value: $json.text({ t: c.kind }) }), $json.field({ key: "visibility", value: $json.text({ t: c.visibility }) }), $json.field({ key: "signature", value: signature }), $json.field({ key: "effects", value: { tag: "JObject", fields: [$json.field({ key: "added", value: $json.texts({ ts: c.effects_added }) }), $json.field({ key: "removed", value: $json.texts({ ts: c.effects_removed }) })] } }), $json.field({ key: "callees", value: { tag: "JObject", fields: [$json.field({ key: "added", value: $json.texts({ ts: c.callees_added }) }), $json.field({ key: "removed", value: $json.texts({ ts: c.callees_removed }) })] } }), $json.field({ key: "contracts", value: { tag: "JArray", items: $std_list.finish({ b: contracts }) } }), $json.field({ key: "assumes", value: { tag: "JObject", fields: [$json.field({ key: "added", value: $json.texts({ ts: c.assumes_added }) }), $json.field({ key: "removed", value: $json.texts({ ts: c.assumes_removed }) })] } }), $json.field({ key: "recovers", value: { tag: "JObject", fields: [$json.field({ key: "added", value: $json.int({ v: c.recovers_added }) }), $json.field({ key: "removed", value: $json.int({ v: c.recovers_removed }) })] } }), $json.field({ key: "obligations", value: { tag: "JArray", items: $std_list.finish({ b: obligations }) } }), $json.field({ key: "breaking", value: $json.bool({ b: c.breaking }) })] };
 }
 
 export function diff_json({ d }) {
@@ -299,19 +303,19 @@ export function diff_text({ d }) {
     }
     const [, lines$19] = $std_list.push({ b: lines, x: "  ~ " + c.kind + " " + c.name + note });
     lines = lines$19;
-    const $m31 = c.signature;
-    $m31$match: {
-      if ($m31.tag === "Some") {
-        const value = $m31.value;
+    const $m32 = c.signature;
+    $m32$match: {
+      if ($m32.tag === "Some") {
+        const value = $m32.value;
         const [, lines$20] = $std_list.push({ b: lines, x: "      signature: " + value.before_sig });
         lines = lines$20;
         const [, lines$21] = $std_list.push({ b: lines, x: "              -> " + value.after_sig });
         lines = lines$21;
-        break $m31$match;
+        break $m32$match;
       }
-      if ($m31.tag === "None") {
+      if ($m32.tag === "None") {
         skip({  });
-        break $m31$match;
+        break $m32$match;
       }
       $rt.unreachable();
     }
@@ -323,25 +327,33 @@ export function diff_text({ d }) {
       const [, lines$23] = $std_list.push({ b: lines, x: "      effects narrowed: " + $std_text.join({ parts: c.effects_removed, sep: ", " }) });
       lines = lines$23;
     }
-    for (const k of c.contracts) {
-      const [, lines$24] = $std_list.push({ b: lines, x: "      " + k.change + " " + k.kind + " " + k.text + " (" + k.compatibility + ")" });
+    if ($std_list.len({ xs: c.callees_added }) > 0) {
+      const [, lines$24] = $std_list.push({ b: lines, x: "      callees added: " + $std_text.join({ parts: c.callees_added, sep: ", " }) });
       lines = lines$24;
     }
-    for (const a of c.assumes_added) {
-      const [, lines$25] = $std_list.push({ b: lines, x: "      new assumption: " + a });
+    if ($std_list.len({ xs: c.callees_removed }) > 0) {
+      const [, lines$25] = $std_list.push({ b: lines, x: "      callees removed: " + $std_text.join({ parts: c.callees_removed, sep: ", " }) });
       lines = lines$25;
     }
-    for (const a of c.assumes_removed) {
-      const [, lines$26] = $std_list.push({ b: lines, x: "      assumption removed: " + a });
+    for (const k of c.contracts) {
+      const [, lines$26] = $std_list.push({ b: lines, x: "      " + k.change + " " + k.kind + " " + k.text + " (" + k.compatibility + ")" });
       lines = lines$26;
     }
-    if (c.recovers_added > 0) {
-      const [, lines$27] = $std_list.push({ b: lines, x: "      " + $std_int.to_text({ x: c.recovers_added }) + " new recover site(s)" });
+    for (const a of c.assumes_added) {
+      const [, lines$27] = $std_list.push({ b: lines, x: "      new assumption: " + a });
       lines = lines$27;
     }
-    for (const x of c.obligations) {
-      const [, lines$28] = $std_list.push({ b: lines, x: "      " + x.kind + " " + x.text + ": " + x.from + " -> " + x.to });
+    for (const a of c.assumes_removed) {
+      const [, lines$28] = $std_list.push({ b: lines, x: "      assumption removed: " + a });
       lines = lines$28;
+    }
+    if (c.recovers_added > 0) {
+      const [, lines$29] = $std_list.push({ b: lines, x: "      " + $std_int.to_text({ x: c.recovers_added }) + " new recover site(s)" });
+      lines = lines$29;
+    }
+    for (const x of c.obligations) {
+      const [, lines$30] = $std_list.push({ b: lines, x: "      " + x.kind + " " + x.text + ": " + x.from + " -> " + x.to });
+      lines = lines$30;
     }
   }
   return $std_text.join({ parts: $std_list.finish({ b: lines }), sep: "\n" }) + "\n";

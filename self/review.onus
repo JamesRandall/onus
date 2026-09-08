@@ -1231,6 +1231,18 @@ fn changed_item(c: json.Json) -> Text may alloc, mutate {
       ) ++ "</div>"
     )
   }
+  let callees: json.Json = json.at(j: c, key: "callees")
+  for what: Text in ["added", "removed"] {
+    let names: List[Text] = json.texts_at(j: callees, key: what)
+    if List.len(xs: names) > 0 {
+      List.push(
+        b: inout parts,
+        x: "<div class=\"compatible\">callees " ++ what ++ ": " ++ esc(
+          s: Text.join(parts: names, sep: ", ")
+        ) ++ "</div>"
+      )
+    }
+  }
   for k: json.Json in json.list_at(j: c, key: "contracts") {
     let compat: Text = esc(s: json.str_at(j: k, key: "compatibility"))
     List.push(

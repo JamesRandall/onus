@@ -49,6 +49,10 @@
       "kind": "fn",
       "name": "bill",
       "visibility": "pub",
+      "callees": [
+        "core.math.double",
+        "payments.charge"
+      ],
       "hardened": false,
       "zone": "hardened",
       "signature": "fn bill(x: Int where it >= 0) -> Int"
@@ -83,6 +87,7 @@
       "kind": "path",
       "name": "billing",
       "visibility": "private",
+      "callees": [],
       "hardened": false,
       "zone": "hardened",
       "signature": "path billing\n  entry bill"

@@ -1,0 +1,2 @@
+finding green_but_different: `svc.bill` is green but differs from the body it replaced: callees removed core.math.double
+promotion: `svc` hardened -> critical (policies passed; mutations: 0 detected, 0 surviving; regeneration: 1 finding(s) in 1 iteration(s))

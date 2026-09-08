@@ -2070,6 +2070,43 @@
           }
         },
         {
+          "name": "zone_promote_audit_different",
+          "args": [
+            "zone",
+            "promote",
+            "svc",
+            "critical",
+            "--model",
+            "scripted:answers.json",
+            "--budget",
+            "2000",
+            "--no-cache"
+          ],
+          "stage_dir": "../zones/ok_zoned",
+          "write": {
+            "answers.json": "[\"```onus\\npub fn bill(x: Int where it >= 0) -> Int\\n  ensures result >= 0\\n{\\n  return payments.charge(pence: x) + payments.charge(pence: x)\\n}\\n```\"]"
+          },
+          "normalise": [
+            "dates",
+            "ms",
+            "hash",
+            "tokens",
+            "token_counts",
+            "stage"
+          ],
+          "stdout": "expect/zone_promote_audit_different.out",
+          "stdout_contains": [
+            "finding green_but_different: `svc.bill` is green but differs from the body it replaced: callees removed core.math.double",
+            "regeneration: 1 finding(s)"
+          ],
+          "files_contain": {
+            ".onus/changes/promote_svc/change.json": [
+              "\"finding\": \"green_but_different\"",
+              "\"kind\": \"add_example\""
+            ]
+          }
+        },
+        {
           "name": "zone_check_signed",
           "args": [
             "check",

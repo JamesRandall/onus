@@ -42,6 +42,9 @@ pub record ItemChange {
   signature: Option[SignatureChange]
   effects_added: List[Text]
   effects_removed: List[Text]
+  -- Functions the body calls, added and removed (§11.1, docs/CHANGES.md item 207); never breaking.
+  callees_added: List[Text]
+  callees_removed: List[Text]
   contracts: List[ContractChange]
   assumes_added: List[Text]
   assumes_removed: List[Text]
@@ -185,6 +188,10 @@ fn item_change(o: json.Json, n: json.Json) -> Option[ItemChange] may alloc, muta
   let new_effects: List[Text] = json.texts_at(j: n, key: "effects")
   let effects_added: List[Text] = missing(xs: new_effects, ys: old_effects)
   let effects_removed: List[Text] = missing(xs: old_effects, ys: new_effects)
+  let old_callees: List[Text] = json.texts_at(j: o, key: "callees")
+  let new_callees: List[Text] = json.texts_at(j: n, key: "callees")
+  let callees_added: List[Text] = missing(xs: new_callees, ys: old_callees)
+  let callees_removed: List[Text] = missing(xs: old_callees, ys: new_callees)
   let old_c: Keyed = keyed(items: json.list_at(j: o, key: "contracts"), by: "text")
   let new_c: Keyed = keyed(items: json.list_at(j: n, key: "contracts"), by: "text")
   var contracts: Builder[ContractChange] = List.builder()
@@ -260,7 +267,9 @@ fn item_change(o: json.Json, n: json.Json) -> Option[ItemChange] may alloc, muta
   let obligation_list: List[ObligationChange] = List.finish(b: obligations)
   let nothing: Bool = signature is None and List.len(xs: effects_added) == 0 and List.len(
     xs: effects_removed
-  ) == 0 and List.len(xs: contract_list) == 0 and List.len(xs: assumes_added) == 0 and List.len(
+  ) == 0 and List.len(xs: callees_added) == 0 and List.len(xs: callees_removed) == 0 and List.len(
+    xs: contract_list
+  ) == 0 and List.len(xs: assumes_added) == 0 and List.len(
     xs: assumes_removed
   ) == 0 and recovers_added == 0 and recovers_removed == 0 and List.len(xs: obligation_list) == 0
   if nothing {
@@ -285,6 +294,8 @@ fn item_change(o: json.Json, n: json.Json) -> Option[ItemChange] may alloc, muta
       signature: signature,
       effects_added: effects_added,
       effects_removed: effects_removed,
+      callees_added: callees_added,
+      callees_removed: callees_removed,
       contracts: contract_list,
       assumes_added: assumes_added,
       assumes_removed: assumes_removed,
@@ -364,6 +375,15 @@ fn change_json(c: ItemChange) -> json.Json may alloc, mutate {
           fields: [
             json.field(key: "added", value: json.texts(ts: c.effects_added)),
             json.field(key: "removed", value: json.texts(ts: c.effects_removed))
+          ]
+        )
+      ),
+      json.field(
+        key: "callees",
+        value: json.JObject(
+          fields: [
+            json.field(key: "added", value: json.texts(ts: c.callees_added)),
+            json.field(key: "removed", value: json.texts(ts: c.callees_removed))
           ]
         )
       ),
@@ -472,6 +492,18 @@ pub fn diff_text(d: Diff) -> Text may alloc, mutate {
       List.push(
         b: inout lines,
         x: "      effects narrowed: " ++ Text.join(parts: c.effects_removed, sep: ", ")
+      )
+    }
+    if List.len(xs: c.callees_added) > 0 {
+      List.push(
+        b: inout lines,
+        x: "      callees added: " ++ Text.join(parts: c.callees_added, sep: ", ")
+      )
+    }
+    if List.len(xs: c.callees_removed) > 0 {
+      List.push(
+        b: inout lines,
+        x: "      callees removed: " ++ Text.join(parts: c.callees_removed, sep: ", ")
       )
     }
     for k: ContractChange in c.contracts {

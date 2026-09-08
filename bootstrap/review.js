@@ -73,9 +73,9 @@ const $ob58 = { kind: "overflow", text: "json_int(j: List.get(xs: start, i: 0)) 
 const $ob59 = { kind: "overflow", text: "i + 1 within Int", at: "self/review.onus:872:9", def: "body_of" };
 const $ob60 = { kind: "overflow", text: "fn_count + 1 within Int", at: "self/review.onus:985:18", def: "render_interface_view" };
 const $ob61 = { kind: "overflow", text: "detected + surviving within Int", at: "self/review.onus:1028:6", def: "coverage_line" };
-const $ob62 = { kind: "overflow", text: "n - 2 within Int", at: "self/review.onus:1625:33", def: "span_start" };
-const $ob63 = { kind: "overflow", text: "n - 1 within Int", at: "self/review.onus:1625:73", def: "span_start" };
-const $ob64 = { kind: "overflow", text: "i + 1 within Int", at: "self/review.onus:1942:11", def: "mapped" };
+const $ob62 = { kind: "overflow", text: "n - 2 within Int", at: "self/review.onus:1637:33", def: "span_start" };
+const $ob63 = { kind: "overflow", text: "n - 1 within Int", at: "self/review.onus:1637:73", def: "span_start" };
+const $ob64 = { kind: "overflow", text: "i + 1 within Int", at: "self/review.onus:1954:11", def: "mapped" };
 export function skip($args) {
   return undefined;
 }
@@ -1091,38 +1091,46 @@ export function changed_item({ c }) {
     const [, parts$50] = $std_list.push({ b: parts, x: "<div class=\"compatible\">effects narrowed: " + esc({ s: $std_text.join({ parts: narrowed, sep: ", " }) }) + "</div>" });
     parts = parts$50;
   }
+  const callees = $json.at({ j: c, key: "callees" });
+  for (const what of ["added", "removed"]) {
+    const names = $json.texts_at({ j: callees, key: what });
+    if ($std_list.len({ xs: names }) > 0) {
+      const [, parts$51] = $std_list.push({ b: parts, x: "<div class=\"compatible\">callees " + what + ": " + esc({ s: $std_text.join({ parts: names, sep: ", " }) }) + "</div>" });
+      parts = parts$51;
+    }
+  }
   for (const k of $json.list_at({ j: c, key: "contracts" })) {
     const compat = esc({ s: $json.str_at({ j: k, key: "compatibility" }) });
-    const [, parts$51] = $std_list.push({ b: parts, x: "<div class=\"" + compat + "\">" + esc({ s: $json.str_at({ j: k, key: "kind" }) }) + " " + esc({ s: $json.str_at({ j: k, key: "change" }) }) + ": <code>" + esc({ s: $json.str_at({ j: k, key: "text" }) }) + "</code> (" + compat + ")</div>" });
-    parts = parts$51;
+    const [, parts$52] = $std_list.push({ b: parts, x: "<div class=\"" + compat + "\">" + esc({ s: $json.str_at({ j: k, key: "kind" }) }) + " " + esc({ s: $json.str_at({ j: k, key: "change" }) }) + ": <code>" + esc({ s: $json.str_at({ j: k, key: "text" }) }) + "</code> (" + compat + ")</div>" });
+    parts = parts$52;
   }
   const assumes = $json.at({ j: c, key: "assumes" });
   for (const a of $json.texts_at({ j: assumes, key: "added" })) {
-    const [, parts$52] = $std_list.push({ b: parts, x: "<div class=\"assumed\">new assumption: <code>" + esc({ s: a }) + "</code></div>" });
-    parts = parts$52;
+    const [, parts$53] = $std_list.push({ b: parts, x: "<div class=\"assumed\">new assumption: <code>" + esc({ s: a }) + "</code></div>" });
+    parts = parts$53;
   }
   for (const a of $json.texts_at({ j: assumes, key: "removed" })) {
-    const [, parts$53] = $std_list.push({ b: parts, x: "<div class=\"compatible\">assumption removed: <code>" + esc({ s: a }) + "</code></div>" });
-    parts = parts$53;
+    const [, parts$54] = $std_list.push({ b: parts, x: "<div class=\"compatible\">assumption removed: <code>" + esc({ s: a }) + "</code></div>" });
+    parts = parts$54;
   }
   const recovers = $json.at({ j: c, key: "recovers" });
   const added = $json.int_at({ j: recovers, key: "added" });
   if (added > 0) {
-    const [, parts$54] = $std_list.push({ b: parts, x: "<div class=\"recover\">" + num({ n: added }) + " new " + site_word({ n: added }) + "</div>" });
-    parts = parts$54;
+    const [, parts$55] = $std_list.push({ b: parts, x: "<div class=\"recover\">" + num({ n: added }) + " new " + site_word({ n: added }) + "</div>" });
+    parts = parts$55;
   }
   const removed = $json.int_at({ j: recovers, key: "removed" });
   if (removed > 0) {
-    const [, parts$55] = $std_list.push({ b: parts, x: "<div class=\"compatible\">" + num({ n: removed }) + " " + site_word({ n: removed }) + " removed</div>" });
-    parts = parts$55;
+    const [, parts$56] = $std_list.push({ b: parts, x: "<div class=\"compatible\">" + num({ n: removed }) + " " + site_word({ n: removed }) + " removed</div>" });
+    parts = parts$56;
   }
   for (const o of $json.list_at({ j: c, key: "obligations" })) {
     let cls = "breaking";
     if ($json.str_at({ j: o, key: "to" }) === "proved") {
       cls = "compatible";
     }
-    const [, parts$56] = $std_list.push({ b: parts, x: "<div class=\"" + cls + "\">" + esc({ s: $json.str_at({ j: o, key: "kind" }) }) + " <code>" + esc({ s: $json.str_at({ j: o, key: "text" }) }) + "</code>: " + esc({ s: $json.str_at({ j: o, key: "from" }) }) + " → " + esc({ s: $json.str_at({ j: o, key: "to" }) }) + "</div>" });
-    parts = parts$56;
+    const [, parts$57] = $std_list.push({ b: parts, x: "<div class=\"" + cls + "\">" + esc({ s: $json.str_at({ j: o, key: "kind" }) }) + " <code>" + esc({ s: $json.str_at({ j: o, key: "text" }) }) + "</code>: " + esc({ s: $json.str_at({ j: o, key: "from" }) }) + " → " + esc({ s: $json.str_at({ j: o, key: "to" }) }) + "</div>" });
+    parts = parts$57;
   }
   let status = "<span class=\"status ok\">compatible</span>";
   if ($json.bool_at({ j: c, key: "breaking" })) {
@@ -1144,8 +1152,8 @@ export function render_diff_view({ diff }) {
   }
   let changed = $std_list.builder({  });
   for (const c of $json.list_at({ j: diff, key: "changed" })) {
-    const [, changed$57] = $std_list.push({ b: changed, x: changed_item({ c: c }) });
-    changed = changed$57;
+    const [, changed$58] = $std_list.push({ b: changed, x: changed_item({ c: c }) });
+    changed = changed$58;
   }
   let changed_html = $std_text.join({ parts: $std_list.finish({ b: changed }), sep: "" });
   if (changed_html === "") {
@@ -1194,8 +1202,8 @@ export function render_change({ c }) {
       if (!$json.is_null({ j: ce })) {
         counterexample = "<pre class=\"counterexample\">" + esc({ s: $json.compact({ j: ce }) }) + "</pre>";
       }
-      const [, rows$58] = $std_list.push({ b: rows, x: "<tr class=\"proposal\"><td><code>" + esc({ s: $json.str_at({ j: p, key: "kind" }) }) + "</code></td><td><code>" + esc({ s: $json.str_at({ j: p, key: "def" }) }) + "</code></td><td>" + code_or({ j: $json.at({ j: p, key: "current" }), dflt: "" }) + "</td><td>" + code_or({ j: $json.at({ j: p, key: "proposed" }), dflt: "<em>for the reviewer to write</em>" }) + "</td><td>" + esc({ s: $json.str_at({ j: p, key: "rationale" }) }) + counterexample + "</td></tr>" });
-      rows = rows$58;
+      const [, rows$59] = $std_list.push({ b: rows, x: "<tr class=\"proposal\"><td><code>" + esc({ s: $json.str_at({ j: p, key: "kind" }) }) + "</code></td><td><code>" + esc({ s: $json.str_at({ j: p, key: "def" }) }) + "</code></td><td>" + code_or({ j: $json.at({ j: p, key: "current" }), dflt: "" }) + "</td><td>" + code_or({ j: $json.at({ j: p, key: "proposed" }), dflt: "<em>for the reviewer to write</em>" }) + "</td><td>" + esc({ s: $json.str_at({ j: p, key: "rationale" }) }) + counterexample + "</td></tr>" });
+      rows = rows$59;
     }
     proposals_html = "<table><thead><tr><th>proposed by loop</th><th>on</th><th>current</th><th>proposed</th><th>why</th></tr></thead><tbody>" + $std_text.join({ parts: $std_list.finish({ b: rows }), sep: "" }) + "</tbody></table>";
   }
@@ -1218,8 +1226,8 @@ export function render_change({ c }) {
   if ($std_list.len({ xs: delta }) > 0) {
     let rows = $std_list.builder({  });
     for (const l of delta) {
-      const [, rows$59] = $std_list.push({ b: rows, x: "<tr><td><code>" + esc({ s: $json.str_at({ j: l, key: "kind" }) }) + " " + esc({ s: $json.str_at({ j: l, key: "text" }) }) + "</code></td><td><code>" + esc({ s: $json.str_at({ j: l, key: "def" }) }) + "</code></td>" + status_cell({ j: $json.at({ j: l, key: "before" }) }) + status_cell({ j: $json.at({ j: l, key: "after" }) }) + "</tr>" });
-      rows = rows$59;
+      const [, rows$60] = $std_list.push({ b: rows, x: "<tr><td><code>" + esc({ s: $json.str_at({ j: l, key: "kind" }) }) + " " + esc({ s: $json.str_at({ j: l, key: "text" }) }) + "</code></td><td><code>" + esc({ s: $json.str_at({ j: l, key: "def" }) }) + "</code></td>" + status_cell({ j: $json.at({ j: l, key: "before" }) }) + status_cell({ j: $json.at({ j: l, key: "after" }) }) + "</tr>" });
+      rows = rows$60;
     }
     ledger_html = "<table class=\"ledger\"><thead><tr><th>obligation</th><th>in</th><th>before</th><th>after</th></tr></thead><tbody>" + $std_text.join({ parts: $std_list.finish({ b: rows }), sep: "" }) + "</tbody></table>";
   }
@@ -1228,8 +1236,8 @@ export function render_change({ c }) {
   if ($std_list.len({ xs: audit }) > 0) {
     let items = $std_list.builder({  });
     for (const f of audit) {
-      const [, items$60] = $std_list.push({ b: items, x: "<li class=\"audit\"><code>" + esc({ s: $json.str_at({ j: f, key: "finding" }) }) + "</code> " + esc({ s: $json.str_at({ j: f, key: "detail" }) }) + "</li>" });
-      items = items$60;
+      const [, items$61] = $std_list.push({ b: items, x: "<li class=\"audit\"><code>" + esc({ s: $json.str_at({ j: f, key: "finding" }) }) + "</code> " + esc({ s: $json.str_at({ j: f, key: "detail" }) }) + "</li>" });
+      items = items$61;
     }
     audit_html = "<h4>Regeneration audit</h4><ul>" + $std_text.join({ parts: $std_list.finish({ b: items }), sep: "" }) + "</ul>";
   }
@@ -1238,8 +1246,8 @@ export function render_change({ c }) {
   if ($std_list.len({ xs: bodies }) > 0) {
     let parts = $std_list.builder({  });
     for (const b of bodies) {
-      const [, parts$61] = $std_list.push({ b: parts, x: "<h5><code>" + esc({ s: $json.str_at({ j: b, key: "module" }) }) + "</code></h5><pre class=\"before\">" + esc({ s: $json.str_at({ j: b, key: "before" }) }) + "</pre><pre class=\"after\">" + esc({ s: $json.str_at({ j: b, key: "after" }) }) + "</pre>" });
-      parts = parts$61;
+      const [, parts$62] = $std_list.push({ b: parts, x: "<h5><code>" + esc({ s: $json.str_at({ j: b, key: "module" }) }) + "</code></h5><pre class=\"before\">" + esc({ s: $json.str_at({ j: b, key: "before" }) }) + "</pre><pre class=\"after\">" + esc({ s: $json.str_at({ j: b, key: "after" }) }) + "</pre>" });
+      parts = parts$62;
     }
     bodies_html = "<details class=\"body\"><summary>Body diff (" + plural({ n: $std_list.len({ xs: bodies }), word: "file" }) + "; informational, counted if opened)</summary>" + $std_text.join({ parts: $std_list.finish({ b: parts }), sep: "" }) + "</details>";
   }
@@ -1252,8 +1260,8 @@ export function render_change({ c }) {
       if (!$json.is_null({ j: $json.at({ j: t, key: "escalation" }) })) {
         escalation = esc({ s: $json.str_at({ j: t, key: "escalation" }) });
       }
-      const [, rows$62] = $std_list.push({ b: rows, x: "<tr><td>" + json_num_text({ j: $json.at({ j: t, key: "iteration" }) }) + "</td><td>" + esc({ s: $json.str_at({ j: t, key: "classification" }) }) + "</td><td>" + json_num_text({ j: $json.at({ j: t, key: "diagnostics_before" }) }) + " → " + json_num_text({ j: $json.at({ j: t, key: "diagnostics_after" }) }) + "</td><td>" + json_num_text({ j: $json.at({ j: t, key: "mechanical_repairs" }) }) + "</td><td>" + json_num_text({ j: $json.at({ j: t, key: "tokens" }) }) + "</td><td>" + json_num_text({ j: $json.at({ j: t, key: "ms" }) }) + "</td><td>" + escalation + "</td></tr>" });
-      rows = rows$62;
+      const [, rows$63] = $std_list.push({ b: rows, x: "<tr><td>" + json_num_text({ j: $json.at({ j: t, key: "iteration" }) }) + "</td><td>" + esc({ s: $json.str_at({ j: t, key: "classification" }) }) + "</td><td>" + json_num_text({ j: $json.at({ j: t, key: "diagnostics_before" }) }) + " → " + json_num_text({ j: $json.at({ j: t, key: "diagnostics_after" }) }) + "</td><td>" + json_num_text({ j: $json.at({ j: t, key: "mechanical_repairs" }) }) + "</td><td>" + json_num_text({ j: $json.at({ j: t, key: "tokens" }) }) + "</td><td>" + json_num_text({ j: $json.at({ j: t, key: "ms" }) }) + "</td><td>" + escalation + "</td></tr>" });
+      rows = rows$63;
     }
     trace_html = "<details><summary>Trace (" + plural({ n: $std_list.len({ xs: trace }), word: "iteration" }) + ")</summary><table><thead><tr><th>iteration</th><th>result</th><th>diagnostics</th><th>repairs</th><th>tokens</th><th>ms</th><th>escalation</th></tr></thead><tbody>" + $std_text.join({ parts: $std_list.finish({ b: rows }), sep: "" }) + "</tbody></table></details>";
   }
@@ -1272,8 +1280,8 @@ export function render_changes_view({ changes }) {
   }
   let parts = $std_list.builder({  });
   for (const c of changes) {
-    const [, parts$63] = $std_list.push({ b: parts, x: render_change({ c: c }) });
-    parts = parts$63;
+    const [, parts$64] = $std_list.push({ b: parts, x: render_change({ c: c }) });
+    parts = parts$64;
   }
   return "<section class=\"changes\"><h2>Changes (" + num({ n: $std_list.len({ xs: changes }) }) + ")</h2>" + $std_text.join({ parts: $std_list.finish({ b: parts }), sep: "\n" }) + "</section>";
 }
@@ -1285,8 +1293,8 @@ export function model_table({ ce }) {
       const fields = $m25.fields;
       let rows = $std_list.builder({  });
       for (const f of fields) {
-        const [, rows$64] = $std_list.push({ b: rows, x: "<tr><td><code>" + esc({ s: f.key }) + "</code></td><td><code>" + esc({ s: plain({ j: f.value }) }) + "</code></td></tr>" });
-        rows = rows$64;
+        const [, rows$65] = $std_list.push({ b: rows, x: "<tr><td><code>" + esc({ s: f.key }) + "</code></td><td><code>" + esc({ s: plain({ j: f.value }) }) + "</code></td></tr>" });
+        rows = rows$65;
       }
       return "<table class=\"model\"><thead><tr><th>name</th><th>value</th></tr></thead><tbody>" + $std_text.join({ parts: $std_list.finish({ b: rows }), sep: "" }) + "</tbody></table>";
       break $m25$match;
@@ -1319,8 +1327,8 @@ export function render_diagnostics_view({ diagnostics }) {
       const ob = $json.at({ j: d, key: "obligation" });
       ob_html = "<p class=\"contract\"><code>" + esc({ s: $json.str_at({ j: ob, key: "kind" }) }) + " " + esc({ s: $json.str_at({ j: ob, key: "text" }) }) + "</code> <span class=\"mark " + esc({ s: $json.str_at({ j: ob, key: "status" }) }) + "\">" + esc({ s: $json.str_at({ j: ob, key: "status" }) }) + "</span></p>" + model_table({ ce: $json.at({ j: ob, key: "counterexample" }) });
     }
-    const [, items$65] = $std_list.push({ b: items, x: "<article class=\"diagnostic\"><h4><code>" + esc({ s: $json.str_at({ j: d, key: "code" }) }) + "</code> " + esc({ s: $json.str_at({ j: d, key: "title" }) }) + " <span class=\"small\">" + esc({ s: $json.str_at({ j: location, key: "file" }) }) + ":" + span_start({ l: location }) + in_def + "</span></h4>" + context_html + ob_html + "</article>" });
-    items = items$65;
+    const [, items$66] = $std_list.push({ b: items, x: "<article class=\"diagnostic\"><h4><code>" + esc({ s: $json.str_at({ j: d, key: "code" }) }) + "</code> " + esc({ s: $json.str_at({ j: d, key: "title" }) }) + " <span class=\"small\">" + esc({ s: $json.str_at({ j: location, key: "file" }) }) + ":" + span_start({ l: location }) + in_def + "</span></h4>" + context_html + ob_html + "</article>" });
+    items = items$66;
   }
   return "<section><h2>Diagnostics (" + num({ n: $std_list.len({ xs: diagnostics }) }) + ")</h2>" + $std_text.join({ parts: $std_list.finish({ b: items }), sep: "" }) + "</section>";
 }
@@ -1349,8 +1357,8 @@ export function count_label({ word, n }) {
 export function zones_of_modules({ data }) {
   let out = $std_map.dict({  });
   for (const m of $json.list_at({ j: data, key: "modules" })) {
-    const [, out$66] = $std_map.set({ d: out, key: $json.str_at({ j: m, key: "module" }), value: $json.str_at({ j: m, key: "zone" }) });
-    out = out$66;
+    const [, out$67] = $std_map.set({ d: out, key: $json.str_at({ j: m, key: "module" }), value: $json.str_at({ j: m, key: "zone" }) });
+    out = out$67;
   }
   return out;
 }
@@ -1361,8 +1369,8 @@ export function render_page({ data }) {
   if ($std_list.len({ xs: paths }) > 0) {
     let parts = $std_list.builder({  });
     for (const r of paths) {
-      const [, parts$67] = $std_list.push({ b: parts, x: render_path_view({ r: r, zone_of: zones_of_modules({ data: data }) }) });
-      parts = parts$67;
+      const [, parts$68] = $std_list.push({ b: parts, x: render_path_view({ r: r, zone_of: zones_of_modules({ data: data }) }) });
+      parts = parts$68;
     }
     paths_html = $std_text.join({ parts: $std_list.finish({ b: parts }), sep: "\n" });
   }
@@ -1374,8 +1382,8 @@ export function render_page({ data }) {
     if ($json.has({ j: sources, key: name })) {
       source = { tag: "Some", value: $json.str_at({ j: sources, key: name }) };
     }
-    const [, modules$68] = $std_list.push({ b: modules, x: render_interface_view({ doc: m, source: source }) });
-    modules = modules$68;
+    const [, modules$69] = $std_list.push({ b: modules, x: render_interface_view({ doc: m, source: source }) });
+    modules = modules$69;
   }
   let modules_html = $std_text.join({ parts: $std_list.finish({ b: modules }), sep: "\n" });
   if (modules_html === "") {
@@ -1387,10 +1395,10 @@ export function render_page({ data }) {
   let buttons = $std_list.builder({  });
   let panels = $std_list.builder({  });
   for (const v of views) {
-    const [, buttons$69] = $std_list.push({ b: buttons, x: "<button data-view=\"" + v.id + "\">" + esc({ s: v.label }) + "</button>" });
-    buttons = buttons$69;
-    const [, panels$70] = $std_list.push({ b: panels, x: "<div class=\"view\" data-view=\"" + v.id + "\" hidden>" + v.html + "</div>" });
-    panels = panels$70;
+    const [, buttons$70] = $std_list.push({ b: buttons, x: "<button data-view=\"" + v.id + "\">" + esc({ s: v.label }) + "</button>" });
+    buttons = buttons$70;
+    const [, panels$71] = $std_list.push({ b: panels, x: "<div class=\"view\" data-view=\"" + v.id + "\" hidden>" + v.html + "</div>" });
+    panels = panels$71;
   }
   const entry = esc({ s: $json.str_at({ j: data, key: "entry" }) });
   const generated = $json.at({ j: data, key: "generated" });
@@ -1439,8 +1447,8 @@ export function review_data({ ctx, tab, against, now, changes }) {
   }
   let diagnostics = $std_list.builder({  });
   for (const d of $std_list.finish({ b: ctx.diagnostics })) {
-    const [, diagnostics$71] = $std_list.push({ b: diagnostics, x: $diagjson.to_json({ ctx: ctx, tab: tab, d: d }) });
-    diagnostics = diagnostics$71;
+    const [, diagnostics$72] = $std_list.push({ b: diagnostics, x: $diagjson.to_json({ ctx: ctx, tab: tab, d: d }) });
+    diagnostics = diagnostics$72;
   }
   const diagnostics_json = { tag: "JArray", items: $std_list.finish({ b: diagnostics }) };
   const changes_json = { tag: "JArray", items: changes };
@@ -1458,10 +1466,10 @@ export function review_data({ ctx, tab, against, now, changes }) {
         const value = $m51.value;
         if (!value.is_std) {
           const doc = $interface.interface_of({ ctx: ctx, mod: mid });
-          const [, modules$72] = $std_list.push({ b: modules, x: doc });
-          modules = modules$72;
-          const [, sources$73] = push_source({ ctx: ctx, m: value, sources: sources });
-          sources = sources$73;
+          const [, modules$73] = $std_list.push({ b: modules, x: doc });
+          modules = modules$73;
+          const [, sources$74] = push_source({ ctx: ctx, m: value, sources: sources });
+          sources = sources$74;
           if ($rt.eq(entry_name, { tag: "Some", value: value.name }) && current.tag === "None") {
             current = { tag: "Some", value: doc };
           }
@@ -1481,8 +1489,8 @@ export function review_data({ ctx, tab, against, now, changes }) {
     $m54$match: {
       if ($m54.tag === "Some") {
         const value = $m54.value;
-        const [, paths$74] = $std_list.push({ b: paths, x: $pathreport.path_report({ ctx: ctx, tab: tab, a: value }) });
-        paths = paths$74;
+        const [, paths$75] = $std_list.push({ b: paths, x: $pathreport.path_report({ ctx: ctx, tab: tab, a: value }) });
+        paths = paths$75;
         break $m54$match;
       }
       if ($m54.tag === "None") {
@@ -1498,8 +1506,8 @@ export function review_data({ ctx, tab, against, now, changes }) {
 export function promotions_json({ ctx }) {
   let items = $std_list.builder({  });
   for (const r of ctx.promotions) {
-    const [, items$75] = $std_list.push({ b: items, x: $ledger.promotion_json({ r: r }) });
-    items = items$75;
+    const [, items$76] = $std_list.push({ b: items, x: $ledger.promotion_json({ r: r }) });
+    items = items$76;
   }
   return { tag: "JArray", items: $std_list.finish({ b: items }) };
 }
@@ -1509,8 +1517,8 @@ export function push_source({ ctx, m, sources }) {
   $m60$match: {
     if ($m60.tag === "Some") {
       const value = $m60.value;
-      const [, sources$76] = $std_list.push({ b: sources, x: $json.field({ key: m.name, value: $json.text({ t: value }) }) });
-      sources = sources$76;
+      const [, sources$77] = $std_list.push({ b: sources, x: $json.field({ key: m.name, value: $json.text({ t: value }) }) });
+      sources = sources$77;
       break $m60$match;
     }
     if ($m60.tag === "None") {
@@ -1626,8 +1634,8 @@ export function objects_of({ j }) {
   let out = $std_list.builder({  });
   for (const x of $json.list_of({ j: j })) {
     if (x.tag === "JObject") {
-      const [, out$77] = $std_list.push({ b: out, x: x });
-      out = out$77;
+      const [, out$78] = $std_list.push({ b: out, x: x });
+      out = out$78;
     }
   }
   return $std_list.finish({ b: out });
@@ -1637,8 +1645,8 @@ export function strings_of({ j }) {
   let out = $std_list.builder({  });
   for (const x of $json.list_of({ j: j })) {
     if (x.tag === "JString") {
-      const [, out$78] = $std_list.push({ b: out, x: x });
-      out = out$78;
+      const [, out$79] = $std_list.push({ b: out, x: x });
+      out = out$79;
     }
   }
   return { tag: "JArray", items: $std_list.finish({ b: out }) };
@@ -1657,21 +1665,21 @@ export function mapped({ j, keys, kinds }) {
       const kind = kind_at({ kinds: kinds, i: i });
       const v = $json.at({ j: x, key: k });
       if (kind === "str") {
-        const [, fields$79] = $std_list.push({ b: fields, x: field({ key: k, value: str_or_empty({ j: v }) }) });
-        fields = fields$79;
+        const [, fields$80] = $std_list.push({ b: fields, x: field({ key: k, value: str_or_empty({ j: v }) }) });
+        fields = fields$80;
       } else {
         if (kind === "str?") {
-          const [, fields$80] = $std_list.push({ b: fields, x: field({ key: k, value: str_or_null({ j: v }) }) });
-          fields = fields$80;
-        } else {
-          const [, fields$81] = $std_list.push({ b: fields, x: field({ key: k, value: num_or_zero({ j: v }) }) });
+          const [, fields$81] = $std_list.push({ b: fields, x: field({ key: k, value: str_or_null({ j: v }) }) });
           fields = fields$81;
+        } else {
+          const [, fields$82] = $std_list.push({ b: fields, x: field({ key: k, value: num_or_zero({ j: v }) }) });
+          fields = fields$82;
         }
       }
       i = $rt.int.add(i, 1, $ob64);
     }
-    const [, out$82] = $std_list.push({ b: out, x: { tag: "JObject", fields: $std_list.finish({ b: fields }) } });
-    out = out$82;
+    const [, out$83] = $std_list.push({ b: out, x: { tag: "JObject", fields: $std_list.finish({ b: fields }) } });
+    out = out$83;
   }
   return { tag: "JArray", items: $std_list.finish({ b: out }) };
 }
@@ -1709,8 +1717,8 @@ export function loop_change_of({ j }) {
   const metrics = $json.at({ j: j, key: "metrics" });
   let proposals = $std_list.builder({  });
   for (const x of objects_of({ j: $json.at({ j: j, key: "proposals" }) })) {
-    const [, proposals$83] = $std_list.push({ b: proposals, x: { tag: "JObject", fields: [field({ key: "kind", value: str_or_empty({ j: $json.at({ j: x, key: "kind" }) }) }), field({ key: "def", value: str_or_empty({ j: $json.at({ j: x, key: "def" }) }) }), field({ key: "current", value: str_or_null({ j: $json.at({ j: x, key: "current" }) }) }), field({ key: "proposed", value: str_or_null({ j: $json.at({ j: x, key: "proposed" }) }) }), field({ key: "rationale", value: str_or_empty({ j: $json.at({ j: x, key: "rationale" }) }) }), field({ key: "counterexample", value: object_or_null({ j: $json.at({ j: object_or_null({ j: $json.at({ j: x, key: "evidence" }) }), key: "counterexample" }) }) })] } });
-    proposals = proposals$83;
+    const [, proposals$84] = $std_list.push({ b: proposals, x: { tag: "JObject", fields: [field({ key: "kind", value: str_or_empty({ j: $json.at({ j: x, key: "kind" }) }) }), field({ key: "def", value: str_or_empty({ j: $json.at({ j: x, key: "def" }) }) }), field({ key: "current", value: str_or_null({ j: $json.at({ j: x, key: "current" }) }) }), field({ key: "proposed", value: str_or_null({ j: $json.at({ j: x, key: "proposed" }) }) }), field({ key: "rationale", value: str_or_empty({ j: $json.at({ j: x, key: "rationale" }) }) }), field({ key: "counterexample", value: object_or_null({ j: $json.at({ j: object_or_null({ j: $json.at({ j: x, key: "evidence" }) }), key: "counterexample" }) }) })] } });
+    proposals = proposals$84;
   }
   return { tag: "Some", value: { tag: "JObject", fields: [field({ key: "task", value: { tag: "JObject", fields: [field({ key: "id", value: $json.at({ j: task, key: "id" }) }), field({ key: "kind", value: str_or_empty({ j: $json.at({ j: task, key: "kind" }) }) }), field({ key: "scope", value: strings_of({ j: $json.at({ j: task, key: "scope" }) }) }), field({ key: "target", value: target })] } }), field({ key: "status", value: $json.text({ t: status }) }), field({ key: "cause", value: str_or_null({ j: $json.at({ j: j, key: "cause" }) }) }), field({ key: "generated", value: { tag: "JObject", fields: [field({ key: "at", value: str_or_empty({ j: $json.at({ j: generated, key: "at" }) }) }), field({ key: "model", value: str_or_empty({ j: $json.at({ j: generated, key: "model" }) }) })] } }), field({ key: "interface_diff", value: { tag: "JArray", items: objects_of({ j: $json.at({ j: j, key: "interface_diff" }) }) } }), field({ key: "ledger_delta", value: mapped({ j: $json.at({ j: j, key: "ledger_delta" }), keys: ["def", "kind", "text", "before", "after"], kinds: ["str", "str", "str", "str?", "str?"] }) }), field({ key: "body_diff", value: mapped({ j: $json.at({ j: j, key: "body_diff" }), keys: ["file", "module", "before", "after"], kinds: ["str", "str", "str", "str"] }) }), field({ key: "trace", value: mapped({ j: $json.at({ j: j, key: "trace" }), keys: ["iteration", "classification", "diagnostics_before", "diagnostics_after", "mechanical_repairs", "tokens", "ms", "escalation"], kinds: ["num", "str", "num", "num", "num", "num", "num", "str?"] }) }), field({ key: "metrics", value: { tag: "JObject", fields: [field({ key: "iterations", value: num_or_zero({ j: $json.at({ j: metrics, key: "iterations" }) }) }), field({ key: "mechanical_repairs", value: num_or_zero({ j: $json.at({ j: metrics, key: "mechanical_repairs" }) }) }), field({ key: "escalation_steps", value: num_or_zero({ j: $json.at({ j: metrics, key: "escalation_steps" }) }) }), field({ key: "proposals", value: num_or_zero({ j: $json.at({ j: metrics, key: "proposals" }) }) }), field({ key: "tokens", value: num_or_zero({ j: $json.at({ j: metrics, key: "tokens" }) }) })] } }), field({ key: "proposals", value: { tag: "JArray", items: $std_list.finish({ b: proposals }) } }), field({ key: "audit", value: mapped({ j: $json.at({ j: j, key: "audit" }), keys: ["finding", "detail"], kinds: ["str", "str"] }) })] } };
 }
@@ -1727,8 +1735,8 @@ export function read_changes({ files, root }) {
     if ($m88.tag === "Ok") {
       const value = $m88.value;
       for (const name of value) {
-        const [, out$84] = add_change({ files: files, path: dir + "/" + name + "/change.json", out: out });
-        out = out$84;
+        const [, out$85] = add_change({ files: files, path: dir + "/" + name + "/change.json", out: out });
+        out = out$85;
       }
       return out;
       break $m88$match;
@@ -1793,16 +1801,16 @@ export function insert_newest_first({ xs, c }) {
   let placed = false;
   for (const x of xs) {
     if (!placed && $std_text.compare({ a: $json.str_at({ j: $json.at({ j: x, key: "generated" }), key: "at" }), b: at }) < 0) {
-      const [, out$85] = $std_list.push({ b: out, x: c });
-      out = out$85;
+      const [, out$86] = $std_list.push({ b: out, x: c });
+      out = out$86;
       placed = true;
     }
-    const [, out$86] = $std_list.push({ b: out, x: x });
-    out = out$86;
+    const [, out$87] = $std_list.push({ b: out, x: x });
+    out = out$87;
   }
   if (!placed) {
-    const [, out$87] = $std_list.push({ b: out, x: c });
-    out = out$87;
+    const [, out$88] = $std_list.push({ b: out, x: c });
+    out = out$88;
   }
   return $std_list.finish({ b: out });
 }

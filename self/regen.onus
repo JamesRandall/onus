@@ -2022,10 +2022,143 @@ fn def_or_question(d: json.Json) -> Text {
 }
 
 -- Regeneration audit findings (§8): what the interfaces alone could not reconstruct.
-fn audit(baseline: Check, final: Option[Check]) -> List[Finding] may alloc, mutate {
+fn audit(
+  baseline: Check,
+  final: Option[Check],
+  targets: List[TargetInfo]
+) -> List[Finding] may alloc, mutate {
   match final with
   | None -> return []
-  | Some(value) -> return audit_of(baseline: baseline, final: value)
+  | Some(value) -> return audit_of(baseline: baseline, final: value) ++ different_findings(
+    baseline: baseline,
+    final: value,
+    targets: targets
+  )
+}
+
+-- Loop spec §8's third finding (docs/CHANGES.md item 207): a target whose regenerated
+-- body is green but calls other functions, uses other effects or writes other constants
+-- than the body it replaced. Nothing when the regenerated program does not check.
+fn different_findings(
+  baseline: Check,
+  final: Check,
+  targets: List[TargetInfo]
+) -> List[Finding] may alloc, mutate {
+  var out: Builder[Finding] = List.builder()
+  if List.len(xs: final.diagnostics) > 0 {
+    return List.finish(b: out)
+  }
+  for t: TargetInfo in targets {
+    match target_finding(baseline: baseline, final: final, t: t) with
+    | Some(value) -> List.push(b: inout out, x: value)
+    | None -> skip()
+  }
+  return List.finish(b: out)
+}
+
+fn target_finding(
+  baseline: Check,
+  final: Check,
+  t: TargetInfo
+) -> Option[Finding] may alloc, mutate {
+  var before: Int = -1
+  match def_named(c: baseline, module: t.module_name, name: t.name) with
+  | None -> return None
+  | Some(value) -> before = value
+  var after: Int = -1
+  match def_named(c: final, module: t.module_name, name: t.name) with
+  | None -> return None
+  | Some(value) -> after = value
+  if before < 0 or after < 0 {
+    return None
+  }
+  let detail: Text = shape_difference(
+    before: baseline.ctx,
+    before_def: before,
+    after: final.ctx,
+    after_def: after
+  )
+  if detail == "" {
+    return None
+  }
+  return Some(
+    value: Finding {
+      finding: "green_but_different",
+      detail: "`" ++ t.module_name ++ "." ++ t.name ++ "` is green but differs from the body it replaced: " ++ detail
+    }
+  )
+}
+
+-- The function `module.name` in a checked program, if it has one.
+fn def_named(c: Check, module: Text, name: Text) -> Option[Int] may alloc {
+  match Map.find(d: c.ctx.by_name, key: module) with
+  | None -> return None
+  | Some(value) -> {
+    for d: defs.Def in List.finish(b: c.ctx.defs) {
+      if d.mod == value and d.name == name and d.kind is defs.Fn and d.parent is None {
+        return Some(value: d.id)
+      }
+    }
+    return None
+  }
+}
+
+-- How two bodies differ in shape: callees, effects and constants added or removed; "" when alike.
+fn shape_difference(
+  before: context.Context,
+  before_def: Int,
+  after: context.Context,
+  after_def: Int
+) -> Text may alloc, mutate {
+  var parts: Builder[Text] = List.builder()
+  push_difference(
+    parts: inout parts,
+    what: "callees",
+    before: interface.callees_of(ctx: before, def: before_def),
+    after: interface.callees_of(ctx: after, def: after_def)
+  )
+  push_difference(
+    parts: inout parts,
+    what: "effects",
+    before: interface.effects_used(ctx: before, def: before_def),
+    after: interface.effects_used(ctx: after, def: after_def)
+  )
+  push_difference(
+    parts: inout parts,
+    what: "constants",
+    before: interface.constants_of(ctx: before, def: before_def),
+    after: interface.constants_of(ctx: after, def: after_def)
+  )
+  return Text.join(parts: List.finish(b: parts), sep: "; ")
+}
+
+fn push_difference(
+  parts: inout Builder[Text],
+  what: Text,
+  before: List[Text],
+  after: List[Text]
+) -> Unit may alloc, mutate {
+  var added: Builder[Text] = List.builder()
+  for x: Text in after {
+    if not List.contains(xs: before, x: x) {
+      List.push(b: inout added, x: x)
+    }
+  }
+  var removed: Builder[Text] = List.builder()
+  for x: Text in before {
+    if not List.contains(xs: after, x: x) {
+      List.push(b: inout removed, x: x)
+    }
+  }
+  let a: List[Text] = List.finish(b: added)
+  let r: List[Text] = List.finish(b: removed)
+  if List.len(xs: a) > 0 {
+    List.push(b: inout parts, x: what ++ " added " ++ Text.join(parts: a, sep: ", "))
+  }
+  if List.len(xs: r) > 0 {
+    List.push(b: inout parts, x: what ++ " removed " ++ Text.join(parts: r, sep: ", "))
+  }
+  return Unit
 }
 
 fn audit_of(baseline: Check, final: Check) -> List[Finding] may alloc, mutate {
@@ -2940,7 +3073,7 @@ fn conclude(
 ) -> Result[Outcome, io.Error] may io.file, alloc, mutate {
   var findings: List[Finding] = []
   if r.task.kind == "regenerate" {
-    findings = audit(baseline: r.baseline, final: final)
+    findings = audit(baseline: r.baseline, final: final, targets: r.targets)
     if List.len(xs: findings) > 0 {
       r = { r with
         proposals: r.proposals ++ proposals_from_audit(

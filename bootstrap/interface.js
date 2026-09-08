@@ -29,8 +29,8 @@ const $ob10 = { kind: "overflow", text: "verified + 1 within Int", at: "self/int
 const $ob11 = { kind: "overflow", text: "detected + 1 within Int", at: "self/interface.onus:174:20", def: "coverage_json" };
 const $ob12 = { kind: "overflow", text: "surviving + 1 within Int", at: "self/interface.onus:176:21", def: "coverage_json" };
 const $ob13 = { kind: "overflow", text: "-1 within Int", at: "self/interface.onus:218:10", def: "module_of_file" };
-const $ob14 = { kind: "overflow", text: "-1 within Int", at: "self/interface.onus:868:24", def: "def_name_at" };
-const $ob15 = { kind: "overflow", text: "value.end - value.start within Int", at: "self/interface.onus:880:27", def: "def_name_at" };
+const $ob14 = { kind: "overflow", text: "-1 within Int", at: "self/interface.onus:869:24", def: "def_name_at" };
+const $ob15 = { kind: "overflow", text: "value.end - value.start within Int", at: "self/interface.onus:881:27", def: "def_name_at" };
 export function is_check({ k }) {
   if (k.tag === "Property" || k.tag === "Law") {
     return false;
@@ -736,7 +736,7 @@ export function item_json({ ctx, c, item, examples, properties, assumes, recover
     const [, assume_json$22] = $std_list.push({ b: assume_json, x: a.j });
     assume_json = assume_json$22;
   }
-  return { tag: "JObject", fields: [$json.field({ key: "effects", value: $json.texts({ ts: effects }) }), $json.field({ key: "claims", value: $json.texts({ ts: claims_list }) }), $json.field({ key: "contracts", value: { tag: "JArray", items: contracts } }), $json.field({ key: "examples", value: { tag: "JArray", items: $std_list.finish({ b: example_json }) } }), $json.field({ key: "properties", value: { tag: "JArray", items: $std_list.finish({ b: property_json }) } }), $json.field({ key: "assumes", value: { tag: "JArray", items: $std_list.finish({ b: assume_json }) } }), $json.field({ key: "recovers", value: { tag: "JArray", items: recovers } }), $json.field({ key: "obligations", value: counts_json({ obs: $std_list.finish({ b: own }) }) }), $json.field({ key: "at", value: $loc.location_json({ ctx: ctx, tables: c.tables, file: c.file, span: span }) }), $json.field({ key: "kind", value: $json.text({ t: kind }) }), $json.field({ key: "name", value: $json.text({ t: name }) }), $json.field({ key: "visibility", value: $json.text({ t: visibility }) }), $json.field({ key: "hardened", value: $json.bool({ b: is_hardened({ item: item }) }) }), $json.field({ key: "zone", value: $json.text({ t: item_zone({ ctx: ctx, c: c, item: item }) }) }), $json.field({ key: "signature", value: $json.text({ t: signature }) })] };
+  return { tag: "JObject", fields: [$json.field({ key: "effects", value: $json.texts({ ts: effects }) }), $json.field({ key: "claims", value: $json.texts({ ts: claims_list }) }), $json.field({ key: "contracts", value: { tag: "JArray", items: contracts } }), $json.field({ key: "examples", value: { tag: "JArray", items: $std_list.finish({ b: example_json }) } }), $json.field({ key: "properties", value: { tag: "JArray", items: $std_list.finish({ b: property_json }) } }), $json.field({ key: "assumes", value: { tag: "JArray", items: $std_list.finish({ b: assume_json }) } }), $json.field({ key: "recovers", value: { tag: "JArray", items: recovers } }), $json.field({ key: "obligations", value: counts_json({ obs: $std_list.finish({ b: own }) }) }), $json.field({ key: "at", value: $loc.location_json({ ctx: ctx, tables: c.tables, file: c.file, span: span }) }), $json.field({ key: "kind", value: $json.text({ t: kind }) }), $json.field({ key: "name", value: $json.text({ t: name }) }), $json.field({ key: "visibility", value: $json.text({ t: visibility }) }), $json.field({ key: "callees", value: $json.texts({ ts: item_callees({ ctx: ctx, c: c, item: item }) }) }), $json.field({ key: "hardened", value: $json.bool({ b: is_hardened({ item: item }) }) }), $json.field({ key: "zone", value: $json.text({ t: item_zone({ ctx: ctx, c: c, item: item }) }) }), $json.field({ key: "signature", value: $json.text({ t: signature }) })] };
 }
 
 export function is_hardened({ item }) {
@@ -1183,5 +1183,291 @@ export function def_name_at({ ctx, c, span }) {
 
 export function ledger_entry({ ctx, c, o }) {
   return { tag: "JObject", fields: [$json.field({ key: "kind", value: $json.text({ t: $obligations.kind_text({ k: o.kind }) }) }), $json.field({ key: "text", value: $json.text({ t: o.text }) }), $json.field({ key: "def", value: $json.text({ t: $context.get_def({ ctx: ctx, id: o.def }).name }) }), $json.field({ key: "status", value: $json.text({ t: $obligations.status_text({ s: o.status }) }) }), $json.field({ key: "by", value: $json.text_or_null({ o: o.by }) }), $json.field({ key: "pinned", value: $json.bool({ b: o.pinned }) }), $json.field({ key: "at", value: $loc.location_json({ ctx: ctx, tables: c.tables, file: o.at_file, span: o.at_span }) })] };
+}
+
+export function item_callees({ ctx, c, item }) {
+  const $m74 = item;
+  $m74$match: {
+    if ($m74.tag === "FnItem") {
+      const decl = $m74.decl;
+      const def = or_neg({ o: $std_map.find({ d: ctx.def_of, key: $defs.node_key({ file: c.file, tag: $defs.tag_item, span: decl.span }) }) });
+      if (def < 0) {
+        return [];
+      }
+      return callees_of({ ctx: ctx, def: def });
+      break $m74$match;
+    }
+    if (true) {
+      return [];
+      break $m74$match;
+    }
+    $rt.unreachable();
+  }
+}
+
+export function callees_of({ ctx, def }) {
+  const d = $context.get_def({ ctx: ctx, id: def });
+  let seen = $std_map.dict({  });
+  const $m75 = body_span_of({ d: d });
+  $m75$match: {
+    if ($m75.tag === "None") {
+      skip({  });
+      break $m75$match;
+    }
+    if ($m75.tag === "Some") {
+      const value = $m75.value;
+      const [, seen$36] = collect_callees({ ctx: ctx, file: d.file, outer: value, seen: seen });
+      seen = seen$36;
+      break $m75$match;
+    }
+    $rt.unreachable();
+  }
+  return sorted_texts({ xs: $std_map.keys({ d: seen }) });
+}
+
+export function collect_callees({ ctx, file, outer, seen }) {
+  for (const k of $std_map.keys({ d: ctx.refs })) {
+    if ($defs.key_file({ key: k }) === file && inside({ span: $defs.key_span({ key: k }), outer: outer })) {
+      const $m76 = callee_at({ ctx: ctx, key: k });
+      $m76$match: {
+        if ($m76.tag === "Some") {
+          const value = $m76.value;
+          const [, seen$37] = $std_map.set({ d: seen, key: $context.qualified_name({ ctx: ctx, id: value }), value: true });
+          seen = seen$37;
+          break $m76$match;
+        }
+        if ($m76.tag === "None") {
+          skip({  });
+          break $m76$match;
+        }
+        $rt.unreachable();
+      }
+    }
+  }
+  return [undefined, seen];
+  return [undefined, seen];
+}
+
+export function callee_at({ ctx, key }) {
+  const $m77 = $std_map.find({ d: ctx.refs, key: key });
+  $m77$match: {
+    if ($m77.tag === "None") {
+      return { tag: "None" };
+      break $m77$match;
+    }
+    if ($m77.tag === "Some") {
+      const value = $m77.value;
+      return fn_callee({ ctx: ctx, res: value });
+      break $m77$match;
+    }
+    $rt.unreachable();
+  }
+}
+
+export function fn_callee({ ctx, res }) {
+  const $m79 = callee_of({ res: res });
+  $m79$match: {
+    if ($m79.tag === "None") {
+      return { tag: "None" };
+      break $m79$match;
+    }
+    if ($m79.tag === "Some") {
+      const value = $m79.value;
+      if ($context.get_def({ ctx: ctx, id: value }).kind.tag === "Fn") {
+        return { tag: "Some", value: value };
+      }
+      return { tag: "None" };
+      break $m79$match;
+    }
+    $rt.unreachable();
+  }
+}
+
+export function callee_of({ res }) {
+  const $m83 = res;
+  $m83$match: {
+    if ($m83.tag === "DefRes") {
+      const def = $m83.def;
+      return { tag: "Some", value: def };
+      break $m83$match;
+    }
+    if ($m83.tag === "CompanionRes") {
+      const owner = $m83.owner;
+      const fn_def = $m83.fn_def;
+      return { tag: "Some", value: fn_def };
+      break $m83$match;
+    }
+    if ($m83.tag === "IfaceFnRes") {
+      const iface = $m83.iface;
+      const fn_def = $m83.fn_def;
+      return { tag: "Some", value: fn_def };
+      break $m83$match;
+    }
+    if (true) {
+      return { tag: "None" };
+      break $m83$match;
+    }
+    $rt.unreachable();
+  }
+}
+
+export function body_span_of({ d }) {
+  const $m88 = d.node;
+  $m88$match: {
+    if ($m88.tag === "FnNode") {
+      const decl = $m88.decl;
+      const $m89 = decl.body;
+      $m89$match: {
+        if ($m89.tag === "Some") {
+          const value = $m89.value;
+          return { tag: "Some", value: value.span };
+          break $m89$match;
+        }
+        if ($m89.tag === "None") {
+          return { tag: "None" };
+          break $m89$match;
+        }
+        $rt.unreachable();
+      }
+      break $m88$match;
+    }
+    if (true) {
+      return { tag: "None" };
+      break $m88$match;
+    }
+    $rt.unreachable();
+  }
+}
+
+export function inside({ span, outer }) {
+  return span.start >= outer.start && span.end <= outer.end;
+}
+
+export function constants_of({ ctx, def }) {
+  const d = $context.get_def({ ctx: ctx, id: def });
+  let seen = $std_map.dict({  });
+  const $m93 = d.node;
+  $m93$match: {
+    if ($m93.tag === "FnNode") {
+      const decl = $m93.decl;
+      const $m94 = decl.body;
+      $m94$match: {
+        if ($m94.tag === "Some") {
+          const value = $m94.value;
+          for (const n of $walk.nodes_in_block({ b: value, into_verify: false })) {
+            const $m95 = n;
+            $m95$match: {
+              if ($m95.tag === "NExpr") {
+                const e = $m95.e;
+                if (is_literal({ e: e })) {
+                  const [, seen$38] = $std_map.set({ d: seen, key: $printer.print_expr({ e: e }), value: true });
+                  seen = seen$38;
+                }
+                break $m95$match;
+              }
+              if (true) {
+                skip({  });
+                break $m95$match;
+              }
+              $rt.unreachable();
+            }
+          }
+          break $m94$match;
+        }
+        if ($m94.tag === "None") {
+          skip({  });
+          break $m94$match;
+        }
+        $rt.unreachable();
+      }
+      break $m93$match;
+    }
+    if (true) {
+      skip({  });
+      break $m93$match;
+    }
+    $rt.unreachable();
+  }
+  return sorted_texts({ xs: $std_map.keys({ d: seen }) });
+}
+
+export function is_literal({ e }) {
+  const $m96 = e;
+  $m96$match: {
+    if ($m96.tag === "IntLit") {
+      const value = $m96.value;
+      const text = $m96.text;
+      const span = $m96.span;
+      return true;
+      break $m96$match;
+    }
+    if ($m96.tag === "FloatLit") {
+      const value = $m96.value;
+      const span = $m96.span;
+      return true;
+      break $m96$match;
+    }
+    if ($m96.tag === "TextLit") {
+      const value = $m96.value;
+      const span = $m96.span;
+      return true;
+      break $m96$match;
+    }
+    if ($m96.tag === "DurationLit") {
+      const nanos = $m96.nanos;
+      const span = $m96.span;
+      return true;
+      break $m96$match;
+    }
+    if (true) {
+      return false;
+      break $m96$match;
+    }
+    $rt.unreachable();
+  }
+}
+
+export function effects_used({ ctx, def }) {
+  let out = $std_list.builder({  });
+  const $m97 = $std_map.find({ d: ctx.inferred, key: def });
+  $m97$match: {
+    if ($m97.tag === "Some") {
+      const value = $m97.value;
+      for (const e of $effectset.values({ s: value })) {
+        const [, out$39] = $std_list.push({ b: out, x: effect_name({ ctx: ctx, e: e }) });
+        out = out$39;
+      }
+      break $m97$match;
+    }
+    if ($m97.tag === "None") {
+      skip({  });
+      break $m97$match;
+    }
+    $rt.unreachable();
+  }
+  return sorted_texts({ xs: $std_list.finish({ b: out }) });
+}
+
+export function sorted_texts({ xs }) {
+  let out = [];
+  for (const x of xs) {
+    let placed = false;
+    let next = $std_list.builder({  });
+    for (const y of out) {
+      if (!placed && $std_text.compare({ a: x, b: y }) < 0) {
+        const [, next$40] = $std_list.push({ b: next, x: x });
+        next = next$40;
+        placed = true;
+      }
+      const [, next$41] = $std_list.push({ b: next, x: y });
+      next = next$41;
+    }
+    if (!placed) {
+      const [, next$42] = $std_list.push({ b: next, x: x });
+      next = next$42;
+    }
+    out = $std_list.finish({ b: next });
+  }
+  return out;
 }
 

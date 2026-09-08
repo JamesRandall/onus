@@ -47,6 +47,9 @@
       "kind": "fn",
       "name": "climb",
       "visibility": "private",
+      "callees": [
+        "recursion.climb"
+      ],
       "hardened": false,
       "zone": "draft",
       "signature": "fn climb(n: Int where 0 <= it and it <= 10) -> Int may panic"
@@ -90,6 +93,9 @@
       "kind": "fn",
       "name": "countdown",
       "visibility": "private",
+      "callees": [
+        "recursion.countdown"
+      ],
       "hardened": false,
       "zone": "draft",
       "signature": "fn countdown(n: Int where it >= 0) -> Int"
@@ -141,6 +147,9 @@
       "kind": "fn",
       "name": "caught",
       "visibility": "private",
+      "callees": [
+        "recursion.climb"
+      ],
       "hardened": false,
       "zone": "draft",
       "signature": "fn caught() -> Result[Int, Panicked]"
@@ -193,6 +202,7 @@
       "kind": "example",
       "name": "a_bad_measure_panics",
       "visibility": "private",
+      "callees": [],
       "hardened": false,
       "zone": "draft",
       "signature": "example a_bad_measure_panics {\n  caught() is Err\n}"
@@ -245,6 +255,7 @@
       "kind": "example",
       "name": "a_good_measure_recurses",
       "visibility": "private",
+      "callees": [],
       "hardened": false,
       "zone": "draft",
       "signature": "example a_good_measure_recurses {\n  countdown(n: 5) == 0\n}"

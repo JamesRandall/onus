@@ -20,6 +20,10 @@
         "added": [],
         "removed": []
       },
+      "callees": {
+        "added": [],
+        "removed": []
+      },
       "contracts": [
         {
           "kind": "requires",

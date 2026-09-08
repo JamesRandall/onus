@@ -2600,6 +2600,41 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     under stage2: 494 passed, 3 skipped. Fixed point reached from
     `bootstrap/`, native stage agrees; promoted.
 
+207. **The finding "green but different" (loop spec §8; spec §11.1).**
+    Loop spec §8's third finding was not reported in v0 (item 115), and
+    the first honest regeneration showed why it is the one that matters:
+    mandelbrot's `main` came back as a different program with a green
+    ledger. Now, when a regeneration checks clean, the audit compares
+    each target's body with the one it replaced — the functions it calls
+    (every resolved reference inside the body that names a function),
+    the effects it uses (the effects pass's inference) and the literal
+    constants it writes (as the printer prints them) — and a difference
+    is the finding `green_but_different`, naming the function and what
+    was added or removed, proposed as `add_example`. The comparison
+    lives in `interface` as `callees_of`, `effects_used` and
+    `constants_of`, and the interface document's function items carry
+    `callees` so the interface diff reports callees added and removed
+    (compatible, never breaking) and the review page's diff view shows
+    them for any loop change. Fixture: `zone_promote_audit_different` in
+    `test/cli`, the scripted model regenerating `svc.bill` as
+    `payments.charge(pence: x) + payments.charge(pence: x)` — green, and
+    no longer calling `core.math.double` — which the promotion record
+    reports as one finding. With it the reading of docs/BENCHMARK.md was
+    taken again: `main` is flagged for the callees and constants that
+    changed, `escape_count` for one literal a refactor no longer writes
+    — the noise a constants comparison carries, and the decisive signal
+    on `main`. Review artefacts under `.onus/changes/207/`: the interface
+    diffs are `regen` gaining `different_findings`, `target_finding`,
+    `def_named`, `shape_difference` and `push_difference` with `audit`
+    taking the targets, `interface` gaining the twelve callee, constant
+    and effect helpers, and `idiff.ItemChange` gaining `callees_added`
+    and `callees_removed` (breaking, as a record field is); the ledger
+    delta is `interface` 61 → 67 and `regen` 219 → 223 (ten checked
+    obligations added: the helpers' index arithmetic), nothing
+    regressed. The suite under stage2: 495 passed, 3 skipped; every
+    pinned interface document gains `callees`. Fixed point reached from
+    `bootstrap/`, native stage agrees; promoted.
+
 ### Deferred, not changed
 
 - Decided 2026-09-06, to apply in M15.5: generics compile natively by

@@ -48,6 +48,7 @@
           "kind": "record",
           "name": "Request",
           "visibility": "private",
+          "callees": [],
           "hardened": false,
           "zone": "hardened",
           "signature": "record Request {\n  caller: Text\n  customer: Text\n  idempotency_key: Text\n}"
@@ -82,6 +83,7 @@
           "kind": "record",
           "name": "Order",
           "visibility": "private",
+          "callees": [],
           "hardened": false,
           "zone": "hardened",
           "signature": "record Order {\n  customer: Text\n  amount_pence: Int where it >= 0\n}"
@@ -116,6 +118,7 @@
           "kind": "record",
           "name": "Basket",
           "visibility": "private",
+          "callees": [],
           "hardened": false,
           "zone": "hardened",
           "signature": "record Basket {\n  items: List[Order]\n  total: Int where it >= 0\n}"
@@ -153,6 +156,11 @@
           "kind": "fn",
           "name": "recent_orders",
           "visibility": "pub",
+          "callees": [
+            "std.sql.query",
+            "std.sql.select",
+            "std.sql.text"
+          ],
           "hardened": false,
           "zone": "hardened",
           "signature": "fn recent_orders(\n  db: sql.Db[ReadOnly, schema: \"orders\"],\n  who: auth.AuthedCustomer\n) -> Result[List[Order], sql.Error] may sql.read, alloc"
@@ -214,6 +222,11 @@
           "kind": "fn",
           "name": "load_basket",
           "visibility": "private",
+          "callees": [
+            "std.sql.query",
+            "std.sql.select",
+            "std.sql.text"
+          ],
           "hardened": false,
           "zone": "hardened",
           "signature": "fn load_basket(\n  db: sql.Db[ReadOnly],\n  who: auth.AuthedCustomer\n) -> Result[Basket, sql.Error] may sql.read, alloc"
@@ -275,6 +288,12 @@
           "kind": "fn",
           "name": "record_order",
           "visibility": "private",
+          "callees": [
+            "std.sql.execute",
+            "std.sql.int",
+            "std.sql.statement",
+            "std.sql.text"
+          ],
           "hardened": false,
           "zone": "hardened",
           "signature": "fn record_order(\n  db: sql.Db[ReadWrite, schema: \"orders\"],\n  who: auth.AuthedCustomer,\n  basket: Basket,\n  receipt: payments.Receipt\n) -> Result[Unit, sql.Error] may sql.write, alloc"
@@ -309,6 +328,7 @@
           "kind": "union",
           "name": "CheckoutError",
           "visibility": "private",
+          "callees": [],
           "hardened": false,
           "zone": "hardened",
           "signature": "union CheckoutError =\n  | Unauthorised of detail: auth.Error\n  | Storage of detail: sql.Error\n  | Payment of detail: payments.Error\n  | Empty"
@@ -351,6 +371,14 @@
           "kind": "fn",
           "name": "handle_checkout",
           "visibility": "pub",
+          "callees": [
+            "app.auth.require",
+            "checkout.load_basket",
+            "checkout.record_order",
+            "std.list.is_empty",
+            "std.sql.narrow",
+            "vendor.payments.charge"
+          ],
           "hardened": false,
           "zone": "hardened",
           "signature": "fn handle_checkout(\n  req: Request,\n  clock: io.Clock,\n  db: sql.Db[ReadWrite, schema: \"orders\"],\n  pay: payments.Client,\n  auth: auth.Service\n) -> Result[payments.Receipt, CheckoutError] may sql.read, sql.write, io.net, io.clock, alloc"
@@ -385,6 +413,7 @@
           "kind": "policy",
           "name": "no_third_party_assumes",
           "visibility": "private",
+          "callees": [],
           "hardened": false,
           "zone": "hardened",
           "signature": "policy no_third_party_assumes\n  forbid assume outside { self, std.* }"
@@ -419,6 +448,7 @@
           "kind": "path",
           "name": "checkout",
           "visibility": "private",
+          "callees": [],
           "hardened": false,
           "zone": "hardened",
           "signature": "path checkout\n  entry handle_checkout\n  effects <= { sql.read, sql.write, io.net, io.clock, alloc }\n  require { Idempotent }\n  policy no_third_party_assumes except { vendor.payments.charge }"
@@ -656,6 +686,7 @@
           "kind": "record",
           "name": "AuthedCustomer",
           "visibility": "pub",
+          "callees": [],
           "hardened": false,
           "zone": "hardened",
           "signature": "-- AuthedCustomer is evidence: only `require` produces one (§3.10).\npub sealed record AuthedCustomer {\n  id: Text\n}"
@@ -690,6 +721,7 @@
           "kind": "union",
           "name": "Error",
           "visibility": "pub",
+          "callees": [],
           "hardened": false,
           "zone": "hardened",
           "signature": "pub union Error =\n  | Unknown of caller: Text\n  | Expired"
@@ -724,6 +756,7 @@
           "kind": "capability",
           "name": "Service",
           "visibility": "pub",
+          "callees": [],
           "hardened": false,
           "zone": "hardened",
           "signature": "pub capability Service\n  grants io.net"
@@ -771,6 +804,7 @@
           "kind": "fn",
           "name": "require",
           "visibility": "pub",
+          "callees": [],
           "hardened": false,
           "zone": "hardened",
           "signature": "fn require(\n  service: Service,\n  caller: Text,\n  customer: Text,\n  clock: io.Clock\n) -> Result[AuthedCustomer, Error] may io.net"
@@ -880,6 +914,7 @@
           "kind": "claim",
           "name": "Idempotent",
           "visibility": "pub",
+          "callees": [],
           "hardened": false,
           "zone": "hardened",
           "signature": "pub claim Idempotent \"Calling twice with the same arguments has the same observable effect as calling once.\""
@@ -948,6 +983,7 @@
           "kind": "capability",
           "name": "Client",
           "visibility": "pub",
+          "callees": [],
           "hardened": true,
           "zone": "hardened",
           "signature": "pub hardened capability Client\n  grants io.net"
@@ -982,6 +1018,7 @@
           "kind": "union",
           "name": "Error",
           "visibility": "pub",
+          "callees": [],
           "hardened": true,
           "zone": "hardened",
           "signature": "pub hardened union Error =\n  | Declined of reason: Text"
@@ -1016,6 +1053,7 @@
           "kind": "record",
           "name": "Receipt",
           "visibility": "pub",
+          "callees": [],
           "hardened": true,
           "zone": "hardened",
           "signature": "pub hardened record Receipt {\n  id: Text\n  amount: Int where it >= 0\n}"
@@ -1077,6 +1115,10 @@
           "kind": "fn",
           "name": "charge",
           "visibility": "pub",
+          "callees": [
+            "app.auth.require",
+            "vendor.payments.charge"
+          ],
           "hardened": true,
           "zone": "hardened",
           "signature": "fn charge(\n  client: Client,\n  key: Text,\n  amount: Int where it >= 0,\n  who: auth.AuthedCustomer\n) -> Result[Receipt, Error] may io.net, alloc"
