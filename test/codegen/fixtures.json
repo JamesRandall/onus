@@ -72,6 +72,15 @@
           "file_hashes": {
             "mandelbrot.pgm": "b3:ee684a7518322545a170cc6ea2ce5e76b48425acbfc38dbf5cda4412094efad6"
           }
+        },
+        {
+          "source": "../../examples/counter/counter.onus",
+          "targets": [
+            "js"
+          ],
+          "via": "fake_dom.sh",
+          "stdout": "counter_dom.out",
+          "stderr_text": ""
         }
       ]
     },

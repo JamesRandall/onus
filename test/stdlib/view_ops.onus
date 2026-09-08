@@ -1,0 +1,103 @@
+module view_ops
+-- `std.view`'s predicates and accessibility conditions (§22.4), as examples over small trees.
+import std.view
+
+pub union Msg =
+  | Pressed
+  | Typed
+
+fn labelled_form() -> view.View[Msg] may alloc {
+  return view.element(
+    tag: Form,
+    attrs: [],
+    children: [
+      view.element(
+        tag: Label,
+        attrs: [view.attr(name: For, value: "name")],
+        children: [view.text(value: "Name")]
+      ),
+      view.element(
+        tag: Input,
+        attrs: [view.attr(name: Id, value: "name"), view.on(event: Edited, msg: Typed)],
+        children: []
+      ),
+      view.element(
+        tag: Button,
+        attrs: [view.on(event: Click, msg: Pressed)],
+        children: [view.text(value: "Go")]
+      )
+    ]
+  )
+}
+
+fn silent_button() -> view.View[Msg] may alloc {
+  return view.element(tag: Button, attrs: [], children: [view.text(value: "nothing")])
+}
+
+fn unlabelled_input() -> view.View[Msg] may alloc {
+  return view.element(
+    tag: Div,
+    attrs: [],
+    children: [view.element(tag: Input, attrs: [], children: [])]
+  )
+}
+
+fn bare_image() -> view.View[Msg] may alloc {
+  return view.element(tag: Img, attrs: [view.attr(name: Src, value: "x.png")], children: [])
+}
+
+fn nested_buttons() -> view.View[Msg] may alloc {
+  return view.element(
+    tag: Button,
+    attrs: [view.on(event: Click, msg: Pressed)],
+    children: [
+      view.element(
+        tag: A,
+        attrs: [view.attr(name: Href, value: "/")],
+        children: [view.text(value: "in")]
+      )
+    ]
+  )
+}
+
+fn keyed_list(n: Int where 0 <= it and it <= 100) -> view.View[Msg] may alloc {
+  var items: Builder[view.View[Msg]] = List.builder()
+  for i: Int in 0 ..< n {
+    List.push(
+      b: inout items,
+      x: view.keyed[Msg](
+        key: Int.to_text(x: i),
+        tag: Li,
+        attrs: [],
+        children: [view.text[Msg](value: Int.to_text(x: i))]
+      )
+    )
+  }
+  return view.element[Msg](tag: Ul, attrs: [], children: List.finish(b: items))
+}
+
+example spellings {
+  view.tag_name(tag: OptionItem) == "option"
+  view.event_name(event: Edited) == "input"
+  view.attr_name(name: AriaLabel) == "aria-label"
+}
+
+example conditions {
+  view.accessible(tree: labelled_form())
+  view.buttons_have_handlers(tree: labelled_form())
+  not view.buttons_have_handlers(tree: silent_button())
+  not view.inputs_have_labels(tree: unlabelled_input())
+  not view.images_have_alt(tree: bare_image())
+  not view.no_nested_interactive(tree: nested_buttons())
+  view.has_handler(v: silent_button(), event: Click) == false
+  view.attribute_of(v: bare_image(), name: Src) == Some(value: "x.png")
+}
+
+example descendants_counted {
+  List.len(xs: view.descendants(of: keyed_list(n: 3))) == 7
+  List.len(xs: view.descendants(of: view.text[Msg](value: "leaf"))) == 1
+}
+
+property lists_are_accessible(n: Int where 0 <= it and it <= 100) {
+  view.accessible(tree: keyed_list(n: n))
+}

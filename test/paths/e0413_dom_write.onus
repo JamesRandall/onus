@@ -1,0 +1,18 @@
+module e0413_dom_write
+-- A view function that writes to the document itself (§22.3): the path forbids `dom.write`.
+import std.dom
+import std.view
+
+pub fn render(root: dom.Root, count: Int) -> view.View[Unit] may dom.write, alloc {
+  let tree: view.View[Unit] = view.element(
+    tag: Span,
+    attrs: [],
+    children: [view.text(value: Int.to_text(x: count))]
+  )
+  view.patch[Unit](root: root, previous: None, next: tree)
+  return tree
+}
+
+path p
+  entry render
+  forbid { dom.write }

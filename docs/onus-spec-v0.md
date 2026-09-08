@@ -1376,3 +1376,70 @@ Patterns match module names; the most specific match wins. `default` applies to 
 The interface document, path report and ledger carry the zone of every item. A path report additionally lists the zones it crosses and every hardened-item-in-draft-module it depends on. The review tool renders zones as regions, with draft regions visibly distinct, and the promotion history of each module.
 
 `hardened` as a visibility modifier is permitted only on `pub` items in `draft` modules; elsewhere it is `E0902 hardened modifier outside draft zone`. `hardened` is a reserved word.
+
+---
+
+## 22. Views
+
+<!-- changed: 2026-09-08, docs/CHANGE-LOG-04.md, docs/CHANGES.md item 208 — views and the DOM capability -->
+
+### 22.1 The `dom` capability
+
+`dom.Root` is a capability granting access to one DOM subtree. It is constructed by the runtime for `main` on the `js` host only (host claim `host.js`, §19.2) and attenuated like any capability: `dom.subtree(root: Root, id: Text) -> Root` narrows to a child.
+
+Effects: `dom.read` (query layout, focus, scroll position), `dom.write` (patch the tree), `dom.event` (receive events). All three require a `dom.Root` in scope.
+
+### 22.2 The `View` type
+
+`std.view` defines an immutable tree:
+
+```
+union View[Msg] =
+  | Element of element: Tag, attrs: List[Attr[Msg]], children: List[View[Msg]], key: Option[Text]
+  | Text of value: Text
+  | Keyed of key: Text, child: View[Msg]
+
+union Attr[Msg] =
+  | Attribute of name: AttrName, value: Text
+  | On of event: EventKind, msg: Msg
+  | Property of name: PropName, value: Text
+```
+
+`Tag`, `AttrName`, `PropName` and `EventKind` are closed unions of the HTML vocabulary; there is no string-tagged element. <!-- changed: 2026-09-08, item 208 — a module's variants share one namespace (§4.2), so the `input` event is `EventKind.Edited` and the `option` element `Tag.OptionItem`; every other variant is the HTML name in title case --> A view function is any pure function returning `View[Msg]`. Handlers are messages, not closures: an `On` carries a value of the application's `Msg` type, so a view cannot capture capabilities or perform effects, and the set of things a UI can do is the closed `Msg` union. <!-- changed: 2026-09-08, item 208 — the change log named the element's field `tag`; a union's discriminant is `tag` in the JavaScript representation (§19.3), so the field is `element` -->
+
+### 22.3 The program shape
+
+```
+pub fn view(state: State) -> View[Msg] may alloc
+pub fn update(state: State, msg: Msg, api: ModelApi, clock: io.Clock) -> Result[State, AppError] may io.net, io.clock, alloc
+```
+
+`std.view.run(root: dom.Root, init: State, view: fn(State) -> View[Msg] may alloc, update: fn(State, Msg) -> Result[State, E] may e) may dom.read, dom.write, dom.event, e, alloc` drives the loop: render, diff against the previous tree, patch, wait for an event, dispatch its `Msg` to `update`, repeat. `run` is the only function in `std.view` with `dom.write`; a `path` over a workbench entry may `forbid { dom.write }` on everything except `std.view.run` via `except`. <!-- changed: 2026-09-08, item 208 — the change log gave `run` the `diverge` effect; on the JavaScript host events arrive on the host's loop, so `run` installs the loop and returns, and the page keeps dispatching; an `update` that returns `Err` stops the loop with the error on the console -->
+
+Capabilities the UI needs (`ModelApi`, `io.Net`, the ledger store) are parameters of `update`, never of `view`. A view cannot reach anything; it can only describe.
+
+### 22.4 Verifiable views
+
+Because a `View` is a value, properties over it are ordinary contracts:
+
+```
+property every_button_has_handler(s: State) {
+  forall v: View[Msg] in View.descendants(of: view(state: s)) where View.is_element(v: v, tag: Button):
+    View.has_handler(v: v, event: Click)
+}
+
+property labelled_inputs(s: State) {
+  forall v: View[Msg] in View.descendants(of: view(state: s)) where View.is_element(v: v, tag: Input):
+    View.has_label(tree: view(state: s), of: v)
+}
+```
+
+`std.view` ships a small set of such predicates and properties (buttons have handlers, inputs have labels, images have alt text, no nested interactive elements) that an application opts into per view function with `claims view.accessible`. Accessibility becomes a claim, propagated and reported like any other. <!-- changed: 2026-09-08, item 208 — the change log's properties used `v is Element(tag: Button, ..)`; patterns with field values (`pat_field = NAME ":" pattern`) are not in the grammar, so the predicates are functions of `std.view`; the nested pattern is deferred -->
+
+### 22.5 Runtime primitive
+
+One addition to the primitive surface (§19.1): `dom.patch(root, previous: View, next: View)` — diff two trees and apply the minimal set of DOM mutations. Keyed children reorder by key; unkeyed children reconcile positionally. Events are delivered as `(EventKind, path-to-node)` pairs and mapped back to `Msg` by the runtime from the current tree. The primitive is perhaps two hundred lines in the JS runtime; on native and WASM targets it is unavailable (`E0800`) unless a host provides a DOM.
+
+### 22.6 What is absent
+
+No component abstraction beyond functions; no local component state (all state is in `State`); no lifecycle hooks; no context or dependency injection (capabilities are parameters); no string-tagged elements; no inline styles as strings (a `Style` union in `std.view`, closed, with a `Custom` variant that carries `host.js`); no templating syntax.

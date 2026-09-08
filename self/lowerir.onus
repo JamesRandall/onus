@@ -1125,7 +1125,8 @@ fn main_spec(l: L, ctx: context.Context, f: ast.FnDecl) -> Option[ir.MainSpec] m
       let s: types.Type = types.strip(t: p.ty)
       match s with
       | types.Capability(def, _, _) -> {
-        if Text.starts_with(t: context.qualified_name(ctx: ctx, id: def), prefix: "std.io.") {
+        let qualified: Text = context.qualified_name(ctx: ctx, id: def)
+        if Text.starts_with(t: qualified, prefix: "std.io.") or qualified == "std.dom.Root" {
           List.push(
             b: inout roots,
             x: ir.Root { name: p.name, kind: context.get_def(ctx: ctx, id: def).name }

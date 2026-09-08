@@ -5,6 +5,7 @@
   "sources": [
     "../../examples/mandelbrot/mandelbrot.onus",
     "../../examples/reporting/reporting.onus",
-    "../../examples/checkout/checkout.onus"
+    "../../examples/checkout/checkout.onus",
+    "../../examples/counter/counter.onus"
   ]
 }

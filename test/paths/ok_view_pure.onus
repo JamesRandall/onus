@@ -1,0 +1,19 @@
+module ok_view_pure
+-- A view function stays pure of the document (§22.3): the path may forbid every `dom` effect.
+import std.dom
+import std.view
+
+pub union Msg =
+  | Tick
+
+pub fn render(count: Int) -> view.View[Msg] may alloc {
+  return view.element(
+    tag: Button,
+    attrs: [view.on(event: Click, msg: Tick)],
+    children: [view.text(value: Int.to_text(x: count))]
+  )
+}
+
+path p
+  entry render
+  forbid { dom.read, dom.write, dom.event }

@@ -1749,10 +1749,22 @@ fn main_call(
         List.push(b: inout args, x: "ptr %args")
       } else {
         let kind: Option[Text] = root_kind(roots: spec.roots, name: p.name)
-        if kind is Some {
-          List.push(b: inout args, x: "ptr " ++ root_call(n: inout n, kind: or_empty(o: kind)))
-        } else {
+        if kind == Some(value: "Root") {
+          -- `dom.Root` (§22.1) exists only on the JavaScript host: E0800, and a null root.
+          record_unsupported(
+            n: n,
+            def: entry.mod.name ++ ".main",
+            file: value.def.file,
+            span: value.def.span,
+            what: "`dom.Root` as a root capability of `main` (§22.1)"
+          )
           List.push(b: inout args, x: "ptr null")
+        } else {
+          if kind is Some {
+            List.push(b: inout args, x: "ptr " ++ root_call(n: inout n, kind: or_empty(o: kind)))
+          } else {
+            List.push(b: inout args, x: "ptr null")
+          }
         }
       }
     }

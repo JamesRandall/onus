@@ -65,6 +65,15 @@
           "expect": [
             "E0800"
           ]
+        },
+        {
+          "source": "e0800_dom_root.onus",
+          "targets": [
+            "native"
+          ],
+          "expect": [
+            "E0800"
+          ]
         }
       ]
     },

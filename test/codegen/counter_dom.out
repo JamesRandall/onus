@@ -1,0 +1,6 @@
+rendered: <body><div class="counter"><button id="dec" @click>-</button><span id="count">0</span><button id="inc" @click>+</button><button id="reset" @click>reset</button></div></body>
+click inc: <body><div class="counter"><button id="dec" @click>-</button><span id="count">1</span><button id="inc" @click>+</button><button id="reset" @click>reset</button></div></body>
+click inc: <body><div class="counter"><button id="dec" @click>-</button><span id="count">2</span><button id="inc" @click>+</button><button id="reset" @click>reset</button></div></body>
+click dec: <body><div class="counter"><button id="dec" @click>-</button><span id="count">1</span><button id="inc" @click>+</button><button id="reset" @click>reset</button></div></body>
+click reset: <body><div class="counter"><button id="dec" @click>-</button><span id="count">0</span><button id="inc" @click>+</button><button id="reset" @click>reset</button></div></body>
+click inc: <body><div class="counter"><button id="dec" @click>-</button><span id="count">1</span><button id="inc" @click>+</button><button id="reset" @click>reset</button></div></body>

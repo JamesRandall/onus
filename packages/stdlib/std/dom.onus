@@ -1,0 +1,18 @@
+module std.dom
+import std.host
+
+-- The DOM capability (spec §22.1; docs/CHANGES.md item 208): access to one
+-- subtree of the document, granted to `main` by the runtime on the
+-- JavaScript host only and attenuated like any capability. The effects it
+-- grants are `dom.read` (layout, focus, scroll), `dom.write` (patching the
+-- tree) and `dom.event` (receiving events); every `dom.*` primitive claims
+-- `host.js`, and a program that reaches one is `E0800` on any other target.
+pub capability Root
+  grants dom.read
+  grants dom.write
+  grants dom.event
+
+-- The subtree rooted at the element with `id` under `root`; a missing id is
+-- the root itself, so that a view has somewhere to render.
+pub intrinsic fn subtree(root: Root, id: Text) -> Root may dom.read, alloc
+  claims host.js

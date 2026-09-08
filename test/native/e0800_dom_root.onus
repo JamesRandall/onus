@@ -1,0 +1,7 @@
+module e0800_dom_root
+-- A `main` taking `dom.Root` (§22.1) has no native host: E0800 names it.
+import std.dom
+
+pub fn main(root: dom.Root) -> Result[Unit, Text] may dom.read {
+  return Ok(value: Unit)
+}

@@ -4,7 +4,7 @@ Follows `CHANGE-LOG-03.md`. Apply after it. Adds what the workbench needs to be 
 
 ---
 
-## 2026-09-05 — Views and the DOM **(to apply)**
+## 2026-09-05 — Views and the DOM **(applying; 2026-09-08, docs/CHANGES.md item 208: the capability, the primitive, `std.view` and the counter; the workbench in Onus is a later change)**
 
 **Principle.** UI frameworks exist for human authors: syntax that reads like markup, components to reason about one piece at a time, lifecycle hooks, an ecosystem. A model needs none of that. What remains is the one non-ergonomic problem — keeping the DOM in sync with state without rebuilding it — and that is a small runtime primitive, not a dependency. A view in Onus is a pure function from state to a tree value; the tree is verifiable like any other value; only the patch step touches the DOM.
 
@@ -87,7 +87,7 @@ cmp_expr    = add_expr [ CMP_OP add_expr | "is" pattern ] ;
 
 **Stdlib.** Add `std/view.onus`: `View`, `Attr`, `Tag`, `AttrName`, `PropName`, `EventKind`, `Style`, `run`, `descendants`, `has_label`, and the accessibility properties. Written in Onus, verified like everything else. This is the first stdlib module written against the self-hosted compiler and should be treated as a fixture for it.
 
-**Milestones.** Add **M15 — Views.** `dom` capability, `dom.patch`, `std.view`, the accessibility claim set. Accept: a counter application (state, `view`, `update`) runs in a browser from the JS target; `every_button_has_handler` is proved for it; `forbid { dom.write }` on a path rejects a direct `dom.write` outside `std.view.run`; the same source built for native fails with `E0800` naming the primitive.
+**Milestones.** Add **M17 — Views** (M15 is the compiler in Onus and M16 zones in the implementation spec; edited 2026-09-08). `dom` capability, `dom.patch`, `std.view`, the accessibility claim set. Accept: a counter application (state, `view`, `update`) runs in a browser from the JS target; `every_button_has_handler` is proved for it; `forbid { dom.write }` on a path rejects a direct `dom.write` outside `std.view.run`; the same source built for native fails with `E0800` naming the primitive.
 
 **M10 (review tool)** is redefined: the workbench's logic — path layout, interface diff rendering, ledger queries, the task queue — is written in Onus against `std.view`, in a `draft` zone, and promoted when its audit is clean. The hand-written TypeScript shell is reduced to bootstrapping `main` and nothing else. Reorder: M15 before M10's rewrite.
 

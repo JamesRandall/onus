@@ -19,7 +19,8 @@
         "list_ops.onus",
         "list_generic.onus",
         "map_ops.onus",
-        "hash_ops.onus"
+        "hash_ops.onus",
+        "view_ops.onus"
       ]
     },
     {

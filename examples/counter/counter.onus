@@ -1,0 +1,71 @@
+module counter
+-- The counter of language spec §22.5: a state, a view of it, and an update.
+-- `main` takes the document's root and hands the three to `view.run`.
+import std.dom
+import std.view
+
+pub union Msg =
+  | Increment
+  | Decrement
+  | Reset
+
+pub record State {
+  count: Int
+}
+
+pub fn initial() -> State {
+  return State { count: 0 }
+}
+
+pub fn update(state: State, msg: Msg) -> Result[State, Text] {
+  match msg with
+  | Increment -> return Ok(value: State { count: state.count + 1 })
+  | Decrement -> return Ok(value: State { count: state.count - 1 })
+  | Reset -> return Ok(value: State { count: 0 })
+}
+
+pub fn render(state: State) -> view.View[Msg] may alloc {
+  return view.element(
+    tag: Div,
+    attrs: [view.attr(name: Class, value: "counter")],
+    children: [
+      view.element(
+        tag: Button,
+        attrs: [view.on(event: Click, msg: Decrement), view.attr(name: Id, value: "dec")],
+        children: [view.text(value: "-")]
+      ),
+      view.element(
+        tag: Span,
+        attrs: [view.attr(name: Id, value: "count")],
+        children: [view.text(value: Int.to_text(x: state.count))]
+      ),
+      view.element(
+        tag: Button,
+        attrs: [view.on(event: Click, msg: Increment), view.attr(name: Id, value: "inc")],
+        children: [view.text(value: "+")]
+      ),
+      view.element(
+        tag: Button,
+        attrs: [view.on(event: Click, msg: Reset), view.attr(name: Id, value: "reset")],
+        children: [view.text(value: "reset")]
+      )
+    ]
+  )
+}
+
+property every_button_has_handler(s: State) {
+  view.buttons_have_handlers(tree: render(state: s))
+}
+
+property rendered_accessible(s: State) {
+  view.accessible(tree: render(state: s))
+}
+
+example increments_once {
+  update(state: initial(), msg: Increment) == Ok(value: State { count: 1 })
+}
+
+pub fn main(root: dom.Root) -> Result[Unit, Text] may dom.read, dom.write, dom.event, alloc {
+  view.run(root: root, init: initial(), view: render, update: update)
+  return Ok(value: Unit)
+}

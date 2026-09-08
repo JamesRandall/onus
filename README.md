@@ -128,7 +128,7 @@ Effects are declared with `may` (`-> Int may alloc`). `z3` must be on `PATH` for
 - `packages/stdlib` — `std.*`, written in Onus
 - `test/` — the fixture suite, one manifest per directory
 - `docs/schema/` — the JSON schemas of the documents the compiler and the loop write
-- `examples/` — mandelbrot, reporting, checkout: the three worked examples from the spec, used as integration tests
+- `examples/` — mandelbrot, reporting, checkout: the three worked examples from the spec, used as integration tests; counter, the view example of §22
 - `onus-lang.org/` — the website, a Hugo site that mounts the documents and examples above so it never carries a stale copy
 
 ## Commands

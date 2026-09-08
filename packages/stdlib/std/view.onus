@@ -1,0 +1,363 @@
+module std.view
+import std.dom
+import std.host
+
+-- Views (spec §22): an immutable tree a pure function of state returns,
+-- patched onto the DOM by one primitive, with handlers as messages. A view
+-- cannot reach a capability or perform an effect; it describes.
+-- The HTML vocabulary, closed (§22.2): no string-tagged element.
+pub union Tag =
+  | Div
+  | Span
+  | P
+  | H1
+  | H2
+  | H3
+  | Ul
+  | Ol
+  | Li
+  | Button
+  | Input
+  | Label
+  | Form
+  | Table
+  | Thead
+  | Tbody
+  | Tr
+  | Th
+  | Td
+  | A
+  | Img
+  | Pre
+  | Code
+  | Section
+  | Header
+  | Footer
+  | Nav
+  | Main
+  | Select
+  | OptionItem
+  | Textarea
+
+pub union AttrName =
+  | Id
+  | Class
+  | Href
+  | Src
+  | Alt
+  | Title
+  | For
+  | Type
+  | Placeholder
+  | Name
+  | Role
+  | AriaLabel
+  | Disabled
+  | Style
+
+pub union PropName =
+  | Value
+  | Checked
+  | Selected
+
+pub union EventKind =
+  | Click
+  -- The `input` event: the value of a field changed as it is edited.
+  | Edited
+  | Change
+  | Submit
+  | KeyDown
+  | Focus
+  | Blur
+
+pub union Attr[Msg] =
+  | Attribute of name: AttrName, value: Text
+  | On of event: EventKind, msg: Msg
+  | Property of name: PropName, value: Text
+
+pub union View[Msg] =
+  | Element of element: Tag, attrs: List[Attr[Msg]], children: List[View[Msg]], key: Option[Text]
+  | Text of value: Text
+  | Keyed of key: Text, child: View[Msg]
+
+-- Constructors ----------------------------------------------------------------
+pub fn text[Msg](value: Text) -> View[Msg] may alloc {
+  return Text(value: value)
+}
+
+pub fn element[Msg](
+  tag: Tag,
+  attrs: List[Attr[Msg]],
+  children: List[View[Msg]]
+) -> View[Msg] may alloc {
+  return Element(element: tag, attrs: attrs, children: children, key: None)
+}
+
+pub fn keyed[Msg](
+  key: Text,
+  tag: Tag,
+  attrs: List[Attr[Msg]],
+  children: List[View[Msg]]
+) -> View[Msg] may alloc {
+  return Element(element: tag, attrs: attrs, children: children, key: Some(value: key))
+}
+
+pub fn attr[Msg](name: AttrName, value: Text) -> Attr[Msg] may alloc {
+  return Attribute(name: name, value: value)
+}
+
+pub fn on[Msg](event: EventKind, msg: Msg) -> Attr[Msg] may alloc {
+  return On(event: event, msg: msg)
+}
+
+-- The tag's name as the document spells it.
+pub fn tag_name(tag: Tag) -> Text {
+  match tag with
+  | Div -> return "div"
+  | Span -> return "span"
+  | P -> return "p"
+  | H1 -> return "h1"
+  | H2 -> return "h2"
+  | H3 -> return "h3"
+  | Ul -> return "ul"
+  | Ol -> return "ol"
+  | Li -> return "li"
+  | Button -> return "button"
+  | Input -> return "input"
+  | Label -> return "label"
+  | Form -> return "form"
+  | Table -> return "table"
+  | Thead -> return "thead"
+  | Tbody -> return "tbody"
+  | Tr -> return "tr"
+  | Th -> return "th"
+  | Td -> return "td"
+  | A -> return "a"
+  | Img -> return "img"
+  | Pre -> return "pre"
+  | Code -> return "code"
+  | Section -> return "section"
+  | Header -> return "header"
+  | Footer -> return "footer"
+  | Nav -> return "nav"
+  | Main -> return "main"
+  | Select -> return "select"
+  | OptionItem -> return "option"
+  | Textarea -> return "textarea"
+}
+
+pub fn attr_name(name: AttrName) -> Text {
+  match name with
+  | Id -> return "id"
+  | Class -> return "class"
+  | Href -> return "href"
+  | Src -> return "src"
+  | Alt -> return "alt"
+  | Title -> return "title"
+  | For -> return "for"
+  | Type -> return "type"
+  | Placeholder -> return "placeholder"
+  | Name -> return "name"
+  | Role -> return "role"
+  | AriaLabel -> return "aria-label"
+  | Disabled -> return "disabled"
+  | Style -> return "style"
+}
+
+pub fn event_name(event: EventKind) -> Text {
+  match event with
+  | Click -> return "click"
+  | Edited -> return "input"
+  | Change -> return "change"
+  | Submit -> return "submit"
+  | KeyDown -> return "keydown"
+  | Focus -> return "focus"
+  | Blur -> return "blur"
+}
+
+-- Predicates (§22.4) ------------------------------------------------------------
+-- Every node of a tree, the tree itself first, children in order, a depth of
+-- `fuel` levels at most.
+pub fn descendants[Msg](of: View[Msg]) -> List[View[Msg]] may alloc, mutate {
+  var out: Builder[View[Msg]] = List.builder()
+  collect(v: of, fuel: 64, out: inout out)
+  return List.finish(b: out)
+}
+
+fn collect[Msg](
+  v: View[Msg],
+  fuel: Int where it >= 0,
+  out: inout Builder[View[Msg]]
+) -> Unit may alloc, mutate
+  decreases fuel
+{
+  List.push(b: inout out, x: v)
+  if fuel == 0 {
+    return Unit
+  }
+  match v with
+  | Element(element, attrs, children, key) -> {
+    for c: View[Msg] in children {
+      collect(v: c, fuel: fuel - 1, out: inout out)
+    }
+  }
+  | Keyed(key, child) -> collect(v: child, fuel: fuel - 1, out: inout out)
+  | Text(value) -> skip()
+  return Unit
+}
+
+fn skip() -> Unit {
+  return Unit
+}
+
+pub fn is_element[Msg](v: View[Msg], tag: Tag) -> Bool {
+  match v with
+  | Element(element, attrs, children, key) -> return element == tag
+  | _ -> return false
+}
+
+-- Whether `a` is a handler for `kind`.
+fn handles[Msg](a: Attr[Msg], kind: EventKind) -> Bool {
+  match a with
+  | On(event, msg) -> return event == kind
+  | _ -> return false
+}
+
+-- The value of `a` when it is the attribute `attr`.
+fn attribute_named[Msg](a: Attr[Msg], attr: AttrName) -> Option[Text] {
+  match a with
+  | Attribute(name, value) -> {
+    if name == attr {
+      return Some(value: value)
+    }
+    return None
+  }
+  | _ -> return None
+}
+
+pub fn has_handler[Msg](v: View[Msg], event: EventKind) -> Bool {
+  match v with
+  | Element(element, attrs, children, key) -> {
+    for a: Attr[Msg] in attrs {
+      if handles(a: a, kind: event) {
+        return true
+      }
+    }
+    return false
+  }
+  | _ -> return false
+}
+
+pub fn attribute_of[Msg](v: View[Msg], name: AttrName) -> Option[Text] {
+  match v with
+  | Element(element, attrs, children, key) -> {
+    for a: Attr[Msg] in attrs {
+      match attribute_named(a: a, attr: name) with
+      | Some(value) -> return Some(value: value)
+      | None -> skip()
+    }
+    return None
+  }
+  | _ -> return None
+}
+
+-- An input is labelled when it has an `aria-label`, or an `id` some `label` in the tree is `for`.
+pub fn has_label[Msg](tree: View[Msg], of: View[Msg]) -> Bool may alloc, mutate {
+  if attribute_of(v: of, name: AriaLabel) is Some {
+    return true
+  }
+  match attribute_of(v: of, name: Id) with
+  | None -> return false
+  | Some(value) -> {
+    for n: View[Msg] in descendants(of: tree) {
+      if is_element(v: n, tag: Label) and attribute_of(v: n, name: For) == Some(value: value) {
+        return true
+      }
+    }
+    return false
+  }
+}
+
+pub fn is_interactive[Msg](v: View[Msg]) -> Bool {
+  return is_element(v: v, tag: Button) or is_element(v: v, tag: Input) or is_element(
+    v: v,
+    tag: A
+  ) or is_element(v: v, tag: Select) or is_element(v: v, tag: Textarea)
+}
+
+-- The accessibility conditions (§22.4), each over a whole tree.
+pub fn buttons_have_handlers[Msg](tree: View[Msg]) -> Bool may alloc, mutate {
+  for v: View[Msg] in descendants(of: tree) {
+    if is_element(v: v, tag: Button) and not has_handler(v: v, event: Click) {
+      return false
+    }
+  }
+  return true
+}
+
+pub fn inputs_have_labels[Msg](tree: View[Msg]) -> Bool may alloc, mutate {
+  for v: View[Msg] in descendants(of: tree) {
+    if is_element(v: v, tag: Input) and not has_label(tree: tree, of: v) {
+      return false
+    }
+  }
+  return true
+}
+
+pub fn images_have_alt[Msg](tree: View[Msg]) -> Bool may alloc, mutate {
+  for v: View[Msg] in descendants(of: tree) {
+    if is_element(v: v, tag: Img) and attribute_of(v: v, name: Alt) is None {
+      return false
+    }
+  }
+  return true
+}
+
+pub fn no_nested_interactive[Msg](tree: View[Msg]) -> Bool may alloc, mutate {
+  for v: View[Msg] in descendants(of: tree) {
+    if is_interactive(v: v) {
+      match v with
+      | Element(element, attrs, children, key) -> {
+        for c: View[Msg] in children {
+          for d: View[Msg] in descendants(of: c) {
+            if is_interactive(v: d) {
+              return false
+            }
+          }
+        }
+      }
+      | _ -> skip()
+    }
+  }
+  return true
+}
+
+-- The whole set: what `claims view.accessible` asserts of a view function's result.
+pub fn accessible[Msg](tree: View[Msg]) -> Bool may alloc, mutate {
+  return buttons_have_handlers(tree: tree) and inputs_have_labels(tree: tree) and images_have_alt(
+    tree: tree
+  ) and no_nested_interactive(tree: tree)
+}
+
+pub claim accessible "Every view this function returns satisfies `view.accessible`: buttons have click handlers, inputs have labels, images have alt text, and no interactive element nests another."
+
+-- The primitive (§22.5) --------------------------------------------------------
+-- Diffs `previous` against `next` and applies the minimal mutations under `root`.
+pub intrinsic fn patch[Msg](
+  root: dom.Root,
+  previous: Option[View[Msg]],
+  next: View[Msg]
+) -> Unit may dom.write, alloc
+  claims host.js
+
+-- The loop (§22.3): renders `init`, patches, and on every event dispatches its
+-- message to `update` and re-renders; installed on the host's event loop, so it
+-- returns at once and the page keeps dispatching. An `update` that returns
+-- `Err` stops the loop with the error on the console.
+pub intrinsic fn run[State, Msg, E, e](
+  root: dom.Root,
+  init: State,
+  view: fn(state: State) -> View[Msg] may alloc,
+  update: fn(state: State, msg: Msg) -> Result[State, E] may e
+) -> Unit may dom.read, dom.write, dom.event, e, alloc
+  claims host.js

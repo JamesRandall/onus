@@ -4,6 +4,7 @@
  * `Panic` into an exit status with the failed obligation in the report.
  */
 import * as io from './io.js';
+import * as dom from './dom.js';
 import * as sql from './sql.js';
 import { Panic } from './panic.js';
 function root(kind) {
@@ -20,6 +21,9 @@ function root(kind) {
             return io.Clock.root();
         case 'Process':
             return io.Process.root();
+        case 'Root':
+            // `dom.Root` (§22.1): the document's body, on a host that has one.
+            return dom.Root.root();
     }
 }
 export function runMain(main, spec, argv) {

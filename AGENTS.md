@@ -55,7 +55,7 @@ See `docs/onus-impl-spec-v0.md` §2. Short version:
 - `packages/stdlib` — `std.*` written in Onus
 - `test/` — the fixture suite: one directory per area with a `fixtures.json` manifest (impl spec §10)
 - `docs/schema/` — the JSON schemas of the interface, diagnostic, path, task, change and proposal documents
-- `examples/` — mandelbrot, reporting, checkout: the three worked examples from the spec, used as integration tests
+- `examples/` — mandelbrot, reporting, checkout: the three worked examples from the spec, used as integration tests; counter, the view example of §22
 
 ## Commands
 

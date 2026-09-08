@@ -246,12 +246,12 @@ export function check_main({ ctx, m, decl }) {
           if ($m25.tag === "Capability") {
             const def = $m25.def;
             const qualified = $context.qualified_name({ ctx: ctx, id: def });
-            if (!$std_text.starts_with({ t: qualified, prefix: "std.io." })) {
+            if (!($std_text.starts_with({ t: qualified, prefix: "std.io." }) || qualified === "std.dom.Root")) {
               let at = decl.name.span;
               if (i < $std_list.len({ xs: decl.params })) {
                 at = $std_list.get({ xs: decl.params, i: i }).span;
               }
-              const [, ctx$7] = rep({ ctx: ctx, code: "E0602", file: m.file, at: at, def_name: { tag: "Some", value: decl.name.text }, detail: "`main` receives `" + p.name + "` of capability type `" + qualified + "`, but the runtime supplies only root capabilities (`io.Files`, `io.Env`, `io.Net`, `io.Clock`; §8.3)" });
+              const [, ctx$7] = rep({ ctx: ctx, code: "E0602", file: m.file, at: at, def_name: { tag: "Some", value: decl.name.text }, detail: "`main` receives `" + p.name + "` of capability type `" + qualified + "`, but the runtime supplies only root capabilities (`io.Files`, `io.Env`, `io.Net`, `io.Clock`, `io.Console`, `io.Process`, `dom.Root`; §8.3, §22.1)" });
               ctx = ctx$7;
             }
             break $m25$match;

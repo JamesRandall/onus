@@ -165,7 +165,7 @@ fn check_main(
       match types.strip(t: p.ty) with
       | types.Capability(def, _, _) -> {
         let qualified: Text = context.qualified_name(ctx: ctx, id: def)
-        if not Text.starts_with(t: qualified, prefix: "std.io.") {
+        if not (Text.starts_with(t: qualified, prefix: "std.io.") or qualified == "std.dom.Root") {
           var at: ast.Span = decl.name.span
           if i < List.len(xs: decl.params) {
             at = List.get(xs: decl.params, i: i).span
@@ -176,7 +176,7 @@ fn check_main(
             file: m.file,
             at: at,
             def_name: Some(value: decl.name.text),
-            detail: "`main` receives `" ++ p.name ++ "` of capability type `" ++ qualified ++ "`, but the runtime supplies only root capabilities (`io.Files`, `io.Env`, `io.Net`, `io.Clock`; §8.3)"
+            detail: "`main` receives `" ++ p.name ++ "` of capability type `" ++ qualified ++ "`, but the runtime supplies only root capabilities (`io.Files`, `io.Env`, `io.Net`, `io.Clock`, `io.Console`, `io.Process`, `dom.Root`; §8.3, §22.1)"
           )
         }
       }

@@ -2635,6 +2635,39 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     pinned interface document gains `callees`. Fixed point reached from
     `bootstrap/`, native stage agrees; promoted.
 
+208. **Views and the DOM capability (M17; spec §22; docs/CHANGE-LOG-04.md).**
+    `std/dom.onus`: the capability `Root` granting `dom.read`, `dom.write`
+    and `dom.event`, and `subtree`; `std/view.onus`: the immutable tree
+    `View[Msg]` (`Element`, `Text`, `Keyed`) and `Attr[Msg]` (`Attribute`,
+    `On` carrying a message, `Property`) over the closed vocabularies
+    `Tag`, `AttrName`, `PropName` and `EventKind`, the constructors, the
+    spellings, `descendants`, the predicates (`is_element`,
+    `has_handler`, `attribute_of`, `has_label`, `is_interactive`), the
+    accessibility conditions (`buttons_have_handlers`,
+    `inputs_have_labels`, `images_have_alt`, `no_nested_interactive`,
+    together `accessible`) and `claim accessible`; the intrinsics
+    `patch` and `run`, both claiming `host.js`. The JavaScript runtime's
+    `dom.ts` implements them against `globalThis.document` — a browser's,
+    or a fake a test supplies: `patch` diffs two trees and applies the
+    minimal mutations (keyed children by key, unkeyed positionally,
+    attributes, properties and listeners reconciled), `run` renders and
+    on every message updates and re-renders, installed on the host's
+    loop and returning at once. `dom.Root` is a root capability of
+    `main` (§8.3) on the JavaScript target, supplied as the document's
+    body; the native emitter refuses a `main` that takes one with
+    `E0800`. Three deviations from the change log, each marked in §22:
+    the element's field is `element`, not `tag`, since a union's
+    discriminant is `tag` in the JavaScript representation; `run` has no
+    `diverge` effect, since it installs the loop and returns; and the
+    accessibility properties use predicate functions rather than
+    `v is Element(tag: Button, ..)`, since patterns with field values are
+    not in the grammar (deferred). The variant `Input` of `EventKind`
+    is `Edited` and `Option` of `Tag` is `OptionItem`, since a module's
+    variants share one namespace. The milestone is M17 in the
+    implementation spec (the change log said M15). Fixtures: `test/paths/e0413_dom_write` (a view function that patches the document itself, under `forbid { dom.write }`) and `test/paths/ok_view_pure` (a path from a view function forbidding every `dom` effect); `test/stdlib/view_ops` (the spellings, the predicates, the conditions and `descendants` as examples, keyed lists accessible as a property); `test/native/e0800_dom_root`; the counter in `test/examples` and, in `test/codegen`, run from the JavaScript target against the fake document `fake_dom.mjs` (via `fake_dom.sh`), the tree after each click pinned in `counter_dom.out`.
+    Review artefacts under `.onus/changes/208/`: interface diffs of `capabilities`, `lowerir`, `native` (and, unchanged, `ir`, `build`, `nativebuild`, `jsemit`, `codes`), `ledger.md`; no obligation of `self/` changed status. Fixed
+    point reached from `bootstrap/`, native stage agrees; promoted.
+
 ### Deferred, not changed
 
 - Decided 2026-09-06, to apply in M15.5: generics compile natively by

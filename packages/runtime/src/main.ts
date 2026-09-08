@@ -4,10 +4,11 @@
  * `Panic` into an exit status with the failed obligation in the report.
  */
 import * as io from './io.js';
+import * as dom from './dom.js';
 import * as sql from './sql.js';
 import { Panic, type Result } from './panic.js';
 
-export type RootKind = 'Files' | 'Env' | 'Net' | 'Clock' | 'Console' | 'Process';
+export type RootKind = 'Files' | 'Env' | 'Net' | 'Clock' | 'Console' | 'Process' | 'Root';
 
 export interface MainSpec {
   /** Parameter name → root capability kind, for every capability parameter of `main`. */
@@ -18,7 +19,7 @@ export interface MainSpec {
   readonly status: boolean;
 }
 
-function root(kind: RootKind): io.Files | io.Env | io.Net | io.Clock | io.Console | io.Process {
+function root(kind: RootKind): io.Files | io.Env | io.Net | io.Clock | io.Console | io.Process | dom.Root {
   switch (kind) {
     case 'Console':
       return io.Console.root();
@@ -32,6 +33,9 @@ function root(kind: RootKind): io.Files | io.Env | io.Net | io.Clock | io.Consol
       return io.Clock.root();
     case 'Process':
       return io.Process.root();
+    case 'Root':
+      // `dom.Root` (§22.1): the document's body, on a host that has one.
+      return dom.Root.root();
   }
 }
 
