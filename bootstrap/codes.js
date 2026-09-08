@@ -244,6 +244,27 @@ export function title({ code }) {
   if (code === "E0801") {
     return "target disagreement";
   }
+  if (code === "E0900") {
+    return "dependency crosses zone boundary";
+  }
+  if (code === "E0901") {
+    return "manifest edited outside zone command";
+  }
+  if (code === "E0902") {
+    return "hardened modifier outside draft zone";
+  }
+  if (code === "E0903") {
+    return "public function of a critical module on no path";
+  }
+  if (code === "E0904") {
+    return "checked obligation not exercised in a critical module";
+  }
+  if (code === "E0905") {
+    return "assumption without justification in a hardened module";
+  }
+  if (code === "E0906") {
+    return "manifest unreadable";
+  }
   if (code === "E0999") {
     return "internal error";
   }
@@ -251,6 +272,6 @@ export function title({ code }) {
 }
 
 export function all_codes($args) {
-  return ["E0001", "E0002", "E0003", "E0004", "E0005", "E0006", "E0007", "E0008", "E0009", "E0010", "E0011", "E0012", "E0101", "E0102", "E0103", "E0104", "E0105", "E0106", "E0107", "E0108", "E0109", "E0110", "E0111", "E0112", "E0113", "E0114", "E0115", "E0201", "E0202", "E0203", "E0204", "E0205", "E0206", "E0207", "E0208", "E0302", "E0310", "E0320", "E0321", "E0322", "E0323", "E0324", "E0325", "E0326", "E0327", "E0328", "E0329", "E0330", "E0331", "E0332", "E0333", "E0334", "E0335", "E0337", "E0338", "E0339", "E0340", "E0341", "E0342", "E0343", "E0344", "E0345", "E0410", "E0411", "E0412", "E0413", "E0414", "E0415", "E0416", "E0501", "E0600", "E0601", "E0602", "E0603", "E0604", "E0700", "E0701", "E0702", "E0703", "E0800", "E0801", "E0999"];
+  return ["E0001", "E0002", "E0003", "E0004", "E0005", "E0006", "E0007", "E0008", "E0009", "E0010", "E0011", "E0012", "E0101", "E0102", "E0103", "E0104", "E0105", "E0106", "E0107", "E0108", "E0109", "E0110", "E0111", "E0112", "E0113", "E0114", "E0115", "E0201", "E0202", "E0203", "E0204", "E0205", "E0206", "E0207", "E0208", "E0302", "E0310", "E0320", "E0321", "E0322", "E0323", "E0324", "E0325", "E0326", "E0327", "E0328", "E0329", "E0330", "E0331", "E0332", "E0333", "E0334", "E0335", "E0337", "E0338", "E0339", "E0340", "E0341", "E0342", "E0343", "E0344", "E0345", "E0410", "E0411", "E0412", "E0413", "E0414", "E0415", "E0416", "E0501", "E0600", "E0601", "E0602", "E0603", "E0604", "E0700", "E0701", "E0702", "E0703", "E0800", "E0801", "E0900", "E0901", "E0902", "E0903", "E0904", "E0905", "E0906", "E0999"];
 }
 

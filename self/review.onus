@@ -4,6 +4,8 @@ import context
 import defs
 import report
 import json
+import tables
+import ledger
 import loc
 import interface
 import pathreport
@@ -518,7 +520,52 @@ fn push_nonempty(out: inout Builder[Text], s: Text) -> Unit may mutate, alloc {
 }
 
 -- The path view: the graph as SVG, then the path's assumptions, capabilities and ledger rows.
-pub fn render_path_view(r: json.Json) -> Text may alloc, mutate {
+-- The zones as regions (§21.5): one rectangle around the placed nodes of each zone,
+-- draft regions visibly distinct, labelled with the zone.
+fn zone_regions_svg(
+  layout: Layout,
+  nodes: List[json.Json],
+  zone_of: Dict[Text, Text]
+) -> Text may alloc, mutate {
+  var out: Builder[Text] = List.builder()
+  for z: Text in ["critical", "hardened", "draft"] {
+    var x0: Int = 1000000
+    var y0: Int = 1000000
+    var x1: Int = -1
+    var y1: Int = -1
+    for n: json.Json in nodes {
+      var zone: Text = "draft"
+      match Map.find(d: zone_of, key: json.str_at(j: n, key: "module")) with
+      | Some(value) -> zone = value
+      | None -> skip()
+      if zone == z {
+        match placed_of(layout: layout, id: json.str_at(j: n, key: "id")) with
+        | Some(value) -> {
+          x0 = min(a: x0, b: value.x)
+          y0 = min(a: y0, b: value.y)
+          x1 = max(a: x1, b: value.x + node_w)
+          y1 = max(a: y1, b: value.y + node_h)
+        }
+        | None -> skip()
+      }
+    }
+    if x1 >= 0 {
+      List.push(
+        b: inout out,
+        x: "<g class=\"zone " ++ z ++ "\"><rect x=\"" ++ num(n: x0 - 14) ++ "\" y=\"" ++ num(
+          n: y0 - 22
+        ) ++ "\" width=\"" ++ num(n: x1 - x0 + 28) ++ "\" height=\"" ++ num(
+          n: y1 - y0 + 30
+        ) ++ "\" rx=\"10\"/><text class=\"small\" x=\"" ++ num(n: x0 - 6) ++ "\" y=\"" ++ num(
+          n: y0 - 8
+        ) ++ "\">" ++ z ++ "</text></g>"
+      )
+    }
+  }
+  return Text.join(parts: List.finish(b: out), sep: "\n")
+}
+
+pub fn render_path_view(r: json.Json, zone_of: Dict[Text, Text]) -> Text may alloc, mutate {
   let entry: Text = json.str_at(j: r, key: "entry")
   var breaks: Builder[Break] = List.builder()
   var extras: Builder[Extra] = List.builder()
@@ -555,6 +602,7 @@ pub fn render_path_view(r: json.Json) -> Text may alloc, mutate {
   let assumed_ids: Dict[Text, Bool] = texts_set(xs: List.finish(b: assumed_at))
   let recover_ids: Dict[Text, Bool] = texts_set(xs: List.finish(b: recover_defs))
   var svg: Builder[Text] = List.builder()
+  push_nonempty(out: inout svg, s: zone_regions_svg(layout: layout, nodes: nodes, zone_of: zone_of))
   for g: json.Json in json.list_at(j: r, key: "gates") {
     push_nonempty(out: inout svg, s: gate_svg(layout: layout, g: g))
   }
@@ -573,6 +621,12 @@ pub fn render_path_view(r: json.Json) -> Text may alloc, mutate {
   var ok_text: Text = "failed"
   if json.bool_at(j: r, key: "ok") {
     ok_text = "ok"
+  }
+  if json.bool_at(j: r, key: "conditional") {
+    ok_text = ok_text ++ ", conditional on " ++ Text.join(
+      parts: json.texts_at(j: r, key: "conditional_on"),
+      sep: ", "
+    )
   }
   let effects: json.Json = json.at(j: r, key: "effects")
   var head: Text = "<h2>path <code>" ++ esc(
@@ -1001,6 +1055,31 @@ fn coverage_line(c: json.Json) -> Text may alloc {
 
 -- Ledger view ----------------------------------------------------------------------------------------
 -- Every obligation of every module, plus assumptions, recover sites and capability construction sites.
+-- The promotion history of every module (§21.5), or nothing when there is none.
+pub fn render_promotions_view(data: json.Json) -> Text may alloc, mutate {
+  let items: List[json.Json] = json.list_at(j: data, key: "promotions")
+  if List.len(xs: items) == 0 {
+    return ""
+  }
+  var rows: Builder[Text] = List.builder()
+  for p: json.Json in items {
+    List.push(
+      b: inout rows,
+      x: "<tr class=\"" ++ esc(s: json.str_at(j: p, key: "kind")) ++ "\"><td><code>" ++ esc(
+        s: json.str_at(j: p, key: "module")
+      ) ++ "</code></td><td>" ++ esc(s: json.str_at(j: p, key: "kind")) ++ "</td><td>" ++ esc(
+        s: json.str_at(j: p, key: "from")
+      ) ++ " → " ++ esc(s: json.str_at(j: p, key: "to")) ++ "</td><td>" ++ esc(
+        s: json.str_at(j: p, key: "at")
+      ) ++ "</td><td>" ++ esc(s: json.str_at(j: p, key: "audit")) ++ "</td></tr>"
+    )
+  }
+  return "<section class=\"promotions\"><h2>Promotions</h2>\n<table><thead><tr><th>module</th><th>change</th><th>zones</th><th>at</th><th>audit</th></tr></thead><tbody>\n" ++ Text.join(
+    parts: List.finish(b: rows),
+    sep: "\n"
+  ) ++ "\n</tbody></table></section>"
+}
+
 pub fn render_ledger_view(data: json.Json) -> Text may alloc, mutate {
   let modules: List[json.Json] = json.list_at(j: data, key: "modules")
   var rows: Builder[Row] = List.builder()
@@ -1547,7 +1626,7 @@ fn span_start(l: json.Json) -> Text may alloc {
 }
 
 -- The page -------------------------------------------------------------------------------------------
-const css: Text = "\n:root { color-scheme: light; --fg: #1f2328; --muted: #57606a; --line: #d0d7de; --bg: #ffffff; --panel: #f6f8fa; --amber: #fff3cd; --amber-line: #b8860b; --purple: #6f42c1; }\nbody { margin: 0; font: 14px/1.45 -apple-system, BlinkMacSystemFont, \"Segoe UI\", Helvetica, Arial, sans-serif; color: var(--fg); background: var(--bg); }\nheader { padding: 12px 24px; border-bottom: 1px solid var(--line); display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; }\nheader h1 { font-size: 16px; margin: 0; }\nnav button { font: inherit; background: none; border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; color: var(--fg); }\nnav button.active { background: var(--fg); color: var(--bg); border-color: var(--fg); }\nmain { padding: 16px 24px 48px; max-width: 1400px; }\n.view[hidden] { display: none; }\nh2 { font-size: 18px; margin: 20px 0 6px; } h3 { font-size: 15px; margin: 18px 0 6px; } h4 { margin: 12px 0 4px; }\ncode, pre { font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }\npre { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; overflow-x: auto; margin: 6px 0; white-space: pre-wrap; }\ntable { border-collapse: collapse; width: 100%; margin: 6px 0 12px; } th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); vertical-align: top; } th { color: var(--muted); font-weight: 600; }\n.meta, .small { color: var(--muted); } .small { font-size: 12px; }\n.item { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin: 10px 0; }\n.contract { margin: 2px 0 2px 12px; }\n.mark.checked { color: var(--muted); } .mark.failed, .status.failed, .breaking { color: #1f2328; font-weight: 600; } .status.ok, .compatible { color: var(--muted); }\n.assumed { background: var(--amber); } tr.assumed td { background: var(--amber); } div.assumed { border-left: 3px solid var(--amber-line); padding: 2px 8px; margin: 4px 0; }\n.recover { color: var(--purple); } div.recover { border-left: 3px solid var(--purple); padding: 2px 8px; margin: 4px 0; }\n.graph { overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }\nsvg text { font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: var(--fg); } svg text.small { font-size: 10.5px; fill: var(--muted); } svg text.name { font-weight: 600; }\nsvg .node rect { fill: #fff; stroke: #57606a; stroke-width: 1.2; } svg .node.entry rect { stroke-width: 2.4; stroke: #1f2328; } svg .node.intrinsic rect { stroke-dasharray: 4 3; }\nsvg .node.assumed rect { fill: var(--amber); stroke: var(--amber-line); } svg .node.recover rect { stroke: var(--purple); stroke-width: 2.4; }\nsvg .node.break rect { fill: #fff; stroke: #1f2328; stroke-dasharray: 2 4; } svg .edge { fill: none; stroke: #8c959f; stroke-width: 1.2; } svg .edge.back { stroke-dasharray: 6 3; } svg .edge.break { stroke: #1f2328; stroke-dasharray: 2 4; }\nsvg .edge-label { font-size: 10px; fill: var(--muted); text-anchor: middle; } svg .gate { fill: #d0d7de; fill-opacity: 0.35; stroke: #8c959f; stroke-dasharray: 8 4; } svg .gate-label { font-size: 11px; fill: var(--muted); }\n.filter.active { background: var(--fg); color: var(--bg); } .filter { font: inherit; border: 1px solid var(--line); border-radius: 6px; background: none; padding: 2px 8px; cursor: pointer; }\n.test.passed, .test.proved { color: var(--muted); } .test.failed { font-weight: 600; }\ndetails.body summary { cursor: pointer; color: var(--muted); }\npre.verify { margin: 6px 0 2px; background: #fff; } tr.verify-row td { background: var(--amber); border-top: none; padding-top: 0; }\n"
+const css: Text = "\n:root { color-scheme: light; --fg: #1f2328; --muted: #57606a; --line: #d0d7de; --bg: #ffffff; --panel: #f6f8fa; --amber: #fff3cd; --amber-line: #b8860b; --purple: #6f42c1; }\nbody { margin: 0; font: 14px/1.45 -apple-system, BlinkMacSystemFont, \"Segoe UI\", Helvetica, Arial, sans-serif; color: var(--fg); background: var(--bg); }\nheader { padding: 12px 24px; border-bottom: 1px solid var(--line); display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; }\nheader h1 { font-size: 16px; margin: 0; }\nnav button { font: inherit; background: none; border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; color: var(--fg); }\nnav button.active { background: var(--fg); color: var(--bg); border-color: var(--fg); }\nmain { padding: 16px 24px 48px; max-width: 1400px; }\n.view[hidden] { display: none; }\nh2 { font-size: 18px; margin: 20px 0 6px; } h3 { font-size: 15px; margin: 18px 0 6px; } h4 { margin: 12px 0 4px; }\ncode, pre { font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }\npre { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; overflow-x: auto; margin: 6px 0; white-space: pre-wrap; }\ntable { border-collapse: collapse; width: 100%; margin: 6px 0 12px; } th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); vertical-align: top; } th { color: var(--muted); font-weight: 600; }\n.meta, .small { color: var(--muted); } .small { font-size: 12px; }\n.item { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin: 10px 0; }\n.contract { margin: 2px 0 2px 12px; }\n.mark.checked { color: var(--muted); } .mark.failed, .status.failed, .breaking { color: #1f2328; font-weight: 600; } .status.ok, .compatible { color: var(--muted); }\n.assumed { background: var(--amber); } tr.assumed td { background: var(--amber); } div.assumed { border-left: 3px solid var(--amber-line); padding: 2px 8px; margin: 4px 0; }\n.recover { color: var(--purple); } div.recover { border-left: 3px solid var(--purple); padding: 2px 8px; margin: 4px 0; }\n.graph { overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }\nsvg text { font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: var(--fg); } svg text.small { font-size: 10.5px; fill: var(--muted); } svg text.name { font-weight: 600; }\nsvg .node rect { fill: #fff; stroke: #57606a; stroke-width: 1.2; } svg .node.entry rect { stroke-width: 2.4; stroke: #1f2328; } svg .node.intrinsic rect { stroke-dasharray: 4 3; }\nsvg .node.assumed rect { fill: var(--amber); stroke: var(--amber-line); } svg .node.recover rect { stroke: var(--purple); stroke-width: 2.4; }\nsvg .node.break rect { fill: #fff; stroke: #1f2328; stroke-dasharray: 2 4; } svg .edge { fill: none; stroke: #8c959f; stroke-width: 1.2; } svg .edge.back { stroke-dasharray: 6 3; } svg .edge.break { stroke: #1f2328; stroke-dasharray: 2 4; }\nsvg .edge-label { font-size: 10px; fill: var(--muted); text-anchor: middle; } svg .gate { fill: #d0d7de; fill-opacity: 0.35; stroke: #8c959f; stroke-dasharray: 8 4; } svg .gate-label { font-size: 11px; fill: var(--muted); } svg .zone rect { fill: none; stroke: #8c959f; stroke-width: 1; } svg .zone.critical rect { stroke: #1f2328; stroke-width: 1.6; } svg .zone.hardened rect { stroke: #57606a; } svg .zone.draft rect { stroke: #b8860b; stroke-dasharray: 3 3; } svg .zone text { fill: var(--muted); font-size: 10.5px; } tr.demotion td { background: var(--amber); }\n.filter.active { background: var(--fg); color: var(--bg); } .filter { font: inherit; border: 1px solid var(--line); border-radius: 6px; background: none; padding: 2px 8px; cursor: pointer; }\n.test.passed, .test.proved { color: var(--muted); } .test.failed { font-weight: 600; }\ndetails.body summary { cursor: pointer; color: var(--muted); }\npre.verify { margin: 6px 0 2px; background: #fff; } tr.verify-row td { background: var(--amber); border-top: none; padding-top: 0; }\n"
 
 const script: Text = "\n(function () {\n  var buttons = document.querySelectorAll('nav button[data-view]');\n  function show(name) {\n    document.querySelectorAll('.view').forEach(function (v) { v.hidden = v.getAttribute('data-view') !== name; });\n    buttons.forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-view') === name); });\n    try { localStorage.setItem('onus-review-view', name); } catch (e) {}\n  }\n  buttons.forEach(function (b) { b.addEventListener('click', function () { show(b.getAttribute('data-view')); }); });\n  var initial = null; try { initial = localStorage.getItem('onus-review-view'); } catch (e) {}\n  show(initial && document.querySelector('.view[data-view=\"' + initial + '\"]') ? initial : 'paths');\n  document.querySelectorAll('.filter').forEach(function (f) {\n    f.addEventListener('click', function () {\n      var status = f.getAttribute('data-status');\n      document.querySelectorAll('.filter').forEach(function (x) { x.classList.toggle('active', x === f); });\n      document.querySelectorAll('.ledger-view tr.ledger-row').forEach(function (row) { row.hidden = status !== 'all' && !row.classList.contains('status-' + status); });\n    });\n  });\n  var opened = {};\n  document.querySelectorAll('details.body').forEach(function (d) {\n    d.addEventListener('toggle', function () {\n      if (!d.open) return;\n      var m = d.getAttribute('data-module'); var item = d.getAttribute('data-item');\n      opened[m] = opened[m] || {}; opened[m][item] = true;\n      var n = Object.keys(opened[m]).length;\n      document.querySelectorAll('.rate[data-module=\"' + m + '\"]').forEach(function (r) {\n        var total = Number(r.getAttribute('data-total')) || 0;\n        r.textContent = n + ' of ' + total + ' bodies opened' + (total > 0 ? ' (' + Math.round(100 * n / total) + '%)' : '');\n      });\n    });\n  });\n})();\n"
 
@@ -1567,13 +1646,26 @@ fn count_label(word: Text, n: Int) -> Text may alloc {
 -- The whole review page: one self-contained HTML document with every view
 -- pre-rendered; the inline script only switches views, filters the ledger
 -- and counts body expansions.
+-- Module name → zone, from the interface documents of the review data.
+fn zones_of_modules(data: json.Json) -> Dict[Text, Text] may alloc, mutate {
+  var out: Dict[Text, Text] = Map.dict()
+  for m: json.Json in json.list_at(j: data, key: "modules") {
+    Map.set(
+      d: inout out,
+      key: json.str_at(j: m, key: "module"),
+      value: json.str_at(j: m, key: "zone")
+    )
+  }
+  return out
+}
+
 pub fn render_page(data: json.Json) -> Text may alloc, mutate {
   let paths: List[json.Json] = json.list_at(j: data, key: "paths")
   var paths_html: Text = "<section><h2>Paths</h2><p>The entry module declares no <code>path</code>.</p></section>"
   if List.len(xs: paths) > 0 {
     var parts: Builder[Text] = List.builder()
     for r: json.Json in paths {
-      List.push(b: inout parts, x: render_path_view(r: r))
+      List.push(b: inout parts, x: render_path_view(r: r, zone_of: zones_of_modules(data: data)))
     }
     paths_html = Text.join(parts: List.finish(b: parts), sep: "\n")
   }
@@ -1596,7 +1688,11 @@ pub fn render_page(data: json.Json) -> Text may alloc, mutate {
   let views: List[View] = [
     View { id: "paths", label: "Paths", html: paths_html },
     View { id: "interfaces", label: "Interfaces", html: modules_html },
-    View { id: "ledger", label: "Ledger", html: render_ledger_view(data: data) },
+    View {
+      id: "ledger",
+      label: "Ledger",
+      html: render_ledger_view(data: data) ++ render_promotions_view(data: data)
+    },
     View { id: "diff", label: "Diff", html: render_diff_view(diff: json.at(j: data, key: "diff")) },
     View {
       id: "changes",
@@ -1729,9 +1825,19 @@ pub fn review_data(
       json.field(key: "paths", value: json.JArray(items: List.finish(b: paths))),
       json.field(key: "diagnostics", value: diagnostics_json),
       json.field(key: "diff", value: diff_of(against: against, current: current)),
-      json.field(key: "changes", value: changes_json)
+      json.field(key: "changes", value: changes_json),
+      json.field(key: "promotions", value: promotions_json(ctx: ctx))
     ]
   )
+}
+
+-- The promotion history (§21.5), from the promotions ledger.
+fn promotions_json(ctx: context.Context) -> json.Json may alloc, mutate {
+  var items: Builder[json.Json] = List.builder()
+  for r: tables.PromotionRecord in ctx.promotions {
+    List.push(b: inout items, x: ledger.promotion_json(r: r))
+  }
+  return json.JArray(items: List.finish(b: items))
 }
 
 fn push_source(

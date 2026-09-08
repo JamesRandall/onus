@@ -14,6 +14,7 @@ import tables
 import json
 import loc
 import ledger
+import zones
 
 -- Interface documents (spec §11, §11.1; impl spec §3.6; `report/interface.ts`).
 --
@@ -333,6 +334,11 @@ fn build(ctx: context.Context, rec: defs.ModuleRecord) -> json.Json may alloc, m
   return json.JObject(
     fields: [
       json.field(key: "module", value: json.text(t: rec.name)),
+      json.field(key: "zone", value: json.text(t: zones.module_zone(ctx: ctx, mod: rec.id))),
+      json.field(
+        key: "conditional_on",
+        value: json.texts(ts: zones.conditional_on(ctx: ctx, mod: rec.id))
+      ),
       json.field(key: "hash", value: json.text(t: "b3:" ++ hash.blake3_hex(t: canonical_text))),
       json.field(key: "imports", value: json.texts(ts: List.finish(b: imports))),
       json.field(key: "items", value: json.JArray(items: List.finish(b: items))),
@@ -549,9 +555,34 @@ fn item_json(
       json.field(key: "kind", value: json.text(t: kind)),
       json.field(key: "name", value: json.text(t: name)),
       json.field(key: "visibility", value: json.text(t: visibility)),
+      json.field(key: "hardened", value: json.bool(b: is_hardened(item: item))),
+      json.field(key: "zone", value: json.text(t: item_zone(ctx: ctx, c: c, item: item))),
       json.field(key: "signature", value: json.text(t: signature))
     ]
   )
+}
+
+fn is_hardened(item: ast.Item) -> Bool {
+  match item with
+  | ast.FnItem(decl) -> return decl.vis.is_hardened and decl.vis.is_pub
+  | ast.TypeAliasItem(decl) -> return decl.vis.is_hardened and decl.vis.is_pub
+  | ast.IntrinsicTypeItem(decl) -> return decl.vis.is_hardened and decl.vis.is_pub
+  | ast.ConstItem(decl) -> return decl.vis.is_hardened and decl.vis.is_pub
+  | ast.RecordItem(decl) -> return decl.vis.is_hardened and decl.vis.is_pub
+  | ast.UnionItem(decl) -> return decl.vis.is_hardened and decl.vis.is_pub
+  | ast.InterfaceItem(decl) -> return decl.vis.is_hardened and decl.vis.is_pub
+  | ast.ClaimItem(decl) -> return decl.vis.is_hardened and decl.vis.is_pub
+  | ast.CapabilityItem(decl) -> return decl.vis.is_hardened and decl.vis.is_pub
+  | _ -> return false
+}
+
+-- The zone an item is held to (§21.5): its module's, or `hardened` for a hardened item of a draft module.
+fn item_zone(ctx: context.Context, c: Ctx, item: ast.Item) -> Text {
+  let z: Text = zones.module_zone(ctx: ctx, mod: c.mod)
+  if z == zones.zone_draft and is_hardened(item: item) {
+    return zones.zone_hardened
+  }
+  return z
 }
 
 fn effects_of(ctx: context.Context, c: Ctx, f: ast.FnDecl) -> List[Text] may alloc, mutate {
@@ -642,6 +673,10 @@ fn contract_entry(
     json.field(key: "kind", value: json.text(t: kind)),
     json.field(key: "text", value: json.text(t: printer.print_expr(e: e))),
     json.field(key: "pinned", value: json.bool(b: pinned)),
+    json.field(
+      key: "conditional",
+      value: json.bool(b: List.len(xs: zones.conditional_on(ctx: ctx, mod: c.mod)) > 0)
+    ),
     json.field(key: "status", value: json.text(t: status_of(obs: all))),
     json.field(key: "sites", value: json.int(v: List.len(xs: all)))
   ]

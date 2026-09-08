@@ -1,0 +1,18 @@
+{
+  "diagnostics": [
+    {
+      "code": "E0416",
+      "span": [
+        [
+          8,
+          3
+        ],
+        [
+          8,
+          45
+        ]
+      ],
+      "file": "excepted_third_party/vendor.onus"
+    }
+  ]
+}

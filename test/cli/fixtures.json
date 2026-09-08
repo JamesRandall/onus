@@ -275,6 +275,34 @@
           "stdout": "expect/interface_mandelbrot.json"
         },
         {
+          "name": "interface_hardened_text",
+          "args": [
+            "interface",
+            "ok_hardened_items.onus",
+            "--no-cache"
+          ],
+          "stage": [
+            "../checker/ok_hardened_items.onus"
+          ],
+          "stdout": "expect/interface_hardened.onus.txt",
+          "stdout_canonical": true,
+          "stdout_contains": [
+            "pub hardened fn charge(",
+            "pub hardened sealed record Token"
+          ]
+        },
+        {
+          "name": "interface_hardened_json",
+          "args": [
+            "interface",
+            "ok_hardened_items.onus",
+            "--json",
+            "--no-cache"
+          ],
+          "in": "interface_hardened_text",
+          "stdout": "expect/interface_hardened.json"
+        },
+        {
           "name": "interface_reporting_text",
           "args": [
             "interface",
@@ -868,6 +896,49 @@
           "stdout": "expect/coverage_interface.json",
           "stdout_contains": [
             "\"checked_exercised\""
+          ]
+        },
+        {
+          "name": "zone_coverage_test",
+          "args": [
+            "test",
+            "core.onus",
+            "--out",
+            "out",
+            "--no-cache"
+          ],
+          "stage_dir": "../zones/e0904_unexercised",
+          "normalise": [
+            "last_line"
+          ],
+          "stdout": "expect/zone_coverage_test.out",
+          "stdout_contains": [
+            "obligation coverage: "
+          ]
+        },
+        {
+          "name": "zone_coverage_check",
+          "args": [
+            "check",
+            "core.onus",
+            "--no-cache"
+          ],
+          "in": "zone_coverage_test",
+          "stdout_text": ""
+        },
+        {
+          "name": "zone_coverage_path",
+          "args": [
+            "path",
+            "core.onus",
+            "--json",
+            "--no-cache"
+          ],
+          "in": "zone_coverage_test",
+          "stdout": "expect/zone_coverage_path.json",
+          "stdout_contains": [
+            "\"zone\": \"critical\"",
+            "\"zones_crossed\": ["
           ]
         },
         {
@@ -1859,6 +1930,434 @@
           "stderr_contains": [
             "usage:\n"
           ]
+        }
+      ]
+    },
+    {
+      "kind": "cli",
+      "name": "cli-zones",
+      "requires": [
+        "cli",
+        "z3"
+      ],
+      "cases": [
+        {
+          "name": "zone_show",
+          "args": [
+            "zone",
+            "show",
+            "--no-cache"
+          ],
+          "stage_dir": "../zones/ok_zoned",
+          "stdout": "expect/zone_show.out"
+        },
+        {
+          "name": "zone_promote_refused",
+          "args": [
+            "zone",
+            "promote",
+            "core",
+            "critical",
+            "--budget",
+            "2000",
+            "--no-cache"
+          ],
+          "stage_dir": "../zones/e0903_off_path",
+          "status": 1,
+          "stdout": "expect/zone_promote_refused.out",
+          "stdout_contains": [
+            "E0903",
+            "promotion refused"
+          ]
+        },
+        {
+          "name": "zone_promote",
+          "args": [
+            "zone",
+            "promote",
+            "svc",
+            "critical",
+            "--budget",
+            "2000",
+            "--no-cache"
+          ],
+          "stage_dir": "../zones/ok_zoned",
+          "normalise": [
+            "dates"
+          ],
+          "stdout": "expect/zone_promote.out",
+          "files": {
+            "onus.toml": "expect/zone_promote.toml",
+            ".onus/ledger/promotions.json": "expect/zone_promote.promotions.json"
+          },
+          "stdout_contains": [
+            "policies passed; mutations:"
+          ]
+        },
+        {
+          "name": "zone_promote_audit",
+          "args": [
+            "zone",
+            "promote",
+            "svc",
+            "critical",
+            "--model",
+            "scripted:answers.json",
+            "--budget",
+            "2000",
+            "--no-cache"
+          ],
+          "stage_dir": "../zones/ok_zoned",
+          "write": {
+            "answers.json": "[\"```onus\\npub fn bill(x: Int where it >= 0) -> Int\\n  ensures result >= 0\\n{\\n  return payments.charge(pence: math.double(x: x))\\n}\\n```\"]"
+          },
+          "normalise": [
+            "dates",
+            "ms",
+            "hash",
+            "tokens",
+            "token_counts",
+            "stage"
+          ],
+          "stdout": "expect/zone_promote_audit.out",
+          "stdout_contains": [
+            "mutations: 0 detected, 0 surviving; regeneration passed in 1 iteration(s)"
+          ],
+          "files": {
+            "onus.toml": "expect/zone_promote.toml",
+            ".onus/ledger/promotions.json": "expect/zone_promote_audit.promotions.json"
+          },
+          "files_contain": {
+            ".onus/changes/promote_svc/change.json": [
+              "\"kind\": \"regenerate\"",
+              "\"status\": \"opened\"",
+              "\"zone\": \"hardened\"",
+              "\"context_policy\": \"none\""
+            ]
+          }
+        },
+        {
+          "name": "zone_promote_audit_findings",
+          "args": [
+            "zone",
+            "promote",
+            "svc",
+            "critical",
+            "--model",
+            "scripted:answers.json",
+            "--budget",
+            "2000",
+            "--no-cache"
+          ],
+          "stage_dir": "../zones/ok_zoned",
+          "write": {
+            "answers.json": "[\"```onus\\npub fn bill(x: Int where it >= 0) -> Int\\n  ensures result >= 0\\n{\\n  return 0 - 1\\n}\\n```\"]"
+          },
+          "normalise": [
+            "dates",
+            "ms",
+            "hash",
+            "tokens",
+            "token_counts",
+            "stage"
+          ],
+          "stdout": "expect/zone_promote_audit_findings.out",
+          "stdout_contains": [
+            "promotion: `svc` hardened -> critical (policies passed; mutations: 0 detected, 0 surviving; regeneration blocked"
+          ],
+          "files": {
+            ".onus/ledger/promotions.json": "expect/zone_promote_audit_findings.promotions.json"
+          }
+        },
+        {
+          "name": "zone_check_signed",
+          "args": [
+            "check",
+            "svc.onus",
+            "--no-cache"
+          ],
+          "in": "zone_promote",
+          "stdout_text": ""
+        },
+        {
+          "name": "zone_show_history",
+          "args": [
+            "zone",
+            "show",
+            "--no-cache"
+          ],
+          "in": "zone_promote",
+          "normalise": [
+            "dates"
+          ],
+          "stdout": "expect/zone_show_history.out"
+        },
+        {
+          "name": "zone_edited_manifest",
+          "args": [
+            "check",
+            "svc.onus",
+            "--no-cache"
+          ],
+          "in": "zone_promote",
+          "edit": [
+            {
+              "file": "onus.toml",
+              "from": "\"svc\" = \"critical\"",
+              "to": "\"svc\" = \"hardened\""
+            }
+          ],
+          "status": 1,
+          "stdout": "expect/zone_edited_manifest.out",
+          "stdout_contains": [
+            "E0901"
+          ]
+        },
+        {
+          "name": "zone_demote",
+          "args": [
+            "zone",
+            "demote",
+            "core.math",
+            "draft",
+            "--no-cache"
+          ],
+          "stage_dir": "../zones/ok_zoned",
+          "normalise": [
+            "dates"
+          ],
+          "stdout": "expect/zone_demote.out",
+          "files": {
+            "onus.toml": "expect/zone_demote.toml"
+          }
+        },
+        {
+          "name": "zone_conditional_check",
+          "args": [
+            "check",
+            "svc.onus",
+            "--no-cache"
+          ],
+          "in": "zone_demote",
+          "stdout_text": ""
+        },
+        {
+          "name": "zone_conditional_interface",
+          "args": [
+            "interface",
+            "svc.onus",
+            "--json",
+            "--no-cache"
+          ],
+          "in": "zone_demote",
+          "stdout": "expect/zone_conditional_interface.json",
+          "stdout_contains": [
+            "\"conditional_on\": [",
+            "\"core.math\"",
+            "\"conditional\": true"
+          ]
+        },
+        {
+          "name": "reporting_zoned_check",
+          "args": [
+            "check",
+            "reporting.onus",
+            "--no-cache"
+          ],
+          "stage_dir": "../../examples/reporting",
+          "stdout_text": ""
+        },
+        {
+          "name": "reporting_demote",
+          "args": [
+            "zone",
+            "demote",
+            "app.config",
+            "draft",
+            "--no-cache"
+          ],
+          "in": "reporting_zoned_check",
+          "normalise": [
+            "dates"
+          ],
+          "stdout": "expect/reporting_demote.out"
+        },
+        {
+          "name": "reporting_conditional_path",
+          "args": [
+            "path",
+            "reporting.onus",
+            "--json",
+            "--no-cache"
+          ],
+          "in": "reporting_zoned_check",
+          "stdout": "expect/reporting_conditional_path.json",
+          "stdout_contains": [
+            "\"conditional\": true",
+            "\"app.config\""
+          ]
+        },
+        {
+          "name": "checkout_zoned_check",
+          "args": [
+            "check",
+            "checkout.onus",
+            "--no-cache"
+          ],
+          "stage_dir": "../../examples/checkout",
+          "stdout_text": ""
+        },
+        {
+          "name": "checkout_zoned_path",
+          "args": [
+            "path",
+            "checkout.onus",
+            "--json",
+            "--no-cache"
+          ],
+          "in": "checkout_zoned_check",
+          "stdout": "expect/checkout_zoned_path.json",
+          "stdout_contains": [
+            "\"zone\": \"hardened\"",
+            "\"draft_dependencies\": [",
+            "\"vendor.payments.charge\""
+          ]
+        },
+        {
+          "name": "checkout_test_coverage",
+          "args": [
+            "test",
+            "checkout.onus",
+            "--out",
+            "out",
+            "--no-cache"
+          ],
+          "in": "checkout_zoned_check",
+          "normalise": [
+            "last_line"
+          ],
+          "stdout": "expect/checkout_test_coverage.out"
+        },
+        {
+          "name": "checkout_test_assumptions",
+          "args": [
+            "test",
+            "checkout.onus",
+            "--assumptions",
+            "--out",
+            "out",
+            "--no-cache"
+          ],
+          "in": "checkout_zoned_check",
+          "normalise": [
+            "dates"
+          ],
+          "stdout": "expect/checkout_test_assumptions.out"
+        },
+        {
+          "name": "checkout_promote_contracts",
+          "args": [
+            "zone",
+            "promote",
+            "app.contracts",
+            "critical",
+            "--budget",
+            "2000",
+            "--no-cache"
+          ],
+          "in": "checkout_zoned_check",
+          "normalise": [
+            "dates"
+          ],
+          "stdout": "expect/checkout_promote_contracts.out",
+          "stdout_contains": [
+            "policies passed; mutations:"
+          ]
+        },
+        {
+          "name": "checkout_promote_auth",
+          "args": [
+            "zone",
+            "promote",
+            "app.auth",
+            "critical",
+            "--budget",
+            "2000",
+            "--no-cache"
+          ],
+          "in": "checkout_zoned_check",
+          "normalise": [
+            "dates"
+          ],
+          "stdout": "expect/checkout_promote_auth.out",
+          "stdout_contains": [
+            "policies passed; mutations:"
+          ]
+        },
+        {
+          "name": "checkout_promote_core",
+          "args": [
+            "zone",
+            "promote",
+            "checkout",
+            "critical",
+            "--budget",
+            "2000",
+            "--no-cache"
+          ],
+          "in": "checkout_zoned_check",
+          "normalise": [
+            "dates"
+          ],
+          "stdout": "expect/checkout_promote_core.out",
+          "status": 1,
+          "stdout_contains": [
+            "E0416",
+            "promotion refused: `checkout` does not meet `critical`"
+          ]
+        },
+        {
+          "name": "checkout_path_after_promotions",
+          "args": [
+            "path",
+            "checkout.onus",
+            "--json",
+            "--no-cache"
+          ],
+          "in": "checkout_zoned_check",
+          "normalise": [
+            "dates"
+          ],
+          "stdout": "expect/checkout_path_after_promotions.json",
+          "stdout_contains": [
+            "\"zone\": \"hardened\"",
+            "\"zones_crossed\": [",
+            "\"critical\"",
+            "\"vendor.payments.charge\""
+          ]
+        },
+        {
+          "name": "checkout_review_after_promotions",
+          "args": [
+            "review",
+            "checkout.onus",
+            "--out",
+            "review",
+            "--no-cache"
+          ],
+          "in": "checkout_zoned_check",
+          "normalise": [
+            "dates"
+          ],
+          "stdout": "expect/checkout_review_after_promotions.out",
+          "files_contain": {
+            "review/index.html": [
+              "<g class=\"zone critical\">",
+              "<g class=\"zone draft\">",
+              "<section class=\"promotions\">",
+              "app.contracts"
+            ]
+          }
         }
       ]
     },

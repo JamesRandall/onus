@@ -2,6 +2,7 @@ module regen
 import std.io
 import std.hash
 import std.http
+import zones
 import ast
 import context
 import defs
@@ -319,7 +320,7 @@ pub fn parse_task(j: json.Json) -> Result[Task, Text] may alloc, mutate {
     let wall_ms: Int = try positive_int(j: b, key: "wall_ms", dflt: default_wall_ms)
     budget = Budget { iterations: iterations, tokens: tokens, wall_ms: wall_ms }
   }
-  var context_policy: Text = "module"
+  var context_policy: Text = ""
   if json.has(j: j, key: "context_policy") {
     let p: Text = json.str_at(j: j, key: "context_policy")
     if p != "none" and p != "module" and p != "scope" {
@@ -551,7 +552,8 @@ pub fn env_value(
 -- Models (§10) --------------------------------------------------------------------------
 pub union Model =
   | Scripted of answers: List[Text]
-  | ClaudeCode of model_id: Option[Text]
+  -- `sandbox`: the empty directory the subprocess runs in (docs/CHANGES.md item 206).
+  | ClaudeCode of model_id: Option[Text], sandbox: Text
   | Anthropic of key: Text, model_id: Text
   | OpenRouter of key: Text, model_id: Text
 
@@ -567,7 +569,7 @@ pub const request_timeout_ms: Int = 180000
 pub fn model_name(m: Model) -> Text may alloc {
   match m with
   | Scripted(_) -> return "scripted"
-  | ClaudeCode(model_id) -> {
+  | ClaudeCode(model_id, sandbox) -> {
     match model_id with
     | Some(value) -> return "claude-code:" ++ value
     | None -> return "claude-code"
@@ -606,7 +608,16 @@ pub fn model_from_spec(
     arg = Some(value: Text.slice(t: spec, from: Text.count(t: head) + 1, to: Text.count(t: spec)))
   }
   if head == "claude-code" {
-    return Ok(value: ClaudeCode(model_id: arg))
+    -- The subprocess runs in an empty directory of its own, so that what it can read is the prompt.
+    var base: Text = "."
+    if List.len(xs: env_dirs) > 0 {
+      base = List.get(xs: env_dirs, i: 0)
+    }
+    let sandbox: Text = base ++ "/.onus/model-sandbox"
+    if io.mkdir(files: files, path: sandbox) is Err {
+      return Err(error: "claude-code: cannot create " ++ sandbox)
+    }
+    return Ok(value: ClaudeCode(model_id: arg, sandbox: sandbox))
   }
   if head == "anthropic" {
     let key: Text = or_empty(
@@ -690,15 +701,28 @@ pub fn generate(
       }
     )
   }
-  | ClaudeCode(model_id) -> {
+  | ClaudeCode(model_id, sandbox) -> {
     -- A nested Claude Code refuses to start inside another: the marker variables are not inherited.
+    -- It runs in its sandbox, an empty directory, with its file, shell, search and web tools
+    -- disallowed, so that a regeneration reads nothing but the prompt (item 206).
     var args: List[Text] = [
       "-c",
-      "for v in $(env | sed -n 's/^\\(CLAUDE[A-Za-z0-9_]*\\)=.*/\\1/p'); do unset \"$v\"; done; exec claude \"$@\"",
-      "sh",
+      "for v in $(env | sed -n 's/^\\(CLAUDE[A-Za-z0-9_]*\\)=.*/\\1/p'); do unset \"$v\"; done; cd \"$0\" && exec claude \"$@\"",
+      sandbox,
       "-p",
       "--output-format",
       "text",
+      "--disallowedTools",
+      "Read",
+      "Glob",
+      "Grep",
+      "Bash",
+      "Task",
+      "WebFetch",
+      "WebSearch",
+      "Edit",
+      "Write",
+      "NotebookEdit",
       "--system-prompt",
       system
     ]
@@ -1225,7 +1249,7 @@ pub fn check_project(
   }
   check.run_passes(
     ctx: inout ctx,
-    to: 11,
+    to: check.pass_index(name: "paths"),
     files: files,
     console: console,
     process: process,
@@ -2031,18 +2055,31 @@ fn audit_of(baseline: Check, final: Check) -> List[Finding] may alloc, mutate {
             key: "text"
           ) ++ ")"
         }
-        List.push(
-          b: inout out,
-          x: Finding {
-            finding: "obligation_regressed",
-            detail: json.str_at(j: d, key: "code") ++ " " ++ json.str_at(
-              j: d,
-              key: "title"
-            ) ++ ob ++ " in " ++ def_or_question(
-              d: d
-            ) ++ ": the interfaces were sufficient to check the old body but not to reconstruct it"
-          }
-        )
+        if json.str_at(j: d, key: "code") == "E0115" {
+          -- An elided body left in place: the model produced no usable body for it (item 204).
+          List.push(
+            b: inout out,
+            x: Finding {
+              finding: "not_reconstructed",
+              detail: "no usable body came back for " ++ def_or_question(
+                d: d
+              ) ++ " within the budget"
+            }
+          )
+        } else {
+          List.push(
+            b: inout out,
+            x: Finding {
+              finding: "obligation_regressed",
+              detail: json.str_at(j: d, key: "code") ++ " " ++ json.str_at(
+                j: d,
+                key: "title"
+              ) ++ ob ++ " in " ++ def_or_question(
+                d: d
+              ) ++ ": the interfaces were sufficient to check the old body but not to reconstruct it"
+            }
+          )
+        }
       }
     }
     return List.finish(b: out)
@@ -2556,6 +2593,10 @@ record Best {
 
 -- Everything one run carries between iterations.
 record Run {
+  -- The zone of the target's module (spec §21): the context policy's default, the escalation's shape, what the loop may edit.
+  zone: Text
+  -- Interfaces the loop edited itself, which only a `draft` module allows; the change records them.
+  loop_authored: List[Text]
   task: Task
   project: Project
   work_dir: Text
@@ -2618,11 +2659,51 @@ fn count_of(c: Option[Check], fallback: Check) -> Int {
 }
 
 -- One rung of the ladder (§4.1) per stall; false when there is none left.
+-- The zone of the first target's module, from the project's manifest (spec §21.4); `draft`
+-- when there is none or it cannot be read. Read here rather than from the baseline's context,
+-- whose check stops at the paths pass.
+fn target_zone(r: Run, files: io.Files) -> Text may io.file, alloc, mutate {
+  var manifest: zones.Manifest = zones.empty_manifest()
+  match zones.read_manifest(files: files, root: Some(value: r.project.root)) with
+  | Ok(value) -> manifest = manifest_or_empty(o: value)
+  | Err(_) -> skip()
+  for t: TargetInfo in r.targets {
+    return zones.zone_of(m: manifest, name: t.module_name)
+  }
+  return zones.zone_draft
+}
+
+fn manifest_or_empty(o: Option[zones.Manifest]) -> zones.Manifest may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return zones.empty_manifest()
+}
+
+pub fn default_policy(zone: Text) -> Text {
+  if zone == zones.zone_critical {
+    return "none"
+  }
+  if zone == zones.zone_hardened {
+    return "module"
+  }
+  return "scope"
+}
+
 fn escalate(r: inout Run) -> Bool may alloc, mutate {
   r = { r with ladder: r.ladder + 1, escalation_steps: r.escalation_steps + 1 }
   var go: Bool = true
   var answer: Bool = false
   var guard: Int = 8
+  if r.zone == zones.zone_critical {
+    -- In `critical` the ladder is not walked: escalation goes to the frontier model at the first stall
+    -- (loop spec §4.1), which v0 has no second model configured for; the task is blocked.
+    push_message(
+      r: inout r,
+      m: "the module is `critical`: no re-prompting or wider context; a frontier model is not configured"
+    )
+    r = { r with cause: Some(value: "stall") }
+    return false
+  }
   loop while go and guard > 0
     invariant guard >= 0
     decreases guard
@@ -2736,6 +2817,26 @@ fn check_working(
   )
 }
 
+-- Writes the working texts to their files: the tree a subprocess model reads during a call.
+fn write_working(files: io.Files, r: Run) -> Result[Unit, io.Error] may io.file, alloc, mutate {
+  for path: Text in Map.keys(d: r.working) {
+    match Map.find(d: r.working, key: path) with
+    | Some(value) -> try build.write_file(files: files, path: path, text: value)
+    | None -> skip()
+  }
+  return Ok(value: Unit)
+}
+
+-- Writes the texts the run started from back to their files.
+fn restore_tree(files: io.Files, r: Run) -> Result[Unit, io.Error] may io.file, alloc, mutate {
+  for path: Text in Map.keys(d: r.texts0) {
+    match Map.find(d: r.texts0, key: path) with
+    | Some(value) -> try build.write_file(files: files, path: path, text: value)
+    | None -> skip()
+  }
+  return Ok(value: Unit)
+}
+
 fn ask(
   r: inout Run,
   files: io.Files,
@@ -2746,6 +2847,11 @@ fn ask(
   prompt: Text,
   max_tokens: Int
 ) -> Result[Answer, Text] may io.file, io.net, nondet, alloc, mutate {
+  -- The working tree is the loop's state during a run (§9; docs/CHANGES.md item 205): what a
+  -- model with a file system can read is what the prompt shows, elided bodies included.
+  match write_working(files: files, r: r) with
+  | Err(error) -> return Err(error: "could not write the working tree: " ++ io_error_text(e: error))
+  | Ok(_) -> skip()
   let answer: Answer = try generate(
     m: model,
     process: process,
@@ -2771,6 +2877,14 @@ fn push_message(r: inout Run, m: Text) -> Unit may alloc, mutate {
 }
 
 fn push_proposal(r: inout Run, p: json.Json) -> Unit may alloc, mutate {
+  if r.zone == zones.zone_critical and json.str_at(j: p, key: "kind") == "widen_effects" {
+    -- An effect widening on a critical module is a human decision from the start (loop spec §4.1).
+    push_message(
+      r: inout r,
+      m: "an effect widening on a `critical` module is not proposed by the loop"
+    )
+    return Unit
+  }
   r = { r with proposals: List.append(xs: r.proposals, x: p) }
   return Unit
 }
@@ -2903,6 +3017,11 @@ fn conclude(
     b: inout fields,
     x: json.field(key: "audit", value: json.JArray(items: List.finish(b: audit_json)))
   )
+  List.push(b: inout fields, x: json.field(key: "zone", value: json.text(t: r.zone)))
+  List.push(
+    b: inout fields,
+    x: json.field(key: "loop_authored", value: json.texts(ts: r.loop_authored))
+  )
   if status == "blocked" {
     var last: List[json.Json] = []
     let n_history: Int = List.len(xs: r.history)
@@ -2931,6 +3050,10 @@ fn conclude(
   }
   let change: json.Json = json.JObject(fields: List.finish(b: fields))
   var path: Option[Text] = None
+  if not (write and status == "opened") {
+    -- The working tree held the loop's texts during the run; it is the project's again (§9).
+    try restore_tree(files: files, r: r)
+  }
   if write {
     if status == "opened" {
       for d: json.Json in diffs {
@@ -3088,6 +3211,33 @@ fn splice_found(
   iteration: Int,
   sp: inout Spliced
 ) -> Unit may alloc, mutate {
+  if signature_text(f: f) != signature_text(f: target.decl) and r.zone == zones.zone_draft {
+    -- In `draft` the loop may edit the interface directly (loop spec §1, §5); the ledger records it as loop-authored.
+    let path_text: Text = or_empty(o: Map.find(d: sp.texts, key: target.path))
+    var texts: Dict[Text, Text] = sp.texts
+    Map.set(
+      d: inout texts,
+      key: target.path,
+      value: Text.replace(
+        t: path_text,
+        from: signature_text(f: target.decl),
+        to: signature_text(f: f)
+      )
+    )
+    sp = { sp with texts: texts }
+    let qualified: Text = target.module_name ++ "." ++ target.name
+    if not List.contains(xs: r.loop_authored, x: qualified) {
+      r = { r with loop_authored: r.loop_authored ++ [qualified] }
+    }
+    match f.body with
+    | None -> push_message(r: inout r, m: "`" ++ target.name ++ "` came back without a body.")
+    | Some(value) -> {
+      if not value.elided {
+        splice_body(r: inout r, target: target, body: value, sp: inout sp)
+      }
+    }
+    return Unit
+  }
   if signature_text(f: f) != signature_text(f: target.decl) {
     r = { r with claim_edits: r.claim_edits + 1 }
     push_message(
@@ -3754,6 +3904,8 @@ pub fn run_task(
     cause: None,
     model_name: model_name(m: opts.model),
     ctx_policy: task.context_policy,
+    zone: zones.zone_draft,
+    loop_authored: [],
     full_history: false,
     ladder: 0,
     pending_escalation: None,
@@ -3779,8 +3931,16 @@ pub fn run_task(
   match select_targets(task: task, project: project, baseline: r.baseline, texts: texts0) with
   | Err(error) -> return Ok(value: failure(error: error))
   | Ok(value) -> r = { r with targets: value }
+  r = { r with zone: target_zone(r: r, files: files) }
+  if task.context_policy == "" {
+    -- The default follows the zone (loop spec §3): draft → scope, hardened → module, critical → none.
+    r = { r with
+      ctx_policy: default_policy(zone: r.zone),
+      task: { task with context_policy: default_policy(zone: r.zone) }
+    }
+  }
   if task.kind == "regenerate" {
-    r = { r with ctx_policy: "none" }
+    r = { r with ctx_policy: "none", task: { r.task with context_policy: "none" } }
   }
   -- A ticket produces a proposal only (§2, §5).
   if task.kind == "ticket" {

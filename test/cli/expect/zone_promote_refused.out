@@ -1,0 +1,4 @@
+./core.onus:7:8: E0903 public function of a critical module on no path
+  in stray
+  `core.stray` is public in `core`, a `critical` module, and on no `path` (§21)
+promotion refused: `core` does not meet `critical` (§21.2)

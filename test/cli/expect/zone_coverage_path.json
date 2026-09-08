@@ -1,0 +1,103 @@
+{
+  "path": "halving",
+  "entry": "core.half",
+  "zone": "critical",
+  "zones_crossed": [
+    "critical"
+  ],
+  "draft_dependencies": [],
+  "conditional": false,
+  "conditional_on": [],
+  "reachable": [
+    "core.half"
+  ],
+  "effects": {
+    "bound": null,
+    "forbid": [],
+    "actual": [
+      "panic"
+    ]
+  },
+  "claims": {
+    "required": [],
+    "satisfied": true
+  },
+  "assumes": [],
+  "obligations": {
+    "proved": 1,
+    "checked": 2,
+    "assumed": 0,
+    "failed": 0,
+    "checked_at": [
+      "core.half:4:13",
+      "core.half:5:10"
+    ]
+  },
+  "unresolvable_calls": [],
+  "capabilities": [],
+  "graph": {
+    "nodes": [
+      {
+        "id": "core.half",
+        "module": "core",
+        "kind": "entry",
+        "effects": [
+          "panic"
+        ],
+        "claims": [],
+        "obligations": {
+          "proved": 1,
+          "checked": 2,
+          "assumed": 0,
+          "failed": 0
+        },
+        "assumes": 0,
+        "recovers": 0,
+        "unresolvable": 0
+      }
+    ],
+    "edges": []
+  },
+  "gates": [],
+  "recovers": [],
+  "ledger": [
+    {
+      "kind": "representation",
+      "text": "x within ±2^53 - 1",
+      "def": "core.half",
+      "status": "checked",
+      "by": "z3: not provable",
+      "pinned": false,
+      "at": "core.onus:4:13"
+    },
+    {
+      "kind": "refinement",
+      "text": "it >= 0",
+      "def": "core.half",
+      "status": "checked",
+      "by": "z3: not provable",
+      "pinned": false,
+      "at": "core.onus:5:10"
+    },
+    {
+      "kind": "overflow",
+      "text": "2 != 0",
+      "def": "core.half",
+      "status": "proved",
+      "by": "z3",
+      "pinned": false,
+      "at": "core.onus:5:10"
+    }
+  ],
+  "obligation_coverage": {
+    "proved": 1,
+    "checked": 1,
+    "checked_exercised": 1,
+    "assumptions": 0,
+    "assumptions_verifiable": 0,
+    "assumptions_verified": 0,
+    "mutations_detected": 0,
+    "mutations_surviving": 0
+  },
+  "ok": true
+}

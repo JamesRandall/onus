@@ -1,5 +1,7 @@
 {
   "module": "mandelbrot",
+  "zone": "draft",
+  "conditional_on": [],
   "hash": "b3:c4d86a8afc99f7a11415a63412ee7df02d280e82adc581f8ef442fa1e8bb2b23",
   "imports": [
     "std.io"
@@ -35,6 +37,8 @@
       "kind": "type",
       "name": "Iter",
       "visibility": "private",
+      "hardened": false,
+      "zone": "draft",
       "signature": "type Iter = Int where 0 <= it and it <= 10000"
     },
     {
@@ -67,6 +71,8 @@
       "kind": "type",
       "name": "Coord",
       "visibility": "private",
+      "hardened": false,
+      "zone": "draft",
       "signature": "type Coord = Int where 0 <= it"
     },
     {
@@ -99,6 +105,8 @@
       "kind": "record",
       "name": "Viewport",
       "visibility": "private",
+      "hardened": false,
+      "zone": "draft",
       "signature": "record Viewport {\n  x_min: Float\n  x_max: Float where it > x_min\n  y_min: Float\n  y_max: Float where it > y_min\n}"
     },
     {
@@ -109,6 +117,7 @@
           "kind": "requires",
           "text": "limit > 0",
           "pinned": false,
+          "conditional": false,
           "status": "proved",
           "sites": 4
         },
@@ -116,6 +125,7 @@
           "kind": "ensures",
           "text": "result <= limit",
           "pinned": false,
+          "conditional": false,
           "status": "proved",
           "sites": 1
         },
@@ -123,6 +133,7 @@
           "kind": "invariant",
           "text": "i <= limit",
           "pinned": false,
+          "conditional": false,
           "status": "proved",
           "sites": 2
         },
@@ -130,6 +141,7 @@
           "kind": "decreases",
           "text": "limit - i",
           "pinned": false,
+          "conditional": false,
           "status": "proved",
           "sites": 1
         }
@@ -178,6 +190,8 @@
       "kind": "fn",
       "name": "escape_count",
       "visibility": "pub",
+      "hardened": false,
+      "zone": "draft",
       "signature": "fn escape_count(cx: Float, cy: Float, limit: Iter) -> Iter"
     },
     {
@@ -228,6 +242,8 @@
       "kind": "property",
       "name": "escape_bounded",
       "visibility": "private",
+      "hardened": false,
+      "zone": "draft",
       "signature": "property escape_bounded(cx: Float, cy: Float, limit: Iter where it > 0) {\n  escape_count(cx: cx, cy: cy, limit: limit) <= limit\n}"
     },
     {
@@ -262,6 +278,8 @@
       "kind": "fn",
       "name": "render",
       "visibility": "pub",
+      "hardened": false,
+      "zone": "draft",
       "signature": "fn render(\n  view: Viewport,\n  width: Coord where it > 0,\n  height: Coord where it > 0,\n  limit: Iter where it > 0\n) -> Grid[Iter, width, height] may alloc"
     },
     {
@@ -297,6 +315,8 @@
       "kind": "fn",
       "name": "main",
       "visibility": "pub",
+      "hardened": false,
+      "zone": "draft",
       "signature": "fn main(args: List[Text], files: io.Files) -> Result[Unit, io.Error] may io.file, alloc"
     }
   ],

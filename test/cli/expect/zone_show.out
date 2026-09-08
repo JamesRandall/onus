@@ -1,0 +1,4 @@
+[zones]
+"core.*" = "critical"
+"svc" = "hardened"
+default = "draft"

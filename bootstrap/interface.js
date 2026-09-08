@@ -8,6 +8,7 @@ import * as $std_map from "./std/map.js";
 import * as $context from "./context.js";
 import * as $printer from "./printer.js";
 import * as $loc from "./loc.js";
+import * as $zones from "./zones.js";
 import * as $std_hash from "./std/hash.js";
 import * as $comments from "./comments.js";
 import * as $defs from "./defs.js";
@@ -15,21 +16,21 @@ import * as $effectset from "./effectset.js";
 import * as $walk from "./walk.js";
 import * as $obligations from "./obligations.js";
 
-const $ob1 = { kind: "overflow", text: "-1 within Int", at: "self/interface.onus:69:20", def: "or_neg" };
-const $ob2 = { kind: "overflow", text: "n_proved + 1 within Int", at: "self/interface.onus:99:40", def: "counts" };
-const $ob3 = { kind: "overflow", text: "n_assumed + 1 within Int", at: "self/interface.onus:100:42", def: "counts" };
-const $ob4 = { kind: "overflow", text: "n_failed + 1 within Int", at: "self/interface.onus:101:40", def: "counts" };
-const $ob5 = { kind: "overflow", text: "n_checked + 1 within Int", at: "self/interface.onus:102:24", def: "counts" };
-const $ob6 = { kind: "overflow", text: "n_proved + 1 within Int", at: "self/interface.onus:148:20", def: "coverage_json" };
-const $ob7 = { kind: "overflow", text: "n_checked + 1 within Int", at: "self/interface.onus:151:21", def: "coverage_json" };
-const $ob8 = { kind: "overflow", text: "n_exercised + 1 within Int", at: "self/interface.onus:153:25", def: "coverage_json" };
-const $ob9 = { kind: "overflow", text: "verifiable + 1 within Int", at: "self/interface.onus:162:20", def: "coverage_json" };
-const $ob10 = { kind: "overflow", text: "verified + 1 within Int", at: "self/interface.onus:165:18", def: "coverage_json" };
-const $ob11 = { kind: "overflow", text: "detected + 1 within Int", at: "self/interface.onus:173:20", def: "coverage_json" };
-const $ob12 = { kind: "overflow", text: "surviving + 1 within Int", at: "self/interface.onus:175:21", def: "coverage_json" };
-const $ob13 = { kind: "overflow", text: "-1 within Int", at: "self/interface.onus:217:10", def: "module_of_file" };
-const $ob14 = { kind: "overflow", text: "-1 within Int", at: "self/interface.onus:833:24", def: "def_name_at" };
-const $ob15 = { kind: "overflow", text: "value.end - value.start within Int", at: "self/interface.onus:845:27", def: "def_name_at" };
+const $ob1 = { kind: "overflow", text: "-1 within Int", at: "self/interface.onus:70:20", def: "or_neg" };
+const $ob2 = { kind: "overflow", text: "n_proved + 1 within Int", at: "self/interface.onus:100:40", def: "counts" };
+const $ob3 = { kind: "overflow", text: "n_assumed + 1 within Int", at: "self/interface.onus:101:42", def: "counts" };
+const $ob4 = { kind: "overflow", text: "n_failed + 1 within Int", at: "self/interface.onus:102:40", def: "counts" };
+const $ob5 = { kind: "overflow", text: "n_checked + 1 within Int", at: "self/interface.onus:103:24", def: "counts" };
+const $ob6 = { kind: "overflow", text: "n_proved + 1 within Int", at: "self/interface.onus:149:20", def: "coverage_json" };
+const $ob7 = { kind: "overflow", text: "n_checked + 1 within Int", at: "self/interface.onus:152:21", def: "coverage_json" };
+const $ob8 = { kind: "overflow", text: "n_exercised + 1 within Int", at: "self/interface.onus:154:25", def: "coverage_json" };
+const $ob9 = { kind: "overflow", text: "verifiable + 1 within Int", at: "self/interface.onus:163:20", def: "coverage_json" };
+const $ob10 = { kind: "overflow", text: "verified + 1 within Int", at: "self/interface.onus:166:18", def: "coverage_json" };
+const $ob11 = { kind: "overflow", text: "detected + 1 within Int", at: "self/interface.onus:174:20", def: "coverage_json" };
+const $ob12 = { kind: "overflow", text: "surviving + 1 within Int", at: "self/interface.onus:176:21", def: "coverage_json" };
+const $ob13 = { kind: "overflow", text: "-1 within Int", at: "self/interface.onus:218:10", def: "module_of_file" };
+const $ob14 = { kind: "overflow", text: "-1 within Int", at: "self/interface.onus:868:24", def: "def_name_at" };
+const $ob15 = { kind: "overflow", text: "value.end - value.start within Int", at: "self/interface.onus:880:27", def: "def_name_at" };
 export function is_check({ k }) {
   if (k.tag === "Property" || k.tag === "Law") {
     return false;
@@ -425,7 +426,7 @@ export function build({ ctx, rec }) {
     }
     $rt.unreachable();
   }
-  return { tag: "JObject", fields: [$json.field({ key: "module", value: $json.text({ t: rec.name }) }), $json.field({ key: "hash", value: $json.text({ t: "b3:" + $std_hash.blake3_hex({ t: canonical_text }) }) }), $json.field({ key: "imports", value: $json.texts({ ts: $std_list.finish({ b: imports }) }) }), $json.field({ key: "items", value: { tag: "JArray", items: $std_list.finish({ b: items }) } }), $json.field({ key: "assumes", value: { tag: "JArray", items: $std_list.finish({ b: assume_json }) } }), $json.field({ key: "recovers", value: { tag: "JArray", items: $std_list.finish({ b: recovers }) } }), $json.field({ key: "sealed_types", value: $json.texts({ ts: $std_list.finish({ b: sealed_types }) }) }), $json.field({ key: "test_module", value: $json.bool({ b: m.is_test }) }), $json.field({ key: "obligations", value: counts_json({ obs: c.own }) }), $json.field({ key: "ledger", value: { tag: "JArray", items: $std_list.finish({ b: ledger }) } }), $json.field({ key: "obligation_coverage", value: coverage_json({ ctx: ctx, tab: c.tables, obs: c.own, assumes: assume_list, scope: { prefix: { tag: "Some", value: rec.name + "." }, names: $std_map.dict({  }) } }) })] };
+  return { tag: "JObject", fields: [$json.field({ key: "module", value: $json.text({ t: rec.name }) }), $json.field({ key: "zone", value: $json.text({ t: $zones.module_zone({ ctx: ctx, mod: rec.id }) }) }), $json.field({ key: "conditional_on", value: $json.texts({ ts: $zones.conditional_on({ ctx: ctx, mod: rec.id }) }) }), $json.field({ key: "hash", value: $json.text({ t: "b3:" + $std_hash.blake3_hex({ t: canonical_text }) }) }), $json.field({ key: "imports", value: $json.texts({ ts: $std_list.finish({ b: imports }) }) }), $json.field({ key: "items", value: { tag: "JArray", items: $std_list.finish({ b: items }) } }), $json.field({ key: "assumes", value: { tag: "JArray", items: $std_list.finish({ b: assume_json }) } }), $json.field({ key: "recovers", value: { tag: "JArray", items: $std_list.finish({ b: recovers }) } }), $json.field({ key: "sealed_types", value: $json.texts({ ts: $std_list.finish({ b: sealed_types }) }) }), $json.field({ key: "test_module", value: $json.bool({ b: m.is_test }) }), $json.field({ key: "obligations", value: counts_json({ obs: c.own }) }), $json.field({ key: "ledger", value: { tag: "JArray", items: $std_list.finish({ b: ledger }) } }), $json.field({ key: "obligation_coverage", value: coverage_json({ ctx: ctx, tab: c.tables, obs: c.own, assumes: assume_list, scope: { prefix: { tag: "Some", value: rec.name + "." }, names: $std_map.dict({  }) } }) })] };
 }
 
 export function is_sealed({ item }) {
@@ -735,7 +736,71 @@ export function item_json({ ctx, c, item, examples, properties, assumes, recover
     const [, assume_json$22] = $std_list.push({ b: assume_json, x: a.j });
     assume_json = assume_json$22;
   }
-  return { tag: "JObject", fields: [$json.field({ key: "effects", value: $json.texts({ ts: effects }) }), $json.field({ key: "claims", value: $json.texts({ ts: claims_list }) }), $json.field({ key: "contracts", value: { tag: "JArray", items: contracts } }), $json.field({ key: "examples", value: { tag: "JArray", items: $std_list.finish({ b: example_json }) } }), $json.field({ key: "properties", value: { tag: "JArray", items: $std_list.finish({ b: property_json }) } }), $json.field({ key: "assumes", value: { tag: "JArray", items: $std_list.finish({ b: assume_json }) } }), $json.field({ key: "recovers", value: { tag: "JArray", items: recovers } }), $json.field({ key: "obligations", value: counts_json({ obs: $std_list.finish({ b: own }) }) }), $json.field({ key: "at", value: $loc.location_json({ ctx: ctx, tables: c.tables, file: c.file, span: span }) }), $json.field({ key: "kind", value: $json.text({ t: kind }) }), $json.field({ key: "name", value: $json.text({ t: name }) }), $json.field({ key: "visibility", value: $json.text({ t: visibility }) }), $json.field({ key: "signature", value: $json.text({ t: signature }) })] };
+  return { tag: "JObject", fields: [$json.field({ key: "effects", value: $json.texts({ ts: effects }) }), $json.field({ key: "claims", value: $json.texts({ ts: claims_list }) }), $json.field({ key: "contracts", value: { tag: "JArray", items: contracts } }), $json.field({ key: "examples", value: { tag: "JArray", items: $std_list.finish({ b: example_json }) } }), $json.field({ key: "properties", value: { tag: "JArray", items: $std_list.finish({ b: property_json }) } }), $json.field({ key: "assumes", value: { tag: "JArray", items: $std_list.finish({ b: assume_json }) } }), $json.field({ key: "recovers", value: { tag: "JArray", items: recovers } }), $json.field({ key: "obligations", value: counts_json({ obs: $std_list.finish({ b: own }) }) }), $json.field({ key: "at", value: $loc.location_json({ ctx: ctx, tables: c.tables, file: c.file, span: span }) }), $json.field({ key: "kind", value: $json.text({ t: kind }) }), $json.field({ key: "name", value: $json.text({ t: name }) }), $json.field({ key: "visibility", value: $json.text({ t: visibility }) }), $json.field({ key: "hardened", value: $json.bool({ b: is_hardened({ item: item }) }) }), $json.field({ key: "zone", value: $json.text({ t: item_zone({ ctx: ctx, c: c, item: item }) }) }), $json.field({ key: "signature", value: $json.text({ t: signature }) })] };
+}
+
+export function is_hardened({ item }) {
+  const $m37 = item;
+  $m37$match: {
+    if ($m37.tag === "FnItem") {
+      const decl = $m37.decl;
+      return decl.vis.is_hardened && decl.vis.is_pub;
+      break $m37$match;
+    }
+    if ($m37.tag === "TypeAliasItem") {
+      const decl = $m37.decl;
+      return decl.vis.is_hardened && decl.vis.is_pub;
+      break $m37$match;
+    }
+    if ($m37.tag === "IntrinsicTypeItem") {
+      const decl = $m37.decl;
+      return decl.vis.is_hardened && decl.vis.is_pub;
+      break $m37$match;
+    }
+    if ($m37.tag === "ConstItem") {
+      const decl = $m37.decl;
+      return decl.vis.is_hardened && decl.vis.is_pub;
+      break $m37$match;
+    }
+    if ($m37.tag === "RecordItem") {
+      const decl = $m37.decl;
+      return decl.vis.is_hardened && decl.vis.is_pub;
+      break $m37$match;
+    }
+    if ($m37.tag === "UnionItem") {
+      const decl = $m37.decl;
+      return decl.vis.is_hardened && decl.vis.is_pub;
+      break $m37$match;
+    }
+    if ($m37.tag === "InterfaceItem") {
+      const decl = $m37.decl;
+      return decl.vis.is_hardened && decl.vis.is_pub;
+      break $m37$match;
+    }
+    if ($m37.tag === "ClaimItem") {
+      const decl = $m37.decl;
+      return decl.vis.is_hardened && decl.vis.is_pub;
+      break $m37$match;
+    }
+    if ($m37.tag === "CapabilityItem") {
+      const decl = $m37.decl;
+      return decl.vis.is_hardened && decl.vis.is_pub;
+      break $m37$match;
+    }
+    if (true) {
+      return false;
+      break $m37$match;
+    }
+    $rt.unreachable();
+  }
+}
+
+export function item_zone({ ctx, c, item }) {
+  const z = $zones.module_zone({ ctx: ctx, mod: c.mod });
+  if (z === $zones.zone_draft && is_hardened({ item: item })) {
+    return $zones.zone_hardened;
+  }
+  return z;
 }
 
 export function effects_of({ ctx, c, f }) {
@@ -745,22 +810,22 @@ export function effects_of({ ctx, c, f }) {
   if (def >= 0) {
     sig = $std_map.find({ d: ctx.signatures, key: def });
   }
-  const $m38 = sig;
-  $m38$match: {
-    if ($m38.tag === "None") {
+  const $m39 = sig;
+  $m39$match: {
+    if ($m39.tag === "None") {
       for (const e of f.effects) {
         const [, out$23] = $std_list.push({ b: out, x: qname_text({ q: e.name }) });
         out = out$23;
       }
-      break $m38$match;
+      break $m39$match;
     }
-    if ($m38.tag === "Some") {
-      const value = $m38.value;
+    if ($m39.tag === "Some") {
+      const value = $m39.value;
       for (const e of $effectset.values({ s: value.effects })) {
         const [, out$24] = $std_list.push({ b: out, x: effect_name({ ctx: ctx, e: e }) });
         out = out$24;
       }
-      break $m38$match;
+      break $m39$match;
     }
     $rt.unreachable();
   }
@@ -773,31 +838,31 @@ export function contracts_of({ ctx, cx, f }) {
     const [, out$25] = $std_list.push({ b: out, x: contract_entry({ ctx: ctx, c: cx, kind: con.clause, e: con.expr, pinned: con.is_proved, source: $defs.node_key({ file: cx.file, tag: $defs.tag_sig, span: con.span }) }) });
     out = out$25;
   }
-  const $m39 = f.body;
-  $m39$match: {
-    if ($m39.tag === "None") {
+  const $m40 = f.body;
+  $m40$match: {
+    if ($m40.tag === "None") {
       skip({  });
-      break $m39$match;
+      break $m40$match;
     }
-    if ($m39.tag === "Some") {
-      const value = $m39.value;
+    if ($m40.tag === "Some") {
+      const value = $m40.value;
       for (const n of $walk.nodes_in_block({ b: value, into_verify: false })) {
-        const $m40 = n;
-        $m40$match: {
-          if ($m40.tag === "NClause") {
-            const c = $m40.c;
+        const $m41 = n;
+        $m41$match: {
+          if ($m41.tag === "NClause") {
+            const c = $m41.c;
             const [, out$26] = $std_list.push({ b: out, x: contract_entry({ ctx: ctx, c: cx, kind: c.clause, e: c.expr, pinned: false, source: $defs.node_key({ file: cx.file, tag: $defs.tag_sig, span: c.span }) }) });
             out = out$26;
-            break $m40$match;
+            break $m41$match;
           }
           if (true) {
             skip({  });
-            break $m40$match;
+            break $m41$match;
           }
           $rt.unreachable();
         }
       }
-      break $m39$match;
+      break $m40$match;
     }
     $rt.unreachable();
   }
@@ -807,8 +872,8 @@ export function contracts_of({ ctx, cx, f }) {
 export function contract_entry({ ctx, c, kind, e, pinned, source }) {
   let obs = $std_list.builder({  });
   let checked_at = { tag: "None" };
-  const $hi42 = ctx.obligation_count;
-  for (let i = 0; i < $hi42; i++) {
+  const $hi43 = ctx.obligation_count;
+  for (let i = 0; i < $hi43; i++) {
     const o = $context.get_obligation({ ctx: ctx, id: i });
     if (or_neg({ o: o.source }) === source) {
       const [, obs$27] = $std_list.push({ b: obs, x: o });
@@ -819,17 +884,17 @@ export function contract_entry({ ctx, c, kind, e, pinned, source }) {
     }
   }
   const all = $std_list.finish({ b: obs });
-  let fields = [$json.field({ key: "kind", value: $json.text({ t: kind }) }), $json.field({ key: "text", value: $json.text({ t: $printer.print_expr({ e: e }) }) }), $json.field({ key: "pinned", value: $json.bool({ b: pinned }) }), $json.field({ key: "status", value: $json.text({ t: status_of({ obs: all }) }) }), $json.field({ key: "sites", value: $json.int({ v: $std_list.len({ xs: all }) }) })];
-  const $m44 = checked_at;
-  $m44$match: {
-    if ($m44.tag === "Some") {
-      const value = $m44.value;
+  let fields = [$json.field({ key: "kind", value: $json.text({ t: kind }) }), $json.field({ key: "text", value: $json.text({ t: $printer.print_expr({ e: e }) }) }), $json.field({ key: "pinned", value: $json.bool({ b: pinned }) }), $json.field({ key: "conditional", value: $json.bool({ b: $std_list.len({ xs: $zones.conditional_on({ ctx: ctx, mod: c.mod }) }) > 0 }) }), $json.field({ key: "status", value: $json.text({ t: status_of({ obs: all }) }) }), $json.field({ key: "sites", value: $json.int({ v: $std_list.len({ xs: all }) }) })];
+  const $m45 = checked_at;
+  $m45$match: {
+    if ($m45.tag === "Some") {
+      const value = $m45.value;
       fields = $std_list.append({ xs: fields, x: $json.field({ key: "checked_at", value: $json.text({ t: value }) }) });
-      break $m44$match;
+      break $m45$match;
     }
-    if ($m44.tag === "None") {
+    if ($m45.tag === "None") {
       skip({  });
-      break $m44$match;
+      break $m45$match;
     }
     $rt.unreachable();
   }
@@ -840,16 +905,16 @@ export function example_json_of({ ctx, c, e }) {
   const def = or_neg({ o: $std_map.find({ d: ctx.def_of, key: $defs.node_key({ file: c.file, tag: $defs.tag_item, span: e.span }) }) });
   let status = "not run";
   if (def >= 0) {
-    const $m46 = $std_map.find({ d: ctx.examples, key: def });
-    $m46$match: {
-      if ($m46.tag === "Some") {
-        const value = $m46.value;
+    const $m47 = $std_map.find({ d: ctx.examples, key: def });
+    $m47$match: {
+      if ($m47.tag === "Some") {
+        const value = $m47.value;
         status = value;
-        break $m46$match;
+        break $m47$match;
       }
-      if ($m46.tag === "None") {
+      if ($m47.tag === "None") {
         skip({  });
-        break $m46$match;
+        break $m47$match;
       }
       $rt.unreachable();
     }
@@ -861,10 +926,10 @@ export function property_json_of({ ctx, c, p }) {
   let status = "checked";
   const k = $defs.node_key({ file: c.file, tag: $defs.tag_item, span: p.span });
   let found = false;
-  const $m48 = $std_map.find({ d: ctx.obligations_at, key: k });
-  $m48$match: {
-    if ($m48.tag === "Some") {
-      const value = $m48.value;
+  const $m49 = $std_map.find({ d: ctx.obligations_at, key: k });
+  $m49$match: {
+    if ($m49.tag === "Some") {
+      const value = $m49.value;
       for (const id of value) {
         const o = $context.get_obligation({ ctx: ctx, id: id });
         if (!found && o.kind.tag === "Property") {
@@ -872,11 +937,11 @@ export function property_json_of({ ctx, c, p }) {
           status = status_of({ obs: [o] });
         }
       }
-      break $m48$match;
+      break $m49$match;
     }
-    if ($m48.tag === "None") {
+    if ($m49.tag === "None") {
       skip({  });
-      break $m48$match;
+      break $m49$match;
     }
     $rt.unreachable();
   }
@@ -885,69 +950,69 @@ export function property_json_of({ ctx, c, p }) {
 
 export function item_blocks({ item }) {
   let out = $std_list.builder({  });
-  const $m50 = item;
-  $m50$match: {
-    if ($m50.tag === "FnItem") {
-      const decl = $m50.decl;
-      const $m51 = decl.body;
-      $m51$match: {
-        if ($m51.tag === "Some") {
-          const value = $m51.value;
+  const $m51 = item;
+  $m51$match: {
+    if ($m51.tag === "FnItem") {
+      const decl = $m51.decl;
+      const $m52 = decl.body;
+      $m52$match: {
+        if ($m52.tag === "Some") {
+          const value = $m52.value;
           const [, out$28] = $std_list.push({ b: out, x: value });
           out = out$28;
-          break $m51$match;
+          break $m52$match;
         }
-        if ($m51.tag === "None") {
+        if ($m52.tag === "None") {
           skip({  });
-          break $m51$match;
+          break $m52$match;
         }
         $rt.unreachable();
       }
-      break $m50$match;
+      break $m51$match;
     }
-    if ($m50.tag === "ImplItem") {
-      const decl = $m50.decl;
+    if ($m51.tag === "ImplItem") {
+      const decl = $m51.decl;
       for (const f of decl.fns) {
-        const $m52 = f.body;
-        $m52$match: {
-          if ($m52.tag === "Some") {
-            const value = $m52.value;
+        const $m53 = f.body;
+        $m53$match: {
+          if ($m53.tag === "Some") {
+            const value = $m53.value;
             const [, out$29] = $std_list.push({ b: out, x: value });
             out = out$29;
-            break $m52$match;
+            break $m53$match;
           }
-          if ($m52.tag === "None") {
+          if ($m53.tag === "None") {
             skip({  });
-            break $m52$match;
+            break $m53$match;
           }
           $rt.unreachable();
         }
       }
-      break $m50$match;
+      break $m51$match;
     }
-    if ($m50.tag === "InterfaceItem") {
-      const decl = $m50.decl;
+    if ($m51.tag === "InterfaceItem") {
+      const decl = $m51.decl;
       for (const b of law_blocks({ members: decl.items })) {
         const [, out$30] = $std_list.push({ b: out, x: b });
         out = out$30;
       }
-      break $m50$match;
+      break $m51$match;
     }
-    if ($m50.tag === "ExampleItem") {
-      const decl = $m50.decl;
+    if ($m51.tag === "ExampleItem") {
+      const decl = $m51.decl;
       const [, out$31] = $std_list.push({ b: out, x: decl.body });
       out = out$31;
-      break $m50$match;
+      break $m51$match;
     }
-    if ($m50.tag === "PropertyItem") {
-      const decl = $m50.decl;
+    if ($m51.tag === "PropertyItem") {
+      const decl = $m51.decl;
       const [, out$32] = $std_list.push({ b: out, x: decl.body });
       out = out$32;
-      break $m50$match;
+      break $m51$match;
     }
     if (true) {
       skip({  });
-      break $m50$match;
+      break $m51$match;
     }
     $rt.unreachable();
   }
@@ -957,17 +1022,17 @@ export function item_blocks({ item }) {
 export function law_blocks({ members }) {
   let out = $std_list.builder({  });
   for (const member of members) {
-    const $m53 = member;
-    $m53$match: {
-      if ($m53.tag === "LawItem") {
-        const decl = $m53.decl;
+    const $m54 = member;
+    $m54$match: {
+      if ($m54.tag === "LawItem") {
+        const decl = $m54.decl;
         const [, out$33] = $std_list.push({ b: out, x: decl.body });
         out = out$33;
-        break $m53$match;
+        break $m54$match;
       }
       if (true) {
         skip({  });
-        break $m53$match;
+        break $m54$match;
       }
       $rt.unreachable();
     }
@@ -979,47 +1044,47 @@ export function assumes_in({ ctx, c, item }) {
   let out = $std_list.builder({  });
   for (const b of item_blocks({ item: item })) {
     for (const n of $walk.nodes_in_block({ b: b, into_verify: false })) {
-      const $m54 = n;
-      $m54$match: {
-        if ($m54.tag === "NStmt") {
-          const s = $m54.s;
-          const $m55 = s;
-          $m55$match: {
-            if ($m55.tag === "Assume") {
-              const claim = $m55.claim;
-              const justification = $m55.justification;
-              const verify_block = $m55.verify_block;
-              const span = $m55.span;
+      const $m55 = n;
+      $m55$match: {
+        if ($m55.tag === "NStmt") {
+          const s = $m55.s;
+          const $m56 = s;
+          $m56$match: {
+            if ($m56.tag === "Assume") {
+              const claim = $m56.claim;
+              const justification = $m56.justification;
+              const verify_block = $m56.verify_block;
+              const span = $m56.span;
               let verify_json = { tag: "JNull" };
-              const $m57 = verify_block;
-              $m57$match: {
-                if ($m57.tag === "Some") {
-                  const value = $m57.value;
+              const $m58 = verify_block;
+              $m58$match: {
+                if ($m58.tag === "Some") {
+                  const value = $m58.value;
                   verify_json = $json.text({ t: $printer.print_verify({ v: value }) });
-                  break $m57$match;
+                  break $m58$match;
                 }
-                if ($m57.tag === "None") {
+                if ($m58.tag === "None") {
                   skip({  });
-                  break $m57$match;
+                  break $m58$match;
                 }
                 $rt.unreachable();
               }
               const site_key = $ledger.site_key_at({ ctx: ctx, node: $defs.node_key({ file: c.file, tag: $defs.tag_stmt, span: span }) });
               const [, out$34] = $std_list.push({ b: out, x: { j: { tag: "JObject", fields: [$json.field({ key: "def", value: $json.text({ t: def_name_at({ ctx: ctx, c: c, span: span }) }) }), $json.field({ key: "claim", value: $json.text({ t: qname_text({ q: claim }) }) }), $json.field({ key: "justification", value: $json.text({ t: justification }) }), $json.field({ key: "at", value: $loc.location_json({ ctx: ctx, tables: c.tables, file: c.file, span: span }) }), $json.field({ key: "verifiable", value: $json.bool({ b: verify_block.tag === "Some" }) }), $json.field({ key: "verify", value: verify_json }), $json.field({ key: "last_verified", value: $ledger.verified_json({ ctx: ctx, key: site_key }) })] }, verifiable: verify_block.tag === "Some", verified: $ledger.is_verified({ ctx: ctx, key: site_key }) } });
               out = out$34;
-              break $m55$match;
+              break $m56$match;
             }
             if (true) {
               skip({  });
-              break $m55$match;
+              break $m56$match;
             }
             $rt.unreachable();
           }
-          break $m54$match;
+          break $m55$match;
         }
         if (true) {
           skip({  });
-          break $m54$match;
+          break $m55$match;
         }
         $rt.unreachable();
       }
@@ -1032,29 +1097,29 @@ export function recovers_in({ ctx, c, item }) {
   let out = $std_list.builder({  });
   for (const b of item_blocks({ item: item })) {
     for (const n of $walk.nodes_in_block({ b: b, into_verify: false })) {
-      const $m60 = n;
-      $m60$match: {
-        if ($m60.tag === "NExpr") {
-          const e = $m60.e;
-          const $m61 = e;
-          $m61$match: {
-            if ($m61.tag === "Recover") {
-              const span = $m61.span;
+      const $m61 = n;
+      $m61$match: {
+        if ($m61.tag === "NExpr") {
+          const e = $m61.e;
+          const $m62 = e;
+          $m62$match: {
+            if ($m62.tag === "Recover") {
+              const span = $m62.span;
               const [, out$35] = $std_list.push({ b: out, x: { tag: "JObject", fields: [$json.field({ key: "def", value: $json.text({ t: def_name_at({ ctx: ctx, c: c, span: span }) }) }), $json.field({ key: "at", value: $loc.location_json({ ctx: ctx, tables: c.tables, file: c.file, span: span }) })] } });
               out = out$35;
-              break $m61$match;
+              break $m62$match;
             }
             if (true) {
               skip({  });
-              break $m61$match;
+              break $m62$match;
             }
             $rt.unreachable();
           }
-          break $m60$match;
+          break $m61$match;
         }
         if (true) {
           skip({  });
-          break $m60$match;
+          break $m61$match;
         }
         $rt.unreachable();
       }
@@ -1069,33 +1134,33 @@ export function def_name_at({ ctx, c, span }) {
   for (const d of $std_list.finish({ b: ctx.defs })) {
     if (d.file === c.file && ($rt.eq(d.kind, { tag: "Fn" }) || $rt.eq(d.kind, { tag: "Example" }) || $rt.eq(d.kind, { tag: "Property" }))) {
       let extent = { tag: "None" };
-      const $m67 = d.node;
-      $m67$match: {
-        if ($m67.tag === "FnNode") {
-          const decl = $m67.decl;
+      const $m68 = d.node;
+      $m68$match: {
+        if ($m68.tag === "FnNode") {
+          const decl = $m68.decl;
           extent = { tag: "Some", value: decl.span };
-          break $m67$match;
+          break $m68$match;
         }
-        if ($m67.tag === "ExampleNode") {
-          const decl = $m67.decl;
+        if ($m68.tag === "ExampleNode") {
+          const decl = $m68.decl;
           extent = { tag: "Some", value: decl.span };
-          break $m67$match;
+          break $m68$match;
         }
-        if ($m67.tag === "PropertyNode") {
-          const decl = $m67.decl;
+        if ($m68.tag === "PropertyNode") {
+          const decl = $m68.decl;
           extent = { tag: "Some", value: decl.span };
-          break $m67$match;
+          break $m68$match;
         }
         if (true) {
           skip({  });
-          break $m67$match;
+          break $m68$match;
         }
         $rt.unreachable();
       }
-      const $m71 = extent;
-      $m71$match: {
-        if ($m71.tag === "Some") {
-          const value = $m71.value;
+      const $m72 = extent;
+      $m72$match: {
+        if ($m72.tag === "Some") {
+          const value = $m72.value;
           if (within({ inner: span, outer: value })) {
             const size = $rt.int.sub(value.end, value.start, $ob15);
             if (best_size < 0 || size < best_size) {
@@ -1103,11 +1168,11 @@ export function def_name_at({ ctx, c, span }) {
               best_size = size;
             }
           }
-          break $m71$match;
+          break $m72$match;
         }
-        if ($m71.tag === "None") {
+        if ($m72.tag === "None") {
           skip({  });
-          break $m71$match;
+          break $m72$match;
         }
         $rt.unreachable();
       }

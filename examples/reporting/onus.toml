@@ -1,0 +1,4 @@
+[zones]
+"reporting" = "hardened"
+"app.config" = "hardened"
+default = "draft"

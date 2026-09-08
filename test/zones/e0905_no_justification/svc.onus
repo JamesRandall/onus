@@ -1,0 +1,10 @@
+module svc
+
+claim Quiet "Writes nothing."
+
+pub fn leaf() -> Int may alloc
+  claims Quiet
+{
+  assume Quiet ""
+  return 1
+}

@@ -95,6 +95,17 @@ pub record Context {
   -- the command line, else 0 and 7 days, under which no record is stale.
   now_ms: Int
   assumption_max_age_ms: Int
+  -- Pass 12a (zones): the project root the manifest is read from (the command line's, which may
+  -- be inferred from the entry rather than given as `--root`), each module's zone, and the
+  -- manifest's exceptions per module (§21.4).
+  project_root: Option[Text]
+  zones: Dict[Int, Text]
+  zone_exceptions: Dict[Text, List[Text]]
+  -- The promotions ledger (§21.3), the modules it says are demoted, and per module the demoted
+  -- modules its guarantees are conditional on.
+  promotions: List[tables.PromotionRecord]
+  demoted: Dict[Text, Bool]
+  conditional_on: Dict[Int, List[Text]]
 }
 
 pub fn new_context(root: Option[Text], stdlib: Option[Text]) -> Context may alloc {
@@ -154,7 +165,13 @@ pub fn new_context(root: Option[Text], stdlib: Option[Text]) -> Context may allo
     coverage: Map.dict(),
     mutations: [],
     now_ms: 0,
-    assumption_max_age_ms: 604800000
+    assumption_max_age_ms: 604800000,
+    project_root: root,
+    zones: Map.dict(),
+    zone_exceptions: Map.dict(),
+    promotions: [],
+    demoted: Map.dict(),
+    conditional_on: Map.dict()
   }
 }
 
@@ -205,6 +222,7 @@ pub fn get_def(ctx: Context, id: Int) -> defs.Def {
     key: -1,
     span: ast.Span { start: 0, end: 0 },
     is_pub: false,
+    is_hardened: false,
     is_sealed: false,
     is_intrinsic: false,
     parent: None,

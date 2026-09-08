@@ -21,6 +21,17 @@ pub record AssumeSite {
 }
 
 -- A passing or failing verification of an assumption, as `onus test --assumptions` records it (§20.3).
+-- A promotion or demotion (spec §21.3; docs/CHANGES.md item 203): the module, the zones, when, and the audit's outcome.
+pub record PromotionRecord {
+  module: Text
+  from: Text
+  to: Text
+  at: Text
+  -- "promotion" or "demotion".
+  kind: Text
+  audit: Text
+}
+
 pub record VerificationRecord {
   at: Text
   target: Text

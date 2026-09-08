@@ -1,0 +1,6 @@
+module svc
+
+-- Not a draft module: `hardened` has no meaning here (spec §21, E0902).
+pub hardened fn a() -> Int {
+  return 1
+}

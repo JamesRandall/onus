@@ -1,0 +1,402 @@
+module toml
+
+-- A reader for the subset of TOML the project manifest uses (spec §21.4;
+-- docs/CHANGES.md item 202): tables (`[zones]`, `[zones.exceptions]`),
+-- bare or double-quoted keys, and values that are double-quoted strings,
+-- arrays of values on one line, or inline tables `{ k = v, ... }`.
+-- Comments start with `#`. Nothing else: numbers, dates, multi-line
+-- strings and array tables are `Err` with the line of the offence.
+pub union Value =
+  | VText of text: Text
+  | VList of items: List[Value]
+  | VTable of entries: List[Entry]
+
+pub record Entry {
+  key: Text
+  value: Value
+}
+
+pub record Table {
+  -- The dotted header (`zones.exceptions`), "" for the root.
+  name: Text
+  entries: List[Entry]
+}
+
+pub record Doc {
+  tables: List[Table]
+}
+
+-- The table named `name`, if the document has it.
+pub fn table(doc: Doc, name: Text) -> Option[Table] {
+  for t: Table in doc.tables {
+    if t.name == name {
+      return Some(value: t)
+    }
+  }
+  return None
+}
+
+-- The entry `key` of a table, if present.
+pub fn entry(t: Table, key: Text) -> Option[Value] {
+  for e: Entry in t.entries {
+    if e.key == key {
+      return Some(value: e.value)
+    }
+  }
+  return None
+}
+
+pub fn text_of(v: Value) -> Option[Text] {
+  match v with
+  | VText(text) -> return Some(value: text)
+  | _ -> return None
+}
+
+-- The texts of an array of strings; any other value is nothing.
+pub fn texts_of(v: Value) -> Option[List[Text]] may alloc, mutate {
+  match v with
+  | VList(items) -> {
+    var out: Builder[Text] = List.builder()
+    for item: Value in items {
+      match item with
+      | VText(text) -> List.push(b: inout out, x: text)
+      | _ -> return None
+    }
+    return Some(value: List.finish(b: out))
+  }
+  | _ -> return None
+}
+
+pub fn entries_of(v: Value) -> Option[List[Entry]] {
+  match v with
+  | VTable(entries) -> return Some(value: entries)
+  | _ -> return None
+}
+
+-- Parses a document; the error names the first offending line.
+pub fn parse(text: Text) -> Result[Doc, Text] may alloc, mutate {
+  var tables: Builder[Table] = List.builder()
+  var current_name: Text = ""
+  var current: Builder[Entry] = List.builder()
+  var line_no: Int = 0
+  for raw: Text in Text.split(t: text, sep: "\n") {
+    line_no = line_no + 1
+    let line: Text = Text.trim(t: strip_comment(line: raw))
+    if line != "" {
+      if Text.starts_with(t: line, prefix: "[") {
+        if not Text.ends_with(t: line, suffix: "]") or Text.count(t: line) < 3 {
+          return Err(error: "line " ++ Int.to_text(x: line_no) ++ ": malformed table header")
+        }
+        List.push(
+          b: inout tables,
+          x: Table { name: current_name, entries: List.finish(b: current) }
+        )
+        current = List.builder()
+        let inner: Text = Text.trim(t: Text.slice(t: line, from: 1, to: Text.count(t: line) - 1))
+        match header_name(inner: inner) with
+        | None -> return Err(
+          error: "line " ++ Int.to_text(x: line_no) ++ ": malformed table header"
+        )
+        | Some(value) -> current_name = value
+      } else {
+        match parse_entry(line: line, line_no: line_no) with
+        | Err(error) -> return Err(error: error)
+        | Ok(value) -> List.push(b: inout current, x: value)
+      }
+    }
+  }
+  List.push(b: inout tables, x: Table { name: current_name, entries: List.finish(b: current) })
+  return Ok(value: Doc { tables: List.finish(b: tables) })
+}
+
+fn strip_comment(line: Text) -> Text may alloc, mutate {
+  let cps: List[Int] = Text.code_points(t: line)
+  var in_string: Bool = false
+  var esc: Bool = false
+  for i: Int in 0 ..< List.len(xs: cps) {
+    let cp: Int = List.get(xs: cps, i: i)
+    if in_string {
+      if esc {
+        esc = false
+      } else {
+        if cp == 92 {
+          esc = true
+        } else {
+          if cp == 34 {
+            in_string = false
+          }
+        }
+      }
+    } else {
+      if cp == 34 {
+        in_string = true
+      } else {
+        if cp == 35 {
+          return Text.slice(t: line, from: 0, to: i)
+        }
+      }
+    }
+  }
+  return line
+}
+
+-- `a.b."c d"` as the dotted name with quotes removed.
+fn header_name(inner: Text) -> Option[Text] may alloc, mutate {
+  var parts: Builder[Text] = List.builder()
+  for seg: Text in Text.split(t: inner, sep: ".") {
+    let s: Text = Text.trim(t: seg)
+    if s == "" {
+      return None
+    }
+    List.push(b: inout parts, x: unquote_key(key: s))
+  }
+  return Some(value: Text.join(parts: List.finish(b: parts), sep: "."))
+}
+
+fn unquote_key(key: Text) -> Text may alloc {
+  let n: Int = Text.count(t: key)
+  if n >= 2 and Text.starts_with(t: key, prefix: "\"") and Text.ends_with(t: key, suffix: "\"") {
+    return Text.slice(t: key, from: 1, to: n - 1)
+  }
+  return key
+}
+
+-- `key = value` on one line.
+fn parse_entry(line: Text, line_no: Int) -> Result[Entry, Text] may alloc, mutate {
+  let cps: List[Int] = Text.code_points(t: line)
+  let n: Int = List.len(xs: cps)
+  -- The key ends at the first `=` outside quotes.
+  var key_end: Int = -1
+  var in_string: Bool = false
+  for i: Int in 0 ..< n {
+    let cp: Int = List.get(xs: cps, i: i)
+    if key_end < 0 {
+      if cp == 34 {
+        in_string = not in_string
+      } else {
+        if cp == 61 and not in_string {
+          key_end = i
+        }
+      }
+    }
+  }
+  if key_end < 0 {
+    return Err(error: "line " ++ Int.to_text(x: line_no) ++ ": expected `key = value`")
+  }
+  let key: Text = unquote_key(key: Text.trim(t: Text.slice(t: line, from: 0, to: key_end)))
+  if key == "" {
+    return Err(error: "line " ++ Int.to_text(x: line_no) ++ ": empty key")
+  }
+  let rest: Text = Text.trim(t: Text.slice(t: line, from: key_end + 1, to: n))
+  match parse_value(cps: Text.code_points(t: rest), from: 0, line_no: line_no, fuel: 16) with
+  | Err(error) -> return Err(error: error)
+  | Ok(value) -> {
+    if value.next != Text.count(t: rest) {
+      return Err(error: "line " ++ Int.to_text(x: line_no) ++ ": unexpected text after the value")
+    }
+    return Ok(value: Entry { key: key, value: value.value })
+  }
+}
+
+record Parsed {
+  value: Value
+  -- The offset after the value and the spaces following it.
+  next: Int where it >= 0
+}
+
+fn skip_spaces(cps: List[Int], from: Int where it >= 0) -> Int where it >= from may alloc {
+  var i: Int where it >= from = from
+  for k: Int in from ..< List.len(xs: cps) {
+    if i == k and (List.get(xs: cps, i: k) == 32 or List.get(xs: cps, i: k) == 9) {
+      i = k + 1
+    }
+  }
+  return i
+}
+
+fn cp_at(cps: List[Int], i: Int) -> Int {
+  if i >= 0 and i < List.len(xs: cps) {
+    return List.get(xs: cps, i: i)
+  }
+  return -1
+}
+
+-- A value at `from`: a string, an array or an inline table, nested at most `fuel` deep.
+fn parse_value(
+  cps: List[Int],
+  from: Int where it >= 0,
+  line_no: Int,
+  fuel: Int where it >= 0
+) -> Result[Parsed, Text] may alloc, mutate
+  decreases fuel
+{
+  let at: Int = skip_spaces(cps: cps, from: from)
+  let cp: Int = cp_at(cps: cps, i: at)
+  if cp == 34 {
+    return parse_string(cps: cps, from: at, line_no: line_no)
+  }
+  if fuel == 0 {
+    return Err(error: "line " ++ Int.to_text(x: line_no) ++ ": value nested too deep")
+  }
+  if cp == 91 {
+    var items: Builder[Value] = List.builder()
+    var i: Int where it >= 0 = skip_spaces(cps: cps, from: at + 1)
+    var done: Bool = false
+    for step: Int in 0 ..< List.len(xs: cps) {
+      if not done {
+        if cp_at(cps: cps, i: i) == 93 {
+          done = true
+          i = skip_spaces(cps: cps, from: i + 1)
+        } else {
+          match parse_value(cps: cps, from: i, line_no: line_no, fuel: fuel - 1) with
+          | Err(error) -> return Err(error: error)
+          | Ok(value) -> {
+            List.push(b: inout items, x: value.value)
+            i = value.next
+            if cp_at(cps: cps, i: i) == 44 {
+              i = skip_spaces(cps: cps, from: i + 1)
+            } else {
+              if cp_at(cps: cps, i: i) != 93 {
+                return Err(
+                  error: "line " ++ Int.to_text(x: line_no) ++ ": expected `,` or `]` in the array"
+                )
+              }
+            }
+          }
+        }
+      }
+    }
+    if not done {
+      return Err(error: "line " ++ Int.to_text(x: line_no) ++ ": unterminated array")
+    }
+    return Ok(value: Parsed { value: VList(items: List.finish(b: items)), next: i })
+  }
+  if cp == 123 {
+    var entries: Builder[Entry] = List.builder()
+    var i: Int where it >= 0 = skip_spaces(cps: cps, from: at + 1)
+    var done: Bool = false
+    for step: Int in 0 ..< List.len(xs: cps) {
+      if not done {
+        if cp_at(cps: cps, i: i) == 125 {
+          done = true
+          i = skip_spaces(cps: cps, from: i + 1)
+        } else {
+          -- key = value
+          var key_end: Int = -1
+          for k: Int in i ..< List.len(xs: cps) {
+            if key_end < 0 and cp_at(cps: cps, i: k) == 61 {
+              key_end = k
+            }
+          }
+          if key_end < 0 {
+            return Err(
+              error: "line " ++ Int.to_text(
+                x: line_no
+              ) ++ ": expected `key = value` in the inline table"
+            )
+          }
+          let key: Text = unquote_key(
+            key: Text.trim(t: Text.of_code_points(cps: slice_cps(cps: cps, from: i, to: key_end)))
+          )
+          match parse_value(cps: cps, from: key_end + 1, line_no: line_no, fuel: fuel - 1) with
+          | Err(error) -> return Err(error: error)
+          | Ok(value) -> {
+            List.push(b: inout entries, x: Entry { key: key, value: value.value })
+            i = value.next
+            if cp_at(cps: cps, i: i) == 44 {
+              i = skip_spaces(cps: cps, from: i + 1)
+            } else {
+              if cp_at(cps: cps, i: i) != 125 {
+                return Err(
+                  error: "line " ++ Int.to_text(
+                    x: line_no
+                  ) ++ ": expected `,` or `}` in the inline table"
+                )
+              }
+            }
+          }
+        }
+      }
+    }
+    if not done {
+      return Err(error: "line " ++ Int.to_text(x: line_no) ++ ": unterminated inline table")
+    }
+    return Ok(value: Parsed { value: VTable(entries: List.finish(b: entries)), next: i })
+  }
+  return Err(
+    error: "line " ++ Int.to_text(x: line_no) ++ ": expected a string, an array or an inline table"
+  )
+}
+
+fn slice_cps(
+  cps: List[Int],
+  from: Int,
+  to: Int
+) -> List[Int where 0 <= it and it <= 1114111] may alloc, mutate {
+  var out: Builder[Int where 0 <= it and it <= 1114111] = List.builder()
+  for k: Int in 0 ..< List.len(xs: cps) {
+    if k >= from and k < to {
+      let cp: Int = List.get(xs: cps, i: k)
+      if cp >= 0 and cp <= 1114111 {
+        List.push(b: inout out, x: cp)
+      }
+    }
+  }
+  return List.finish(b: out)
+}
+
+-- A double-quoted string at `from` (which holds the opening quote); `\"` and `\\` are the escapes.
+fn parse_string(
+  cps: List[Int],
+  from: Int where it >= 0,
+  line_no: Int
+) -> Result[Parsed, Text] may alloc, mutate {
+  var out: Builder[Int where 0 <= it and it <= 1114111] = List.builder()
+  var esc: Bool = false
+  var end: Int = -1
+  for k: Int in from + 1 ..< List.len(xs: cps) {
+    if end < 0 {
+      let cp: Int = List.get(xs: cps, i: k)
+      if esc {
+        esc = false
+        if cp == 110 {
+          List.push(b: inout out, x: 10)
+        } else {
+          if cp >= 0 and cp <= 1114111 {
+            List.push(b: inout out, x: cp)
+          }
+        }
+      } else {
+        if cp == 92 {
+          esc = true
+        } else {
+          if cp == 34 {
+            end = k
+          } else {
+            if cp >= 0 and cp <= 1114111 {
+              List.push(b: inout out, x: cp)
+            }
+          }
+        }
+      }
+    }
+  }
+  if end < 0 {
+    return Err(error: "line " ++ Int.to_text(x: line_no) ++ ": unterminated string")
+  }
+  return Ok(
+    value: Parsed {
+      value: VText(text: Text.of_code_points(cps: List.finish(b: out))),
+      next: skip_spaces(cps: cps, from: end + 1)
+    }
+  )
+}
+
+example parses_the_manifest_shape {
+  parse(
+    text: "[zones]\n\"app.core.*\" = \"critical\"\ndefault = \"draft\"\n\n[zones.exceptions]\n\"app.core.checkout\" = { third_party_assumes = [\"vendor.payments.charge\"] }\n"
+  ) is Ok
+  parse(text: "[zones\n") is Err
+  parse(text: "x = 3\n") is Err
+  parse(text: "# only a comment\n") is Ok
+}

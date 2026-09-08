@@ -3,18 +3,18 @@ import std.io
 import app.auth
 import app.contracts
 
-pub capability Client
+pub hardened capability Client
   grants io.net
 
-pub union Error =
+pub hardened union Error =
   | Declined of reason: Text
 
-pub record Receipt {
+pub hardened record Receipt {
   id: Text
   amount: Int where it >= 0
 }
 
-pub fn charge(
+pub hardened fn charge(
   client: Client,
   key: Text,
   amount: Int where it >= 0,

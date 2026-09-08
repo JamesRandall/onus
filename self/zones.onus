@@ -1,0 +1,815 @@
+module zones
+import std.io
+import ast
+import context
+import defs
+import tables
+import obligations
+import report
+import ledger
+import loc
+import resolve
+import toml
+import std.hash
+import build
+
+-- Trust zones (spec §21; impl spec §4 pass 12a; docs/CHANGES.md item 202):
+-- every module's zone from the manifest `onus.toml` at the project root,
+-- the dependency rule (E0900), the `hardened` modifier's placement
+-- (E0902), and the zone policy bundles: a `hardened` module's assumptions
+-- carry a justification (E0905); a `critical` module has every public
+-- function on a path (E0903), every `checked` obligation of a contract
+-- exercised by the coverage ledger (E0904), and on every path it holds an
+-- entry of, no `recover` (E0413), no third-party assumption the manifest
+-- does not except (E0415) and no unverified assumption (E0416). A manifest
+-- that cannot be read is E0906. The standard library is `critical`. `onus
+-- test` and the loop's inner check stop at pass 12 (paths): the coverage and
+-- verification ledgers the critical bundle reads are what `test` writes.
+pub const zone_draft: Text = "draft"
+
+pub const zone_hardened: Text = "hardened"
+
+pub const zone_critical: Text = "critical"
+
+pub fn is_zone(t: Text) -> Bool {
+  return t == zone_draft or t == zone_hardened or t == zone_critical
+}
+
+pub fn rank(zone: Text) -> Int {
+  if zone == zone_critical {
+    return 2
+  }
+  if zone == zone_hardened {
+    return 1
+  }
+  return 0
+}
+
+pub record Rule {
+  pattern: Text
+  zone: Text
+}
+
+pub record Manifest {
+  rules: List[Rule]
+  default_zone: Text
+  -- Per module: the functions whose third-party assumptions its critical paths may rest on.
+  exceptions: Dict[Text, List[Text]]
+  -- The signature a zone command wrote (`signature` at the root), if any (§21.3).
+  signature: Option[Text]
+}
+
+pub fn empty_manifest() -> Manifest may alloc {
+  return Manifest { rules: [], default_zone: zone_draft, exceptions: Map.dict(), signature: None }
+}
+
+-- Reads `[zones]` and `[zones.exceptions]` (spec §21.4).
+pub fn parse_manifest(text: Text) -> Result[Manifest, Text] may alloc, mutate {
+  let doc: toml.Doc = try toml.parse(text: text)
+  var rules: Builder[Rule] = List.builder()
+  var default_zone: Text = zone_draft
+  var exceptions: Dict[Text, List[Text]] = Map.dict()
+  match toml.table(doc: doc, name: "zones") with
+  | None -> skip()
+  | Some(value) -> try read_rules(t: value, rules: inout rules, default_zone: inout default_zone)
+  match toml.table(doc: doc, name: "zones.exceptions") with
+  | None -> skip()
+  | Some(value) -> try read_exceptions(t: value, exceptions: inout exceptions)
+  var signature: Option[Text] = None
+  match toml.table(doc: doc, name: "") with
+  | None -> skip()
+  | Some(value) -> signature = signature_entry(t: value)
+  return Ok(
+    value: Manifest {
+      rules: List.finish(b: rules),
+      default_zone: default_zone,
+      exceptions: exceptions,
+      signature: signature
+    }
+  )
+}
+
+fn signature_entry(t: toml.Table) -> Option[Text] {
+  match toml.entry(t: t, key: "signature") with
+  | None -> return None
+  | Some(value) -> return toml.text_of(v: value)
+}
+
+-- The manifest as the zone commands write it (§21.4): the rules sorted by
+-- pattern, `default` last, the exceptions sorted by module; what the signature covers.
+pub fn canonical_text(m: Manifest) -> Text may alloc, mutate {
+  var lines: Builder[Text] = List.builder()
+  List.push(b: inout lines, x: "[zones]")
+  var patterns: Builder[Text] = List.builder()
+  for r: Rule in m.rules {
+    List.push(b: inout patterns, x: r.pattern)
+  }
+  for p: Text in sorted_texts(xs: List.finish(b: patterns)) {
+    for r: Rule in m.rules {
+      if r.pattern == p {
+        List.push(b: inout lines, x: "\"" ++ p ++ "\" = \"" ++ r.zone ++ "\"")
+      }
+    }
+  }
+  List.push(b: inout lines, x: "default = \"" ++ m.default_zone ++ "\"")
+  let modules: List[Text] = sorted_texts(xs: Map.keys(d: m.exceptions))
+  if List.len(xs: modules) > 0 {
+    List.push(b: inout lines, x: "")
+    List.push(b: inout lines, x: "[zones.exceptions]")
+    for name: Text in modules {
+      match Map.find(d: m.exceptions, key: name) with
+      | Some(value) -> {
+        var quoted: Builder[Text] = List.builder()
+        for f: Text in sorted_texts(xs: value) {
+          List.push(b: inout quoted, x: "\"" ++ f ++ "\"")
+        }
+        List.push(
+          b: inout lines,
+          x: "\"" ++ name ++ "\" = { third_party_assumes = [" ++ Text.join(
+            parts: List.finish(b: quoted),
+            sep: ", "
+          ) ++ "] }"
+        )
+      }
+      | None -> skip()
+    }
+  }
+  return Text.join(parts: List.finish(b: lines), sep: "\n") ++ "\n"
+}
+
+-- Insertion sort by code point order; manifests are small.
+fn sorted_texts(xs: List[Text]) -> List[Text] may alloc, mutate {
+  var out: List[Text] = []
+  for x: Text in xs {
+    var placed: Bool = false
+    var next: Builder[Text] = List.builder()
+    for y: Text in out {
+      if not placed and Text.compare(a: x, b: y) < 0 {
+        List.push(b: inout next, x: x)
+        placed = true
+      }
+      List.push(b: inout next, x: y)
+    }
+    if not placed {
+      List.push(b: inout next, x: x)
+    }
+    out = List.finish(b: next)
+  }
+  return out
+}
+
+pub fn signature_of(m: Manifest) -> Text may alloc, mutate {
+  return "b3:" ++ hash.blake3_hex(t: canonical_text(m: m))
+}
+
+-- The manifest's full text as a zone command writes it: the signature, then the tables.
+pub fn manifest_text(m: Manifest) -> Text may alloc, mutate {
+  return "signature = \"" ++ signature_of(m: m) ++ "\"\n\n" ++ canonical_text(m: m)
+}
+
+pub fn write_manifest(
+  files: io.Files,
+  root: Text,
+  m: Manifest
+) -> Result[Unit, io.Error] may io.file, alloc, mutate {
+  return build.write_file(files: files, path: root ++ "/onus.toml", text: manifest_text(m: m))
+}
+
+-- The manifest with `module` at `zone`: its exact rule replaced, or added.
+pub fn set_zone(m: Manifest, module: Text, zone: Text) -> Manifest may alloc, mutate {
+  var rules: Builder[Rule] = List.builder()
+  var found: Bool = false
+  for r: Rule in m.rules {
+    if r.pattern == module {
+      List.push(b: inout rules, x: Rule { pattern: module, zone: zone })
+      found = true
+    } else {
+      List.push(b: inout rules, x: r)
+    }
+  }
+  if not found {
+    List.push(b: inout rules, x: Rule { pattern: module, zone: zone })
+  }
+  return { m with rules: List.finish(b: rules) }
+}
+
+fn read_rules(
+  t: toml.Table,
+  rules: inout Builder[Rule],
+  default_zone: inout Text
+) -> Result[Unit, Text] may alloc, mutate {
+  for e: toml.Entry in t.entries {
+    match toml.text_of(v: e.value) with
+    | None -> return Err(error: "[zones] " ++ e.key ++ ": a zone is a string")
+    | Some(value) -> {
+      if not is_zone(t: value) {
+        return Err(
+          error: "[zones] " ++ e.key ++ ": `" ++ value ++ "` is not a zone (draft, hardened or critical)"
+        )
+      }
+      if e.key == "default" {
+        default_zone = value
+      } else {
+        List.push(b: inout rules, x: Rule { pattern: e.key, zone: value })
+      }
+    }
+  }
+  return Ok(value: Unit)
+}
+
+fn read_exceptions(
+  t: toml.Table,
+  exceptions: inout Dict[Text, List[Text]]
+) -> Result[Unit, Text] may alloc, mutate {
+  for e: toml.Entry in t.entries {
+    match exception_list(v: e.value) with
+    | None -> return Err(
+      error: "[zones.exceptions] " ++ e.key ++ ": expected { third_party_assumes = [\"module.fn\", ...] }"
+    )
+    | Some(value) -> Map.set(d: inout exceptions, key: e.key, value: value)
+  }
+  return Ok(value: Unit)
+}
+
+fn exception_list(v: toml.Value) -> Option[List[Text]] may alloc, mutate {
+  match toml.entries_of(v: v) with
+  | None -> return None
+  | Some(value) -> {
+    for e: toml.Entry in value {
+      if e.key == "third_party_assumes" {
+        return toml.texts_of(v: e.value)
+      }
+    }
+    return Some(value: [])
+  }
+}
+
+-- The zone of a module name: an exact rule, else the longest `prefix.*` rule
+-- the name is under, else the default.
+pub fn zone_of(m: Manifest, name: Text) -> Text may alloc {
+  var best: Text = m.default_zone
+  var best_len: Int = -1
+  for r: Rule in m.rules {
+    if r.pattern == name {
+      return r.zone
+    }
+    if Text.ends_with(t: r.pattern, suffix: ".*") and Text.count(t: r.pattern) >= 2 {
+      let prefix: Text = Text.slice(t: r.pattern, from: 0, to: Text.count(t: r.pattern) - 1)
+      if Text.starts_with(t: name, prefix: prefix) and Text.count(t: prefix) > best_len {
+        best = r.zone
+        best_len = Text.count(t: prefix)
+      }
+    }
+  }
+  return best
+}
+
+-- The manifest at `<root>/onus.toml`, nothing when there is no root or no file.
+pub fn read_manifest(
+  files: io.Files,
+  root: Option[Text]
+) -> Result[Option[Manifest], Text] may io.file, alloc, mutate {
+  match root with
+  | None -> return Ok(value: None)
+  | Some(value) -> return read_manifest_at(files: files, root: value)
+}
+
+fn read_manifest_at(
+  files: io.Files,
+  root: Text
+) -> Result[Option[Manifest], Text] may io.file, alloc, mutate {
+  match io.read(files: files, path: root ++ "/onus.toml") with
+  | Err(_) -> return Ok(value: None)
+  | Ok(value) -> {
+    let m: Manifest = try parse_manifest(text: value)
+    return Ok(value: Some(value: m))
+  }
+}
+
+-- The zone the pass assigned a module; `draft` before the pass ran.
+pub fn module_zone(ctx: context.Context, mod: Int) -> Text {
+  match Map.find(d: ctx.zones, key: mod) with
+  | Some(value) -> return value
+  | None -> return zone_draft
+}
+
+-- The zone an item is held to: its module's, or `hardened` for a hardened item of a draft module.
+pub fn def_zone(ctx: context.Context, def: Int) -> Text {
+  let d: defs.Def = context.get_def(ctx: ctx, id: def)
+  let z: Text = module_zone(ctx: ctx, mod: d.mod)
+  if z == zone_draft and d.is_hardened and d.is_pub {
+    return zone_hardened
+  }
+  return z
+}
+
+-- The top-level definition an item belongs to (a field's record, a variant's union).
+fn top_def(ctx: context.Context, def: Int) -> defs.Def {
+  var d: defs.Def = context.get_def(ctx: ctx, id: def)
+  for i: Int in 0 ..< 4 {
+    match d.parent with
+    | Some(value) -> d = context.get_def(ctx: ctx, id: value)
+    | None -> skip()
+  }
+  return d
+}
+
+fn rep(
+  ctx: inout context.Context,
+  code: Text,
+  file: Int,
+  span: ast.Span,
+  def_name: Option[Text],
+  detail: Text
+) -> Unit may mutate, alloc {
+  context.report(
+    ctx: inout ctx,
+    d: report.diagnostic(code: code, file: file, span: span, def_name: def_name, detail: detail)
+  )
+  return Unit
+}
+
+fn skip() -> Unit {
+  return Unit
+}
+
+-- Pass 12a. Effects: fills `ctx.zones` and `ctx.zone_exceptions`; reports E0900–E0906, E0413, E0415 and E0416.
+pub fn zones_pass(ctx: inout context.Context, files: io.Files) -> Unit may io.file, alloc, mutate {
+  var manifest: Manifest = empty_manifest()
+  match read_manifest(files: files, root: ctx.project_root) with
+  | Err(error) -> {
+    rep(
+      ctx: inout ctx,
+      code: "E0906",
+      file: 0,
+      span: ast.Span { start: 0, end: 0 },
+      def_name: None,
+      detail: "onus.toml: " ++ error
+    )
+    return Unit
+  }
+  | Ok(value) -> manifest = manifest_or_empty(o: value)
+  var zones: Dict[Int, Text] = Map.dict()
+  for mid: Int in 0 ..< ctx.module_count {
+    match Map.find(d: ctx.modules, key: mid) with
+    | Some(value) -> {
+      if value.is_std {
+        Map.set(d: inout zones, key: mid, value: zone_critical)
+      } else {
+        Map.set(d: inout zones, key: mid, value: zone_of(m: manifest, name: value.name))
+      }
+    }
+    | None -> skip()
+  }
+  ctx = { ctx with
+    zones: zones,
+    zone_exceptions: manifest.exceptions,
+    demoted: ledger.demoted_modules(records: ctx.promotions),
+    conditional_on: Map.dict()
+  }
+  match manifest.signature with
+  | Some(value) -> {
+    if value != signature_of(m: manifest) {
+      rep(
+        ctx: inout ctx,
+        code: "E0901",
+        file: 0,
+        span: ast.Span { start: 0, end: 0 },
+        def_name: None,
+        detail: "onus.toml was edited outside `onus zone`: its signature does not match its zones (§21.3)"
+      )
+    }
+  }
+  | None -> skip()
+  check_modifier(ctx: inout ctx)
+  check_dependencies(ctx: inout ctx)
+  check_hardened(ctx: inout ctx)
+  check_critical(ctx: inout ctx)
+  return Unit
+}
+
+fn manifest_or_empty(o: Option[Manifest]) -> Manifest may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return empty_manifest()
+}
+
+-- E0902: `hardened` only on a public item of a draft module.
+fn check_modifier(ctx: inout context.Context) -> Unit may mutate, alloc {
+  for d: defs.Def in List.finish(b: ctx.defs) {
+    if d.is_hardened {
+      let z: Text = module_zone(ctx: ctx, mod: d.mod)
+      if not d.is_pub {
+        rep(
+          ctx: inout ctx,
+          code: "E0902",
+          file: d.file,
+          span: d.span,
+          def_name: Some(value: d.name),
+          detail: "`" ++ d.name ++ "` is marked `hardened` but is not `pub`; only a public item of a `draft` module can be a boundary (§21.1)"
+        )
+      } else {
+        if z != zone_draft {
+          rep(
+            ctx: inout ctx,
+            code: "E0902",
+            file: d.file,
+            span: d.span,
+            def_name: Some(value: d.name),
+            detail: "`" ++ d.name ++ "` is marked `hardened` in `" ++ context.module_name(
+              ctx: ctx,
+              id: d.mod
+            ) ++ "`, a `" ++ z ++ "` module; the modifier belongs to `draft` modules (§21.1)"
+          )
+        }
+      }
+    }
+  }
+  return Unit
+}
+
+fn module_of_file(ctx: context.Context, file: Int) -> Option[Int] {
+  for mid: Int in 0 ..< ctx.module_count {
+    match Map.find(d: ctx.modules, key: mid) with
+    | Some(value) -> {
+      if value.file == file {
+        return Some(value: mid)
+      }
+    }
+    | None -> skip()
+  }
+  return None
+}
+
+-- The definition a resolution refers to, when it refers to one.
+fn target_of(res: defs.Resolution) -> Option[Int] {
+  match res with
+  | defs.DefRes(def) -> return Some(value: def)
+  | defs.CompanionRes(owner, fn_def) -> return Some(value: fn_def)
+  | defs.IfaceFnRes(iface, fn_def) -> return Some(value: fn_def)
+  | _ -> return None
+}
+
+-- E0900: every reference from a module to a definition of a lower zone, once per (module, definition).
+fn check_dependencies(ctx: inout context.Context) -> Unit may mutate, alloc {
+  var seen: Dict[Text, Bool] = Map.dict()
+  for k: Int in Map.keys(d: ctx.refs) {
+    match Map.find(d: ctx.refs, key: k) with
+    | None -> skip()
+    | Some(value) -> check_resolution(ctx: inout ctx, key: k, res: value, seen: inout seen)
+  }
+  return Unit
+}
+
+fn check_resolution(
+  ctx: inout context.Context,
+  key: Int,
+  res: defs.Resolution,
+  seen: inout Dict[Text, Bool]
+) -> Unit may mutate, alloc {
+  match target_of(res: res) with
+  | None -> skip()
+  | Some(value) -> check_reference(ctx: inout ctx, key: key, def: value, seen: inout seen)
+  return Unit
+}
+
+fn check_reference(
+  ctx: inout context.Context,
+  key: Int,
+  def: Int,
+  seen: inout Dict[Text, Bool]
+) -> Unit may mutate, alloc {
+  let file: Int = defs.key_file(key: key)
+  match module_of_file(ctx: ctx, file: file) with
+  | None -> skip()
+  | Some(value) -> {
+    let from_mod: Int = value
+    let target: defs.Def = context.get_def(ctx: ctx, id: def)
+    if target.mod != from_mod {
+      let za: Text = module_zone(ctx: ctx, mod: from_mod)
+      let zb: Text = module_zone(ctx: ctx, mod: target.mod)
+      if rank(zone: za) > rank(zone: zb) {
+        let top: defs.Def = top_def(ctx: ctx, def: def)
+        let allowed: Bool = zb == zone_draft and top.is_hardened and top.is_pub
+        let tag: Text = Int.to_text(x: from_mod) ++ "#" ++ Int.to_text(x: top.id)
+        let target_name: Text = context.module_name(ctx: ctx, id: target.mod)
+        if not allowed and Map.contains(d: ctx.demoted, key: target_name) {
+          mark_conditional(ctx: inout ctx, mod: from_mod, on: target_name)
+        }
+        if not allowed and not Map.contains(d: ctx.demoted, key: target_name) and not Map.contains(
+          d: seen,
+          key: tag
+        ) {
+          Map.set(d: inout seen, key: tag, value: true)
+          var why: Text = "`" ++ za ++ "` may depend only on `" ++ za ++ "` or higher"
+          if zb == zone_draft and rank(zone: za) >= 1 {
+            why = "`" ++ top.name ++ "` is not `hardened`"
+          }
+          rep(
+            ctx: inout ctx,
+            code: "E0900",
+            file: file,
+            span: defs.key_span(key: key),
+            def_name: None,
+            detail: "`" ++ context.module_name(
+              ctx: ctx,
+              id: from_mod
+            ) ++ "` (" ++ za ++ ") depends on `" ++ context.qualified_name(
+              ctx: ctx,
+              id: top.id
+            ) ++ "` of `" ++ context.module_name(
+              ctx: ctx,
+              id: target.mod
+            ) ++ "` (" ++ zb ++ "): " ++ why ++ " (§21.1)"
+          )
+        }
+      }
+    }
+  }
+  return Unit
+}
+
+-- E0905: in a hardened or critical module every assumption carries a justification.
+fn check_hardened(ctx: inout context.Context) -> Unit may mutate, alloc {
+  for s: tables.AssumeSite in List.finish(b: ctx.assume_sites) {
+    let d: defs.Def = context.get_def(ctx: ctx, id: s.fn_def)
+    if rank(zone: def_zone(ctx: ctx, def: s.fn_def)) >= 1 and Text.trim(t: s.justification) == "" {
+      rep(
+        ctx: inout ctx,
+        code: "E0905",
+        file: s.at_file,
+        span: s.at_span,
+        def_name: Some(value: d.name),
+        detail: "`" ++ context.qualified_name(
+          ctx: ctx,
+          id: s.fn_def
+        ) ++ "` assumes `" ++ context.get_def(
+          ctx: ctx,
+          id: s.claim_def
+        ).name ++ "` without a justification; a `" ++ def_zone(
+          ctx: ctx,
+          def: s.fn_def
+        ) ++ "` module says why (§21.2)"
+      )
+    }
+  }
+  return Unit
+}
+
+-- Whether a path declares `policy verified_assumptions_only` itself (then pass 12 reported E0416 already).
+fn declares_verified_only(ctx: context.Context, path_def: Int) -> Bool {
+  match context.get_def(ctx: ctx, id: path_def).node with
+  | defs.PathNode(decl) -> {
+    for c: ast.PathClause in decl.clauses {
+      match c with
+      | ast.PathPolicy(name, except_list, span) -> {
+        if name.text == resolve.builtin_policy {
+          return true
+        }
+      }
+      | _ -> skip()
+    }
+    return false
+  }
+  | _ -> return false
+}
+
+fn excepted(ctx: context.Context, mod: Int, fn_def: Int) -> Bool may alloc {
+  match Map.find(d: ctx.zone_exceptions, key: context.module_name(ctx: ctx, id: mod)) with
+  | Some(value) -> return List.contains(xs: value, x: context.qualified_name(ctx: ctx, id: fn_def))
+  | None -> return false
+}
+
+fn is_covered(ctx: context.Context, def: Int) -> Bool may alloc {
+  for pid: Int in Map.keys(d: ctx.analyses) {
+    match Map.find(d: ctx.analyses, key: pid) with
+    | Some(value) -> {
+      if value.entry_fn == def or List.contains(xs: value.reachable, x: def) {
+        return true
+      }
+    }
+    | None -> skip()
+  }
+  return false
+}
+
+fn contract_kind(k: obligations.Kind) -> Bool {
+  match k with
+  | obligations.Overflow -> return false
+  | obligations.Representation -> return false
+  | obligations.Assertion -> return false
+  | _ -> return true
+}
+
+-- The critical bundle (§21.2): E0903, E0904 per module; E0413, E0415, E0416 per path.
+fn check_critical(ctx: inout context.Context) -> Unit may mutate, alloc {
+  -- E0903: every public function of a critical module is on a path.
+  for d: defs.Def in List.finish(b: ctx.defs) {
+    if d.is_pub and d.parent is None and not d.is_intrinsic and d.kind is defs.Fn and module_zone(
+      ctx: ctx,
+      mod: d.mod
+    ) == zone_critical {
+      match Map.find(d: ctx.modules, key: d.mod) with
+      | Some(value) -> {
+        if not value.is_std and not value.tree.is_test and not is_covered(ctx: ctx, def: d.id) {
+          rep(
+            ctx: inout ctx,
+            code: "E0903",
+            file: d.file,
+            span: d.span,
+            def_name: Some(value: d.name),
+            detail: "`" ++ context.qualified_name(
+              ctx: ctx,
+              id: d.id
+            ) ++ "` is public in `" ++ value.name ++ "`, a `critical` module, and on no `path` (§21)"
+          )
+        }
+      }
+      | None -> skip()
+    }
+  }
+  -- E0904: every checked contract obligation of a critical module is exercised.
+  let tab: Dict[Int, loc.LineTable] = loc.line_tables(ctx: ctx)
+  for i: Int in 0 ..< ctx.obligation_count {
+    let o: obligations.Obligation = context.get_obligation(ctx: ctx, id: i)
+    let d: defs.Def = context.get_def(ctx: ctx, id: o.def)
+    if o.status is obligations.Checked and contract_kind(k: o.kind) and module_zone(
+      ctx: ctx,
+      mod: d.mod
+    ) == zone_critical and not is_std_module(ctx: ctx, mod: d.mod) {
+      if hits(ctx: ctx, site: ledger.check_site(ctx: ctx, tab: tab, o: o)) == 0 {
+        rep(
+          ctx: inout ctx,
+          code: "E0904",
+          file: o.at_file,
+          span: o.at_span,
+          def_name: Some(value: d.name),
+          detail: "`" ++ obligations.kind_text(
+            k: o.kind
+          ) ++ " " ++ o.text ++ "` in `" ++ context.qualified_name(
+            ctx: ctx,
+            id: o.def
+          ) ++ "` is checked at runtime and no example or property exercises it; `critical` requires one (§21.2, `checked_requires_example`)"
+        )
+      }
+    }
+  }
+  -- The paths whose entry a critical module holds.
+  for pid: Int in Map.keys(d: ctx.analyses) {
+    match Map.find(d: ctx.analyses, key: pid) with
+    | Some(value) -> check_critical_path(ctx: inout ctx, a: value)
+    | None -> skip()
+  }
+  return Unit
+}
+
+fn is_std_module(ctx: context.Context, mod: Int) -> Bool {
+  match Map.find(d: ctx.modules, key: mod) with
+  | Some(value) -> return value.is_std
+  | None -> return false
+}
+
+fn hits(ctx: context.Context, site: Text) -> Int {
+  match Map.find(d: ctx.coverage, key: site) with
+  | Some(value) -> return value
+  | None -> return 0
+}
+
+fn check_critical_path(
+  ctx: inout context.Context,
+  a: tables.PathAnalysis
+) -> Unit may mutate, alloc {
+  let entry_mod: Int = context.get_def(ctx: ctx, id: a.entry_fn).mod
+  if module_zone(ctx: ctx, mod: entry_mod) != zone_critical {
+    return Unit
+  }
+  let path_name: Text = context.get_def(ctx: ctx, id: a.def).name
+  for r: tables.RecoverSite in a.recovers {
+    rep(
+      ctx: inout ctx,
+      code: "E0413",
+      file: r.at_file,
+      span: r.at_span,
+      def_name: Some(value: path_name),
+      detail: "`" ++ context.qualified_name(
+        ctx: ctx,
+        id: r.fn_def
+      ) ++ "` is reachable on path `" ++ path_name ++ "` and recovers a panic; a `critical` path forbids `recover` (§21.2)"
+    )
+  }
+  let verified_declared: Bool = declares_verified_only(ctx: ctx, path_def: a.def)
+  for pa: tables.PathAssume in a.assume_sites {
+    let owner: defs.Def = context.get_def(ctx: ctx, id: pa.fn_def)
+    let claim: Text = context.get_def(ctx: ctx, id: pa.claim_def).name
+    if owner.mod != a.mod and not is_std_module(ctx: ctx, mod: owner.mod) and not excepted(
+      ctx: ctx,
+      mod: a.mod,
+      fn_def: pa.fn_def
+    ) {
+      rep(
+        ctx: inout ctx,
+        code: "E0415",
+        file: defs.key_file(key: pa.node),
+        span: defs.key_span(key: pa.node),
+        def_name: Some(value: path_name),
+        detail: "`" ++ context.qualified_name(
+          ctx: ctx,
+          id: pa.fn_def
+        ) ++ "` assumes `" ++ claim ++ "` (\"" ++ pa.justification ++ "\") outside `" ++ context.module_name(
+          ctx: ctx,
+          id: a.mod
+        ) ++ "`, and the manifest does not except it; a `critical` path forbids third-party assumptions (§21.2)"
+      )
+    }
+    if not verified_declared and not ledger.is_verified(ctx: ctx, key: pa.key) {
+      var why: Text = "with no `verify` block"
+      if pa.verify_key is Some {
+        why = "without a passing verification in the last " ++ Int.to_text(
+          x: (ctx.assumption_max_age_ms + 43200000) / 86400000
+        ) ++ " days"
+      }
+      rep(
+        ctx: inout ctx,
+        code: "E0416",
+        file: defs.key_file(key: pa.node),
+        span: defs.key_span(key: pa.node),
+        def_name: Some(value: path_name),
+        detail: "`" ++ context.qualified_name(
+          ctx: ctx,
+          id: pa.fn_def
+        ) ++ "` assumes `" ++ claim ++ "` " ++ why ++ "; a `critical` path requires one (§21.2, `verified_assumptions_only`)"
+      )
+    }
+  }
+  return Unit
+}
+
+-- A dependent's guarantees rest on a demoted module (§21.3): recorded, never a diagnostic.
+fn mark_conditional(ctx: inout context.Context, mod: Int, on: Text) -> Unit may mutate, alloc {
+  var table: Dict[Int, List[Text]] = ctx.conditional_on
+  var current: List[Text] = []
+  match Map.find(d: table, key: mod) with
+  | Some(value) -> current = value
+  | None -> skip()
+  if not List.contains(xs: current, x: on) {
+    Map.set(d: inout table, key: mod, value: current ++ [on])
+    ctx = { ctx with conditional_on: table }
+  }
+  return Unit
+}
+
+-- The demoted modules a module's guarantees are conditional on.
+pub fn conditional_on(ctx: context.Context, mod: Int) -> List[Text] may alloc {
+  match Map.find(d: ctx.conditional_on, key: mod) with
+  | Some(value) -> return value
+  | None -> return []
+}
+
+-- The demoted modules a path's guarantees are conditional on: those of every reachable module.
+pub fn path_conditional(
+  ctx: context.Context,
+  reachable: List[Int]
+) -> List[Text] may alloc, mutate {
+  var out: List[Text] = []
+  for def: Int in reachable {
+    for name: Text in conditional_on(ctx: ctx, mod: context.get_def(ctx: ctx, id: def).mod) {
+      if not List.contains(xs: out, x: name) {
+        out = out ++ [name]
+      }
+    }
+  }
+  return out
+}
+
+-- Report helpers (§21.5) -----------------------------------------------------------
+-- The zones the reachable functions of a path belong to, in rank order.
+pub fn zones_crossed(ctx: context.Context, reachable: List[Int]) -> List[Text] may alloc, mutate {
+  var out: Builder[Text] = List.builder()
+  for z: Text in [zone_draft, zone_hardened, zone_critical] {
+    var found: Bool = false
+    for def: Int in reachable {
+      if module_zone(ctx: ctx, mod: context.get_def(ctx: ctx, id: def).mod) == z {
+        found = true
+      }
+    }
+    if found {
+      List.push(b: inout out, x: z)
+    }
+  }
+  return List.finish(b: out)
+}
+
+-- The hardened items of draft modules among the reachable functions.
+pub fn draft_dependencies(
+  ctx: context.Context,
+  reachable: List[Int]
+) -> List[Text] may alloc, mutate {
+  var out: Builder[Text] = List.builder()
+  for def: Int in reachable {
+    let d: defs.Def = context.get_def(ctx: ctx, id: def)
+    if d.is_hardened and d.is_pub and module_zone(ctx: ctx, mod: d.mod) == zone_draft {
+      List.push(b: inout out, x: context.qualified_name(ctx: ctx, id: def))
+    }
+  }
+  return List.finish(b: out)
+}

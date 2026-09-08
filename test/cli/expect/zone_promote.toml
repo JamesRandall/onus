@@ -1,0 +1,6 @@
+signature = "b3:a3f49d0a5a8e837ebaf951352786e7ac496b7369da92914e909f15031dc106ec"
+
+[zones]
+"core.*" = "critical"
+"svc" = "critical"
+default = "draft"

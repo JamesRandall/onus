@@ -247,6 +247,27 @@ pub fn title(code: Text) -> Text {
   if code == "E0801" {
     return "target disagreement"
   }
+  if code == "E0900" {
+    return "dependency crosses zone boundary"
+  }
+  if code == "E0901" {
+    return "manifest edited outside zone command"
+  }
+  if code == "E0902" {
+    return "hardened modifier outside draft zone"
+  }
+  if code == "E0903" {
+    return "public function of a critical module on no path"
+  }
+  if code == "E0904" {
+    return "checked obligation not exercised in a critical module"
+  }
+  if code == "E0905" {
+    return "assumption without justification in a hardened module"
+  }
+  if code == "E0906" {
+    return "manifest unreadable"
+  }
   if code == "E0999" {
     return "internal error"
   }
@@ -337,6 +358,13 @@ pub fn all_codes() -> List[Text] may alloc {
     "E0703",
     "E0800",
     "E0801",
+    "E0900",
+    "E0901",
+    "E0902",
+    "E0903",
+    "E0904",
+    "E0905",
+    "E0906",
     "E0999"
   ]
 }

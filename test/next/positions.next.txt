@@ -1,12 +1,12 @@
 0	module test	-	
 7	ident	-	
 16	. newline	-	
-17	capability claim const eof example fn impl import interface intrinsic path policy property pub record sealed type union	-	
+17	capability claim const eof example fn hardened impl import interface intrinsic path policy property pub record sealed type union	-	
 24	ident	-	
 27	. newline	-	
 28	ident	-	
 30	. newline	-	
-32	capability claim const eof example fn impl import interface intrinsic path policy property pub record sealed type union	-	
+32	capability claim const eof example fn hardened impl import interface intrinsic path policy property pub record sealed type union	-	
 39	type-ident	-	
 45	[ {	-	
 46	ident newline }	-	
@@ -24,18 +24,18 @@
 78	% ( * + ++ - . / [ and implies newline or }	-	
 79	ident }	-	
 80	newline	-	
-82	capability claim const eof example fn impl interface intrinsic path policy property pub record sealed type union	-	
+82	capability claim const eof example fn hardened impl interface intrinsic path policy property pub record sealed type union	-	
 88	type-ident	-	
 94	= [	-	
 95	newline	-	
-98	capability claim const eof example fn impl interface intrinsic path policy property pub record sealed type union |	-	
+98	capability claim const eof example fn hardened impl interface intrinsic path policy property pub record sealed type union |	-	
 100	type-ident	-	
 104	newline of	-	
 107	ident	-	
 109	:	-	
 111	fn ident type-ident	-	
 116	, [ newline where	-	
-119	capability claim const eof example fn impl interface intrinsic path policy property pub record sealed type union |	-	
+119	capability claim const eof example fn hardened impl interface intrinsic path policy property pub record sealed type union |	-	
 121	type-ident	-	
 126	newline of	-	
 129	ident	-	
@@ -46,7 +46,7 @@
 144	:	-	
 146	fn ident type-ident	-	
 151	, [ newline where	-	
-153	capability claim const eof example fn impl interface intrinsic path policy property pub record sealed type union |	-	
+153	capability claim const eof example fn hardened impl interface intrinsic path policy property pub record sealed type union |	-	
 156	ident	-	
 161	( [	-	
 162	) ident	-	
@@ -87,7 +87,7 @@
 245	!= % ( * + ++ - . / < <= == > >= [ and implies is newline or }	-	
 246	( - [ assume exists fake false fn for forall ident if it let literal:duration literal:float literal:int literal:text loop match not old recover result return true try type-ident var { }	-	p k
 247	newline	-	
-249	capability claim const eof example fn impl interface intrinsic path policy property pub record sealed type union	-	
+249	capability claim const eof example fn hardened impl interface intrinsic path policy property pub record sealed type union	-	
 252	ident	-	
 257	( [	-	
 258	) ident	-	
@@ -134,7 +134,7 @@
 389	!= % ( * + ++ - . / < <= == > >= [ and implies is newline or }	-	
 390	( - [ assume exists fake false fn for forall ident if it let literal:duration literal:float literal:int literal:text loop match not old recover result return true try type-ident var { | }	-	s name
 391	newline	-	
-393	capability claim const eof example fn impl interface intrinsic path policy property pub record sealed type union	-	
+393	capability claim const eof example fn hardened impl interface intrinsic path policy property pub record sealed type union	-	
 396	ident	-	
 403	( [	-	
 404	) ident	-	
@@ -228,8 +228,8 @@
 667	!= % ( * + ++ - . / < <= == > >= [ and implies is newline or }	-	
 668	( - [ assume exists fake false fn for forall ident if it let literal:duration literal:float literal:int literal:text loop match not old recover result return true try type-ident var { }	-	xs ratio flag total maybe r
 669	newline	-	
-671	capability claim const eof example fn impl interface intrinsic path policy property pub record sealed type union	-	
-675	capability claim const fn interface intrinsic record sealed type union	-	
+671	capability claim const eof example fn hardened impl interface intrinsic path policy property pub record sealed type union	-	
+675	capability claim const fn hardened interface intrinsic record sealed type union	-	
 678	ident	-	
 682	( [	-	
 683	) ident	-	
@@ -342,4 +342,4 @@
 950	!= % ( * + ++ - . / < <= == > >= [ and implies is newline or { }	-	
 951	( - [ assume exists fake false fn for forall ident if it let literal:duration literal:float literal:int literal:text loop match not old recover result return true try type-ident var { }	-	args files p t n
 952	newline	-	
-953	capability claim const eof example fn impl interface intrinsic path policy property pub record sealed type union	-	
+953	capability claim const eof example fn hardened impl interface intrinsic path policy property pub record sealed type union	-	

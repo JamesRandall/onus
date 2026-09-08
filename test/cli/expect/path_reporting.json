@@ -1,6 +1,14 @@
 {
   "path": "monthly_report",
   "entry": "reporting.monthly_totals",
+  "zone": "hardened",
+  "zones_crossed": [
+    "hardened",
+    "critical"
+  ],
+  "draft_dependencies": [],
+  "conditional": false,
+  "conditional_on": [],
   "reachable": [
     "reporting.monthly_totals",
     "std.sql.select",

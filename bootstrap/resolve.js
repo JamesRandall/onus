@@ -13,22 +13,22 @@ import * as $parser from "./parser.js";
 const $ob1 = { kind: "overflow", text: "-1 within Int", at: "self/resolve.onus:142:20", def: "or_neg" };
 const $ob2 = { kind: "overflow", text: "-1 within Int", at: "self/resolve.onus:148:20", def: "find_or" };
 const $ob3 = { kind: "overflow", text: "List.len(xs: parts) - 1 within Int", at: "self/resolve.onus:153:33", def: "last_segment" };
-const $ob4 = { kind: "overflow", text: "-1 within Int", at: "self/resolve.onus:252:14", def: "add" };
-const $ob5 = { kind: "overflow", text: "n - 1 within Int", at: "self/resolve.onus:1100:53", def: "claim_exists" };
-const $ob6 = { kind: "overflow", text: "line + 1 within Int", at: "self/resolve.onus:1185:16", def: "where_line" };
-const $ob7 = { kind: "overflow", text: "i + 1 within Int", at: "self/resolve.onus:1187:11", def: "where_line" };
-const $ob8 = { kind: "overflow", text: "n - 1 within Int", at: "self/resolve.onus:1204:53", def: "claim_ref" };
-const $ob9 = { kind: "overflow", text: "-1 within Int", at: "self/resolve.onus:1205:20", def: "claim_ref" };
-const $ob10 = { kind: "overflow", text: "n - 1 within Int", at: "self/resolve.onus:1223:57", def: "claim_ref" };
-const $ob11 = { kind: "overflow", text: "n - 1 within Int", at: "self/resolve.onus:1267:65", def: "res_claim_pred" };
-const $ob12 = { kind: "overflow", text: "n - 1 within Int", at: "self/resolve.onus:1569:53", def: "type_name" };
-const $ob13 = { kind: "overflow", text: "n - 1 within Int", at: "self/resolve.onus:1591:55", def: "type_name" };
-const $ob14 = { kind: "overflow", text: "scope.frame + 1 within Int", at: "self/resolve.onus:2389:58", def: "res_expr" };
-const $ob15 = { kind: "overflow", text: "n - 1 within Int", at: "self/resolve.onus:2483:53", def: "ctor_name" };
-const $ob16 = { kind: "overflow", text: "n - 1 within Int", at: "self/resolve.onus:2538:55", def: "ctor_name" };
-const $ob17 = { kind: "overflow", text: "n - 1 within Int", at: "self/resolve.onus:2761:53", def: "ctor_owner" };
-const $ob18 = { kind: "overflow", text: "-1 within Int", at: "self/resolve.onus:2794:18", def: "companion" };
-const $ob19 = { kind: "overflow", text: "-1 within Int", at: "self/resolve.onus:2933:50", def: "resolve_module" };
+const $ob4 = { kind: "overflow", text: "-1 within Int", at: "self/resolve.onus:254:14", def: "add" };
+const $ob5 = { kind: "overflow", text: "n - 1 within Int", at: "self/resolve.onus:1121:53", def: "claim_exists" };
+const $ob6 = { kind: "overflow", text: "line + 1 within Int", at: "self/resolve.onus:1206:16", def: "where_line" };
+const $ob7 = { kind: "overflow", text: "i + 1 within Int", at: "self/resolve.onus:1208:11", def: "where_line" };
+const $ob8 = { kind: "overflow", text: "n - 1 within Int", at: "self/resolve.onus:1225:53", def: "claim_ref" };
+const $ob9 = { kind: "overflow", text: "-1 within Int", at: "self/resolve.onus:1226:20", def: "claim_ref" };
+const $ob10 = { kind: "overflow", text: "n - 1 within Int", at: "self/resolve.onus:1244:57", def: "claim_ref" };
+const $ob11 = { kind: "overflow", text: "n - 1 within Int", at: "self/resolve.onus:1288:65", def: "res_claim_pred" };
+const $ob12 = { kind: "overflow", text: "n - 1 within Int", at: "self/resolve.onus:1592:53", def: "type_name" };
+const $ob13 = { kind: "overflow", text: "n - 1 within Int", at: "self/resolve.onus:1614:55", def: "type_name" };
+const $ob14 = { kind: "overflow", text: "scope.frame + 1 within Int", at: "self/resolve.onus:2413:58", def: "res_expr" };
+const $ob15 = { kind: "overflow", text: "n - 1 within Int", at: "self/resolve.onus:2507:53", def: "ctor_name" };
+const $ob16 = { kind: "overflow", text: "n - 1 within Int", at: "self/resolve.onus:2562:55", def: "ctor_name" };
+const $ob17 = { kind: "overflow", text: "n - 1 within Int", at: "self/resolve.onus:2785:53", def: "ctor_owner" };
+const $ob18 = { kind: "overflow", text: "-1 within Int", at: "self/resolve.onus:2818:18", def: "companion" };
+const $ob19 = { kind: "overflow", text: "-1 within Int", at: "self/resolve.onus:2957:50", def: "resolve_module" };
 export const builtin_policy = "verified_assumptions_only";
 
 export function new_scope({ parent, frame }) {
@@ -404,9 +404,9 @@ export function iface_item_span({ member }) {
   }
 }
 
-export function add({ ctx, m, kind, node, name, key, is_pub, is_sealed, is_intrinsic, parent }) {
+export function add({ ctx, m, kind, node, name, key, is_pub, is_hardened, is_sealed, is_intrinsic, parent }) {
   const id = $context.def_count({ ctx: ctx });
-  const [, ctx$6] = $context.add_def({ ctx: ctx, d: { id: id, kind: kind, node: node, name: name.text, mod: m.id, file: m.file, key: key, span: name.span, is_pub: is_pub, is_sealed: is_sealed, is_intrinsic: is_intrinsic, parent: parent, frame: $rt.int.neg(1, $ob4), is_inout: false } });
+  const [, ctx$6] = $context.add_def({ ctx: ctx, d: { id: id, kind: kind, node: node, name: name.text, mod: m.id, file: m.file, key: key, span: name.span, is_pub: is_pub, is_hardened: is_hardened, is_sealed: is_sealed, is_intrinsic: is_intrinsic, parent: parent, frame: $rt.int.neg(1, $ob4), is_inout: false } });
   ctx = ctx$6;
   return [id, ctx];
 }
@@ -468,7 +468,7 @@ export function collect_fields({ ctx, m, owner, owner_name, fields, is_pub }) {
     }
     const [, seen$13] = $std_map.set({ d: seen, key: f.name.text, value: true });
     seen = seen$13;
-    const [$r42, ctx$14] = add({ ctx: ctx, m: m, kind: { tag: "Field" }, node: { tag: "FieldNode", decl: f }, name: f.name, key: $defs.node_key({ file: m.file, tag: $defs.tag_sig, span: f.span }), is_pub: is_pub, is_sealed: false, is_intrinsic: false, parent: { tag: "Some", value: owner } });
+    const [$r42, ctx$14] = add({ ctx: ctx, m: m, kind: { tag: "Field" }, node: { tag: "FieldNode", decl: f }, name: f.name, key: $defs.node_key({ file: m.file, tag: $defs.tag_sig, span: f.span }), is_pub: is_pub, is_hardened: false, is_sealed: false, is_intrinsic: false, parent: { tag: "Some", value: owner } });
     ctx = ctx$14;
     const fid = $r42;
   }
@@ -519,7 +519,7 @@ export function collect_item({ ctx, m, members, item }) {
   $m45$match: {
     if ($m45.tag === "FnItem") {
       const decl = $m45.decl;
-      const [$r49, ctx$17] = add({ ctx: ctx, m: m, kind: { tag: "Fn" }, node: { tag: "FnNode", decl: decl }, name: decl.name, key: $defs.node_key({ file: m.file, tag: $defs.tag_item, span: decl.span }), is_pub: decl.vis.is_pub, is_sealed: decl.vis.is_sealed, is_intrinsic: decl.is_intrinsic, parent: { tag: "None" } });
+      const [$r49, ctx$17] = add({ ctx: ctx, m: m, kind: { tag: "Fn" }, node: { tag: "FnNode", decl: decl }, name: decl.name, key: $defs.node_key({ file: m.file, tag: $defs.tag_item, span: decl.span }), is_pub: decl.vis.is_pub, is_hardened: decl.vis.is_hardened, is_sealed: decl.vis.is_sealed, is_intrinsic: decl.is_intrinsic, parent: { tag: "None" } });
       ctx = ctx$17;
       const id = $r49;
       const [, ctx$18] = declare({ ctx: ctx, table: members.values, id: id, what: "function" });
@@ -528,7 +528,7 @@ export function collect_item({ ctx, m, members, item }) {
     }
     if ($m45.tag === "ConstItem") {
       const decl = $m45.decl;
-      const [$r53, ctx$19] = add({ ctx: ctx, m: m, kind: { tag: "Const" }, node: { tag: "ConstNode", decl: decl }, name: decl.name, key: $defs.node_key({ file: m.file, tag: $defs.tag_item, span: decl.span }), is_pub: decl.vis.is_pub, is_sealed: false, is_intrinsic: false, parent: { tag: "None" } });
+      const [$r53, ctx$19] = add({ ctx: ctx, m: m, kind: { tag: "Const" }, node: { tag: "ConstNode", decl: decl }, name: decl.name, key: $defs.node_key({ file: m.file, tag: $defs.tag_item, span: decl.span }), is_pub: decl.vis.is_pub, is_hardened: decl.vis.is_hardened, is_sealed: false, is_intrinsic: false, parent: { tag: "None" } });
       ctx = ctx$19;
       const id = $r53;
       const [, ctx$20] = declare({ ctx: ctx, table: members.values, id: id, what: "constant" });
@@ -537,7 +537,7 @@ export function collect_item({ ctx, m, members, item }) {
     }
     if ($m45.tag === "TypeAliasItem") {
       const decl = $m45.decl;
-      const [$r57, ctx$21] = add({ ctx: ctx, m: m, kind: { tag: "Alias" }, node: { tag: "AliasNode", decl: decl }, name: decl.name, key: $defs.node_key({ file: m.file, tag: $defs.tag_item, span: decl.span }), is_pub: decl.vis.is_pub, is_sealed: decl.vis.is_sealed, is_intrinsic: false, parent: { tag: "None" } });
+      const [$r57, ctx$21] = add({ ctx: ctx, m: m, kind: { tag: "Alias" }, node: { tag: "AliasNode", decl: decl }, name: decl.name, key: $defs.node_key({ file: m.file, tag: $defs.tag_item, span: decl.span }), is_pub: decl.vis.is_pub, is_hardened: decl.vis.is_hardened, is_sealed: decl.vis.is_sealed, is_intrinsic: false, parent: { tag: "None" } });
       ctx = ctx$21;
       const id = $r57;
       const [, ctx$22] = declare_type({ ctx: ctx, table: members.types, id: id });
@@ -546,7 +546,7 @@ export function collect_item({ ctx, m, members, item }) {
     }
     if ($m45.tag === "IntrinsicTypeItem") {
       const decl = $m45.decl;
-      const [$r61, ctx$23] = add({ ctx: ctx, m: m, kind: { tag: "IntrinsicType" }, node: { tag: "IntrinsicTypeNode", decl: decl }, name: decl.name, key: $defs.node_key({ file: m.file, tag: $defs.tag_item, span: decl.span }), is_pub: decl.vis.is_pub, is_sealed: false, is_intrinsic: true, parent: { tag: "None" } });
+      const [$r61, ctx$23] = add({ ctx: ctx, m: m, kind: { tag: "IntrinsicType" }, node: { tag: "IntrinsicTypeNode", decl: decl }, name: decl.name, key: $defs.node_key({ file: m.file, tag: $defs.tag_item, span: decl.span }), is_pub: decl.vis.is_pub, is_hardened: decl.vis.is_hardened, is_sealed: false, is_intrinsic: true, parent: { tag: "None" } });
       ctx = ctx$23;
       const id = $r61;
       const [, ctx$24] = declare_type({ ctx: ctx, table: members.types, id: id });
@@ -555,7 +555,7 @@ export function collect_item({ ctx, m, members, item }) {
     }
     if ($m45.tag === "RecordItem") {
       const decl = $m45.decl;
-      const [$r65, ctx$25] = add({ ctx: ctx, m: m, kind: { tag: "Record" }, node: { tag: "RecordNode", decl: decl }, name: decl.name, key: $defs.node_key({ file: m.file, tag: $defs.tag_item, span: decl.span }), is_pub: decl.vis.is_pub, is_sealed: decl.vis.is_sealed, is_intrinsic: false, parent: { tag: "None" } });
+      const [$r65, ctx$25] = add({ ctx: ctx, m: m, kind: { tag: "Record" }, node: { tag: "RecordNode", decl: decl }, name: decl.name, key: $defs.node_key({ file: m.file, tag: $defs.tag_item, span: decl.span }), is_pub: decl.vis.is_pub, is_hardened: decl.vis.is_hardened, is_sealed: decl.vis.is_sealed, is_intrinsic: false, parent: { tag: "None" } });
       ctx = ctx$25;
       const id = $r65;
       const [, ctx$26] = declare_type({ ctx: ctx, table: members.types, id: id });
@@ -566,13 +566,13 @@ export function collect_item({ ctx, m, members, item }) {
     }
     if ($m45.tag === "UnionItem") {
       const decl = $m45.decl;
-      const [$r69, ctx$28] = add({ ctx: ctx, m: m, kind: { tag: "Union" }, node: { tag: "UnionNode", decl: decl }, name: decl.name, key: $defs.node_key({ file: m.file, tag: $defs.tag_item, span: decl.span }), is_pub: decl.vis.is_pub, is_sealed: decl.vis.is_sealed, is_intrinsic: false, parent: { tag: "None" } });
+      const [$r69, ctx$28] = add({ ctx: ctx, m: m, kind: { tag: "Union" }, node: { tag: "UnionNode", decl: decl }, name: decl.name, key: $defs.node_key({ file: m.file, tag: $defs.tag_item, span: decl.span }), is_pub: decl.vis.is_pub, is_hardened: decl.vis.is_hardened, is_sealed: decl.vis.is_sealed, is_intrinsic: false, parent: { tag: "None" } });
       ctx = ctx$28;
       const id = $r69;
       const [, ctx$29] = declare_type({ ctx: ctx, table: members.types, id: id });
       ctx = ctx$29;
       for (const v of decl.variants) {
-        const [$r73, ctx$30] = add({ ctx: ctx, m: m, kind: { tag: "Variant" }, node: { tag: "VariantNode", decl: v }, name: v.name, key: $defs.node_key({ file: m.file, tag: $defs.tag_sig, span: v.span }), is_pub: decl.vis.is_pub, is_sealed: decl.vis.is_sealed, is_intrinsic: false, parent: { tag: "Some", value: id } });
+        const [$r73, ctx$30] = add({ ctx: ctx, m: m, kind: { tag: "Variant" }, node: { tag: "VariantNode", decl: v }, name: v.name, key: $defs.node_key({ file: m.file, tag: $defs.tag_sig, span: v.span }), is_pub: decl.vis.is_pub, is_hardened: decl.vis.is_hardened, is_sealed: decl.vis.is_sealed, is_intrinsic: false, parent: { tag: "Some", value: id } });
         ctx = ctx$30;
         const vid = $r73;
         const [, ctx$31] = declare({ ctx: ctx, table: members.variants, id: vid, what: "variant" });
@@ -584,7 +584,7 @@ export function collect_item({ ctx, m, members, item }) {
     }
     if ($m45.tag === "InterfaceItem") {
       const decl = $m45.decl;
-      const [$r77, ctx$33] = add({ ctx: ctx, m: m, kind: { tag: "Interface" }, node: { tag: "InterfaceNode", decl: decl }, name: decl.name, key: $defs.node_key({ file: m.file, tag: $defs.tag_item, span: decl.span }), is_pub: decl.vis.is_pub, is_sealed: false, is_intrinsic: false, parent: { tag: "None" } });
+      const [$r77, ctx$33] = add({ ctx: ctx, m: m, kind: { tag: "Interface" }, node: { tag: "InterfaceNode", decl: decl }, name: decl.name, key: $defs.node_key({ file: m.file, tag: $defs.tag_item, span: decl.span }), is_pub: decl.vis.is_pub, is_hardened: decl.vis.is_hardened, is_sealed: false, is_intrinsic: false, parent: { tag: "None" } });
       ctx = ctx$33;
       const id = $r77;
       const [, ctx$34] = declare({ ctx: ctx, table: members.interfaces, id: id, what: "interface" });
@@ -602,7 +602,7 @@ export function collect_item({ ctx, m, members, item }) {
         if (member.tag === "IfaceFnItem") {
           kind = { tag: "IfaceFn" };
         }
-        const [$r82, ctx$37] = add({ ctx: ctx, m: m, kind: kind, node: iface_item_node({ member: member }), name: mname, key: $defs.node_key({ file: m.file, tag: $defs.tag_sig, span: iface_item_span({ member: member }) }), is_pub: decl.vis.is_pub, is_sealed: false, is_intrinsic: false, parent: { tag: "Some", value: id } });
+        const [$r82, ctx$37] = add({ ctx: ctx, m: m, kind: kind, node: iface_item_node({ member: member }), name: mname, key: $defs.node_key({ file: m.file, tag: $defs.tag_sig, span: iface_item_span({ member: member }) }), is_pub: decl.vis.is_pub, is_hardened: decl.vis.is_hardened, is_sealed: false, is_intrinsic: false, parent: { tag: "Some", value: id } });
         ctx = ctx$37;
         const mid = $r82;
       }
@@ -610,7 +610,7 @@ export function collect_item({ ctx, m, members, item }) {
     }
     if ($m45.tag === "ImplItem") {
       const decl = $m45.decl;
-      const [$r86, ctx$38] = add({ ctx: ctx, m: m, kind: { tag: "Impl" }, node: { tag: "ImplNode", decl: decl }, name: decl.iface, key: $defs.node_key({ file: m.file, tag: $defs.tag_item, span: decl.span }), is_pub: false, is_sealed: false, is_intrinsic: false, parent: { tag: "None" } });
+      const [$r86, ctx$38] = add({ ctx: ctx, m: m, kind: { tag: "Impl" }, node: { tag: "ImplNode", decl: decl }, name: decl.iface, key: $defs.node_key({ file: m.file, tag: $defs.tag_item, span: decl.span }), is_pub: false, is_hardened: false, is_sealed: false, is_intrinsic: false, parent: { tag: "None" } });
       ctx = ctx$38;
       const id = $r86;
       let seen = $std_map.dict({  });
@@ -621,7 +621,7 @@ export function collect_item({ ctx, m, members, item }) {
         }
         const [, seen$40] = $std_map.set({ d: seen, key: f.name.text, value: true });
         seen = seen$40;
-        const [$r91, ctx$41] = add({ ctx: ctx, m: m, kind: { tag: "Fn" }, node: { tag: "FnNode", decl: f }, name: f.name, key: $defs.node_key({ file: m.file, tag: $defs.tag_item, span: f.span }), is_pub: true, is_sealed: false, is_intrinsic: f.is_intrinsic, parent: { tag: "Some", value: id } });
+        const [$r91, ctx$41] = add({ ctx: ctx, m: m, kind: { tag: "Fn" }, node: { tag: "FnNode", decl: f }, name: f.name, key: $defs.node_key({ file: m.file, tag: $defs.tag_item, span: f.span }), is_pub: true, is_hardened: false, is_sealed: false, is_intrinsic: f.is_intrinsic, parent: { tag: "Some", value: id } });
         ctx = ctx$41;
         const fid = $r91;
       }
@@ -629,7 +629,7 @@ export function collect_item({ ctx, m, members, item }) {
     }
     if ($m45.tag === "ClaimItem") {
       const decl = $m45.decl;
-      const [$r95, ctx$42] = add({ ctx: ctx, m: m, kind: { tag: "Claim" }, node: { tag: "ClaimNode", decl: decl }, name: decl.name, key: $defs.node_key({ file: m.file, tag: $defs.tag_item, span: decl.span }), is_pub: decl.vis.is_pub, is_sealed: false, is_intrinsic: false, parent: { tag: "None" } });
+      const [$r95, ctx$42] = add({ ctx: ctx, m: m, kind: { tag: "Claim" }, node: { tag: "ClaimNode", decl: decl }, name: decl.name, key: $defs.node_key({ file: m.file, tag: $defs.tag_item, span: decl.span }), is_pub: decl.vis.is_pub, is_hardened: decl.vis.is_hardened, is_sealed: false, is_intrinsic: false, parent: { tag: "None" } });
       ctx = ctx$42;
       const id = $r95;
       const [, ctx$43] = declare({ ctx: ctx, table: members.claim_table, id: id, what: "claim" });
@@ -638,7 +638,7 @@ export function collect_item({ ctx, m, members, item }) {
     }
     if ($m45.tag === "CapabilityItem") {
       const decl = $m45.decl;
-      const [$r99, ctx$44] = add({ ctx: ctx, m: m, kind: { tag: "Capability" }, node: { tag: "CapabilityNode", decl: decl }, name: decl.name, key: $defs.node_key({ file: m.file, tag: $defs.tag_item, span: decl.span }), is_pub: decl.vis.is_pub, is_sealed: false, is_intrinsic: false, parent: { tag: "None" } });
+      const [$r99, ctx$44] = add({ ctx: ctx, m: m, kind: { tag: "Capability" }, node: { tag: "CapabilityNode", decl: decl }, name: decl.name, key: $defs.node_key({ file: m.file, tag: $defs.tag_item, span: decl.span }), is_pub: decl.vis.is_pub, is_hardened: decl.vis.is_hardened, is_sealed: false, is_intrinsic: false, parent: { tag: "None" } });
       ctx = ctx$44;
       const id = $r99;
       const [, ctx$45] = declare_type({ ctx: ctx, table: members.types, id: id });
@@ -649,7 +649,7 @@ export function collect_item({ ctx, m, members, item }) {
     }
     if ($m45.tag === "PathItem") {
       const decl = $m45.decl;
-      const [$r103, ctx$47] = add({ ctx: ctx, m: m, kind: { tag: "Path" }, node: { tag: "PathNode", decl: decl }, name: decl.name, key: $defs.node_key({ file: m.file, tag: $defs.tag_item, span: decl.span }), is_pub: false, is_sealed: false, is_intrinsic: false, parent: { tag: "None" } });
+      const [$r103, ctx$47] = add({ ctx: ctx, m: m, kind: { tag: "Path" }, node: { tag: "PathNode", decl: decl }, name: decl.name, key: $defs.node_key({ file: m.file, tag: $defs.tag_item, span: decl.span }), is_pub: false, is_hardened: false, is_sealed: false, is_intrinsic: false, parent: { tag: "None" } });
       ctx = ctx$47;
       const id = $r103;
       const [, ctx$48] = declare({ ctx: ctx, table: members.paths, id: id, what: "path" });
@@ -658,7 +658,7 @@ export function collect_item({ ctx, m, members, item }) {
     }
     if ($m45.tag === "PolicyItem") {
       const decl = $m45.decl;
-      const [$r107, ctx$49] = add({ ctx: ctx, m: m, kind: { tag: "Policy" }, node: { tag: "PolicyNode", decl: decl }, name: decl.name, key: $defs.node_key({ file: m.file, tag: $defs.tag_item, span: decl.span }), is_pub: false, is_sealed: false, is_intrinsic: false, parent: { tag: "None" } });
+      const [$r107, ctx$49] = add({ ctx: ctx, m: m, kind: { tag: "Policy" }, node: { tag: "PolicyNode", decl: decl }, name: decl.name, key: $defs.node_key({ file: m.file, tag: $defs.tag_item, span: decl.span }), is_pub: false, is_hardened: false, is_sealed: false, is_intrinsic: false, parent: { tag: "None" } });
       ctx = ctx$49;
       const id = $r107;
       const [, ctx$50] = declare({ ctx: ctx, table: members.policies, id: id, what: "policy" });
@@ -667,7 +667,7 @@ export function collect_item({ ctx, m, members, item }) {
     }
     if ($m45.tag === "ExampleItem") {
       const decl = $m45.decl;
-      const [$r111, ctx$51] = add({ ctx: ctx, m: m, kind: { tag: "Example" }, node: { tag: "ExampleNode", decl: decl }, name: decl.name, key: $defs.node_key({ file: m.file, tag: $defs.tag_item, span: decl.span }), is_pub: false, is_sealed: false, is_intrinsic: false, parent: { tag: "None" } });
+      const [$r111, ctx$51] = add({ ctx: ctx, m: m, kind: { tag: "Example" }, node: { tag: "ExampleNode", decl: decl }, name: decl.name, key: $defs.node_key({ file: m.file, tag: $defs.tag_item, span: decl.span }), is_pub: false, is_hardened: false, is_sealed: false, is_intrinsic: false, parent: { tag: "None" } });
       ctx = ctx$51;
       const id = $r111;
       const [, ctx$52] = declare({ ctx: ctx, table: members.tests, id: id, what: "example" });
@@ -676,7 +676,7 @@ export function collect_item({ ctx, m, members, item }) {
     }
     if ($m45.tag === "PropertyItem") {
       const decl = $m45.decl;
-      const [$r115, ctx$53] = add({ ctx: ctx, m: m, kind: { tag: "Property" }, node: { tag: "PropertyNode", decl: decl }, name: decl.name, key: $defs.node_key({ file: m.file, tag: $defs.tag_item, span: decl.span }), is_pub: false, is_sealed: false, is_intrinsic: false, parent: { tag: "None" } });
+      const [$r115, ctx$53] = add({ ctx: ctx, m: m, kind: { tag: "Property" }, node: { tag: "PropertyNode", decl: decl }, name: decl.name, key: $defs.node_key({ file: m.file, tag: $defs.tag_item, span: decl.span }), is_pub: false, is_hardened: false, is_sealed: false, is_intrinsic: false, parent: { tag: "None" } });
       ctx = ctx$53;
       const id = $r115;
       const [, ctx$54] = declare({ ctx: ctx, table: members.tests, id: id, what: "property" });
@@ -967,7 +967,7 @@ export function bind_value({ r, ctx, scope, kind, node, name, key, is_inout }) {
     $rt.unreachable();
   }
   const id = $context.def_count({ ctx: ctx });
-  const [, ctx$79] = $context.add_def({ ctx: ctx, d: { id: id, kind: kind, node: node, name: name.text, mod: r.m.id, file: r.m.file, key: key, span: name.span, is_pub: false, is_sealed: false, is_intrinsic: false, parent: { tag: "None" }, frame: scope.frame, is_inout: is_inout } });
+  const [, ctx$79] = $context.add_def({ ctx: ctx, d: { id: id, kind: kind, node: node, name: name.text, mod: r.m.id, file: r.m.file, key: key, span: name.span, is_pub: false, is_hardened: false, is_sealed: false, is_intrinsic: false, parent: { tag: "None" }, frame: scope.frame, is_inout: is_inout } });
   ctx = ctx$79;
   scope_set_value({ s: scope, name: name.text, id: id });
   return [id, ctx];
@@ -1265,7 +1265,7 @@ export function res_claim_pred({ r, ctx, p }) {
 
 export function bind_type_param({ r, ctx, scope, name, key, node, parent }) {
   const id = $context.def_count({ ctx: ctx });
-  const [, ctx$103] = $context.add_def({ ctx: ctx, d: { id: id, kind: { tag: "TypeParam" }, node: node, name: name.text, mod: r.m.id, file: r.m.file, key: key, span: name.span, is_pub: false, is_sealed: false, is_intrinsic: false, parent: parent, frame: scope.frame, is_inout: false } });
+  const [, ctx$103] = $context.add_def({ ctx: ctx, d: { id: id, kind: { tag: "TypeParam" }, node: node, name: name.text, mod: r.m.id, file: r.m.file, key: key, span: name.span, is_pub: false, is_hardened: false, is_sealed: false, is_intrinsic: false, parent: parent, frame: scope.frame, is_inout: false } });
   ctx = ctx$103;
   if ($std_map.contains({ d: scope.types, key: name.text })) {
     const [, ctx$104] = rep({ r: r, ctx: ctx, code: "E0107", at: name.span, detail: "type parameter `" + name.text + "` is declared twice" });
@@ -1342,7 +1342,7 @@ export function res_tparams({ r, ctx, ps, scope }) {
         const name = $m197.name;
         const span = $m197.span;
         const id = $context.def_count({ ctx: ctx });
-        const [, ctx$110] = $context.add_def({ ctx: ctx, d: { id: id, kind: { tag: "EffectParam" }, node: { tag: "TParamNode", decl: p }, name: name.text, mod: r.m.id, file: r.m.file, key: key({ r: r, tag: $defs.tag_sig, span: span }), span: name.span, is_pub: false, is_sealed: false, is_intrinsic: false, parent: { tag: "None" }, frame: scope.frame, is_inout: false } });
+        const [, ctx$110] = $context.add_def({ ctx: ctx, d: { id: id, kind: { tag: "EffectParam" }, node: { tag: "TParamNode", decl: p }, name: name.text, mod: r.m.id, file: r.m.file, key: key({ r: r, tag: $defs.tag_sig, span: span }), span: name.span, is_pub: false, is_hardened: false, is_sealed: false, is_intrinsic: false, parent: { tag: "None" }, frame: scope.frame, is_inout: false } });
         ctx = ctx$110;
         if ($std_map.contains({ d: scope.effects, key: name.text })) {
           const [, ctx$111] = rep({ r: r, ctx: ctx, code: "E0107", at: name.span, detail: "effect parameter `" + name.text + "` is declared twice" });
@@ -1986,7 +1986,7 @@ export function res_item({ r, ctx, item }) {
 
 export function res_verify_block({ r, ctx, v }) {
   const id = $context.def_count({ ctx: ctx });
-  const [, ctx$184] = $context.add_def({ ctx: ctx, d: { id: id, kind: { tag: "Verify" }, node: { tag: "VerifyNode", decl: v }, name: "verify", mod: r.m.id, file: r.m.file, key: key({ r: r, tag: $defs.tag_misc, span: v.span }), span: v.span, is_pub: false, is_sealed: false, is_intrinsic: false, parent: r.current_fn_def, frame: 0, is_inout: false } });
+  const [, ctx$184] = $context.add_def({ ctx: ctx, d: { id: id, kind: { tag: "Verify" }, node: { tag: "VerifyNode", decl: v }, name: "verify", mod: r.m.id, file: r.m.file, key: key({ r: r, tag: $defs.tag_misc, span: v.span }), span: v.span, is_pub: false, is_hardened: false, is_sealed: false, is_intrinsic: false, parent: r.current_fn_def, frame: 0, is_inout: false } });
   ctx = ctx$184;
   const scope = child_frame({ parent: r.module_scope, frame: 0 });
   const [, ctx$185] = res_params({ r: r, ctx: ctx, ps: v.params, scope: scope, bind: true });

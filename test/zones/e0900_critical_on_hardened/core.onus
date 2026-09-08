@@ -1,0 +1,9 @@
+module core
+import util
+
+pub fn step(x: Int) -> Int {
+  return util.inc(x: x)
+}
+
+path stepping
+  entry step

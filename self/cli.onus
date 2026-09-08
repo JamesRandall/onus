@@ -30,6 +30,7 @@ import mutate
 import defs
 import tables
 import assumptions
+import zones
 import config
 import jsemit
 
@@ -43,7 +44,7 @@ import jsemit
 -- item 187): 0 success, 1 diagnostics (or a breaking interface, or a native
 -- build that failed), 2 usage or I/O failure, and for `run` the program's own,
 -- since `run` hands the program the terminal through `io.exec`.
-pub const usage: Text = "usage:\n  onus check <file.onus>... [--json] [--root <dir>] [--stdlib <dir>] [--to <pass>] [--budget <ms>] [--ledger] [--no-cache]\n      report every diagnostic; exit 1 if any. Passes: parse, canonical, load, resolve, types, consteval, effects, contracts, claims, capabilities, verify, paths\n  onus fmt <file.onus>... [--stdout]\n      rewrite files in canonical form\n  onus build <entry.onus> [--out <dir>] [--emit js|ir] [--target js|native|wasm] [--root <dir>] [--stdlib <dir>] [--runtime <path>]\n      check, then emit JavaScript for every module into <dir> (default: <entry dir>/out); --target native compiles\n      an executable with clang into <dir>/native (§19); --emit ir prints the target-neutral form\n  onus run <entry.onus> [--out <dir>] [--target js|native|wasm] [-- args...]\n      build, then run the entry module's main\n  onus test <entry.onus> [--out <dir>] [--target js|native|all] [--root <dir>] [--stdlib <dir>]\n      build, then run the generated example, property and law tests (§20.6); --target all runs the examples on\n      both targets and reports any disagreement as E0801 (§19.5)\n  onus test <entry.onus> --mutate [--out <dir>] [--root <dir>] [--stdlib <dir>] [--budget <ms>]\n      weaken each contract in turn and report the weakenings no example, property or law detects (§20.4)\n  onus test <entry.onus> --assumptions [--env <test module>] [--out <dir>] [--root <dir>] [--stdlib <dir>]\n      run every verify block against capabilities from the environment module and record the results in .onus/ledger/ (§20.2–§20.3)\n  onus interface <file.onus> [--json] [--diff <old-interface.json>] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]\n      check, then print the entry module's interface: canonical source with bodies elided, or the §11.1 JSON;\n      with --diff, the changes since a previous interface document (§11.1, §15.1)\n  onus path <file.onus> [<name>] [--json] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]\n      check, then print the §9.1 report of the entry module's paths (or of the named one)\n  onus --version\n      print the compiler's version\n  onus review <entry.onus> [--out <dir>] [--against <interface.json>] [--root <dir>] [--stdlib <dir>] [--budget <ms>]\n      check, then write the review page and its bundle (§15) into <dir> (default: <entry dir>/review)\n  onus next <file.onus> --offset <n> [--json] [--root <dir>] [--stdlib <dir>]\n      the legal next tokens at the offset (in code points), the expected type there and the names in scope (§14)\n  onus loop run <task.json> [--root <dir>] [--model claude-code[:<model>]|anthropic[:<model>]|openrouter[:<model>]|scripted:<file.json>] [--budget <ms>] [--json] [--no-write]\n      run one task of the regeneration loop to its conclusion (docs/onus-loop-v0.md); exit 0 when a change is opened, 2 when blocked, 1 on error.\n      Keys are read from the environment, or from .env and .env.local in the project root and the current directory:\n      ANTHROPIC_API_KEY, OPENROUTER_API_KEY (and OPENROUTER_MODEL for the default model).\nThe standard library is --stdlib or ONUS_STDLIB, else the one the compiler carries; the runtime for build and run is --runtime or ONUS_RUNTIME, else the one the compiler carries, written beside the program.\n"
+pub const usage: Text = "usage:\n  onus check <file.onus>... [--json] [--root <dir>] [--stdlib <dir>] [--to <pass>] [--budget <ms>] [--ledger] [--no-cache]\n      report every diagnostic; exit 1 if any. Passes: parse, canonical, load, resolve, types, consteval, effects, contracts, claims, capabilities, verify, paths, zones\n  onus fmt <file.onus>... [--stdout]\n      rewrite files in canonical form\n  onus build <entry.onus> [--out <dir>] [--emit js|ir] [--target js|native|wasm] [--root <dir>] [--stdlib <dir>] [--runtime <path>]\n      check, then emit JavaScript for every module into <dir> (default: <entry dir>/out); --target native compiles\n      an executable with clang into <dir>/native (§19); --emit ir prints the target-neutral form\n  onus run <entry.onus> [--out <dir>] [--target js|native|wasm] [-- args...]\n      build, then run the entry module's main\n  onus test <entry.onus> [--out <dir>] [--target js|native|all] [--root <dir>] [--stdlib <dir>]\n      build, then run the generated example, property and law tests (§20.6); --target all runs the examples on\n      both targets and reports any disagreement as E0801 (§19.5)\n  onus test <entry.onus> --mutate [--out <dir>] [--root <dir>] [--stdlib <dir>] [--budget <ms>]\n      weaken each contract in turn and report the weakenings no example, property or law detects (§20.4)\n  onus test <entry.onus> --assumptions [--env <test module>] [--out <dir>] [--root <dir>] [--stdlib <dir>]\n      run every verify block against capabilities from the environment module and record the results in .onus/ledger/ (§20.2–§20.3)\n  onus interface <file.onus> [--json] [--diff <old-interface.json>] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]\n      check, then print the entry module's interface: canonical source with bodies elided, or the §11.1 JSON;\n      with --diff, the changes since a previous interface document (§11.1, §15.1)\n  onus path <file.onus> [<name>] [--json] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]\n      check, then print the §9.1 report of the entry module's paths (or of the named one)\n  onus zone show [--root <dir>]\n      print the manifest's zones and the promotion history (§21)\n  onus zone promote <module> <zone> [--root <dir>] [--stdlib <dir>] [--budget <ms>]\n      check the module at the zone's standard (its policy bundle, the static half of the audit; the\n      regeneration half is deferred) and, when it passes, write the signed manifest and the promotion record\n  onus zone demote <module> <zone> [--root <dir>]\n      always permitted and always recorded; dependents' guarantees become conditional (§21.3)\n  onus --version\n      print the compiler's version\n  onus review <entry.onus> [--out <dir>] [--against <interface.json>] [--root <dir>] [--stdlib <dir>] [--budget <ms>]\n      check, then write the review page and its bundle (§15) into <dir> (default: <entry dir>/review)\n  onus next <file.onus> --offset <n> [--json] [--root <dir>] [--stdlib <dir>]\n      the legal next tokens at the offset (in code points), the expected type there and the names in scope (§14)\n  onus loop run <task.json> [--root <dir>] [--model claude-code[:<model>]|anthropic[:<model>]|openrouter[:<model>]|scripted:<file.json>] [--budget <ms>] [--json] [--no-write]\n      run one task of the regeneration loop to its conclusion (docs/onus-loop-v0.md); exit 0 when a change is opened, 2 when blocked, 1 on error.\n      Keys are read from the environment, or from .env and .env.local in the project root and the current directory:\n      ANTHROPIC_API_KEY, OPENROUTER_API_KEY (and OPENROUTER_MODEL for the default model).\nThe standard library is --stdlib or ONUS_STDLIB, else the one the compiler carries; the runtime for build and run is --runtime or ONUS_RUNTIME, else the one the compiler carries, written beside the program.\n"
 
 pub const passes: List[Text] = [
   "parse",
@@ -57,7 +58,8 @@ pub const passes: List[Text] = [
   "claims",
   "capabilities",
   "verify",
-  "paths"
+  "paths",
+  "zones"
 ]
 
 record Args {
@@ -204,8 +206,10 @@ fn setup(
     assumptions: led.assumptions,
     coverage: led.coverage,
     mutations: led.mutations,
+    promotions: led.promotions,
     now_ms: io.time(clock: clock),
-    assumption_max_age_ms: cfg.max_assumption_age_days * 86400000
+    assumption_max_age_ms: cfg.max_assumption_age_days * 86400000,
+    project_root: Some(value: root)
   }
   return Setup {
     ctx: ctx,
@@ -338,7 +342,7 @@ fn check_command(
   if List.len(xs: args.files) == 0 {
     return usage_error(console: console)
   }
-  let to: Text = value_or(args: args, name: "to", fallback: "paths")
+  let to: Text = value_or(args: args, name: "to", fallback: "zones")
   if not is_pass(name: to) {
     io.eprint(
       console: console,
@@ -563,7 +567,7 @@ fn build_command(
   let bundled_runtime: Bool = rt.bundled
   check.run_passes(
     ctx: inout ctx,
-    to: 11,
+    to: 12,
     files: files,
     console: console,
     process: process,
@@ -731,7 +735,7 @@ fn test_command(
   let rt: RuntimeChoice = runtime_choice(args: args, env: env)
   check.run_passes(
     ctx: inout ctx,
-    to: 11,
+    to: check.pass_index(name: "paths"),
     files: files,
     console: console,
     process: process,
@@ -888,7 +892,7 @@ fn test_assumptions(
   let rt: RuntimeChoice = runtime_choice(args: args, env: env)
   check.run_passes(
     ctx: inout ctx,
-    to: 11,
+    to: check.pass_index(name: "paths"),
     files: files,
     console: console,
     process: process,
@@ -1013,7 +1017,7 @@ fn test_mutate(
   let rt: RuntimeChoice = runtime_choice(args: args, env: env)
   check.run_passes(
     ctx: inout ctx,
-    to: 11,
+    to: check.pass_index(name: "paths"),
     files: files,
     console: console,
     process: process,
@@ -1155,7 +1159,7 @@ fn interface_command(
   try read_entries(ctx: inout ctx, files: files, paths: [entry])
   check.run_passes(
     ctx: inout ctx,
-    to: 11,
+    to: 12,
     files: files,
     console: console,
     process: process,
@@ -1497,7 +1501,7 @@ fn review_command(
   try read_entries(ctx: inout ctx, files: files, paths: [entry])
   check.run_passes(
     ctx: inout ctx,
-    to: 11,
+    to: 12,
     files: files,
     console: console,
     process: process,
@@ -1557,7 +1561,7 @@ fn path_command(
   try read_entries(ctx: inout ctx, files: files, paths: [entry])
   check.run_passes(
     ctx: inout ctx,
-    to: 11,
+    to: 12,
     files: files,
     console: console,
     process: process,
@@ -1727,6 +1731,22 @@ pub fn main(
         )
       )
     }
+    if value == "zone" {
+      return Ok(
+        value: exit_status_of(
+          console: console,
+          r: zone_command(
+            args: a,
+            files: files,
+            console: console,
+            process: process,
+            env: env,
+            clock: clock,
+            net: net
+          )
+        )
+      )
+    }
     if value == "review" {
       return Ok(
         value: exit_status_of(
@@ -1744,4 +1764,353 @@ pub fn main(
     }
     return Ok(value: exit_status(console: console, r: usage_error(console: console)))
   }
+}
+
+-- `onus zone show | promote <module> <zone> | demote <module> <zone>` (spec
+-- §21.3; docs/CHANGES.md item 203). The root is `--root` or the working
+-- directory; a module's source is `<root>/<module with dots as slashes>.onus`.
+-- `promote` runs the pipeline over that source with the module at the target
+-- zone in a candidate manifest, refuses on any diagnostic, and otherwise
+-- writes the signed manifest and a promotion record; with `--model <spec>`
+-- the audit's regeneration half runs first (loop spec §8): a `regenerate`
+-- task over the module, whose findings, or a blocked or failed run, refuse
+-- the promotion; without it the record says the regeneration was skipped.
+-- `demote` writes and records without checking. Exit 0 when done, 1 when
+-- refused, 2 for a usage error.
+fn zone_command(
+  args: Args,
+  files: io.Files,
+  console: io.Console,
+  process: io.Process,
+  env: io.Env,
+  clock: io.Clock,
+  net: io.Net
+) -> Result[Int, io.Error] may io.file, io.env, io.clock, io.net, nondet, alloc, mutate {
+  if List.len(xs: args.files) == 0 {
+    return Err(error: usage_failure(console: console))
+  }
+  let sub: Text = List.get(xs: args.files, i: 0)
+  var root: Text = "."
+  match value(args: args, name: "root") with
+  | Some(value) -> root = value
+  | None -> skip()
+  var manifest: zones.Manifest = zones.empty_manifest()
+  match zones.read_manifest(files: files, root: Some(value: root)) with
+  | Err(error) -> {
+    io.eprint(console: console, text: "onus zone: onus.toml: " ++ error ++ "\n")
+    return Ok(value: 1)
+  }
+  | Ok(value) -> manifest = manifest_or_empty(o: value)
+  let led: ledger.Ledger = ledger.read_ledger(files: files, dir: root ++ "/.onus/ledger")
+  if sub == "show" {
+    io.print(console: console, text: zones.canonical_text(m: manifest))
+    for r: tables.PromotionRecord in led.promotions {
+      io.print(
+        console: console,
+        text: r.kind ++ " " ++ r.module ++ ": " ++ r.from ++ " -> " ++ r.to ++ " at " ++ r.at ++ " (" ++ r.audit ++ ")\n"
+      )
+    }
+    return Ok(value: 0)
+  }
+  if (sub != "promote" and sub != "demote") or List.len(xs: args.files) < 3 {
+    return Err(error: usage_failure(console: console))
+  }
+  let module: Text = List.get(xs: args.files, i: 1)
+  let zone: Text = List.get(xs: args.files, i: 2)
+  if not zones.is_zone(t: zone) {
+    io.eprint(
+      console: console,
+      text: "onus zone: `" ++ zone ++ "` is not a zone (draft, hardened or critical)\n"
+    )
+    return Err(error: Other(detail: "usage"))
+  }
+  let from: Text = zones.zone_of(m: manifest, name: module)
+  let candidate: zones.Manifest = zones.set_zone(m: manifest, module: module, zone: zone)
+  let at: Text = assumptions.iso_of_millis(ms: io.time(clock: clock))
+  var audit: Text = "demotion; not audited"
+  if sub == "promote" {
+    let source: Text = root ++ "/" ++ Text.replace(t: module, from: ".", to: "/") ++ ".onus"
+    let candidate_dir: Text = root ++ "/.onus/zone-candidate"
+    try io.mkdir(files: files, path: candidate_dir)
+    try zones.write_manifest(files: files, root: candidate_dir, m: candidate)
+    var stdlib: Option[Text] = value(args: args, name: "stdlib")
+    if stdlib is None {
+      stdlib = io.get_env(env: env, name: "ONUS_STDLIB")
+    }
+    var budget: Int where it >= 0 = 500
+    match value(args: args, name: "budget") with
+    | Some(value) -> budget = parse_budget(t: value)
+    | None -> skip()
+    var ctx: context.Context = context.new_context(root: Some(value: root), stdlib: stdlib)
+    let cfg: config.Config = config.read_config(files: files, root: root)
+    ctx = { ctx with
+      assumptions: led.assumptions,
+      coverage: led.coverage,
+      mutations: led.mutations,
+      promotions: led.promotions,
+      now_ms: io.time(clock: clock),
+      assumption_max_age_ms: cfg.max_assumption_age_days * 86400000,
+      project_root: Some(value: candidate_dir)
+    }
+    if io.read(files: files, path: source) is Err {
+      io.eprint(
+        console: console,
+        text: "onus zone: no source for `" ++ module ++ "` at " ++ source ++ "\n"
+      )
+      return Ok(value: 1)
+    }
+    -- The whole project is the unit of the check: the paths that cover the module's functions are
+    -- declared wherever the project declares them, so every source under the root is an entry.
+    for path: Text in project_sources(files: files, dir: root, depth: 6) {
+      match io.read(files: files, path: path) with
+      | Ok(value) -> {
+        if loader.add_file(ctx: inout ctx, path: path, text: value) is None {
+          return Err(error: Other(detail: path ++ " is too long"))
+        }
+      }
+      | Err(_) -> skip()
+    }
+    check.run_passes(
+      ctx: inout ctx,
+      to: check.pass_index(name: "zones"),
+      files: files,
+      console: console,
+      process: process,
+      vopts: verifier.Options {
+        z3_path: None,
+        budget_ms: budget,
+        cache_dir: Some(value: root ++ "/.onus/cache"),
+        dump_dir: None
+      }
+    )
+    let tab: Dict[Int, loc.LineTable] = loc.line_tables(ctx: ctx)
+    if List.built(b: ctx.diagnostics) > 0 {
+      emit_diagnostics(ctx: ctx, console: console, tab: tab, as_json: false)
+      io.print(
+        console: console,
+        text: "promotion refused: `" ++ module ++ "` does not meet `" ++ zone ++ "` (§21.2)\n"
+      )
+      return Ok(value: 1)
+    }
+    -- The audit's findings are recorded, never a gate (§21.3 as changed by item 204): what
+    -- promotion rests on is the policy bundle the pass just checked.
+    audit = "policies passed; " ++ mutation_summary(
+      module: module,
+      records: led.mutations
+    ) ++ "; regeneration skipped"
+    match value(args: args, name: "model") with
+    | None -> skip()
+    | Some(value) -> {
+      let regenerated: Text = try audited_regeneration(
+        spec: value,
+        module: module,
+        root: root,
+        stdlib: stdlib,
+        budget: budget,
+        args: args,
+        files: files,
+        console: console,
+        process: process,
+        env: env,
+        clock: clock,
+        net: net
+      )
+      audit = "policies passed; " ++ mutation_summary(
+        module: module,
+        records: led.mutations
+      ) ++ "; " ++ regenerated
+    }
+  }
+  try zones.write_manifest(files: files, root: root, m: candidate)
+  var kind: Text = "promotion"
+  if sub == "demote" {
+    kind = "demotion"
+  }
+  let record: tables.PromotionRecord = tables.PromotionRecord {
+    module: module,
+    from: from,
+    to: zone,
+    at: at,
+    kind: kind,
+    audit: audit
+  }
+  try ledger.write_promotions(
+    files: files,
+    dir: root ++ "/.onus/ledger",
+    records: led.promotions ++ [record]
+  )
+  io.print(
+    console: console,
+    text: kind ++ ": `" ++ module ++ "` " ++ from ++ " -> " ++ zone ++ " (" ++ audit ++ ")\n"
+  )
+  return Ok(value: 0)
+}
+
+fn manifest_or_empty(o: Option[zones.Manifest]) -> zones.Manifest may alloc {
+  match o with
+  | Some(value) -> return value
+  | None -> return zones.empty_manifest()
+}
+
+-- Every `.onus` file under `dir`, `depth` levels down, sorted per directory; dot-directories and
+-- generated ones (`out`, `review`, `node_modules`) are not the project's.
+fn project_sources(
+  files: io.Files,
+  dir: Text,
+  depth: Int where it >= 0
+) -> List[Text] may io.file, alloc, mutate
+  decreases depth
+{
+  var out: Builder[Text] = List.builder()
+  match io.list_dir(files: files, path: dir) with
+  | Err(_) -> skip()
+  | Ok(value) -> {
+    for name: Text in value {
+      if Text.ends_with(t: name, suffix: ".onus") and not Text.starts_with(t: name, prefix: ".") {
+        List.push(b: inout out, x: dir ++ "/" ++ name)
+      }
+    }
+    if depth > 0 {
+      for name: Text in value {
+        if not Text.starts_with(t: name, prefix: ".") and not Text.contains(
+          t: name,
+          needle: "."
+        ) and name != "out" and name != "review" and name != "node_modules" and name != "out-mutate" {
+          for p: Text in project_sources(files: files, dir: dir ++ "/" ++ name, depth: depth - 1) {
+            List.push(b: inout out, x: p)
+          }
+        }
+      }
+    }
+  }
+  return List.finish(b: out)
+}
+
+-- The regeneration half of the promotion audit (spec §21.3; loop spec §8):
+-- a `regenerate` task over `module` with the given model, its change
+-- written under `.onus/changes/promote_<module>/`. The result is the text
+-- the promotion record carries: passed with its iteration count, its
+-- findings, or why the run did not conclude; the findings are printed too.
+fn audited_regeneration(
+  spec: Text,
+  module: Text,
+  root: Text,
+  stdlib: Option[Text],
+  budget: Int where it >= 0,
+  args: Args,
+  files: io.Files,
+  console: io.Console,
+  process: io.Process,
+  env: io.Env,
+  clock: io.Clock,
+  net: io.Net
+) -> Result[Text, io.Error] may io.file, io.env, io.clock, io.net, nondet, alloc, mutate {
+  var model: regen.Model = regen.Scripted(answers: [])
+  match regen.model_from_spec(spec: spec, env: env, files: files, env_dirs: [root, "."]) with
+  | Err(error) -> return Ok(value: "regeneration did not run: " ++ error)
+  | Ok(value) -> model = value
+  let task_json: json.Json = json.JObject(
+    fields: [
+      json.field(
+        key: "id",
+        value: json.text(t: "promote_" ++ Text.replace(t: module, from: ".", to: "_"))
+      ),
+      json.field(key: "kind", value: json.text(t: "regenerate")),
+      json.field(key: "scope", value: json.texts(ts: [module]))
+    ]
+  )
+  var task: regen.Task = regen.Task {
+    id: "",
+    kind: "regenerate",
+    scope: [],
+    target: None,
+    counterexample: None,
+    budget: regen.Budget { iterations: 0, tokens: 0, wall_ms: 0 },
+    context_policy: "",
+    origin: None,
+    description: None,
+    helpers: false,
+    alternate_model: None
+  }
+  match regen.parse_task(j: task_json) with
+  | Err(error) -> return Ok(value: "regeneration did not run: " ++ error)
+  | Ok(value) -> task = value
+  let rt: RuntimeChoice = runtime_choice(args: args, env: env)
+  let outcome: regen.Outcome = try regen.run_task(
+    task: task,
+    files: files,
+    console: console,
+    process: process,
+    net: net,
+    clock: clock,
+    opts: regen.Options {
+      root: root,
+      model: model,
+      tools: regen.Tools {
+        stdlib: stdlib,
+        runtime: rt.runtime,
+        bundled: rt.bundled,
+        budget_ms: budget
+      },
+      write: true
+    }
+  )
+  if outcome.status == "error" {
+    return Ok(value: "regeneration did not run: " ++ value_or_text(o: outcome.error, dflt: "error"))
+  }
+  match outcome.change with
+  | None -> return Ok(value: "regeneration " ++ outcome.status)
+  | Some(value) -> return Ok(
+    value: audit_of_change(console: console, change: value, status: outcome.status)
+  )
+}
+
+-- The audit text of a concluded regeneration: passed with its iteration count, or its findings, printed.
+fn audit_of_change(
+  console: io.Console,
+  change: json.Json,
+  status: Text
+) -> Text may io.file, alloc, mutate {
+  let findings: List[json.Json] = json.list_at(j: change, key: "audit")
+  let iterations: Int = json.int_at(j: json.at(j: change, key: "metrics"), key: "iterations")
+  if status != "change" {
+    var why: Text = "regeneration " ++ status
+    if json.has(j: change, key: "cause") {
+      why = why ++ " (" ++ json.str_at(j: change, key: "cause") ++ ")"
+    }
+    return why ++ " after " ++ Int.to_text(x: iterations) ++ " iteration(s)"
+  }
+  if List.len(xs: findings) == 0 {
+    return "regeneration passed in " ++ Int.to_text(x: iterations) ++ " iteration(s)"
+  }
+  for f: json.Json in findings {
+    io.print(
+      console: console,
+      text: "finding " ++ json.str_at(j: f, key: "finding") ++ ": " ++ json.str_at(
+        j: f,
+        key: "detail"
+      ) ++ "\n"
+    )
+  }
+  return "regeneration: " ++ Int.to_text(
+    x: List.len(xs: findings)
+  ) ++ " finding(s) in " ++ Int.to_text(x: iterations) ++ " iteration(s)"
+}
+
+-- The module's contract mutations from the ledger (§20.4): detected and surviving counts.
+fn mutation_summary(module: Text, records: List[tables.MutationRecord]) -> Text may alloc {
+  var detected: Int = 0
+  var surviving: Int = 0
+  for r: tables.MutationRecord in records {
+    if Text.starts_with(t: r.def, prefix: module ++ ".") {
+      if r.detected {
+        detected = detected + 1
+      } else {
+        surviving = surviving + 1
+      }
+    }
+  }
+  return "mutations: " ++ Int.to_text(x: detected) ++ " detected, " ++ Int.to_text(
+    x: surviving
+  ) ++ " surviving"
 }

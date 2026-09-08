@@ -229,6 +229,7 @@ fn add(
   name: ast.Ident,
   key: Int,
   is_pub: Bool,
+  is_hardened: Bool,
   is_sealed: Bool,
   is_intrinsic: Bool,
   parent: Option[Int]
@@ -246,6 +247,7 @@ fn add(
       key: key,
       span: name.span,
       is_pub: is_pub,
+      is_hardened: is_hardened,
       is_sealed: is_sealed,
       is_intrinsic: is_intrinsic,
       parent: parent,
@@ -359,6 +361,7 @@ fn collect_fields(
       name: f.name,
       key: defs.node_key(file: m.file, tag: defs.tag_sig, span: f.span),
       is_pub: is_pub,
+      is_hardened: false,
       is_sealed: false,
       is_intrinsic: false,
       parent: Some(value: owner)
@@ -421,6 +424,7 @@ fn collect_item(
       name: decl.name,
       key: defs.node_key(file: m.file, tag: defs.tag_item, span: decl.span),
       is_pub: decl.vis.is_pub,
+      is_hardened: decl.vis.is_hardened,
       is_sealed: decl.vis.is_sealed,
       is_intrinsic: decl.is_intrinsic,
       parent: None
@@ -436,6 +440,7 @@ fn collect_item(
       name: decl.name,
       key: defs.node_key(file: m.file, tag: defs.tag_item, span: decl.span),
       is_pub: decl.vis.is_pub,
+      is_hardened: decl.vis.is_hardened,
       is_sealed: false,
       is_intrinsic: false,
       parent: None
@@ -451,6 +456,7 @@ fn collect_item(
       name: decl.name,
       key: defs.node_key(file: m.file, tag: defs.tag_item, span: decl.span),
       is_pub: decl.vis.is_pub,
+      is_hardened: decl.vis.is_hardened,
       is_sealed: decl.vis.is_sealed,
       is_intrinsic: false,
       parent: None
@@ -466,6 +472,7 @@ fn collect_item(
       name: decl.name,
       key: defs.node_key(file: m.file, tag: defs.tag_item, span: decl.span),
       is_pub: decl.vis.is_pub,
+      is_hardened: decl.vis.is_hardened,
       is_sealed: false,
       is_intrinsic: true,
       parent: None
@@ -481,6 +488,7 @@ fn collect_item(
       name: decl.name,
       key: defs.node_key(file: m.file, tag: defs.tag_item, span: decl.span),
       is_pub: decl.vis.is_pub,
+      is_hardened: decl.vis.is_hardened,
       is_sealed: decl.vis.is_sealed,
       is_intrinsic: false,
       parent: None
@@ -504,6 +512,7 @@ fn collect_item(
       name: decl.name,
       key: defs.node_key(file: m.file, tag: defs.tag_item, span: decl.span),
       is_pub: decl.vis.is_pub,
+      is_hardened: decl.vis.is_hardened,
       is_sealed: decl.vis.is_sealed,
       is_intrinsic: false,
       parent: None
@@ -518,6 +527,7 @@ fn collect_item(
         name: v.name,
         key: defs.node_key(file: m.file, tag: defs.tag_sig, span: v.span),
         is_pub: decl.vis.is_pub,
+        is_hardened: decl.vis.is_hardened,
         is_sealed: decl.vis.is_sealed,
         is_intrinsic: false,
         parent: Some(value: id)
@@ -542,6 +552,7 @@ fn collect_item(
       name: decl.name,
       key: defs.node_key(file: m.file, tag: defs.tag_item, span: decl.span),
       is_pub: decl.vis.is_pub,
+      is_hardened: decl.vis.is_hardened,
       is_sealed: false,
       is_intrinsic: false,
       parent: None
@@ -575,6 +586,7 @@ fn collect_item(
         name: mname,
         key: defs.node_key(file: m.file, tag: defs.tag_sig, span: iface_item_span(member: member)),
         is_pub: decl.vis.is_pub,
+        is_hardened: decl.vis.is_hardened,
         is_sealed: false,
         is_intrinsic: false,
         parent: Some(value: id)
@@ -590,6 +602,7 @@ fn collect_item(
       name: decl.iface,
       key: defs.node_key(file: m.file, tag: defs.tag_item, span: decl.span),
       is_pub: false,
+      is_hardened: false,
       is_sealed: false,
       is_intrinsic: false,
       parent: None
@@ -617,6 +630,7 @@ fn collect_item(
         name: f.name,
         key: defs.node_key(file: m.file, tag: defs.tag_item, span: f.span),
         is_pub: true,
+        is_hardened: false,
         is_sealed: false,
         is_intrinsic: f.is_intrinsic,
         parent: Some(value: id)
@@ -632,6 +646,7 @@ fn collect_item(
       name: decl.name,
       key: defs.node_key(file: m.file, tag: defs.tag_item, span: decl.span),
       is_pub: decl.vis.is_pub,
+      is_hardened: decl.vis.is_hardened,
       is_sealed: false,
       is_intrinsic: false,
       parent: None
@@ -647,6 +662,7 @@ fn collect_item(
       name: decl.name,
       key: defs.node_key(file: m.file, tag: defs.tag_item, span: decl.span),
       is_pub: decl.vis.is_pub,
+      is_hardened: decl.vis.is_hardened,
       is_sealed: false,
       is_intrinsic: false,
       parent: None
@@ -663,6 +679,7 @@ fn collect_item(
       name: decl.name,
       key: defs.node_key(file: m.file, tag: defs.tag_item, span: decl.span),
       is_pub: false,
+      is_hardened: false,
       is_sealed: false,
       is_intrinsic: false,
       parent: None
@@ -678,6 +695,7 @@ fn collect_item(
       name: decl.name,
       key: defs.node_key(file: m.file, tag: defs.tag_item, span: decl.span),
       is_pub: false,
+      is_hardened: false,
       is_sealed: false,
       is_intrinsic: false,
       parent: None
@@ -693,6 +711,7 @@ fn collect_item(
       name: decl.name,
       key: defs.node_key(file: m.file, tag: defs.tag_item, span: decl.span),
       is_pub: false,
+      is_hardened: false,
       is_sealed: false,
       is_intrinsic: false,
       parent: None
@@ -708,6 +727,7 @@ fn collect_item(
       name: decl.name,
       key: defs.node_key(file: m.file, tag: defs.tag_item, span: decl.span),
       is_pub: false,
+      is_hardened: false,
       is_sealed: false,
       is_intrinsic: false,
       parent: None
@@ -1026,6 +1046,7 @@ fn bind_value(
       key: key,
       span: name.span,
       is_pub: false,
+      is_hardened: false,
       is_sealed: false,
       is_intrinsic: false,
       parent: None,
@@ -1333,6 +1354,7 @@ fn bind_type_param(
       key: key,
       span: name.span,
       is_pub: false,
+      is_hardened: false,
       is_sealed: false,
       is_intrinsic: false,
       parent: parent,
@@ -1434,6 +1456,7 @@ fn res_tparams(
           key: key(r: r, tag: defs.tag_sig, span: span),
           span: name.span,
           is_pub: false,
+          is_hardened: false,
           is_sealed: false,
           is_intrinsic: false,
           parent: None,
@@ -1965,6 +1988,7 @@ fn res_verify_block(
       key: key(r: r, tag: defs.tag_misc, span: v.span),
       span: v.span,
       is_pub: false,
+      is_hardened: false,
       is_sealed: false,
       is_intrinsic: false,
       parent: r.current_fn_def,

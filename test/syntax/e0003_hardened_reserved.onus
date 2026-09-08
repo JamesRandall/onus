@@ -1,0 +1,7 @@
+module hardened_reserved
+
+-- `hardened` is a reserved word (spec §2.3, §21): it cannot name a binding.
+pub fn f() -> Int {
+  let hardened: Int = 1
+  return hardened
+}

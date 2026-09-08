@@ -99,7 +99,9 @@ fn digits(src: List[Int], s: ast.Span) -> Text may alloc {
 }
 
 fn vis(v: ast.Visibility) -> Text may alloc {
-  return "vis(" ++ bool_text(b: v.is_pub) ++ "," ++ bool_text(b: v.is_sealed) ++ ")"
+  return "vis(" ++ bool_text(b: v.is_pub) ++ "," ++ bool_text(b: v.is_hardened) ++ "," ++ bool_text(
+    b: v.is_sealed
+  ) ++ ")"
 }
 
 pub fn dump_module(m: ast.Module, src: List[Int]) -> Text may alloc, mutate

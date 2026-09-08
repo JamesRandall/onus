@@ -792,7 +792,7 @@ fn recover_to_item(p: inout Parser) -> Unit may mutate, alloc
 
 fn starts_item(kind: tokens.Kind) -> Bool {
   match kind with
-  | tokens.Keyword(word) -> return word == "pub" or word == "sealed" or word == "fn" or word == "const" or word == "type" or word == "record" or word == "union" or word == "interface" or word == "impl" or word == "claim" or word == "capability" or word == "path" or word == "policy" or word == "example" or word == "property"
+  | tokens.Keyword(word) -> return word == "pub" or word == "hardened" or word == "sealed" or word == "fn" or word == "const" or word == "type" or word == "record" or word == "union" or word == "interface" or word == "impl" or word == "claim" or word == "capability" or word == "path" or word == "policy" or word == "example" or word == "property"
   | _ -> return false
 }
 
@@ -981,8 +981,9 @@ fn visibility(p: inout Parser) -> ast.Visibility may mutate, alloc
   ensures p.toks == old(p).toks and p.pos >= old(p).pos
 {
   let is_pub: Bool = accept_word(p: inout p, want: "pub")
+  let is_hardened: Bool = accept_word(p: inout p, want: "hardened")
   let is_sealed: Bool = accept_word(p: inout p, want: "sealed")
-  return ast.Visibility { is_pub: is_pub, is_sealed: is_sealed }
+  return ast.Visibility { is_pub: is_pub, is_hardened: is_hardened, is_sealed: is_sealed }
 }
 
 fn parse_item(p: inout Parser) -> Result[ast.Item, Fail] may mutate, alloc
@@ -993,6 +994,7 @@ fn parse_item(p: inout Parser) -> Result[ast.Item, Fail] may mutate, alloc
     p: inout p,
     kinds: [
       "pub",
+      "hardened",
       "sealed",
       "fn",
       "const",

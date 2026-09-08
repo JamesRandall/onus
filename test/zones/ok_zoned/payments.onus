@@ -1,0 +1,12 @@
+module payments
+
+-- A draft module whose boundary is hardened (spec §21.1).
+pub hardened fn charge(pence: Int where it >= 0) -> Int
+  ensures result == pence
+{
+  return pence
+}
+
+pub fn refund(pence: Int) -> Int {
+  return pence
+}

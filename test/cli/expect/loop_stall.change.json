@@ -16,7 +16,7 @@
       "tokens":0,
       "wall_ms": 900000
     },
-    "context_policy": "module",
+    "context_policy": "scope",
     "origin": null,
     "description": null,
     "escalation": {
@@ -81,33 +81,19 @@
       "ms":0,
       "classification": "stall",
       "escalation": "full diagnostic history"
-    },
-    {
-      "iteration": 4,
-      "model": "scripted",
-      "prompt_hash":"<hash>",
-      "diagnostics_before": 1,
-      "diagnostics_after": 1,
-      "codes_after": [
-        "E0702"
-      ],
-      "failing_tests": [],
-      "mechanical_repairs": 0,
-      "tokens":0,
-      "ms":0,
-      "classification": "stall",
-      "escalation": "context policy scope"
     }
   ],
   "metrics": {
-    "iterations": 4,
+    "iterations": 3,
     "mechanical_repairs": 0,
-    "escalation_steps": 3,
+    "escalation_steps": 2,
     "proposals": 0,
     "tokens":0
   },
   "proposals": [],
   "audit": [],
+  "zone": "draft",
+  "loop_authored": [],
   "last_diagnostics": [
     {
       "code": "E0702",

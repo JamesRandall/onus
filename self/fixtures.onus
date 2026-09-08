@@ -507,13 +507,13 @@ fn diagnostics_dir(
   process: io.Process,
   opts: Options,
   dir: Text,
-  m: json.Json
+  m: json.Json,
+  seen: inout Dict[Text, Bool]
 ) -> Result[Tally, io.Error] may io.file, nondet, alloc, mutate {
   let to: Int = check.pass_index(name: json_text_or(j: json.at(j: m, key: "to"), dflt: "paths"))
   let root: Option[Text] = root_of(dir: dir, m: m)
   let ledger: Bool = json.bool_at(j: m, key: "ledger")
   let expect_none: Bool = json.bool_at(j: m, key: "expect_none")
-  var seen: Dict[Text, Bool] = Map.dict()
   var tally: Tally = nothing()
   for path: Text in sources_of(files: files, dir: dir, m: m) {
     let name: Text = base_name(path: path)
@@ -586,39 +586,7 @@ fn diagnostics_dir(
       )
     }
   }
-  -- Coverage: every code under the prefixes, less the exceptions, was produced.
-  let prefixes: List[Text] = json.texts_at(j: m, key: "covers")
-  if List.len(xs: prefixes) > 0 {
-    let except: List[Text] = json.texts_at(j: m, key: "except")
-    var missing: Builder[Text] = List.builder()
-    for code: Text in codes.all_codes() {
-      if covered_by(code: code, prefixes: prefixes) and not List.contains(
-        xs: except,
-        x: code
-      ) and not Map.contains(d: seen, key: code) {
-        List.push(b: inout missing, x: code)
-      }
-    }
-    let missing_list: List[Text] = List.finish(b: missing)
-    if List.len(xs: missing_list) > 0 {
-      tally = add(
-        a: tally,
-        b: fail_line(
-          console: console,
-          what: dir,
-          why: "codes without a fixture: " ++ Text.join(parts: missing_list, sep: " ")
-        )
-      )
-    } else {
-      tally = add(
-        a: tally,
-        b: ok_line(
-          console: console,
-          what: dir ++ " covers " ++ Text.join(parts: prefixes, sep: " ")
-        )
-      )
-    }
-  }
+  tally = add(a: tally, b: coverage_of(console: console, what: dir, m: m, seen: seen))
   return Ok(value: tally)
 }
 
@@ -786,7 +754,7 @@ fn lowered_dir(
       opts: opts,
       path: path,
       root: Some(value: dir_of(path: path)),
-      to: check.pass_index(name: "paths"),
+      to: check.pass_index(name: "zones"),
       budget_ms: 2000
     )
     if List.len(xs: c.diagnostics) > 0 {
@@ -893,7 +861,7 @@ fn examples_of(
     opts: opts,
     path: path,
     root: Some(value: dir_of(path: path)),
-    to: check.pass_index(name: "paths"),
+    to: check.pass_index(name: "zones"),
     budget_ms: 2000
   )
   if List.len(xs: c.diagnostics) > 0 {
@@ -2157,7 +2125,7 @@ fn program_case(
     opts: opts,
     path: path,
     root: Some(value: dir_of(path: path)),
-    to: check.pass_index(name: "paths"),
+    to: check.pass_index(name: "zones"),
     budget_ms: 2000
   )
   if List.len(xs: c.diagnostics) > 0 {
@@ -2353,7 +2321,7 @@ fn probe_ok(
     opts: opts,
     path: path,
     root: Some(value: dir_of(path: path)),
-    to: check.pass_index(name: "paths"),
+    to: check.pass_index(name: "zones"),
     budget_ms: 2000
   )
   if List.len(xs: c.diagnostics) > 0 {
@@ -2489,7 +2457,7 @@ fn builds_dir(
       opts: opts,
       path: path,
       root: Some(value: dir_of(path: path)),
-      to: check.pass_index(name: "paths"),
+      to: check.pass_index(name: "zones"),
       budget_ms: 2000
     )
     if List.len(xs: c.diagnostics) > 0 {
@@ -2769,7 +2737,8 @@ fn run_section(
   env: io.Env,
   opts: Options,
   dir: Text,
-  m: json.Json
+  m: json.Json,
+  seen: inout Dict[Text, Bool]
 ) -> Result[Tally, io.Error] may io.file, io.env, nondet, alloc, mutate {
   let kind: Text = json.str_at(j: m, key: "kind")
   match missing_tool(files: files, process: process, env: env, opts: opts, m: m) with
@@ -2788,7 +2757,8 @@ fn run_section(
       process: process,
       opts: opts,
       dir: dir,
-      m: m
+      m: m,
+      seen: inout seen
     )
   }
   if kind == "canonical" {
@@ -2877,6 +2847,7 @@ fn run_dir(
     value: fail_line(console: console, what: dir, why: "fixtures.json is not JSON")
   )
   | Some(value) -> m = value
+  var seen: Dict[Text, Bool] = Map.dict()
   if not json.has(j: m, key: "sections") {
     return run_section(
       files: files,
@@ -2885,7 +2856,8 @@ fn run_dir(
       env: env,
       opts: opts,
       dir: dir,
-      m: m
+      m: m,
+      seen: inout seen
     )
   }
   var tally: Tally = nothing()
@@ -2899,11 +2871,46 @@ fn run_dir(
         env: env,
         opts: opts,
         dir: dir,
-        m: section
+        m: section,
+        seen: inout seen
       )
     )
   }
+  -- A manifest-level `covers`: every code under the prefixes was produced by some section.
+  tally = add(a: tally, b: coverage_of(console: console, what: dir, m: m, seen: seen))
   return Ok(value: tally)
+}
+
+-- The coverage check of a manifest or section: nothing to report when it has no `covers`.
+fn coverage_of(
+  console: io.Console,
+  what: Text,
+  m: json.Json,
+  seen: Dict[Text, Bool]
+) -> Tally may io.file, alloc, mutate {
+  let prefixes: List[Text] = json.texts_at(j: m, key: "covers")
+  if List.len(xs: prefixes) == 0 {
+    return nothing()
+  }
+  let except: List[Text] = json.texts_at(j: m, key: "except")
+  var missing: Builder[Text] = List.builder()
+  for code: Text in codes.all_codes() {
+    if covered_by(code: code, prefixes: prefixes) and not List.contains(
+      xs: except,
+      x: code
+    ) and not Map.contains(d: seen, key: code) {
+      List.push(b: inout missing, x: code)
+    }
+  }
+  let missing_list: List[Text] = List.finish(b: missing)
+  if List.len(xs: missing_list) > 0 {
+    return fail_line(
+      console: console,
+      what: what,
+      why: "codes without a fixture: " ++ Text.join(parts: missing_list, sep: " ")
+    )
+  }
+  return ok_line(console: console, what: what ++ " covers " ++ Text.join(parts: prefixes, sep: " "))
 }
 
 record Args {

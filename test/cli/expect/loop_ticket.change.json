@@ -13,7 +13,7 @@
       "tokens":0,
       "wall_ms": 900000
     },
-    "context_policy": "module",
+    "context_policy": "scope",
     "origin": null,
     "description": "clamp misbehaves on empty ranges",
     "escalation": {
@@ -65,5 +65,7 @@
       "rationale": "an empty range has no clamp"
     }
   ],
-  "audit": []
+  "audit": [],
+  "zone": "draft",
+  "loop_authored": []
 }

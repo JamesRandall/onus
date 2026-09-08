@@ -4,16 +4,16 @@ import * as $std_list from "./std/list.js";
 import * as $std_map from "./std/map.js";
 import * as $defs from "./defs.js";
 
-const $ob1 = { kind: "refinement", text: "0 <= it and it < List.built(b: ctx.defs)", at: "self/context.onus:189:29", def: "def_at" };
-const $ob2 = { kind: "overflow", text: "-1 within Int", at: "self/context.onus:199:9", def: "get_def" };
-const $ob3 = { kind: "overflow", text: "-1 within Int", at: "self/context.onus:203:10", def: "get_def" };
-const $ob4 = { kind: "overflow", text: "-1 within Int", at: "self/context.onus:205:10", def: "get_def" };
-const $ob5 = { kind: "overflow", text: "-1 within Int", at: "self/context.onus:211:12", def: "get_def" };
-const $ob6 = { kind: "overflow", text: "-1 within Int", at: "self/context.onus:265:9", def: "get_obligation" };
-const $ob7 = { kind: "overflow", text: "-1 within Int", at: "self/context.onus:267:9", def: "get_obligation" };
-const $ob8 = { kind: "overflow", text: "-1 within Int", at: "self/context.onus:270:10", def: "get_obligation" };
+const $ob1 = { kind: "refinement", text: "0 <= it and it < List.built(b: ctx.defs)", at: "self/context.onus:206:29", def: "def_at" };
+const $ob2 = { kind: "overflow", text: "-1 within Int", at: "self/context.onus:216:9", def: "get_def" };
+const $ob3 = { kind: "overflow", text: "-1 within Int", at: "self/context.onus:220:10", def: "get_def" };
+const $ob4 = { kind: "overflow", text: "-1 within Int", at: "self/context.onus:222:10", def: "get_def" };
+const $ob5 = { kind: "overflow", text: "-1 within Int", at: "self/context.onus:229:12", def: "get_def" };
+const $ob6 = { kind: "overflow", text: "-1 within Int", at: "self/context.onus:283:9", def: "get_obligation" };
+const $ob7 = { kind: "overflow", text: "-1 within Int", at: "self/context.onus:285:9", def: "get_obligation" };
+const $ob8 = { kind: "overflow", text: "-1 within Int", at: "self/context.onus:288:10", def: "get_obligation" };
 export function new_context({ root, stdlib }) {
-  return { root: root, stdlib: stdlib, files: $std_list.builder({  }), parsed: $std_map.dict({  }), syntax_error_files: $std_map.dict({  }), canonical: $std_map.dict({  }), comment_tables: $std_map.dict({  }), diagnostics: $std_list.builder({  }), modules: $std_map.dict({  }), module_count: 0, by_name: $std_map.dict({  }), defs: $std_list.builder({  }), def_of: $std_map.dict({  }), refs: $std_map.dict({  }), members: $std_map.dict({  }), granted: $std_map.dict({  }), claim_lists: $std_map.dict({  }), holes: $std_map.dict({  }), expr_types: $std_map.dict({  }), decl_types: $std_map.dict({  }), signatures: $std_map.dict({  }), type_params: $std_map.dict({  }), fields: $std_map.dict({  }), type_aliases: $std_map.dict({  }), instantiations: $std_map.dict({  }), effect_bindings: $std_map.dict({  }), index_bindings: $std_map.dict({  }), refinement_flows: $std_list.builder({  }), variants: $std_map.dict({  }), verifies: $std_map.dict({  }), type_holes: $std_map.dict({  }), impls: $std_map.dict({  }), inferred: $std_map.dict({  }), effect_calls: $std_map.dict({  }), closure_effects: $std_map.dict({  }), cycles: $std_map.dict({  }), const_values: $std_map.dict({  }), proved_at_check_time: $std_map.dict({  }), examples: $std_map.dict({  }), obligations: $std_map.dict({  }), obligation_count: 0, obligations_at: $std_map.dict({  }), contract_nodes: $std_map.dict({  }), clause_nodes: $std_map.dict({  }), where_exprs: $std_map.dict({  }), expr_nodes: $std_map.dict({  }), ctor_of: $std_map.dict({  }), claim_tiers: $std_map.dict({  }), carried: $std_map.dict({  }), assume_sites: $std_list.builder({  }), analyses: $std_map.dict({  }), assumptions: $std_map.dict({  }), coverage: $std_map.dict({  }), mutations: [], now_ms: 0, assumption_max_age_ms: 604800000 };
+  return { root: root, stdlib: stdlib, files: $std_list.builder({  }), parsed: $std_map.dict({  }), syntax_error_files: $std_map.dict({  }), canonical: $std_map.dict({  }), comment_tables: $std_map.dict({  }), diagnostics: $std_list.builder({  }), modules: $std_map.dict({  }), module_count: 0, by_name: $std_map.dict({  }), defs: $std_list.builder({  }), def_of: $std_map.dict({  }), refs: $std_map.dict({  }), members: $std_map.dict({  }), granted: $std_map.dict({  }), claim_lists: $std_map.dict({  }), holes: $std_map.dict({  }), expr_types: $std_map.dict({  }), decl_types: $std_map.dict({  }), signatures: $std_map.dict({  }), type_params: $std_map.dict({  }), fields: $std_map.dict({  }), type_aliases: $std_map.dict({  }), instantiations: $std_map.dict({  }), effect_bindings: $std_map.dict({  }), index_bindings: $std_map.dict({  }), refinement_flows: $std_list.builder({  }), variants: $std_map.dict({  }), verifies: $std_map.dict({  }), type_holes: $std_map.dict({  }), impls: $std_map.dict({  }), inferred: $std_map.dict({  }), effect_calls: $std_map.dict({  }), closure_effects: $std_map.dict({  }), cycles: $std_map.dict({  }), const_values: $std_map.dict({  }), proved_at_check_time: $std_map.dict({  }), examples: $std_map.dict({  }), obligations: $std_map.dict({  }), obligation_count: 0, obligations_at: $std_map.dict({  }), contract_nodes: $std_map.dict({  }), clause_nodes: $std_map.dict({  }), where_exprs: $std_map.dict({  }), expr_nodes: $std_map.dict({  }), ctor_of: $std_map.dict({  }), claim_tiers: $std_map.dict({  }), carried: $std_map.dict({  }), assume_sites: $std_list.builder({  }), analyses: $std_map.dict({  }), assumptions: $std_map.dict({  }), coverage: $std_map.dict({  }), mutations: [], now_ms: 0, assumption_max_age_ms: 604800000, project_root: root, zones: $std_map.dict({  }), zone_exceptions: $std_map.dict({  }), promotions: [], demoted: $std_map.dict({  }), conditional_on: $std_map.dict({  }) };
 }
 
 export function report({ ctx, d }) {
@@ -49,7 +49,7 @@ export function get_def({ ctx, id }) {
   if (id >= 0 && id < $std_list.built({ b: ctx.defs })) {
     return $std_list.at({ b: ctx.defs, i: id });
   }
-  return { id: $rt.int.neg(1, $ob2), kind: { tag: "Fn" }, name: "?", node: { tag: "NoNode" }, mod: $rt.int.neg(1, $ob3), file: 0, key: $rt.int.neg(1, $ob4), span: { start: 0, end: 0 }, is_pub: false, is_sealed: false, is_intrinsic: false, parent: { tag: "None" }, frame: $rt.int.neg(1, $ob5), is_inout: false };
+  return { id: $rt.int.neg(1, $ob2), kind: { tag: "Fn" }, name: "?", node: { tag: "NoNode" }, mod: $rt.int.neg(1, $ob3), file: 0, key: $rt.int.neg(1, $ob4), span: { start: 0, end: 0 }, is_pub: false, is_hardened: false, is_sealed: false, is_intrinsic: false, parent: { tag: "None" }, frame: $rt.int.neg(1, $ob5), is_inout: false };
 }
 
 export function def_count({ ctx }) {

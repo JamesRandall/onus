@@ -1,5 +1,7 @@
 {
   "module": "recursion",
+  "zone": "draft",
+  "conditional_on": [],
   "hash": "b3:a7921a6db306a36f702bc6b5cadc7084c65eec6351d1c7745c08fc57de665b67",
   "imports": [],
   "items": [
@@ -13,6 +15,7 @@
           "kind": "decreases",
           "text": "n",
           "pinned": false,
+          "conditional": false,
           "status": "checked",
           "sites": 2,
           "checked_at": "recursion.onus:10:10"
@@ -44,6 +47,8 @@
       "kind": "fn",
       "name": "climb",
       "visibility": "private",
+      "hardened": false,
+      "zone": "draft",
       "signature": "fn climb(n: Int where 0 <= it and it <= 10) -> Int may panic"
     },
     {
@@ -54,6 +59,7 @@
           "kind": "decreases",
           "text": "n",
           "pinned": false,
+          "conditional": false,
           "status": "proved",
           "sites": 2
         }
@@ -84,6 +90,8 @@
       "kind": "fn",
       "name": "countdown",
       "visibility": "private",
+      "hardened": false,
+      "zone": "draft",
       "signature": "fn countdown(n: Int where it >= 0) -> Int"
     },
     {
@@ -133,6 +141,8 @@
       "kind": "fn",
       "name": "caught",
       "visibility": "private",
+      "hardened": false,
+      "zone": "draft",
       "signature": "fn caught() -> Result[Int, Panicked]"
     },
     {
@@ -183,6 +193,8 @@
       "kind": "example",
       "name": "a_bad_measure_panics",
       "visibility": "private",
+      "hardened": false,
+      "zone": "draft",
       "signature": "example a_bad_measure_panics {\n  caught() is Err\n}"
     },
     {
@@ -233,6 +245,8 @@
       "kind": "example",
       "name": "a_good_measure_recurses",
       "visibility": "private",
+      "hardened": false,
+      "zone": "draft",
       "signature": "example a_good_measure_recurses {\n  countdown(n: 5) == 0\n}"
     }
   ],

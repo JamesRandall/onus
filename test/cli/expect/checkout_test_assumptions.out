@@ -1,0 +1,2 @@
+passed  vendor.payments.charge: app.contracts.Idempotent
+1 assumption verified against local: 1 passed, 0 failed

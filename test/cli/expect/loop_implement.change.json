@@ -16,7 +16,7 @@
       "tokens":0,
       "wall_ms": 900000
     },
-    "context_policy": "module",
+    "context_policy": "scope",
     "origin": null,
     "description": null,
     "escalation": {
@@ -136,5 +136,7 @@
     "tokens":0
   },
   "proposals": [],
-  "audit": []
+  "audit": [],
+  "zone": "draft",
+  "loop_authored": []
 }

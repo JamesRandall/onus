@@ -1,0 +1,197 @@
+{
+  "module": "svc",
+  "zone": "hardened",
+  "conditional_on": [
+    "core.math"
+  ],
+  "hash": "b3:50c3f08b3bf12ce7ed9862db7b4b958169e94c0a160cc08c00d5182215b44527",
+  "imports": [
+    "core.math",
+    "payments"
+  ],
+  "items": [
+    {
+      "effects": [],
+      "claims": [],
+      "contracts": [
+        {
+          "kind": "ensures",
+          "text": "result >= 0",
+          "pinned": false,
+          "conditional": true,
+          "status": "proved",
+          "sites": 1
+        }
+      ],
+      "examples": [],
+      "properties": [],
+      "assumes": [],
+      "recovers": [],
+      "obligations": {
+        "proved": 3,
+        "checked": 1,
+        "assumed": 0,
+        "failed": 0
+      },
+      "at": {
+        "file": "svc.onus",
+        "span": [
+          [
+            5,
+            1
+          ],
+          [
+            9,
+            2
+          ]
+        ]
+      },
+      "kind": "fn",
+      "name": "bill",
+      "visibility": "pub",
+      "hardened": false,
+      "zone": "hardened",
+      "signature": "fn bill(x: Int where it >= 0) -> Int"
+    },
+    {
+      "effects": [],
+      "claims": [],
+      "contracts": [],
+      "examples": [],
+      "properties": [],
+      "assumes": [],
+      "recovers": [],
+      "obligations": {
+        "proved": 0,
+        "checked": 0,
+        "assumed": 0,
+        "failed": 0
+      },
+      "at": {
+        "file": "svc.onus",
+        "span": [
+          [
+            11,
+            1
+          ],
+          [
+            12,
+            13
+          ]
+        ]
+      },
+      "kind": "path",
+      "name": "billing",
+      "visibility": "private",
+      "hardened": false,
+      "zone": "hardened",
+      "signature": "path billing\n  entry bill"
+    }
+  ],
+  "assumes": [],
+  "recovers": [],
+  "sealed_types": [],
+  "test_module": false,
+  "obligations": {
+    "proved": 3,
+    "checked": 1,
+    "assumed": 0,
+    "failed": 0
+  },
+  "ledger": [
+    {
+      "kind": "representation",
+      "text": "x within ±2^53 - 1",
+      "def": "bill",
+      "status": "checked",
+      "by": "z3: not provable",
+      "pinned": false,
+      "at": {
+        "file": "svc.onus",
+        "span": [
+          [
+            5,
+            13
+          ],
+          [
+            5,
+            33
+          ]
+        ]
+      }
+    },
+    {
+      "kind": "ensures",
+      "text": "result >= 0",
+      "def": "bill",
+      "status": "proved",
+      "by": "z3",
+      "pinned": false,
+      "at": {
+        "file": "svc.onus",
+        "span": [
+          [
+            8,
+            3
+          ],
+          [
+            8,
+            51
+          ]
+        ]
+      }
+    },
+    {
+      "kind": "refinement",
+      "text": "it >= 0",
+      "def": "bill",
+      "status": "proved",
+      "by": "z3",
+      "pinned": false,
+      "at": {
+        "file": "svc.onus",
+        "span": [
+          [
+            8,
+            33
+          ],
+          [
+            8,
+            50
+          ]
+        ]
+      }
+    },
+    {
+      "kind": "refinement",
+      "text": "it >= 0",
+      "def": "bill",
+      "status": "proved",
+      "by": "z3",
+      "pinned": false,
+      "at": {
+        "file": "svc.onus",
+        "span": [
+          [
+            8,
+            48
+          ],
+          [
+            8,
+            49
+          ]
+        ]
+      }
+    }
+  ],
+  "obligation_coverage": {
+    "proved": 3,
+    "checked": 0,
+    "checked_exercised": 0,
+    "assumptions": 0,
+    "assumptions_verifiable": 0,
+    "assumptions_verified": 0,
+    "mutations_detected": 0,
+    "mutations_surviving": 0
+  }
+}

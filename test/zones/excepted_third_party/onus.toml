@@ -1,0 +1,6 @@
+[zones]
+"core" = "critical"
+default = "draft"
+
+[zones.exceptions]
+"core" = { third_party_assumes = ["vendor.charge"] }

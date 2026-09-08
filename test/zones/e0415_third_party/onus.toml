@@ -1,0 +1,3 @@
+[zones]
+"core" = "critical"
+default = "draft"

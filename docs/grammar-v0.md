@@ -9,7 +9,7 @@ this grammar and prints the canonical form described at the end.
 
 - `NAME` = `[a-z][a-z0-9_]*`; `TNAME` = `[A-Z][A-Za-z0-9]*`. An identifier
   matching neither (e.g. `xValue`) is `E0005`.
-- Keywords are reserved. *Soft keywords* — `module import test type record
+- Keywords are reserved (`hardened` among them since docs/CHANGES.md item 201). *Soft keywords* — `module import test type record
   union interface impl law claim capability grants path entry effects forbid
   require policy outside except example property of self intrinsic` — never appear
   inside an expression, so they are accepted as names in name positions
@@ -39,7 +39,7 @@ CLAIM       = ( NAME | TNAME ) { "." ( NAME | TNAME ) } ;   (* resolved later *)
 item        = fn_decl | type_alias | const_decl | record_decl | union_decl
             | interface_decl | impl_decl | claim_decl | capability_decl
             | path_decl | policy_decl | example_decl | property_decl ;
-visibility  = [ "pub" ] [ "sealed" ] ;
+visibility  = [ "pub" ] [ "hardened" ] [ "sealed" ] ;   (* changed: 2026-09-07, docs/CHANGE-LOG-03.md, docs/CHANGES.md item 201 — `hardened` is a reserved word, permitted only on `pub` items of `draft` modules (spec §21.1, `E0902`) *)
 
 fn_decl     = visibility [ "const" ] [ "intrinsic" ] "fn" NAME [ tparams ] "(" [ params ] ")" "->" type
               [ "may" effects ] [ "claims" CLAIM { "," CLAIM } ] { contract } ( block | NL ) ;   (* `may` replaces `!`: CHANGES item 82 *)

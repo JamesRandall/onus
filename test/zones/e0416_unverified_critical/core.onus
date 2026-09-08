@@ -1,0 +1,24 @@
+module core
+import std.io
+
+claim Quiet "Writes nothing."
+
+fn leaf(env: io.Env) -> Bool may io.env, alloc
+  claims Quiet
+{
+  assume Quiet "Nothing here writes."
+    verify(env: io.Env) may io.env, alloc {
+      io.get_env(env: env, name: "HOME") is Some
+    }
+  return true
+}
+
+pub fn run(env: io.Env) -> Bool may io.env, alloc
+  claims Quiet
+{
+  return leaf(env: env)
+}
+
+path p
+  entry run
+  require { Quiet }

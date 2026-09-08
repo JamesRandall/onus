@@ -16,11 +16,11 @@ import * as $obligations from "./obligations.js";
 import * as $std_int from "./std/int.js";
 import * as $build from "./build.js";
 import * as $std_map from "./std/map.js";
-import * as $codes from "./codes.js";
 import * as $irtext from "./irtext.js";
 import * as $lowerir from "./lowerir.js";
 import * as $testcmd from "./testcmd.js";
 import * as $std_hash from "./std/hash.js";
+import * as $codes from "./codes.js";
 import * as $lexer from "./lexer.js";
 import * as $parser from "./parser.js";
 import * as $tokens from "./tokens.js";
@@ -36,39 +36,39 @@ const $ob6 = { kind: "overflow", text: "i + 1 within Int", at: "self/fixtures.on
 const $ob7 = { kind: "overflow", text: "List.len(xs: parts) - 1 within Int", at: "self/fixtures.onus:176:33", def: "base_name" };
 const $ob8 = { kind: "overflow", text: "Text.count(t: name) - Text.count(t: suffix) within Int", at: "self/fixtures.onus:181:45", def: "without_suffix" };
 const $ob9 = { kind: "overflow", text: "Text.count(t: dir) + 1 within Int", at: "self/fixtures.onus:319:39", def: "expected_entry" };
-const $ob10 = { kind: "overflow", text: "depth - 1 within Int", at: "self/fixtures.onus:1247:16", def: "copy_tree" };
-const $ob11 = { kind: "overflow", text: "-1 within Int", at: "self/fixtures.onus:1285:10", def: "cp_at" };
-const $ob12 = { kind: "overflow", text: "i + k within Int", at: "self/fixtures.onus:1296:44", def: "date_len_at" };
-const $ob13 = { kind: "overflow", text: "i + 4 within Int", at: "self/fixtures.onus:1300:25", def: "date_len_at" };
-const $ob14 = { kind: "overflow", text: "i + 7 within Int", at: "self/fixtures.onus:1300:60", def: "date_len_at" };
-const $ob15 = { kind: "overflow", text: "i + 10 within Int", at: "self/fixtures.onus:1302:8", def: "date_len_at" };
-const $ob16 = { kind: "overflow", text: "i + 13 within Int", at: "self/fixtures.onus:1303:33", def: "date_len_at" };
-const $ob17 = { kind: "overflow", text: "i + 16 within Int", at: "self/fixtures.onus:1303:69", def: "date_len_at" };
-const $ob18 = { kind: "overflow", text: "i + 19 within Int", at: "self/fixtures.onus:1306:25", def: "date_len_at" };
-const $ob19 = { kind: "overflow", text: "i + 19 within Int", at: "self/fixtures.onus:1309:25", def: "date_len_at" };
-const $ob20 = { kind: "overflow", text: "i + 20 within Int", at: "self/fixtures.onus:1309:75", def: "date_len_at" };
-const $ob21 = { kind: "overflow", text: "i + 21 within Int", at: "self/fixtures.onus:1310:28", def: "date_len_at" };
-const $ob22 = { kind: "overflow", text: "i + 22 within Int", at: "self/fixtures.onus:1311:41", def: "date_len_at" };
-const $ob23 = { kind: "overflow", text: "i + 23 within Int", at: "self/fixtures.onus:1311:73", def: "date_len_at" };
-const $ob24 = { kind: "overflow", text: "i + len within Int", at: "self/fixtures.onus:1330:21", def: "replace_dates" };
-const $ob25 = { kind: "overflow", text: "i + len within Int", at: "self/fixtures.onus:1331:22", def: "replace_dates" };
-const $ob26 = { kind: "overflow", text: "i + j within Int", at: "self/fixtures.onus:1341:27", def: "matches_at" };
-const $ob27 = { kind: "overflow", text: "i + m within Int", at: "self/fixtures.onus:1367:24", def: "replace_scalar_after" };
-const $ob28 = { kind: "overflow", text: "i + 1 within Int", at: "self/fixtures.onus:1395:31", def: "replace_scalar_after" };
-const $ob29 = { kind: "overflow", text: "i - 1 within Int", at: "self/fixtures.onus:1431:30", def: "replace_number_before" };
-const $ob30 = { kind: "overflow", text: "i - k within Int", at: "self/fixtures.onus:1435:17", def: "replace_number_before" };
-const $ob31 = { kind: "overflow", text: "i - k within Int", at: "self/fixtures.onus:1435:59", def: "replace_number_before" };
-const $ob32 = { kind: "overflow", text: "i - k - 1 within Int", at: "self/fixtures.onus:1435:59", def: "replace_number_before" };
-const $ob33 = { kind: "overflow", text: "i - k within Int", at: "self/fixtures.onus:1436:15", def: "replace_number_before" };
-const $ob34 = { kind: "overflow", text: "i - k - 1 within Int", at: "self/fixtures.onus:1436:15", def: "replace_number_before" };
-const $ob35 = { kind: "overflow", text: "List.len(xs: lines) - 1 within Int", at: "self/fixtures.onus:1455:33", def: "last_line" };
-const $ob36 = { kind: "overflow", text: "i + 1 within Int", at: "self/fixtures.onus:1507:42", def: "first_difference" };
-const $ob37 = { kind: "overflow", text: "i + 1 within Int", at: "self/fixtures.onus:1512:40", def: "first_difference" };
-const $ob38 = { kind: "overflow", text: "n + 1 within Int", at: "self/fixtures.onus:1518:38", def: "first_difference" };
-const $ob39 = { kind: "overflow", text: "count + 1 within Int", at: "self/fixtures.onus:1779:21", def: "check_files" };
-const $ob40 = { kind: "overflow", text: "occurrence + 1 within Int", at: "self/fixtures.onus:1928:23", def: "offset_after" };
-const $ob41 = { kind: "overflow", text: "value + Text.count(t: marker) within Int", at: "self/fixtures.onus:1934:29", def: "offset_after" };
-const $ob42 = { kind: "overflow", text: "from - back within Int", at: "self/fixtures.onus:1936:20", def: "offset_after" };
+const $ob10 = { kind: "overflow", text: "depth - 1 within Int", at: "self/fixtures.onus:1215:16", def: "copy_tree" };
+const $ob11 = { kind: "overflow", text: "-1 within Int", at: "self/fixtures.onus:1253:10", def: "cp_at" };
+const $ob12 = { kind: "overflow", text: "i + k within Int", at: "self/fixtures.onus:1264:44", def: "date_len_at" };
+const $ob13 = { kind: "overflow", text: "i + 4 within Int", at: "self/fixtures.onus:1268:25", def: "date_len_at" };
+const $ob14 = { kind: "overflow", text: "i + 7 within Int", at: "self/fixtures.onus:1268:60", def: "date_len_at" };
+const $ob15 = { kind: "overflow", text: "i + 10 within Int", at: "self/fixtures.onus:1270:8", def: "date_len_at" };
+const $ob16 = { kind: "overflow", text: "i + 13 within Int", at: "self/fixtures.onus:1271:33", def: "date_len_at" };
+const $ob17 = { kind: "overflow", text: "i + 16 within Int", at: "self/fixtures.onus:1271:69", def: "date_len_at" };
+const $ob18 = { kind: "overflow", text: "i + 19 within Int", at: "self/fixtures.onus:1274:25", def: "date_len_at" };
+const $ob19 = { kind: "overflow", text: "i + 19 within Int", at: "self/fixtures.onus:1277:25", def: "date_len_at" };
+const $ob20 = { kind: "overflow", text: "i + 20 within Int", at: "self/fixtures.onus:1277:75", def: "date_len_at" };
+const $ob21 = { kind: "overflow", text: "i + 21 within Int", at: "self/fixtures.onus:1278:28", def: "date_len_at" };
+const $ob22 = { kind: "overflow", text: "i + 22 within Int", at: "self/fixtures.onus:1279:41", def: "date_len_at" };
+const $ob23 = { kind: "overflow", text: "i + 23 within Int", at: "self/fixtures.onus:1279:73", def: "date_len_at" };
+const $ob24 = { kind: "overflow", text: "i + len within Int", at: "self/fixtures.onus:1298:21", def: "replace_dates" };
+const $ob25 = { kind: "overflow", text: "i + len within Int", at: "self/fixtures.onus:1299:22", def: "replace_dates" };
+const $ob26 = { kind: "overflow", text: "i + j within Int", at: "self/fixtures.onus:1309:27", def: "matches_at" };
+const $ob27 = { kind: "overflow", text: "i + m within Int", at: "self/fixtures.onus:1335:24", def: "replace_scalar_after" };
+const $ob28 = { kind: "overflow", text: "i + 1 within Int", at: "self/fixtures.onus:1363:31", def: "replace_scalar_after" };
+const $ob29 = { kind: "overflow", text: "i - 1 within Int", at: "self/fixtures.onus:1399:30", def: "replace_number_before" };
+const $ob30 = { kind: "overflow", text: "i - k within Int", at: "self/fixtures.onus:1403:17", def: "replace_number_before" };
+const $ob31 = { kind: "overflow", text: "i - k within Int", at: "self/fixtures.onus:1403:59", def: "replace_number_before" };
+const $ob32 = { kind: "overflow", text: "i - k - 1 within Int", at: "self/fixtures.onus:1403:59", def: "replace_number_before" };
+const $ob33 = { kind: "overflow", text: "i - k within Int", at: "self/fixtures.onus:1404:15", def: "replace_number_before" };
+const $ob34 = { kind: "overflow", text: "i - k - 1 within Int", at: "self/fixtures.onus:1404:15", def: "replace_number_before" };
+const $ob35 = { kind: "overflow", text: "List.len(xs: lines) - 1 within Int", at: "self/fixtures.onus:1423:33", def: "last_line" };
+const $ob36 = { kind: "overflow", text: "i + 1 within Int", at: "self/fixtures.onus:1475:42", def: "first_difference" };
+const $ob37 = { kind: "overflow", text: "i + 1 within Int", at: "self/fixtures.onus:1480:40", def: "first_difference" };
+const $ob38 = { kind: "overflow", text: "n + 1 within Int", at: "self/fixtures.onus:1486:38", def: "first_difference" };
+const $ob39 = { kind: "overflow", text: "count + 1 within Int", at: "self/fixtures.onus:1747:21", def: "check_files" };
+const $ob40 = { kind: "overflow", text: "occurrence + 1 within Int", at: "self/fixtures.onus:1896:23", def: "offset_after" };
+const $ob41 = { kind: "overflow", text: "value + Text.count(t: marker) within Int", at: "self/fixtures.onus:1902:29", def: "offset_after" };
+const $ob42 = { kind: "overflow", text: "from - back within Int", at: "self/fixtures.onus:1904:20", def: "offset_after" };
 export function skip($args) {
   return undefined;
 }
@@ -488,13 +488,12 @@ export function compare_expectation({ files, console, opts, what, expect_path, g
   }
 }
 
-export function diagnostics_dir({ files, console, process, opts, dir, m }) {
+export function diagnostics_dir({ files, console, process, opts, dir, m, seen }) {
   try {
     const to = $check.pass_index({ name: json_text_or({ j: $json.at({ j: m, key: "to" }), dflt: "paths" }) });
     const root = root_of({ dir: dir, m: m });
     const ledger = $json.bool_at({ j: m, key: "ledger" });
     const expect_none = $json.bool_at({ j: m, key: "expect_none" });
-    let seen = $std_map.dict({  });
     let tally = nothing({  });
     for (const path of sources_of({ files: files, dir: dir, m: m })) {
       const name = base_name({ path: path });
@@ -529,26 +528,10 @@ export function diagnostics_dir({ files, console, process, opts, dir, m }) {
         tally = add({ a: tally, b: $rt.unwrap(compare_expectation({ files: files, console: console, opts: opts, what: path, expect_path: without_suffix({ name: path, suffix: ".onus" }) + ".expect.json", got: got_list, ledger: led, detail: diagnostic_texts({ c: c }) })) });
       }
     }
-    const prefixes = $json.texts_at({ j: m, key: "covers" });
-    if ($std_list.len({ xs: prefixes }) > 0) {
-      const except = $json.texts_at({ j: m, key: "except" });
-      let missing = $std_list.builder({  });
-      for (const code of $codes.all_codes({  })) {
-        if (covered_by({ code: code, prefixes: prefixes }) && !$std_list.contains({ xs: except, x: code }) && !$std_map.contains({ d: seen, key: code })) {
-          const [, missing$18] = $std_list.push({ b: missing, x: code });
-          missing = missing$18;
-        }
-      }
-      const missing_list = $std_list.finish({ b: missing });
-      if ($std_list.len({ xs: missing_list }) > 0) {
-        tally = add({ a: tally, b: fail_line({ console: console, what: dir, why: "codes without a fixture: " + $std_text.join({ parts: missing_list, sep: " " }) }) });
-      } else {
-        tally = add({ a: tally, b: ok_line({ console: console, what: dir + " covers " + $std_text.join({ parts: prefixes, sep: " " }) }) });
-      }
-    }
-    return { tag: "Ok", value: tally };
+    tally = add({ a: tally, b: coverage_of({ console: console, what: dir, m: m, seen: seen }) });
+    return [{ tag: "Ok", value: tally }, seen];
   } catch ($e) {
-    if ($e instanceof $rt.EarlyReturn) return $e.value;
+    if ($e instanceof $rt.EarlyReturn) return [$e.value, seen];
     throw $e;
   }
 }
@@ -580,13 +563,13 @@ export function json_text_or({ j, dflt }) {
 
 export function canonical_of({ path, text }) {
   let ctx = $context.new_context({ root: { tag: "None" }, stdlib: { tag: "None" } });
-  const [$r59, ctx$19] = $loader.add_file({ ctx: ctx, path: path, text: text });
-  ctx = ctx$19;
+  const [$r59, ctx$18] = $loader.add_file({ ctx: ctx, path: path, text: text });
+  ctx = ctx$18;
   if ($r59.tag === "None") {
     return { text: text, diagnostics: "too long", clean: false };
   }
-  const [, ctx$20] = $loader.canonical({ ctx: ctx, file: 0 });
-  ctx = ctx$20;
+  const [, ctx$19] = $loader.canonical({ ctx: ctx, file: 0 });
+  ctx = ctx$19;
   const tab = $loc.line_tables({ ctx: ctx });
   let parts = $std_list.builder({  });
   let clean = true;
@@ -594,8 +577,8 @@ export function canonical_of({ path, text }) {
     if (d.code !== "E0001") {
       clean = false;
     }
-    const [, parts$21] = $std_list.push({ b: parts, x: $diagtext.to_text({ ctx: ctx, tab: tab, d: d }) });
-    parts = parts$21;
+    const [, parts$20] = $std_list.push({ b: parts, x: $diagtext.to_text({ ctx: ctx, tab: tab, d: d }) });
+    parts = parts$20;
   }
   let out = text;
   const $m61 = $std_map.find({ d: ctx.canonical, key: 0 });
@@ -701,7 +684,7 @@ export function lowered_dir({ files, console, process, opts, dir, m }) {
     for (const src of $json.list_at({ j: m, key: "sources" })) {
       const name = $json.str_at({ j: src, key: "name" });
       const path = join_path({ base: dir, rel: $json.str_at({ j: src, key: "path" }) });
-      const c = $rt.unwrap(check_source({ files: files, console: console, process: process, opts: opts, path: path, root: { tag: "Some", value: dir_of({ path: path }) }, to: $check.pass_index({ name: "paths" }), budget_ms: 2000 }));
+      const c = $rt.unwrap(check_source({ files: files, console: console, process: process, opts: opts, path: path, root: { tag: "Some", value: dir_of({ path: path }) }, to: $check.pass_index({ name: "zones" }), budget_ms: 2000 }));
       if ($std_list.len({ xs: c.diagnostics }) > 0) {
         tally = add({ a: tally, b: fail_line({ console: console, what: path, why: "diagnostics: " + diagnostic_texts({ c: c }) }) });
       } else {
@@ -777,8 +760,8 @@ export function failing_names({ results }) {
       if ($m73.tag === "Some") {
         const value = $m73.value;
         if (!value) {
-          const [, out$22] = $std_list.push({ b: out, x: name });
-          out = out$22;
+          const [, out$21] = $std_list.push({ b: out, x: name });
+          out = out$21;
         }
         break $m73$match;
       }
@@ -803,7 +786,7 @@ export function has_code({ diagnostics, code }) {
 
 export function examples_of({ files, console, process, env, opts, path, allow_refusal, properties, native_too, cflags, expect_disagreement }) {
   try {
-    let c = $rt.unwrap(check_source({ files: files, console: console, process: process, opts: opts, path: path, root: { tag: "Some", value: dir_of({ path: path }) }, to: $check.pass_index({ name: "paths" }), budget_ms: 2000 }));
+    let c = $rt.unwrap(check_source({ files: files, console: console, process: process, opts: opts, path: path, root: { tag: "Some", value: dir_of({ path: path }) }, to: $check.pass_index({ name: "zones" }), budget_ms: 2000 }));
     if ($std_list.len({ xs: c.diagnostics }) > 0) {
       say({ console: console, line: "skip " + path + ": it does not check" });
       return { tag: "Ok", value: skipped({  }) };
@@ -826,8 +809,8 @@ export function examples_of({ files, console, process, env, opts, path, allow_re
       return { tag: "Ok", value: ok_line({ console: console, what: path + " (js)" }) };
     }
     let ctx = c.ctx;
-    const [$r81, ctx$23] = $nativebuild.build_native({ ctx: ctx, files: files, process: process, env: env, tab: c.tab, out_dir: out_dir, runtime_dir: opts.runtime_dir, target: "native", cflags: cflags });
-    ctx = ctx$23;
+    const [$r81, ctx$22] = $nativebuild.build_native({ ctx: ctx, files: files, process: process, env: env, tab: c.tab, out_dir: out_dir, runtime_dir: opts.runtime_dir, target: "native", cflags: cflags });
+    ctx = ctx$22;
     const native = $rt.unwrap($r81);
     const $m82 = native.exe;
     $m82$match: {
@@ -844,8 +827,8 @@ export function examples_of({ files, console, process, env, opts, path, allow_re
         const tab = $loc.line_tables({ ctx: ctx });
         let parts = $std_list.builder({  });
         for (const d of $std_list.finish({ b: ctx.diagnostics })) {
-          const [, parts$24] = $std_list.push({ b: parts, x: $diagtext.to_text({ ctx: ctx, tab: tab, d: d }) });
-          parts = parts$24;
+          const [, parts$23] = $std_list.push({ b: parts, x: $diagtext.to_text({ ctx: ctx, tab: tab, d: d }) });
+          parts = parts$23;
         }
         return { tag: "Ok", value: fail_line({ console: console, what: path, why: "native build failed: " + $std_text.join({ parts: $std_list.finish({ b: parts }), sep: " | " }) }) };
         break $m82$match;
@@ -857,8 +840,8 @@ export function examples_of({ files, console, process, env, opts, path, allow_re
           return { tag: "Ok", value: fail_line({ console: console, what: path, why: "failing natively: " + failing_names({ results: run.results }) }) };
         }
         if (expect_disagreement) {
-          const [$r86, ctx$25] = $testcmd.compare_targets({ ctx: ctx, js: js, native: run.results });
-          ctx = ctx$25;
+          const [$r86, ctx$24] = $testcmd.compare_targets({ ctx: ctx, js: js, native: run.results });
+          ctx = ctx$24;
           const found = $r86;
           let reported = false;
           for (const d of $std_list.finish({ b: ctx.diagnostics })) {
@@ -871,8 +854,8 @@ export function examples_of({ files, console, process, env, opts, path, allow_re
           }
           return { tag: "Ok", value: fail_line({ console: console, what: path, why: "expected the targets to disagree with E0801" }) };
         }
-        const [$r89, ctx$26] = $testcmd.compare_targets({ ctx: ctx, js: js, native: run.results });
-        ctx = ctx$26;
+        const [$r89, ctx$25] = $testcmd.compare_targets({ ctx: ctx, js: js, native: run.results });
+        ctx = ctx$25;
         const disagreements = $r89;
         if (disagreements > 0) {
           return { tag: "Ok", value: fail_line({ console: console, what: path, why: $std_int.to_text({ x: disagreements }) + " disagreement(s) between the targets" }) };
@@ -902,8 +885,8 @@ export function examples_dir({ files, console, process, env, opts, dir, m }) {
     let tally = nothing({  });
     let paths = $std_list.builder({  });
     for (const rel of $json.texts_at({ j: m, key: "sources" })) {
-      const [, paths$27] = $std_list.push({ b: paths, x: join_path({ base: dir, rel: rel }) });
-      paths = paths$27;
+      const [, paths$26] = $std_list.push({ b: paths, x: join_path({ base: dir, rel: rel }) });
+      paths = paths$26;
     }
     for (const sub of $json.texts_at({ j: m, key: "dirs" })) {
       const d = join_path({ base: dir, rel: sub });
@@ -915,8 +898,8 @@ export function examples_dir({ files, console, process, env, opts, dir, m }) {
             if ($m92.tag === "Ok") {
               const value = $m92.value;
               if (has_tests({ text: value })) {
-                const [, paths$28] = $std_list.push({ b: paths, x: path });
-                paths = paths$28;
+                const [, paths$27] = $std_list.push({ b: paths, x: path });
+                paths = paths$27;
               }
               break $m92$match;
             }
@@ -954,8 +937,8 @@ export function subst({ t, s }) {
 export function subst_all({ xs, s }) {
   let out = $std_list.builder({  });
   for (const x of xs) {
-    const [, out$29] = $std_list.push({ b: out, x: subst({ t: x, s: s }) });
-    out = out$29;
+    const [, out$28] = $std_list.push({ b: out, x: subst({ t: x, s: s }) });
+    out = out$28;
   }
   return $std_list.finish({ b: out });
 }
@@ -978,8 +961,8 @@ export function env_list({ j, s }) {
     if ($m95.tag === "JObject") {
       const fields = $m95.fields;
       for (const f of fields) {
-        const [, out$30] = $std_list.push({ b: out, x: f.key + "=" + subst({ t: json_text_or({ j: f.value, dflt: "" }), s: s }) });
-        out = out$30;
+        const [, out$29] = $std_list.push({ b: out, x: f.key + "=" + subst({ t: json_text_or({ j: f.value, dflt: "" }), s: s }) });
+        out = out$29;
       }
       break $m95$match;
     }
@@ -994,25 +977,25 @@ export function env_list({ j, s }) {
 
 export function run_in({ process, cwd, env, program, args, stdin }) {
   let argv = $std_list.builder({  });
-  const [, argv$31] = $std_list.push({ b: argv, x: "-c" });
+  const [, argv$30] = $std_list.push({ b: argv, x: "-c" });
+  argv = argv$30;
+  const [, argv$31] = $std_list.push({ b: argv, x: "cd \"$0\" && exec \"$@\"" });
   argv = argv$31;
-  const [, argv$32] = $std_list.push({ b: argv, x: "cd \"$0\" && exec \"$@\"" });
+  const [, argv$32] = $std_list.push({ b: argv, x: cwd });
   argv = argv$32;
-  const [, argv$33] = $std_list.push({ b: argv, x: cwd });
-  argv = argv$33;
   if ($std_list.len({ xs: env }) > 0) {
-    const [, argv$34] = $std_list.push({ b: argv, x: "env" });
-    argv = argv$34;
+    const [, argv$33] = $std_list.push({ b: argv, x: "env" });
+    argv = argv$33;
     for (const e of env) {
-      const [, argv$35] = $std_list.push({ b: argv, x: e });
-      argv = argv$35;
+      const [, argv$34] = $std_list.push({ b: argv, x: e });
+      argv = argv$34;
     }
   }
-  const [, argv$36] = $std_list.push({ b: argv, x: program });
-  argv = argv$36;
+  const [, argv$35] = $std_list.push({ b: argv, x: program });
+  argv = argv$35;
   for (const a of args) {
-    const [, argv$37] = $std_list.push({ b: argv, x: a });
-    argv = argv$37;
+    const [, argv$36] = $std_list.push({ b: argv, x: a });
+    argv = argv$36;
   }
   return $std_io.run({ process: process, program: "sh", args: $std_list.finish({ b: argv }), stdin: stdin, timeout_ms: 900000 });
 }
@@ -1139,17 +1122,17 @@ export function replace_dates({ text, to }) {
     if (i >= skip_until) {
       const len = date_len_at({ cps: cps, i: i });
       if (len > 0) {
-        const [, parts$38] = $std_list.push({ b: parts, x: slice_within({ t: text, from: run_start, to: i }) });
+        const [, parts$37] = $std_list.push({ b: parts, x: slice_within({ t: text, from: run_start, to: i }) });
+        parts = parts$37;
+        const [, parts$38] = $std_list.push({ b: parts, x: to });
         parts = parts$38;
-        const [, parts$39] = $std_list.push({ b: parts, x: to });
-        parts = parts$39;
         run_start = $rt.int.add(i, len, $ob24);
         skip_until = $rt.int.add(i, len, $ob25);
       }
     }
   }
-  const [, parts$40] = $std_list.push({ b: parts, x: slice_within({ t: text, from: run_start, to: n }) });
-  parts = parts$40;
+  const [, parts$39] = $std_list.push({ b: parts, x: slice_within({ t: text, from: run_start, to: n }) });
+  parts = parts$39;
   return $std_text.join({ parts: $std_list.finish({ b: parts }), sep: "" });
 }
 
@@ -1206,10 +1189,10 @@ export function replace_scalar_after({ text, prefix, placeholder }) {
                 esc = true;
               } else {
                 if (cp === 34) {
-                  const [, parts$41] = $std_list.push({ b: parts, x: slice_within({ t: text, from: run_start, to: pstart }) });
+                  const [, parts$40] = $std_list.push({ b: parts, x: slice_within({ t: text, from: run_start, to: pstart }) });
+                  parts = parts$40;
+                  const [, parts$41] = $std_list.push({ b: parts, x: prefix + placeholder });
                   parts = parts$41;
-                  const [, parts$42] = $std_list.push({ b: parts, x: prefix + placeholder });
-                  parts = parts$42;
                   run_start = $rt.int.add(i, 1, $ob28);
                   state = 0;
                 }
@@ -1217,10 +1200,10 @@ export function replace_scalar_after({ text, prefix, placeholder }) {
             }
           } else {
             if (!is_digit({ cp: cp })) {
-              const [, parts$43] = $std_list.push({ b: parts, x: slice_within({ t: text, from: run_start, to: pstart }) });
+              const [, parts$42] = $std_list.push({ b: parts, x: slice_within({ t: text, from: run_start, to: pstart }) });
+              parts = parts$42;
+              const [, parts$43] = $std_list.push({ b: parts, x: prefix + placeholder });
               parts = parts$43;
-              const [, parts$44] = $std_list.push({ b: parts, x: prefix + placeholder });
-              parts = parts$44;
               run_start = i;
               state = 0;
             }
@@ -1230,14 +1213,14 @@ export function replace_scalar_after({ text, prefix, placeholder }) {
     }
   }
   if (state === 3) {
-    const [, parts$45] = $std_list.push({ b: parts, x: slice_within({ t: text, from: run_start, to: pstart }) });
+    const [, parts$44] = $std_list.push({ b: parts, x: slice_within({ t: text, from: run_start, to: pstart }) });
+    parts = parts$44;
+    const [, parts$45] = $std_list.push({ b: parts, x: prefix + placeholder });
     parts = parts$45;
-    const [, parts$46] = $std_list.push({ b: parts, x: prefix + placeholder });
-    parts = parts$46;
     run_start = n;
   }
-  const [, parts$47] = $std_list.push({ b: parts, x: slice_within({ t: text, from: run_start, to: n }) });
-  parts = parts$47;
+  const [, parts$46] = $std_list.push({ b: parts, x: slice_within({ t: text, from: run_start, to: n }) });
+  parts = parts$46;
   return $std_text.join({ parts: $std_list.finish({ b: parts }), sep: "" });
 }
 
@@ -1256,16 +1239,16 @@ export function replace_number_before({ text, suffix, placeholder }) {
         }
       }
       if (j >= run_start) {
-        const [, parts$48] = $std_list.push({ b: parts, x: slice_within({ t: text, from: run_start, to: j }) });
+        const [, parts$47] = $std_list.push({ b: parts, x: slice_within({ t: text, from: run_start, to: j }) });
+        parts = parts$47;
+        const [, parts$48] = $std_list.push({ b: parts, x: placeholder });
         parts = parts$48;
-        const [, parts$49] = $std_list.push({ b: parts, x: placeholder });
-        parts = parts$49;
         run_start = i;
       }
     }
   }
-  const [, parts$50] = $std_list.push({ b: parts, x: slice_within({ t: text, from: run_start, to: n }) });
-  parts = parts$50;
+  const [, parts$49] = $std_list.push({ b: parts, x: slice_within({ t: text, from: run_start, to: n }) });
+  parts = parts$49;
   return $std_text.join({ parts: $std_list.finish({ b: parts }), sep: "" });
 }
 
@@ -1631,15 +1614,15 @@ export function json_texts({ j }) {
     if ($m163.tag === "JArray") {
       const items = $m163.items;
       for (const item of items) {
-        const [, out$51] = $std_list.push({ b: out, x: json_text_or({ j: item, dflt: "" }) });
-        out = out$51;
+        const [, out$50] = $std_list.push({ b: out, x: json_text_or({ j: item, dflt: "" }) });
+        out = out$50;
       }
       break $m163$match;
     }
     if ($m163.tag === "JString") {
       const value = $m163.value;
-      const [, out$52] = $std_list.push({ b: out, x: value });
-      out = out$52;
+      const [, out$51] = $std_list.push({ b: out, x: value });
+      out = out$51;
       break $m163$match;
     }
     if (true) {
@@ -1710,8 +1693,8 @@ export function prepare_stage({ files, opts, dir, section_out, case_, stages }) 
     for (const rel of $json.texts_at({ j: case_, key: "remove" })) {
       $rt.unwrap($std_io.remove_all({ files: files, path: stage + "/" + rel }));
     }
-    const [, stages$53] = $std_map.set({ d: stages, key: name, value: stage });
-    stages = stages$53;
+    const [, stages$52] = $std_map.set({ d: stages, key: name, value: stage });
+    stages = stages$52;
     const s = base_subst({ opts: opts, dir: dir, stage: stage, out: section_out });
     const $m170 = $json.at({ j: case_, key: "write" });
     $m170$match: {
@@ -1781,8 +1764,8 @@ export function cli_case({ files, console, process, opts, dir, section_out, case
   try {
     const name = $json.str_at({ j: case_, key: "name" });
     const what = dir + ": " + name;
-    const [$r179, stages$54] = prepare_stage({ files: files, opts: opts, dir: dir, section_out: section_out, case_: case_, stages: stages });
-    stages = stages$54;
+    const [$r179, stages$53] = prepare_stage({ files: files, opts: opts, dir: dir, section_out: section_out, case_: case_, stages: stages });
+    stages = stages$53;
     const stage = $rt.unwrap($r179);
     let s = base_subst({ opts: opts, dir: dir, stage: stage, out: section_out });
     if ($json.has({ j: case_, key: "offset_after" })) {
@@ -1849,8 +1832,8 @@ export function cli_dir({ files, console, process, env, opts, dir, m }) {
     let tally = nothing({  });
     for (const case_ of $json.list_at({ j: m, key: "cases" })) {
       if (!$json.has({ j: case_, key: "requires" }) || missing_tool({ files: files, process: process, env: env, opts: opts, m: case_ }).tag === "None") {
-        const [$r188, stages$55] = cli_case({ files: files, console: console, process: process, opts: opts, dir: dir, section_out: section_out, case_: case_, stages: stages });
-        stages = stages$55;
+        const [$r188, stages$54] = cli_case({ files: files, console: console, process: process, opts: opts, dir: dir, section_out: section_out, case_: case_, stages: stages });
+        stages = stages$54;
         tally = add({ a: tally, b: $rt.unwrap($r188) });
       } else {
         say({ console: console, line: "skip " + dir + ": " + $json.str_at({ j: case_, key: "name" }) + ": " + or_empty({ o: missing_tool({ files: files, process: process, env: env, opts: opts, m: case_ }) }) + " is not available" });
@@ -1887,8 +1870,8 @@ export function build_js({ files, opts, c, out_dir }) {
 export function build_exe({ files, process, env, opts, c, out_dir, cflags }) {
   try {
     let ctx = c.ctx;
-    const [$r193, ctx$56] = $nativebuild.build_native({ ctx: ctx, files: files, process: process, env: env, tab: c.tab, out_dir: out_dir, runtime_dir: opts.runtime_dir, target: "native", cflags: cflags });
-    ctx = ctx$56;
+    const [$r193, ctx$55] = $nativebuild.build_native({ ctx: ctx, files: files, process: process, env: env, tab: c.tab, out_dir: out_dir, runtime_dir: opts.runtime_dir, target: "native", cflags: cflags });
+    ctx = ctx$55;
     const native = $rt.unwrap($r193);
     const $m194 = native.exe;
     $m194$match: {
@@ -1901,8 +1884,8 @@ export function build_exe({ files, process, env, opts, c, out_dir, cflags }) {
         const tab = $loc.line_tables({ ctx: ctx });
         let parts = $std_list.builder({  });
         for (const d of $std_list.finish({ b: ctx.diagnostics })) {
-          const [, parts$57] = $std_list.push({ b: parts, x: $diagtext.to_text({ ctx: ctx, tab: tab, d: d }) });
-          parts = parts$57;
+          const [, parts$56] = $std_list.push({ b: parts, x: $diagtext.to_text({ ctx: ctx, tab: tab, d: d }) });
+          parts = parts$56;
         }
         return { tag: "Ok", value: { tag: "Err", error: $std_text.join({ parts: $std_list.finish({ b: parts }), sep: " | " }) } };
         break $m194$match;
@@ -1927,7 +1910,7 @@ export function program_case({ files, console, process, env, opts, dir, section_
     if ($json.has({ j: case_, key: "targets" })) {
       targets = $json.texts_at({ j: case_, key: "targets" });
     }
-    const c = $rt.unwrap(check_source({ files: files, console: console, process: process, opts: opts, path: path, root: { tag: "Some", value: dir_of({ path: path }) }, to: $check.pass_index({ name: "paths" }), budget_ms: 2000 }));
+    const c = $rt.unwrap(check_source({ files: files, console: console, process: process, opts: opts, path: path, root: { tag: "Some", value: dir_of({ path: path }) }, to: $check.pass_index({ name: "zones" }), budget_ms: 2000 }));
     if ($std_list.len({ xs: c.diagnostics }) > 0) {
       return { tag: "Ok", value: fail_line({ console: console, what: what, why: "diagnostics: " + diagnostic_texts({ c: c }) }) };
     }
@@ -1981,8 +1964,8 @@ export function program_case({ files, console, process, env, opts, dir, section_
         if ($m206.tag === "Some") {
           const value = $m206.value;
           const out = $rt.unwrap(run_program_in({ process: process, cwd: run_dir, env: env_pairs, via: via, program: value, args: args, stdin: stdin }));
-          const [, outputs$58] = $std_map.set({ d: outputs, key: target, value: out });
-          outputs = outputs$58;
+          const [, outputs$57] = $std_map.set({ d: outputs, key: target, value: out });
+          outputs = outputs$57;
           tally = add({ a: tally, b: $rt.unwrap(judge_run({ files: files, console: console, opts: opts, dir: dir, cwd: run_dir, case_: case_, out: out, s: { ...s, stage: run_dir }, target: target, what: what + " " + target })) });
           break $m206$match;
         }
@@ -2078,7 +2061,7 @@ export function probe_ok({ files, console, process, env, opts, dir, section_out,
     }
     const probe = $json.at({ j: m, key: "probe" });
     const path = join_path({ base: dir, rel: $json.str_at({ j: probe, key: "source" }) });
-    const c = $rt.unwrap(check_source({ files: files, console: console, process: process, opts: opts, path: path, root: { tag: "Some", value: dir_of({ path: path }) }, to: $check.pass_index({ name: "paths" }), budget_ms: 2000 }));
+    const c = $rt.unwrap(check_source({ files: files, console: console, process: process, opts: opts, path: path, root: { tag: "Some", value: dir_of({ path: path }) }, to: $check.pass_index({ name: "zones" }), budget_ms: 2000 }));
     if ($std_list.len({ xs: c.diagnostics }) > 0) {
       say({ console: console, line: "skip " + dir + ": the probe does not check: " + diagnostic_texts({ c: c }) });
       return { tag: "Ok", value: false };
@@ -2164,7 +2147,7 @@ export function builds_dir({ files, console, process, env, opts, dir, m }) {
       if ($json.has({ j: case_, key: "targets" })) {
         targets = $json.texts_at({ j: case_, key: "targets" });
       }
-      const c = $rt.unwrap(check_source({ files: files, console: console, process: process, opts: opts, path: path, root: { tag: "Some", value: dir_of({ path: path }) }, to: $check.pass_index({ name: "paths" }), budget_ms: 2000 }));
+      const c = $rt.unwrap(check_source({ files: files, console: console, process: process, opts: opts, path: path, root: { tag: "Some", value: dir_of({ path: path }) }, to: $check.pass_index({ name: "zones" }), budget_ms: 2000 }));
       if ($std_list.len({ xs: c.diagnostics }) > 0) {
         tally = add({ a: tally, b: fail_line({ console: console, what: path, why: "diagnostics: " + diagnostic_texts({ c: c }) }) });
       } else {
@@ -2248,8 +2231,8 @@ export function token_starts({ text }) {
   }
   for (const t of $lexer.lex({ source: text }).tokens) {
     if (!(t.kind.tag === "Newline" && t.start === t.end) && !(t.kind.tag === "Eof")) {
-      const [, out$59] = $std_list.push({ b: out, x: t });
-      out = out$59;
+      const [, out$58] = $std_list.push({ b: out, x: t });
+      out = out$58;
     }
   }
   return $std_list.finish({ b: out });
@@ -2276,8 +2259,8 @@ export function legal_here({ text, t }) {
 
 export function next_line({ files, opts, path, text, offset }) {
   let ctx = $context.new_context({ root: { tag: "None" }, stdlib: opts.stdlib });
-  const [$r243, ctx$60] = $nextcmd.next({ ctx: ctx, files: files, path: path, text: text, offset: offset });
-  ctx = ctx$60;
+  const [$r243, ctx$59] = $nextcmd.next({ ctx: ctx, files: files, path: path, text: text, offset: offset });
+  ctx = ctx$59;
   const r = $r243;
   let expected = "-";
   const $m244 = r.expected_type;
@@ -2301,14 +2284,14 @@ export function next_sweep_dir({ files, console, opts, dir, m }) {
     let tally = nothing({  });
     let paths = $std_list.builder({  });
     for (const rel of $json.texts_at({ j: m, key: "sources" })) {
-      const [, paths$61] = $std_list.push({ b: paths, x: join_path({ base: dir, rel: rel }) });
-      paths = paths$61;
+      const [, paths$60] = $std_list.push({ b: paths, x: join_path({ base: dir, rel: rel }) });
+      paths = paths$60;
     }
     for (const sub of $json.texts_at({ j: m, key: "dirs" })) {
       const d = join_path({ base: dir, rel: sub });
       for (const name of onus_files({ files: files, dir: d })) {
-        const [, paths$62] = $std_list.push({ b: paths, x: d + "/" + name });
-        paths = paths$62;
+        const [, paths$61] = $std_list.push({ b: paths, x: d + "/" + name });
+        paths = paths$61;
       }
     }
     for (const path of $std_list.finish({ b: paths })) {
@@ -2317,8 +2300,8 @@ export function next_sweep_dir({ files, console, opts, dir, m }) {
       let misses = $std_list.builder({  });
       for (const t of toks) {
         if (!legal_here({ text: text, t: t })) {
-          const [, misses$63] = $std_list.push({ b: misses, x: $std_int.to_text({ x: t.start }) + ": " + $tokens.describe_kind({ kind: t.kind }) });
-          misses = misses$63;
+          const [, misses$62] = $std_list.push({ b: misses, x: $std_int.to_text({ x: t.start }) + ": " + $tokens.describe_kind({ kind: t.kind }) });
+          misses = misses$62;
         }
       }
       const missed = $std_list.finish({ b: misses });
@@ -2337,11 +2320,11 @@ export function next_sweep_dir({ files, console, opts, dir, m }) {
       const text = $rt.unwrap($std_io.read({ files: files, path: path }));
       let lines = $std_list.builder({  });
       for (const t of token_starts({ text: text })) {
-        const [, lines$64] = $std_list.push({ b: lines, x: next_line({ files: files, opts: opts, path: path, text: text, offset: t.start }) });
-        lines = lines$64;
+        const [, lines$63] = $std_list.push({ b: lines, x: next_line({ files: files, opts: opts, path: path, text: text, offset: t.start }) });
+        lines = lines$63;
       }
-      const [, lines$65] = $std_list.push({ b: lines, x: next_line({ files: files, opts: opts, path: path, text: text, offset: $std_text.count({ t: text }) }) });
-      lines = lines$65;
+      const [, lines$64] = $std_list.push({ b: lines, x: next_line({ files: files, opts: opts, path: path, text: text, offset: $std_text.count({ t: text }) }) });
+      lines = lines$64;
       const actual = $std_text.join({ parts: $std_list.finish({ b: lines }), sep: "\n" }) + "\n";
       const $m245 = $rt.unwrap(pin_text({ files: files, opts: opts, dir: dir, expect: without_suffix({ name: rel, suffix: ".onus" }) + ".next.txt", actual: actual }));
       $m245$match: {
@@ -2411,14 +2394,14 @@ export function script_dir({ files, console, process, env, opts, dir, m }) {
   }
 }
 
-export function run_section({ files, console, process, env, opts, dir, m }) {
+export function run_section({ files, console, process, env, opts, dir, m, seen }) {
   const kind = $json.str_at({ j: m, key: "kind" });
   const $m250 = missing_tool({ files: files, process: process, env: env, opts: opts, m: m });
   $m250$match: {
     if ($m250.tag === "Some") {
       const value = $m250.value;
       say({ console: console, line: "skip " + dir + " (" + kind + "): " + value + " is not available" });
-      return { tag: "Ok", value: skipped({  }) };
+      return [{ tag: "Ok", value: skipped({  }) }, seen];
       break $m250$match;
     }
     if ($m250.tag === "None") {
@@ -2428,77 +2411,105 @@ export function run_section({ files, console, process, env, opts, dir, m }) {
     $rt.unreachable();
   }
   if (kind === "diagnostics") {
-    return diagnostics_dir({ files: files, console: console, process: process, opts: opts, dir: dir, m: m });
+    const [$r252, seen$65] = diagnostics_dir({ files: files, console: console, process: process, opts: opts, dir: dir, m: m, seen: seen });
+    seen = seen$65;
+    return [$r252, seen];
   }
   if (kind === "canonical") {
-    return canonical_dir({ files: files, console: console, dir: dir });
+    return [canonical_dir({ files: files, console: console, dir: dir }), seen];
   }
   if (kind === "lowered") {
-    return lowered_dir({ files: files, console: console, process: process, opts: opts, dir: dir, m: m });
+    return [lowered_dir({ files: files, console: console, process: process, opts: opts, dir: dir, m: m }), seen];
   }
   if (kind === "examples") {
-    return examples_dir({ files: files, console: console, process: process, env: env, opts: opts, dir: dir, m: m });
+    return [examples_dir({ files: files, console: console, process: process, env: env, opts: opts, dir: dir, m: m }), seen];
   }
   if (kind === "programs") {
-    return programs_dir({ files: files, console: console, process: process, env: env, opts: opts, dir: dir, m: m });
+    return [programs_dir({ files: files, console: console, process: process, env: env, opts: opts, dir: dir, m: m }), seen];
   }
   if (kind === "builds") {
-    return builds_dir({ files: files, console: console, process: process, env: env, opts: opts, dir: dir, m: m });
+    return [builds_dir({ files: files, console: console, process: process, env: env, opts: opts, dir: dir, m: m }), seen];
   }
   if (kind === "cli") {
-    return cli_dir({ files: files, console: console, process: process, env: env, opts: opts, dir: dir, m: m });
+    return [cli_dir({ files: files, console: console, process: process, env: env, opts: opts, dir: dir, m: m }), seen];
   }
   if (kind === "next_sweep") {
-    return next_sweep_dir({ files: files, console: console, opts: opts, dir: dir, m: m });
+    return [next_sweep_dir({ files: files, console: console, opts: opts, dir: dir, m: m }), seen];
   }
   if (kind === "script") {
-    return script_dir({ files: files, console: console, process: process, env: env, opts: opts, dir: dir, m: m });
+    return [script_dir({ files: files, console: console, process: process, env: env, opts: opts, dir: dir, m: m }), seen];
   }
-  return { tag: "Ok", value: fail_line({ console: console, what: dir, why: "unknown kind `" + kind + "`" }) };
+  return [{ tag: "Ok", value: fail_line({ console: console, what: dir, why: "unknown kind `" + kind + "`" }) }, seen];
 }
 
 export function run_dir({ files, console, process, env, opts, dir }) {
   try {
     let text = "";
-    const $m253 = $std_io.read({ files: files, path: dir + "/fixtures.json" });
-    $m253$match: {
-      if ($m253.tag === "Err") {
+    const $m254 = $std_io.read({ files: files, path: dir + "/fixtures.json" });
+    $m254$match: {
+      if ($m254.tag === "Err") {
         return { tag: "Ok", value: fail_line({ console: console, what: dir, why: "no fixtures.json" }) };
-        break $m253$match;
+        break $m254$match;
       }
-      if ($m253.tag === "Ok") {
-        const value = $m253.value;
+      if ($m254.tag === "Ok") {
+        const value = $m254.value;
         text = value;
-        break $m253$match;
+        break $m254$match;
       }
       $rt.unreachable();
     }
     let m = { tag: "JNull" };
-    const $m256 = $json.parse({ t: text });
-    $m256$match: {
-      if ($m256.tag === "None") {
+    const $m257 = $json.parse({ t: text });
+    $m257$match: {
+      if ($m257.tag === "None") {
         return { tag: "Ok", value: fail_line({ console: console, what: dir, why: "fixtures.json is not JSON" }) };
-        break $m256$match;
+        break $m257$match;
       }
-      if ($m256.tag === "Some") {
-        const value = $m256.value;
+      if ($m257.tag === "Some") {
+        const value = $m257.value;
         m = value;
-        break $m256$match;
+        break $m257$match;
       }
       $rt.unreachable();
     }
+    let seen = $std_map.dict({  });
     if (!$json.has({ j: m, key: "sections" })) {
-      return run_section({ files: files, console: console, process: process, env: env, opts: opts, dir: dir, m: m });
+      const [$r259, seen$66] = run_section({ files: files, console: console, process: process, env: env, opts: opts, dir: dir, m: m, seen: seen });
+      seen = seen$66;
+      return $r259;
     }
     let tally = nothing({  });
     for (const section of $json.list_at({ j: m, key: "sections" })) {
-      tally = add({ a: tally, b: $rt.unwrap(run_section({ files: files, console: console, process: process, env: env, opts: opts, dir: dir, m: section })) });
+      const [$r260, seen$67] = run_section({ files: files, console: console, process: process, env: env, opts: opts, dir: dir, m: section, seen: seen });
+      seen = seen$67;
+      tally = add({ a: tally, b: $rt.unwrap($r260) });
     }
+    tally = add({ a: tally, b: coverage_of({ console: console, what: dir, m: m, seen: seen }) });
     return { tag: "Ok", value: tally };
   } catch ($e) {
     if ($e instanceof $rt.EarlyReturn) return $e.value;
     throw $e;
   }
+}
+
+export function coverage_of({ console, what, m, seen }) {
+  const prefixes = $json.texts_at({ j: m, key: "covers" });
+  if ($std_list.len({ xs: prefixes }) === 0) {
+    return nothing({  });
+  }
+  const except = $json.texts_at({ j: m, key: "except" });
+  let missing = $std_list.builder({  });
+  for (const code of $codes.all_codes({  })) {
+    if (covered_by({ code: code, prefixes: prefixes }) && !$std_list.contains({ xs: except, x: code }) && !$std_map.contains({ d: seen, key: code })) {
+      const [, missing$68] = $std_list.push({ b: missing, x: code });
+      missing = missing$68;
+    }
+  }
+  const missing_list = $std_list.finish({ b: missing });
+  if ($std_list.len({ xs: missing_list }) > 0) {
+    return fail_line({ console: console, what: what, why: "codes without a fixture: " + $std_text.join({ parts: missing_list, sep: " " }) });
+  }
+  return ok_line({ console: console, what: what + " covers " + $std_text.join({ parts: prefixes, sep: " " }) });
 }
 
 export function parse_args({ argv }) {
@@ -2539,8 +2550,8 @@ export function parse_args({ argv }) {
         if (a === "--update") {
           update = true;
         } else {
-          const [, dirs$66] = $std_list.push({ b: dirs, x: a });
-          dirs = dirs$66;
+          const [, dirs$69] = $std_list.push({ b: dirs, x: a });
+          dirs = dirs$69;
         }
       }
     }
@@ -2564,44 +2575,44 @@ export function main({ args, files, console, process, env, clock }) {
       runtime_opt = $std_io.get_env({ env: env, name: "ONUS_RUNTIME" });
     }
     let cli = a.cli;
-    const $m269 = cli;
-    $m269$match: {
-      if ($m269.tag === "Some") {
-        const value = $m269.value;
+    const $m272 = cli;
+    $m272$match: {
+      if ($m272.tag === "Some") {
+        const value = $m272.value;
         cli = { tag: "Some", value: absolute({ root: a.root, p: value }) };
-        break $m269$match;
+        break $m272$match;
       }
-      if ($m269.tag === "None") {
+      if ($m272.tag === "None") {
         skip({  });
-        break $m269$match;
+        break $m272$match;
       }
       $rt.unreachable();
     }
     let native_cli = a.native_cli;
-    const $m271 = native_cli;
-    $m271$match: {
-      if ($m271.tag === "Some") {
-        const value = $m271.value;
+    const $m274 = native_cli;
+    $m274$match: {
+      if ($m274.tag === "Some") {
+        const value = $m274.value;
         native_cli = { tag: "Some", value: absolute({ root: a.root, p: value }) };
-        break $m271$match;
+        break $m274$match;
       }
-      if ($m271.tag === "None") {
+      if ($m274.tag === "None") {
         skip({  });
-        break $m271$match;
+        break $m274$match;
       }
       $rt.unreachable();
     }
     let opts = { stdlib: stdlib, runtime: "./onus-runtime/index.js", bundled: true, runtime_dir: { tag: "None" }, out_root: absolute({ root: a.root, p: a.out_root }), update: a.update, root: a.root, cli: cli, native_cli: native_cli, now: $assumptions.iso_of_millis({ ms: $std_io.time({ clock: clock }) }) };
-    const $m275 = runtime_opt;
-    $m275$match: {
-      if ($m275.tag === "Some") {
-        const value = $m275.value;
+    const $m278 = runtime_opt;
+    $m278$match: {
+      if ($m278.tag === "Some") {
+        const value = $m278.value;
         opts = { ...opts, runtime: value, bundled: false, runtime_dir: { tag: "Some", value: dir_of({ path: dir_of({ path: value }) }) + "/native" } };
-        break $m275$match;
+        break $m278$match;
       }
-      if ($m275.tag === "None") {
+      if ($m278.tag === "None") {
         skip({  });
-        break $m275$match;
+        break $m278$match;
       }
       $rt.unreachable();
     }

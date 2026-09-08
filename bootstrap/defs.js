@@ -4,12 +4,12 @@ import * as $std_list from "./std/list.js";
 import * as $std_text from "./std/text.js";
 import * as $std_map from "./std/map.js";
 
-const $ob1 = { kind: "overflow", text: "file * 8 within Int", at: "self/defs.onus:247:12", def: "node_key" };
-const $ob2 = { kind: "overflow", text: "file * 8 + tag within Int", at: "self/defs.onus:247:12", def: "node_key" };
-const $ob3 = { kind: "overflow", text: "(file * 8 + tag) * max_span within Int", at: "self/defs.onus:247:11", def: "node_key" };
-const $ob4 = { kind: "overflow", text: "(file * 8 + tag) * max_span + span.start within Int", at: "self/defs.onus:247:11", def: "node_key" };
-const $ob5 = { kind: "overflow", text: "((file * 8 + tag) * max_span + span.start) * max_span within Int", at: "self/defs.onus:247:10", def: "node_key" };
-const $ob6 = { kind: "overflow", text: "((file * 8 + tag) * max_span + span.start) * max_span + span.end within Int", at: "self/defs.onus:247:10", def: "node_key" };
+const $ob1 = { kind: "overflow", text: "file * 8 within Int", at: "self/defs.onus:249:12", def: "node_key" };
+const $ob2 = { kind: "overflow", text: "file * 8 + tag within Int", at: "self/defs.onus:249:12", def: "node_key" };
+const $ob3 = { kind: "overflow", text: "(file * 8 + tag) * max_span within Int", at: "self/defs.onus:249:11", def: "node_key" };
+const $ob4 = { kind: "overflow", text: "(file * 8 + tag) * max_span + span.start within Int", at: "self/defs.onus:249:11", def: "node_key" };
+const $ob5 = { kind: "overflow", text: "((file * 8 + tag) * max_span + span.start) * max_span within Int", at: "self/defs.onus:249:10", def: "node_key" };
+const $ob6 = { kind: "overflow", text: "((file * 8 + tag) * max_span + span.start) * max_span + span.end within Int", at: "self/defs.onus:249:10", def: "node_key" };
 export function kind_text({ k }) {
   const $m1 = k;
   $m1$match: {
@@ -173,5 +173,22 @@ export const tag_misc = 6;
 
 export function node_key({ file, tag, span }) {
   return $rt.int.add($rt.int.mul($rt.int.add($rt.int.mul($rt.int.add($rt.int.mul(file, 8, $ob1), tag, $ob2), max_span, $ob3), span.start, $ob4), max_span, $ob5), span.end, $ob6);
+}
+
+export function key_file({ key }) {
+  return Math.trunc(Math.trunc(Math.trunc(key / max_span) / max_span) / 8);
+}
+
+export function key_tag({ key }) {
+  return Math.trunc(Math.trunc(key / max_span) / max_span) % 8;
+}
+
+export function key_span({ key }) {
+  const end = key % max_span;
+  const start = Math.trunc(key / max_span) % max_span;
+  if (start >= 0 && end >= start) {
+    return { start: start, end: end };
+  }
+  return { start: 0, end: 0 };
 }
 

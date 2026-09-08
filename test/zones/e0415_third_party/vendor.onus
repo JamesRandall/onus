@@ -1,0 +1,10 @@
+module vendor
+
+pub claim Settled "The vendor settles every charge."
+
+pub hardened fn charge(pence: Int where it >= 0) -> Int may alloc
+  claims Settled
+{
+  assume Settled "The vendor's contract §4."
+  return pence
+}

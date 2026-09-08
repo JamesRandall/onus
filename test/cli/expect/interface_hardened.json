@@ -1,0 +1,243 @@
+{
+  "module": "ok_hardened_items",
+  "zone": "draft",
+  "conditional_on": [],
+  "hash": "b3:a69f754bff628901a7e7199153551563acd047c7e3cff66deac178d5c3f41605",
+  "imports": [],
+  "items": [
+    {
+      "effects": [],
+      "claims": [],
+      "contracts": [],
+      "examples": [],
+      "properties": [],
+      "assumes": [],
+      "recovers": [],
+      "obligations": {
+        "proved": 0,
+        "checked": 0,
+        "assumed": 0,
+        "failed": 0
+      },
+      "at": {
+        "file": "ok_hardened_items.onus",
+        "span": [
+          [
+            5,
+            1
+          ],
+          [
+            8,
+            2
+          ]
+        ]
+      },
+      "kind": "record",
+      "name": "Receipt",
+      "visibility": "pub",
+      "hardened": true,
+      "zone": "hardened",
+      "signature": "-- A draft module exposing a boundary (spec §21.1): `hardened` marks the\n-- public items a hardened or critical module may depend on.\npub hardened record Receipt {\n  id: Text\n  amount_pence: Int where it >= 0\n}"
+    },
+    {
+      "effects": [
+        "alloc"
+      ],
+      "claims": [],
+      "contracts": [
+        {
+          "kind": "ensures",
+          "text": "result.amount_pence == amount_pence",
+          "pinned": false,
+          "conditional": false,
+          "status": "proved",
+          "sites": 1
+        }
+      ],
+      "examples": [],
+      "properties": [],
+      "assumes": [],
+      "recovers": [],
+      "obligations": {
+        "proved": 2,
+        "checked": 1,
+        "assumed": 0,
+        "failed": 0
+      },
+      "at": {
+        "file": "ok_hardened_items.onus",
+        "span": [
+          [
+            10,
+            1
+          ],
+          [
+            14,
+            2
+          ]
+        ]
+      },
+      "kind": "fn",
+      "name": "charge",
+      "visibility": "pub",
+      "hardened": true,
+      "zone": "hardened",
+      "signature": "fn charge(amount_pence: Int where it >= 0) -> Receipt may alloc"
+    },
+    {
+      "effects": [],
+      "claims": [],
+      "contracts": [],
+      "examples": [],
+      "properties": [],
+      "assumes": [],
+      "recovers": [],
+      "obligations": {
+        "proved": 0,
+        "checked": 0,
+        "assumed": 0,
+        "failed": 0
+      },
+      "at": {
+        "file": "ok_hardened_items.onus",
+        "span": [
+          [
+            16,
+            1
+          ],
+          [
+            18,
+            2
+          ]
+        ]
+      },
+      "kind": "record",
+      "name": "Token",
+      "visibility": "pub",
+      "hardened": true,
+      "zone": "hardened",
+      "signature": "pub hardened sealed record Token {\n  value: Text\n}"
+    },
+    {
+      "effects": [],
+      "claims": [],
+      "contracts": [],
+      "examples": [],
+      "properties": [],
+      "assumes": [],
+      "recovers": [],
+      "obligations": {
+        "proved": 0,
+        "checked": 0,
+        "assumed": 0,
+        "failed": 0
+      },
+      "at": {
+        "file": "ok_hardened_items.onus",
+        "span": [
+          [
+            20,
+            1
+          ],
+          [
+            22,
+            2
+          ]
+        ]
+      },
+      "kind": "fn",
+      "name": "refund",
+      "visibility": "pub",
+      "hardened": false,
+      "zone": "draft",
+      "signature": "fn refund(r: Receipt) -> Int"
+    }
+  ],
+  "assumes": [],
+  "recovers": [],
+  "sealed_types": [
+    "Token"
+  ],
+  "test_module": false,
+  "obligations": {
+    "proved": 2,
+    "checked": 1,
+    "assumed": 0,
+    "failed": 0
+  },
+  "ledger": [
+    {
+      "kind": "representation",
+      "text": "amount_pence within ±2^53 - 1",
+      "def": "charge",
+      "status": "checked",
+      "by": "z3: not provable",
+      "pinned": false,
+      "at": {
+        "file": "ok_hardened_items.onus",
+        "span": [
+          [
+            10,
+            24
+          ],
+          [
+            10,
+            55
+          ]
+        ]
+      }
+    },
+    {
+      "kind": "ensures",
+      "text": "result.amount_pence == amount_pence",
+      "def": "charge",
+      "status": "proved",
+      "by": "z3",
+      "pinned": false,
+      "at": {
+        "file": "ok_hardened_items.onus",
+        "span": [
+          [
+            13,
+            3
+          ],
+          [
+            13,
+            58
+          ]
+        ]
+      }
+    },
+    {
+      "kind": "refinement",
+      "text": "it >= 0",
+      "def": "charge",
+      "status": "proved",
+      "by": "z3",
+      "pinned": false,
+      "at": {
+        "file": "ok_hardened_items.onus",
+        "span": [
+          [
+            13,
+            44
+          ],
+          [
+            13,
+            56
+          ]
+        ]
+      }
+    }
+  ],
+  "obligation_coverage": {
+    "proved": 2,
+    "checked": 0,
+    "checked_exercised": 0,
+    "assumptions": 0,
+    "assumptions_verifiable": 0,
+    "assumptions_verified": 0,
+    "mutations_detected": 0,
+    "mutations_surviving": 0
+  }
+}

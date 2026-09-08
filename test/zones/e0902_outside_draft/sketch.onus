@@ -1,0 +1,6 @@
+module sketch
+
+-- A draft module, but the item is private: nothing outside can depend on it (E0902).
+hardened fn b() -> Int {
+  return 2
+}

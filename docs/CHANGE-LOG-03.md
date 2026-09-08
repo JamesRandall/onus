@@ -4,7 +4,7 @@ Follows `CHANGE-LOG-02.md`. Apply after it. Adds zones — per-module levels of 
 
 ---
 
-## 2026-09-05 — Trust zones **(to apply)**
+## 2026-09-05 — Trust zones **(applied; 2026-09-07, docs/CHANGES.md items 201–203: the `hardened` modifier, then the manifest, the zones pass and the reports, then the zone commands, the promotions ledger, the loop and the review page; `onus zone promote` runs the audit's static half, and its regeneration half through the loop when given a model, item 204)**
 
 **Principle.** Trust in Onus is per artefact: interfaces are the human's, bodies are the model's, and the ledger records what each obligation rests on. A project is not uniformly trusted at any moment in its life — a hardened core coexists with a subsystem being prototyped against it — so strictness is declared per module, and the only rule that matters is that nothing at a higher level of trust ever rests on a claim from a lower one.
 
@@ -95,7 +95,7 @@ visibility  = [ "pub" ] [ "hardened" ] [ "sealed" ] ;
 
 **CLI.** `onus zone promote`, `onus zone demote`, `onus zone show`. Promote depends on the loop for the regeneration audit; before the loop exists it runs the audit's static half only (policies) and records that the body-regeneration half was skipped.
 
-**Milestones.** Add **M14 — Zones.** Manifest, dependency rule, policy bundles, `hardened` modifier, zone fields in reports, `onus zone` commands (static half). Accept: the checkout example split into `app.core.*` critical, `app.reporting` hardened and a new `app.payments` draft module with one `hardened` item that `app.core.checkout` depends on; a dependency on a non-hardened draft item fails `E0900`; demoting `app.reporting` marks the reporting path conditional.
+**Milestones.** Add **M16 — Zones** (M14 is the loop and M15 the compiler in Onus in the implementation spec; edited 2026-09-07). Manifest, dependency rule, policy bundles, `hardened` modifier, zone fields in reports, `onus zone` commands (static half). Accept: the checkout example split into `app.core.*` critical, `app.reporting` hardened and a new `app.payments` draft module with one `hardened` item that `app.core.checkout` depends on; a dependency on a non-hardened draft item fails `E0900`; demoting `app.reporting` marks the reporting path conditional.
 
 Add to **M10** (review tool): zones as regions; promotion history.
 

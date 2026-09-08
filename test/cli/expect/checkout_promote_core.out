@@ -1,0 +1,10 @@
+./checkout.onus:26:8: E0903 public function of a critical module on no path
+  in recent_orders
+  `checkout.recent_orders` is public in `checkout`, a `critical` module, and on no `path` (§21)
+./checkout.onus:44:3: E0416 assumption not verified on path
+  in checkout
+  `checkout.load_basket` assumes `Idempotent` with no `verify` block; a `critical` path requires one (§21.2, `verified_assumptions_only`)
+./checkout.onus:61:3: E0416 assumption not verified on path
+  in checkout
+  `checkout.record_order` assumes `Idempotent` with no `verify` block; a `critical` path requires one (§21.2, `verified_assumptions_only`)
+promotion refused: `checkout` does not meet `critical` (§21.2)

@@ -44,6 +44,7 @@ pub const keywords: List[Text] = [
   "import",
   "test",
   "pub",
+  "hardened",
   "sealed",
   "fn",
   "const",

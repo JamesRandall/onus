@@ -20,5 +20,5 @@ if [ -n "${ONUS_NATIVE_CLI:-}" ]; then set -- --native-cli "$ONUS_NATIVE_CLI" "$
 tests=test
 exec node "$runner" \
   "$tests/syntax" "$tests/roundtrip" "$tests/checker" "$tests/paths" "$tests/verify" \
-  "$tests/examples" "$tests/codegen" "$tests/stdlib" "$tests/native" "$tests/next" "$tests/sql" "$tests/cli" \
+  "$tests/examples" "$tests/codegen" "$tests/stdlib" "$tests/native" "$tests/next" "$tests/sql" "$tests/cli" "$tests/zones" \
   --root "$root" --cli "$cli" --stdlib packages/stdlib --out .onus-tmp/fixtures "$@"

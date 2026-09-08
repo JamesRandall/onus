@@ -1,0 +1,10 @@
+[
+  {
+    "module": "svc",
+    "from": "hardened",
+    "to": "critical",
+    "at": "<at>",
+    "kind": "promotion",
+    "audit": "policies passed; mutations: 0 detected, 0 surviving; regeneration passed in 1 iteration(s)"
+  }
+]

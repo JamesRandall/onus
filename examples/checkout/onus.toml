@@ -1,0 +1,8 @@
+[zones]
+"checkout" = "hardened"
+"app.*" = "hardened"
+"vendor.*" = "draft"
+default = "draft"
+
+[zones.exceptions]
+"checkout" = { third_party_assumes = ["vendor.payments.charge"] }

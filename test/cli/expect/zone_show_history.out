@@ -1,0 +1,5 @@
+[zones]
+"core.*" = "critical"
+"svc" = "critical"
+default = "draft"
+promotion svc: hardened -> critical at <at> (policies passed; mutations: 0 detected, 0 surviving; regeneration skipped)

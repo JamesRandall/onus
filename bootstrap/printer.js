@@ -9,10 +9,10 @@ import * as $std_float from "./std/float.js";
 import * as $std_int from "./std/int.js";
 import * as $parser from "./parser.js";
 
-const $ob1 = { kind: "overflow", text: "i + 1 within Int", at: "self/printer.onus:513:11", def: "item_doc" };
-const $ob2 = { kind: "overflow", text: "i + 1 within Int", at: "self/printer.onus:550:11", def: "item_doc" };
-const $ob3 = { kind: "overflow", text: "p + 1 within Int", at: "self/printer.onus:1457:18", def: "expr_doc" };
-const $ob4 = { kind: "overflow", text: "p + 1 within Int", at: "self/printer.onus:1463:83", def: "expr_doc" };
+const $ob1 = { kind: "overflow", text: "i + 1 within Int", at: "self/printer.onus:516:11", def: "item_doc" };
+const $ob2 = { kind: "overflow", text: "i + 1 within Int", at: "self/printer.onus:553:11", def: "item_doc" };
+const $ob3 = { kind: "overflow", text: "p + 1 within Int", at: "self/printer.onus:1460:18", def: "expr_doc" };
+const $ob4 = { kind: "overflow", text: "p + 1 within Int", at: "self/printer.onus:1466:83", def: "expr_doc" };
 export const line_width = 100;
 
 export function print_module({ m, tab }) {
@@ -129,6 +129,9 @@ export function vis({ v }) {
   let out = "";
   if (v.is_pub) {
     out = out + "pub ";
+  }
+  if (v.is_hardened) {
+    out = out + "hardened ";
   }
   if (v.is_sealed) {
     out = out + "sealed ";

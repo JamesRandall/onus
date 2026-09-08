@@ -2332,6 +2332,274 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     difference. Fixed point reached from `bootstrap/`, native stage
     agrees, the suite under stage2 green; promoted.
 
+201. **The `hardened` modifier (M16, first change; spec §2.3, §21;
+    docs/CHANGE-LOG-03.md).** Spec §21 "Zones" is inserted after §20 as
+    the change log wrote it, and the grammar's visibility becomes
+    `[ "pub" ] [ "hardened" ] [ "sealed" ]` with `hardened` a reserved
+    word (the grammar document likewise). The compiler in Onus parses,
+    prints and carries it: `ast.Visibility.is_hardened`, `defs.Def`
+    `is_hardened` (from the declaration's visibility; `false` on every
+    synthetic definition), the keyword in `tokens`, the parser's
+    visibility and its legal-token lists, the printer (`pub hardened
+    sealed record`), so `onus fmt` and `onus interface` render it and
+    `onus next` offers it. Nothing checks it yet: `E0902` (the modifier
+    outside a `pub` item of a `draft` module) needs the manifest and is
+    item 202's, with the dependency rule, `E0900` and `E0901`. Under the
+    self-application rule `self/` does not use the modifier. Fixtures:
+    `test/roundtrip/36_hardened.onus` (a fn, a record and a sealed record
+    marked `hardened`, its own canonical form), `test/syntax/e0003_hardened_reserved.onus`
+    (`let hardened` is a syntax error), and the `cli` cases
+    `interface_hardened_text` (canonical text with the modifier) and
+    `interface_hardened_json`. The milestone is **M16 — Zones** in the
+    implementation spec (the change log said M14, which is the loop). The
+    acceptance of the change log names `app.core.*`, `app.reporting` and
+    `app.payments`; the worked examples of §18 keep their module names and
+    are zoned as they are (impl spec M16). Review artefacts under
+    `.onus/changes/201/`: the interface diffs are `ast.Visibility` and
+    `defs.Def` gaining `is_hardened` (breaking, as any record field is),
+    `resolve.add` taking it, and `tokens.keywords` gaining the word; the
+    ledger delta is empty in all twelve modules snapshotted (the parser's
+    1218 obligations, the printer's 92, the lexer's 311, unchanged). The
+    suite under stage2: 451 passed, 3 skipped; the `next` sweep's pinned
+    answers gain `hardened` at the eleven item positions. Fixed point
+    reached from `bootstrap/`, native stage agrees; promoted.
+
+202. **The manifest and the zones pass (M16; spec §21, impl spec §4 pass
+    12a; docs/CHANGE-LOG-03.md).** `self/toml.onus` reads the subset of
+    TOML the manifest uses (tables, quoted or bare keys, strings, one-line
+    arrays, inline tables; anything else is an error naming the line).
+    `self/zones.onus` is the pass: `onus.toml` at the project root gives
+    every module its zone (an exact rule, else the longest `prefix.*`
+    rule, else `default`, else `draft`; the standard library is
+    `critical`), and the pass checks the dependency rule over every
+    reference the resolver recorded — a node key decodes to its file and
+    span (`defs.key_file`, `key_span`), so the report lands on the use —
+    once per (module, definition), with the hardened items of draft
+    modules as the one exception (`E0900`); the modifier's placement, on
+    a public item of a draft module only (`E0902`); the hardened bundle,
+    a justification on every assumption (`E0905`); and the critical
+    bundle: every public function on a path (`E0903`), every checked
+    contract obligation exercised by the coverage ledger (`E0904`; the
+    overflow and representation obligations of arithmetic are exempt, a
+    narrowing recorded in §21.2), and on every path whose entry a
+    critical module holds, `recover` forbidden (`E0413`), third-party
+    assumptions forbidden unless the manifest's `[zones.exceptions]`
+    names them (`E0415`), and verification required (`E0416`, unless the
+    path declares the policy itself and pass 12 reported it). A manifest
+    that cannot be read is `E0906`. The pass runs after paths as pass 12
+    (`--to zones`, now the default of every command) and needs the files
+    capability for the manifest. The reports: the interface document
+    carries the module's `zone` and each item's `zone` and `hardened`
+    (a hardened item of a draft module is held to `hardened`); the path
+    report carries `zone`, `zones_crossed`, `draft_dependencies` and
+    `conditional` (always `false` until item 203). `Context` gains
+    `zones` and `zone_exceptions`. The fixture runner reads a
+    manifest-level `covers` across sections, since each zone fixture is
+    a project of its own. Fixtures under `test/zones/`: a zoned project
+    that checks (`ok_zoned`: critical `core.*`, hardened `svc` depending
+    on `core` and on the hardened `payments.charge` of a draft module),
+    one per diagnostic, and `ok_exception` (the third-party assumption
+    the manifest excepts). Every existing expectation is unchanged but
+    the interface and path documents, which gain the fields. Review
+    artefacts under `.onus/changes/202/`: the interface diffs are
+    `Context` gaining `project_root`, `zones` and `zone_exceptions`
+    (breaking, as a record field is), `defs` gaining `key_file`, `key_tag`
+    and `key_span` (its ledger 8 → 26: 13 proved, 13 checked, the decoders'
+    arithmetic), `interface` gaining `is_hardened` and `item_zone`,
+    `cli` gaining the pass name in `usage` and `passes`, and the runner's
+    `diagnostics_dir` and `run_section` taking the shared `seen` with
+    `coverage_of` added; the ledger delta is empty in every snapshotted
+    module; `toml` is new with 98 obligations (53 proved, 45 checked: the
+    scanner's index arithmetic) and `zones` with 24 (5 proved, 19 checked:
+    the representation and overflow obligations of key decoding, ranks
+    and the age in days). `onus test`, `test --assumptions`, `test
+    --mutate` and the loop's inner check stop at the paths pass, since the
+    coverage and verification ledgers the critical bundle reads are what
+    they write; `check`, `build`, `run`, `interface`, `path`, `review` and
+    `next` run to zones. The suite under stage2: 470 passed, 3 skipped;
+    the interface and path documents pinned by the `cli` cases gain the
+    fields, and three cases pin that `onus test` clears `E0904` and that
+    the path report of a critical entry says so. Fixed point reached from
+    `bootstrap/`, native stage agrees; promoted.
+
+203. **The zone commands, the promotions ledger and the zone-aware loop
+    and review page (M16, done; spec §21.3–§21.5; loop spec §1, §3,
+    §4.1, §5, §8; docs/CHANGE-LOG-03.md).** `onus zone show` prints the
+    manifest as the commands write it and the promotion history; `onus
+    zone promote <module> <zone>` writes the candidate manifest under
+    `.onus/zone-candidate/`, runs the pipeline over the module's source
+    with the candidate as the project's manifest, refuses on any
+    diagnostic (the target zone's policy bundle, §21.2, is what the zones
+    pass reports), and otherwise writes the manifest at the root, signed,
+    and appends the promotion record to `.onus/ledger/promotions.json`
+    (module, from, to, at, kind, audit); `onus zone demote <module>
+    <zone>` writes and records without checking. The audit is the static
+    half — "policies passed; regeneration skipped" — because the
+    regeneration half of loop spec §8 needs a model, and a second model
+    is not configurable in v0; it is deferred, not dropped. The signature
+    is the BLAKE3 of the `[zones]` and `[zones.exceptions]` tables as
+    `zones.canonical_text` serialises them (rules sorted by pattern,
+    `default` last, exceptions sorted); a manifest whose `signature` does
+    not match is `E0901`, and a manifest with no signature — written by
+    hand before the first command, as the worked examples' are — is
+    accepted (§21.3, a note). Demotion: the zones pass reads the
+    promotions ledger, and a dependency on a module whose latest record
+    is a demotion is not `E0900` but a conditional guarantee, recorded
+    per dependent module (`Context.conditional_on`) and reported: the
+    interface document's `conditional_on` and each ledger row's
+    `conditional`, the path report's `conditional` and `conditional_on`
+    over every reachable module (§21.3, §21.5). The review page draws the
+    zones of a path as regions around its nodes (draft regions dashed)
+    and lists the promotion history beside the ledger, from the review
+    data's `promotions`. The loop (`self/regen.onus`) reads the zone of
+    the target's module from the baseline: the context policy's default
+    is `scope` in `draft`, `module` in `hardened` and `none` in
+    `critical` when the task gives none (its `context_policy` is empty
+    until resolved, then the change records the resolved one); in
+    `draft` a model answer that changes the target's signature is
+    spliced, signature and body, and the change lists the item under
+    `loop_authored`; in `critical` a stall does not walk the ladder — it
+    would go to the frontier model, which is not configured, so the task
+    is blocked with that message — and a `widen_effects` proposal is
+    never emitted (loop spec §4.1); the change document carries `zone`.
+    The worked examples are zoned: `examples/checkout/onus.toml` makes
+    `checkout` and `app.*` hardened and `vendor.*` draft with the
+    exception for `vendor.payments.charge`, and `vendor/payments.onus`
+    marks `Client`, `Error`, `Receipt` and `charge` `hardened`;
+    `examples/reporting/onus.toml` makes `reporting` and `app.config`
+    hardened. The M16 acceptance is the `cli-zones` section of
+    `test/cli`: the checkout project is tested (coverage), verified
+    (`--assumptions`) and promoted module by module — `app.contracts` and
+    `app.auth` reach `critical` (the promotion check loads every source
+    under the root, since the paths that cover a module's functions are
+    declared wherever the project declares them), and `checkout` itself
+    is refused with `E0416`, because its two structural assumptions
+    (`load_basket`'s and `record_order`'s `Idempotent`) have no `verify`
+    block and `critical` admits no unverified assumption, and with
+    `E0903`, because `recent_orders` is public and on no path; the refusal is
+    pinned, `checkout` stays `hardened`, its path report names
+    `vendor.payments.charge` under `draft_dependencies` and crosses all
+    three zones, and the review page draws the regions. Reaching the
+    change log's "checkout critical" needs `verify` blocks on those two
+    assumptions, against a fake `sql.Db` in the example's environment
+    module, which is an edit to the worked example of §18.3 and is left
+    for its author to decide; a promotion of a module with a public
+    function on no path is refused with `E0903`; a signed manifest
+    edited by hand is `E0901`; demoting `app.config` under `reporting`
+    marks the reporting path conditional, and demoting `core.math`
+    under `svc` in the zoned fixture project marks `svc`'s interface
+    conditional with no `E0900`. Found by the zoned example and fixed: item 201 propagated the `hardened` modifier to the definitions of functions and records but not to claims, capabilities, unions, interfaces, constants and type aliases (`resolve` passed `false` for them), so `checkout`'s use of the hardened `vendor.payments.Client` was `E0900`; every item definition now carries its declaration's modifier. A module that carries `hardened` items cannot itself be promoted — the modifier is `E0902` outside `draft` — which is the rule working as written: the boundary is hardened first, the module later, once its modifiers are dropped. Fixtures: `test/zones/e0901_edited_manifest`, and `svc` in `test/zones/ok_zoned` gains a path so it can be promoted to `critical`.
+    Review artefacts under `.onus/changes/203/`: the interface diffs
+    are `cli` gaining `zone_command`, `project_sources` and
+    `manifest_or_empty` with the usage text; `ledger` gaining the
+    promotions reader and writer, `promotion_json` and `demoted_modules`,
+    with `Ledger` carrying `promotions`; `zones` gaining the signature,
+    the canonical text, `write_manifest`, `set_zone` and the conditional
+    helpers, with `Manifest` carrying `signature`; `review` gaining the
+    regions, the promotions view and its data; `regen` gaining
+    `target_zone` and `default_policy`, with `Run` carrying `zone` and
+    `loop_authored`; `tables` gaining `PromotionRecord`; `Context` gaining
+    `promotions`, `demoted` and `conditional_on`. The ledger delta: `cli`
+    69 → 83 (10 proved, 4 checked added: the command's indices and its
+    budget), `review` 123 → 137 (14 checked: the regions' coordinates),
+    `zones` 24 → 28 (2 proved, 2 checked), the rest unchanged, nothing
+    regressed. The suite under stage2: 492 passed, 3 skipped. Fixed
+    point reached from `bootstrap/`, native stage agrees; promoted.
+
+204. **The regeneration half of `onus zone promote`, as an instrument (M16;
+    spec §21.3, loop spec §8).** With `--model <spec>` (the loop's specs:
+    `claude-code`, `anthropic`, `openrouter[:<model>]`,
+    `scripted:<file>`), `promote` runs, after the static check passes, a
+    `regenerate` task over the module through `regen.run_task`: the
+    module's bodies are discarded and rebuilt from the interfaces alone
+    (`context_policy: none`) and the change is written under
+    `.onus/changes/promote_<module>/`. Decided 2026-09-07 with the spec
+    author, and recorded in §21.3: the audit does not gate the promotion.
+    What promotion rests on is what the compiler can check — the zone's
+    policy bundle, verified assumptions, exercised obligations — and the
+    promotion record carries, for the reviewer, the module's contract
+    mutations from the ledger ("mutations: d detected, s surviving") and
+    the regeneration's outcome: "passed in N iteration(s)", "N finding(s)"
+    (each printed), why it did not conclude (blocked, with the cause), or
+    "skipped" without a model. The reasoning: regeneration measures how
+    much of a module's meaning is in its interface; our own compiler,
+    whose specification is its fixture suite, would read low on it
+    correctly, as would any module specified by its output, so a reading
+    is a result and not a bar, and mutation testing is the cheaper twin of
+    the same question. Fixtures: `zone_promote_audit` (the scripted model
+    answers `svc.bill` correctly: "regeneration passed in 1 iteration(s)")
+    and `zone_promote_audit_findings` (a wrong answer: the run is blocked
+    as a stall, the promotion still succeeds and the record says so).
+    Found by the first of them: the loop took the target's zone from the
+    baseline's context, whose check stops at the paths pass, so every
+    module read as `draft`; it now reads the manifest itself
+    (`zones.read_manifest` on the project root). The change document
+    carries `zone` and the resolved `context_policy` (`none` for a
+    regeneration), which the case pins. Found by the first real readings
+    (docs/BENCHMARK.md, "The regeneration audit"): the audit filed an
+    `E0115` left by a body the model never produced as
+    `obligation_regressed`, "the interfaces were sufficient to check the
+    old body but not to reconstruct it", which is not what happened; such
+    a diagnostic is now the finding `not_reconstructed`, naming the
+    function no usable body came back for, so a reviewer can tell the
+    model's silence from the interfaces' insufficiency.
+    Review artefacts under `.onus/changes/204/`: the interface diffs are
+    `cli` gaining `audited_regeneration`, `audit_of_change` and
+    `mutation_summary` with `zone_command` changed, and `regen` gaining
+    `manifest_or_empty` with `target_zone` taking the files capability;
+    the ledger delta is `cli` 83 → 90 (1 proved, 6 checked added: the
+    iteration and mutation counts), `regen` unchanged, nothing regressed.
+    The suite under stage2: 494 passed, 3 skipped. Fixed point reached
+    from `bootstrap/`, native stage agrees; promoted.
+
+205. **The working tree is the loop's state during a run (loop spec §9).**
+    The first honest-looking reading of the regeneration audit was not
+    one: Claude Code, run as a subprocess in a directory where the
+    original `mandelbrot.onus` still lay on disk, returned the three
+    bodies byte-identical to the originals, variable names included
+    (docs/BENCHMARK.md). The loop had elided the bodies only in memory.
+    Now `ask` writes the working texts to their files before every model
+    call — a model with a file system reads exactly what the prompt
+    shows, elided bodies included — and `conclude` writes the texts the
+    run started from back whenever it does not open a change (blocked,
+    error, or `--no-write`), which is what "restoring the working tree
+    when blocked" meant all along. The scripted-model cases pin that a
+    blocked run leaves the file as found and an opened change writes it.
+    It was not enough: with the elided tree on disk the subprocess read
+    the repository's own copy of the example instead (its `main` came
+    back with the viewport, the image size and the PGM header, which no
+    interface states), which item 206 answers by restricting the
+    subprocess's tools. Review artefacts under `.onus/changes/205/`: the
+    interface diff is `regen` gaining `write_working` and `restore_tree`;
+    the ledger delta is empty. The suite under stage2: 494 passed, 3
+    skipped. Fixed point reached from `bootstrap/`, native stage agrees;
+    promoted.
+
+206. **The subprocess model reads nothing but the prompt (loop spec §9).**
+    Item 205 was necessary and not sufficient: Claude Code as a
+    subprocess ran in the repository, where its read tools found the
+    example's original in `examples/`. Tried directly: in print mode
+    Claude Code refuses to read outside its working directory, and
+    `--disallowedTools` removes the tools altogether (`--tools ""` makes
+    it write tool calls as text instead). So `ClaudeCode` carries a
+    `sandbox`, `<root>/.onus/model-sandbox`, an empty directory
+    `model_from_spec` creates, and `generate` changes into it before
+    `exec claude` with `Read`, `Glob`, `Grep`, `Bash`, `Task`,
+    `WebFetch`, `WebSearch`, `Edit`, `Write` and `NotebookEdit`
+    disallowed; the prompt on stdin is all it has. The API models never
+    had a file system. With it the first honest reading was taken
+    (docs/BENCHMARK.md): Claude Code reconstructed mandelbrot green in two
+    answers, `render` the same computation refactored and `main` a
+    different program — an ASCII rendering to a text file where the
+    original writes an 800×600 PGM — with no finding, since nothing in
+    `main`'s interface states what it writes; loop spec §8's third
+    finding, "green but different", is the one to build next. Review
+    artefacts under `.onus/changes/206/`: the interface diff is
+    `regen.Model`'s `ClaudeCode` variant gaining `sandbox` (breaking);
+    the ledger delta is one index refinement proved more. The suite
+    under stage2: 494 passed, 3 skipped. Fixed point reached from
+    `bootstrap/`, native stage agrees; promoted.
+
 ### Deferred, not changed
 
 - Decided 2026-09-06, to apply in M15.5: generics compile natively by

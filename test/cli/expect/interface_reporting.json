@@ -1,5 +1,7 @@
 {
   "module": "reporting",
+  "zone": "hardened",
+  "conditional_on": [],
   "hash": "b3:42f573747d462115453bfdcd0b1ad6dec87d076b3230d33d46d1ca6e78765619",
   "imports": [
     "std.sql",
@@ -37,6 +39,8 @@
       "kind": "record",
       "name": "MonthlyTotal",
       "visibility": "private",
+      "hardened": false,
+      "zone": "hardened",
       "signature": "record MonthlyTotal {\n  month: Text\n  total_pence: Int where it >= 0\n}"
     },
     {
@@ -69,6 +73,8 @@
       "kind": "union",
       "name": "AppError",
       "visibility": "private",
+      "hardened": false,
+      "zone": "hardened",
       "signature": "union AppError =\n  | Config of detail: config.Error\n  | Storage of detail: sql.Error\n  | Io of detail: io.Error"
     },
     {
@@ -82,6 +88,7 @@
           "kind": "ensures",
           "text": "forall t: MonthlyTotal in result: t.total_pence >= 0",
           "pinned": false,
+          "conditional": false,
           "status": "proved",
           "sites": 1
         }
@@ -112,6 +119,8 @@
       "kind": "fn",
       "name": "monthly_totals",
       "visibility": "pub",
+      "hardened": false,
+      "zone": "hardened",
       "signature": "fn monthly_totals(\n  db: sql.Db[ReadOnly, schema: \"orders\"],\n  year: Int where 2000 <= it and it <= 2100\n) -> Result[List[MonthlyTotal], sql.Error] may sql.read, alloc"
     },
     {
@@ -150,6 +159,8 @@
       "kind": "fn",
       "name": "main",
       "visibility": "pub",
+      "hardened": false,
+      "zone": "hardened",
       "signature": "fn main(\n  args: List[Text],\n  env: io.Env,\n  files: io.Files,\n  net: io.Net\n) -> Result[Unit, AppError] may io.env, io.file, io.net, sql.read, alloc"
     },
     {
@@ -182,6 +193,8 @@
       "kind": "path",
       "name": "monthly_report",
       "visibility": "private",
+      "hardened": false,
+      "zone": "hardened",
       "signature": "path monthly_report\n  entry monthly_totals\n  effects <= { sql.read, alloc }\n  forbid { sql.write, io.net, io.file }"
     }
   ],

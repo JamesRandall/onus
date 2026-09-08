@@ -74,7 +74,7 @@ item        = fn_decl | type_alias | record_decl | union_decl | interface_decl
             | impl_decl | claim_decl | capability_decl | path_decl | policy_decl
             | example_decl | property_decl | const_decl ;
 
-visibility  = [ "pub" ] [ "sealed" ] ;
+visibility  = [ "pub" ] [ "hardened" ] [ "sealed" ] ;   (* changed: 2026-09-07, docs/CHANGE-LOG-03.md, docs/CHANGES.md item 201 — `hardened` marks a public item of a draft module a higher zone may depend on (§21.1); it is a reserved word *)
 
 fn_decl     = visibility [ "const" ] [ "intrinsic" ] "fn" NAME [ tparams ] "(" [ params ] ")" "->" type [ "may" effects ]   (* changed: M9, docs/CHANGES.md item 82 — `may` replaces `!` before an effect list, everywhere the grammar had it *)
               [ "claims" claim_list ] { contract } ( block | NL ) ;   (* changed: M1 newlines; M2 intrinsic §3.12: no body *)
@@ -734,7 +734,7 @@ Clauses (grammar in §2.3):
 }
 ```
 
-The report is the reviewer's primary artefact for a path. It has a human-readable rendering with the same content; the JSON is normative. <!-- changed: M8, docs/CHANGES.md item 79 — the v0 report also carries `effects.forbid`, `obligations.failed`, `ok`, and `permitted_by` is `"scope"`, `"except"` or null; `unresolvable_calls` entries are `{ at, reason }`; a capability's `assumes` list is empty until construction-site assumptions exist --> <!-- changed: M10, docs/CHANGES.md item 83 — `graph`, `gates`, `recovers` and `ledger` carry what the path view draws -->
+The report is the reviewer's primary artefact for a path. It has a human-readable rendering with the same content; the JSON is normative. <!-- changed: 2026-09-07, docs/CHANGE-LOG-03.md, docs/CHANGES.md items 202–203 — the report carries `zone` (the entry's), `zones_crossed`, `draft_dependencies` (the hardened items of draft modules it rests on) and `conditional` (§21.3, §21.5) --> <!-- changed: M8, docs/CHANGES.md item 79 — the v0 report also carries `effects.forbid`, `obligations.failed`, `ok`, and `permitted_by` is `"scope"`, `"except"` or null; `unresolvable_calls` entries are `{ at, reason }`; a capability's `assumes` list is empty until construction-site assumptions exist --> <!-- changed: M10, docs/CHANGES.md item 83 — `graph`, `gates`, `recovers` and `ledger` carry what the path view draws -->
 
 ---
 
@@ -824,7 +824,7 @@ Bodies are not in the interface. If an interface is insufficient to trust a modu
 }
 ```
 
-Every item carries its own obligation counts; the module totals are the sum. Diffing two interface documents is how the compiler enforces the compatibility rule below. <!-- changed: M10, docs/CHANGES.md items 84–85 — each item carries `at`; `onus interface --diff` produces the diff document, deciding compatibility textually in v0 -->
+Every item carries its own obligation counts; the module totals are the sum. Diffing two interface documents is how the compiler enforces the compatibility rule below. <!-- changed: M10, docs/CHANGES.md items 84–85 — each item carries `at`; `onus interface --diff` produces the diff document, deciding compatibility textually in v0 --> <!-- changed: 2026-09-07, docs/CHANGE-LOG-03.md, docs/CHANGES.md item 202 — the document carries the module's `zone`, and each item `zone` and `hardened` (§21.5) -->
 
 Visibility: items are private unless marked `pub`. Private items may have weaker contracts; public ones may not be weakened once published without a major version change (the compiler diffs interfaces and refuses a compatible-version bump that weakens a contract or widens an effect set).
 
@@ -1104,6 +1104,8 @@ path monthly_report
 
 ### 18.3 Checkout endpoint
 
+<!-- changed: 2026-09-07, docs/CHANGES.md item 203 — the example is zoned (§21): `checkout` and `app.*` are `hardened`, `vendor.*` is `draft`, and the items of `vendor.payments` the core uses (`Client`, `Error`, `Receipt`, `charge`) are marked `hardened`; the manifest excepts `vendor.payments.charge` from `no_third_party_assumes` so the core can be promoted to `critical` once its assumptions are verified and its checked obligations exercised -->
+
 <!-- changed: M1, the code below is examples/checkout/… in canonical form: named arguments, single-line literals, layout -->
 <!-- changed: M8, docs/CHANGES.md item 80 — `Idempotent` is declared in `app.contracts` (imported by checkout, app.auth and vendor.payments), `auth.require` claims it, and `load_basket` claims it with an `assume` that a select reads only; the path passes with three assumptions, of which exactly one is external -->
 
@@ -1301,3 +1303,76 @@ Line coverage is not reported and cannot be enabled. <!-- changed: 2026-09-05, d
 ---
 
 *End of v0.*
+
+---
+
+## 21. Zones
+
+<!-- changed: 2026-09-07, docs/CHANGE-LOG-03.md, docs/CHANGES.md items 201–203 — trust zones -->
+
+Every module belongs to exactly one zone. A zone is a level of strictness. There are three:
+
+| Zone | Meaning |
+|---|---|
+| `draft` | Being designed. The ledger is recorded but not authoritative. Interfaces may change freely, by human or model. Bodies may be human-edited. |
+| `hardened` | In service. Interfaces are the human's, bodies are the model's (loop spec §1). The ledger is authoritative. |
+| `critical` | In service and load-bearing. `hardened`, plus every public entry is on a `path`; no unverified assumptions; no `recover`; no `checked` obligation without an exercising `example` or `property`. |
+
+Zones are declared in the project manifest (21.4), not in modules, because a zone change is a decision about the project and its diff is what a reviewer approves.
+
+### 21.1 The dependency rule
+
+A module may depend on another module's interface only if that interface is at the same zone or higher. `draft` may depend on anything. `hardened` may depend on `hardened` and `critical`. `critical` may depend only on `critical`.
+
+One exception makes integration possible: a `draft` module may mark individual public items `hardened`. A hardened or critical module may depend on those items — and only those — from the draft module. A hardened item in a draft module is checked to the hardened standard: its contracts may not be changed by the loop, its obligations appear in the authoritative ledger, and its `assume` leaves are subject to the depending zone's policies. Its body remains draft.
+
+```
+-- in a draft module
+pub hardened fn charge(client: Client, req: ChargeRequest) -> Result[Receipt, Error] may io.net, alloc
+  ensures ...
+```
+
+This is the mechanism for building a new subsystem against a stable core: harden the boundary first, and the core is permitted to see only the boundary.
+
+Violations are `E0900 dependency crosses zone boundary`, naming both modules, the zones, and the item. <!-- changed: 2026-09-07, docs/CHANGES.md item 202 — the standard library is `critical`, so any zone may depend on it; a module in no manifest, or with no manifest at all, is `draft`; a manifest that cannot be read is `E0906 manifest unreadable` -->
+
+### 21.2 Zone policies
+
+Each zone applies a fixed bundle of the policies that already exist:
+
+- `draft`: none. `assume` unrestricted; `recover` unrestricted; `checked` unrestricted.
+- `hardened`: `no_loop_authored_claims` (the loop may not edit interfaces; loop spec §1 and §5); assumptions must have a justification string.
+- `critical`: `hardened` plus `verified_assumptions_only` (§20.3), `forbid { recover }` on every path, `checked_requires_example`, and `no_third_party_assumes` unless individually excepted in the manifest. <!-- changed: 2026-09-07, docs/CHANGES.md item 202 — the bundle's diagnostics: a public function of a critical module on no path is `E0903`; `checked_requires_example` is `E0904` over the obligations of contracts (`requires`, `ensures`, refinements, invariants, `decreases`, indices, laws and properties; the overflow and representation obligations of arithmetic, exercised by any execution, are exempt); a hardened module's assumption without a justification is `E0905`; `forbid { recover }` reports `E0413`, the policies `E0415` and `E0416`, each naming the zone -->
+
+A module may add policies beyond its zone's bundle. It may not remove any.
+
+### 21.3 Promotion and demotion
+
+`onus zone promote <module> <zone>` runs the regeneration audit (loop spec §8) on the module at the target zone's standard: bodies are regenerated from interfaces alone, and every finding becomes a proposal. Promotion succeeds only when the audit reports no findings and the zone's policies pass; the manifest change is opened for review like any other change. The audit result is stored in the ledger as the promotion record. <!-- changed: 2026-09-07, docs/CHANGES.md item 204 — promotion succeeds when the zone's policies pass; the audit is an instrument, not a gate: the regeneration's findings (or that it did not conclude, or was skipped) and the module's contract-mutation counts (§20.4) are recorded in the promotion record and shown by the review page, for the reviewer. Regeneration measures how much of a module's meaning is in its interface; a module that is specified by its output (a parser, a printer, an emitter, a query) reads low on it correctly, and that reading is the result, not a bar -->
+
+`onus zone demote <module> <zone>` is always permitted and always recorded. Demoting a module that others depend on does not break the build; it marks every dependent's guarantees that rest on the demoted module as *conditional* in the ledger and the path reports, until the module is promoted again.
+
+Zones only ever change through these commands. Editing the manifest directly is `E0901 manifest edited outside zone command`. <!-- changed: 2026-09-07, docs/CHANGES.md item 203 — the commands sign the manifest: `signature` at its root is the BLAKE3 of the `[zones]` and `[zones.exceptions]` tables as the compiler serialises them, and a manifest whose signature does not match is `E0901`; a manifest with no signature at all is accepted as the project's initial declaration, written by hand before the first command, and carries no promotion record; `onus zone promote --model <spec>` runs the regeneration audit through the loop and records its findings, and without `--model` the promotion record says the regeneration half was skipped (item 204) -->
+
+### 21.4 Manifest
+
+`onus.toml` at the repository root:
+
+```toml
+[zones]
+"app.core.*"      = "critical"
+"app.reporting"   = "hardened"
+"app.payments.*"  = "draft"
+default           = "draft"
+
+[zones.exceptions]
+"app.core.checkout" = { third_party_assumes = ["vendor.payments.charge"] }
+```
+
+Patterns match module names; the most specific match wins. `default` applies to modules not matched. A new module is `draft` unless the manifest says otherwise. <!-- changed: 2026-09-07, docs/CHANGES.md item 203 — the commands write the manifest in this form with a root `signature`, and record promotions and demotions in `.onus/ledger/promotions.json` (module, from, to, at, the audit's outcome) -->
+
+### 21.5 Reporting
+
+The interface document, path report and ledger carry the zone of every item. A path report additionally lists the zones it crosses and every hardened-item-in-draft-module it depends on. The review tool renders zones as regions, with draft regions visibly distinct, and the promotion history of each module.
+
+`hardened` as a visibility modifier is permitted only on `pub` items in `draft` modules; elsewhere it is `E0902 hardened modifier outside draft zone`. `hardened` is a reserved word.

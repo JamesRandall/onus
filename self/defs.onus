@@ -112,6 +112,8 @@ pub record Def {
   span: ast.Span
   is_pub: Bool
   is_sealed: Bool
+  -- Marked `hardened` (spec §21.1); meaningful on public items of draft modules.
+  is_hardened: Bool
   is_intrinsic: Bool
   -- Enclosing definition: a variant's union, a field's record or variant, an impl fn's impl.
   parent: Option[Int]
@@ -245,4 +247,22 @@ pub const tag_misc: Int = 6
 
 pub fn node_key(file: Int, tag: Int, span: ast.Span) -> Int {
   return ((file * 8 + tag) * max_span + span.start) * max_span + span.end
+}
+
+-- The file, tag and span a node key was built from (docs/CHANGES.md item 202).
+pub fn key_file(key: Int) -> Int {
+  return key / max_span / max_span / 8
+}
+
+pub fn key_tag(key: Int) -> Int {
+  return key / max_span / max_span % 8
+}
+
+pub fn key_span(key: Int) -> ast.Span may alloc {
+  let end: Int = key % max_span
+  let start: Int = key / max_span % max_span
+  if start >= 0 and end >= start {
+    return ast.Span { start: start, end: end }
+  }
+  return ast.Span { start: 0, end: 0 }
 }

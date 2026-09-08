@@ -11,6 +11,7 @@ import paths
 import interface
 import json
 import ledger
+import zones
 import loc
 
 -- Path reports (spec §9.1; `report/path.ts`). `path_report` is the normative
@@ -358,6 +359,30 @@ pub fn path_report(
     fields: [
       json.field(key: "path", value: json.text(t: context.get_def(ctx: ctx, id: a.def).name)),
       json.field(key: "entry", value: json.text(t: qualified(ctx: ctx, id: a.entry_fn))),
+      json.field(
+        key: "zone",
+        value: json.text(
+          t: zones.module_zone(ctx: ctx, mod: context.get_def(ctx: ctx, id: a.entry_fn).mod)
+        )
+      ),
+      json.field(
+        key: "zones_crossed",
+        value: json.texts(ts: zones.zones_crossed(ctx: ctx, reachable: a.reachable))
+      ),
+      json.field(
+        key: "draft_dependencies",
+        value: json.texts(ts: zones.draft_dependencies(ctx: ctx, reachable: a.reachable))
+      ),
+      json.field(
+        key: "conditional",
+        value: json.bool(
+          b: List.len(xs: zones.path_conditional(ctx: ctx, reachable: a.reachable)) > 0
+        )
+      ),
+      json.field(
+        key: "conditional_on",
+        value: json.texts(ts: zones.path_conditional(ctx: ctx, reachable: a.reachable))
+      ),
       json.field(key: "reachable", value: qualified_all(ctx: ctx, ids: a.reachable)),
       json.field(
         key: "effects",

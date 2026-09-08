@@ -4,6 +4,7 @@ import ast
 import context
 import tables
 import json
+import build
 import loc
 import obligations
 import defs
@@ -18,6 +19,8 @@ pub record Ledger {
   assumptions: Dict[Text, tables.VerificationRecord]
   coverage: Dict[Text, Int]
   mutations: List[tables.MutationRecord]
+  -- Promotions and demotions in order (§21.3), from `promotions.json`.
+  promotions: List[tables.PromotionRecord]
 }
 
 -- What counts as "in the module" or "on the path" for mutation records: a
@@ -154,8 +157,104 @@ pub fn read_ledger(files: io.Files, dir: Text) -> Ledger may io.file, alloc, mut
   return Ledger {
     assumptions: read_assumptions(files: files, path: dir ++ "/assumptions.json"),
     coverage: read_coverage(files: files, path: dir ++ "/coverage.json"),
-    mutations: read_mutations(files: files, path: dir ++ "/mutations.json")
+    mutations: read_mutations(files: files, path: dir ++ "/mutations.json"),
+    promotions: read_promotions(files: files, path: dir ++ "/promotions.json")
   }
+}
+
+fn read_promotions(
+  files: io.Files,
+  path: Text
+) -> List[tables.PromotionRecord] may io.file, alloc, mutate {
+  var out: Builder[tables.PromotionRecord] = List.builder()
+  match read_json(files: files, path: path) with
+  | None -> skip()
+  | Some(value) -> push_promotions(items: json.list_of(j: value), out: inout out)
+  return List.finish(b: out)
+}
+
+fn push_promotions(
+  items: List[json.Json],
+  out: inout Builder[tables.PromotionRecord]
+) -> Unit may alloc, mutate {
+  for j: json.Json in items {
+    match promotion_of(j: j) with
+    | Some(value) -> List.push(b: inout out, x: value)
+    | None -> skip()
+  }
+  return Unit
+}
+
+fn promotion_of(j: json.Json) -> Option[tables.PromotionRecord] may alloc {
+  if not (json.has(j: j, key: "module") and json.has(j: j, key: "from") and json.has(
+    j: j,
+    key: "to"
+  ) and json.has(j: j, key: "at") and json.has(j: j, key: "kind")) {
+    return None
+  }
+  return Some(
+    value: tables.PromotionRecord {
+      module: json.str_at(j: j, key: "module"),
+      from: json.str_at(j: j, key: "from"),
+      to: json.str_at(j: j, key: "to"),
+      at: json.str_at(j: j, key: "at"),
+      kind: json.str_at(j: j, key: "kind"),
+      audit: json.str_at(j: j, key: "audit")
+    }
+  )
+}
+
+pub fn promotion_json(r: tables.PromotionRecord) -> json.Json may alloc {
+  return json.JObject(
+    fields: [
+      json.field(key: "module", value: json.text(t: r.module)),
+      json.field(key: "from", value: json.text(t: r.from)),
+      json.field(key: "to", value: json.text(t: r.to)),
+      json.field(key: "at", value: json.text(t: r.at)),
+      json.field(key: "kind", value: json.text(t: r.kind)),
+      json.field(key: "audit", value: json.text(t: r.audit))
+    ]
+  )
+}
+
+-- Writes the promotions ledger under `dir`.
+pub fn write_promotions(
+  files: io.Files,
+  dir: Text,
+  records: List[tables.PromotionRecord]
+) -> Result[Unit, io.Error] may io.file, alloc, mutate {
+  var items: Builder[json.Json] = List.builder()
+  for r: tables.PromotionRecord in records {
+    List.push(b: inout items, x: promotion_json(r: r))
+  }
+  try io.mkdir(files: files, path: dir)
+  try build.write_file(
+    files: files,
+    path: dir ++ "/promotions.json",
+    text: json.pretty(j: json.JArray(items: List.finish(b: items))) ++ "\n"
+  )
+  return Ok(value: Unit)
+}
+
+-- The modules whose latest record is a demotion (§21.3): dependents' guarantees on them are conditional.
+pub fn demoted_modules(
+  records: List[tables.PromotionRecord]
+) -> Dict[Text, Bool] may alloc, mutate {
+  var out: Dict[Text, Bool] = Map.dict()
+  for r: tables.PromotionRecord in records {
+    Map.set(d: inout out, key: r.module, value: r.kind == "demotion")
+  }
+  var demoted: Dict[Text, Bool] = Map.dict()
+  for name: Text in Map.keys(d: out) {
+    match Map.find(d: out, key: name) with
+    | Some(value) -> {
+      if value {
+        Map.set(d: inout demoted, key: name, value: true)
+      }
+    }
+    | None -> skip()
+  }
+  return demoted
 }
 
 -- Whether the assumption under `key` has a passing verification record. The

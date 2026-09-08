@@ -158,6 +158,9 @@ fn vis(v: ast.Visibility) -> Text may alloc {
   if v.is_pub {
     out = out ++ "pub "
   }
+  if v.is_hardened {
+    out = out ++ "hardened "
+  }
   if v.is_sealed {
     out = out ++ "sealed "
   }

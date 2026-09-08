@@ -1,0 +1,4 @@
+[zones]
+"core" = "critical"
+"util" = "hardened"
+default = "draft"

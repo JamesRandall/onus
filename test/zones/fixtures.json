@@ -1,0 +1,140 @@
+{
+  "covers": [
+    "E090"
+  ],
+  "sections": [
+    {
+      "kind": "diagnostics",
+      "name": "ok_zoned",
+      "to": "zones",
+      "root": "ok_zoned",
+      "sources": [
+        "ok_zoned/svc.onus",
+        "ok_zoned/core/math.onus",
+        "ok_zoned/payments.onus"
+      ],
+      "budget": 2000
+    },
+    {
+      "kind": "diagnostics",
+      "name": "excepted_third_party",
+      "to": "zones",
+      "root": "excepted_third_party",
+      "sources": [
+        "excepted_third_party/core.onus"
+      ],
+      "budget": 2000
+    },
+    {
+      "kind": "diagnostics",
+      "name": "e0900_draft_item",
+      "to": "zones",
+      "root": "e0900_draft_item",
+      "sources": [
+        "e0900_draft_item/svc.onus"
+      ],
+      "budget": 2000
+    },
+    {
+      "kind": "diagnostics",
+      "name": "e0900_critical_on_hardened",
+      "to": "zones",
+      "root": "e0900_critical_on_hardened",
+      "sources": [
+        "e0900_critical_on_hardened/core.onus"
+      ],
+      "budget": 2000
+    },
+    {
+      "kind": "diagnostics",
+      "name": "e0902_outside_draft",
+      "to": "zones",
+      "root": "e0902_outside_draft",
+      "sources": [
+        "e0902_outside_draft/svc.onus",
+        "e0902_outside_draft/sketch.onus"
+      ],
+      "budget": 2000
+    },
+    {
+      "kind": "diagnostics",
+      "name": "e0903_off_path",
+      "to": "zones",
+      "root": "e0903_off_path",
+      "sources": [
+        "e0903_off_path/core.onus"
+      ],
+      "budget": 2000
+    },
+    {
+      "kind": "diagnostics",
+      "name": "e0904_unexercised",
+      "to": "zones",
+      "root": "e0904_unexercised",
+      "sources": [
+        "e0904_unexercised/core.onus"
+      ],
+      "budget": 2000
+    },
+    {
+      "kind": "diagnostics",
+      "name": "e0905_no_justification",
+      "to": "zones",
+      "root": "e0905_no_justification",
+      "sources": [
+        "e0905_no_justification/svc.onus"
+      ],
+      "budget": 2000
+    },
+    {
+      "kind": "diagnostics",
+      "name": "e0413_recover",
+      "to": "zones",
+      "root": "e0413_recover",
+      "sources": [
+        "e0413_recover/core.onus"
+      ],
+      "budget": 2000
+    },
+    {
+      "kind": "diagnostics",
+      "name": "e0415_third_party",
+      "to": "zones",
+      "root": "e0415_third_party",
+      "sources": [
+        "e0415_third_party/core.onus"
+      ],
+      "budget": 2000
+    },
+    {
+      "kind": "diagnostics",
+      "name": "e0416_unverified_critical",
+      "to": "zones",
+      "root": "e0416_unverified_critical",
+      "sources": [
+        "e0416_unverified_critical/core.onus"
+      ],
+      "budget": 2000
+    },
+    {
+      "kind": "diagnostics",
+      "name": "e0906_bad_manifest",
+      "to": "zones",
+      "root": "e0906_bad_manifest",
+      "sources": [
+        "e0906_bad_manifest/core.onus"
+      ],
+      "budget": 2000
+    },
+    {
+      "kind": "diagnostics",
+      "name": "e0901_edited_manifest",
+      "to": "zones",
+      "root": "e0901_edited_manifest",
+      "sources": [
+        "e0901_edited_manifest/core.onus"
+      ],
+      "budget": 2000
+    }
+  ]
+}

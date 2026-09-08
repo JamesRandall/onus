@@ -1,0 +1,17 @@
+module core
+
+fn risky(x: Int) -> Int may panic {
+  return x
+}
+
+pub fn safe(x: Int) -> Int {
+  let outcome: Result[Int, Panicked] = recover {
+    risky(x: x)
+  }
+  match outcome with
+  | Ok(value) -> return value
+  | Err(_) -> return 0
+}
+
+path guarded
+  entry safe

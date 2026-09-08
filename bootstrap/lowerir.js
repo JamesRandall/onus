@@ -140,23 +140,23 @@ const $ob120 = { kind: "overflow", text: "-1 within Int", at: "self/lowerir.onus
 const $ob121 = { kind: "overflow", text: "-1 within Int", at: "self/lowerir.onus:3209:10", def: "def_or" };
 const $ob122 = { kind: "overflow", text: "-1 within Int", at: "self/lowerir.onus:3210:11", def: "def_or" };
 const $ob123 = { kind: "overflow", text: "-1 within Int", at: "self/lowerir.onus:3211:10", def: "def_or" };
-const $ob124 = { kind: "overflow", text: "-1 within Int", at: "self/lowerir.onus:3217:12", def: "def_or" };
-const $ob125 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/lowerir.onus:3248:11", def: "short_circuit" };
-const $ob126 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/lowerir.onus:3262:35", def: "short_circuit" };
-const $ob127 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/lowerir.onus:3316:37", def: "implies_expr" };
-const $ob128 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/lowerir.onus:3318:38", def: "implies_expr" };
-const $ob129 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/lowerir.onus:3355:33", def: "binary" };
-const $ob130 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/lowerir.onus:3359:39", def: "binary" };
-const $ob131 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/lowerir.onus:3360:40", def: "binary" };
-const $ob132 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/lowerir.onus:3598:32", def: "generator" };
-const $ob133 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/lowerir.onus:3640:31", def: "base_generator" };
-const $ob134 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/lowerir.onus:3647:30", def: "base_generator" };
-const $ob135 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/lowerir.onus:3656:36", def: "base_generator" };
-const $ob136 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/lowerir.onus:3682:30", def: "gen_fields" };
-const $ob137 = { kind: "overflow", text: "-1 within Int", at: "self/lowerir.onus:3815:13", def: "site_or" };
-const $ob138 = { kind: "overflow", text: "-1 within Int", at: "self/lowerir.onus:3816:16", def: "site_or" };
-const $ob139 = { kind: "overflow", text: "-1 within Int", at: "self/lowerir.onus:3818:11", def: "site_or" };
-const $ob140 = { kind: "overflow", text: "-1 within Int", at: "self/lowerir.onus:3819:14", def: "site_or" };
+const $ob124 = { kind: "overflow", text: "-1 within Int", at: "self/lowerir.onus:3218:12", def: "def_or" };
+const $ob125 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/lowerir.onus:3249:11", def: "short_circuit" };
+const $ob126 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/lowerir.onus:3263:35", def: "short_circuit" };
+const $ob127 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/lowerir.onus:3317:37", def: "implies_expr" };
+const $ob128 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/lowerir.onus:3319:38", def: "implies_expr" };
+const $ob129 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/lowerir.onus:3356:33", def: "binary" };
+const $ob130 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/lowerir.onus:3360:39", def: "binary" };
+const $ob131 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/lowerir.onus:3361:40", def: "binary" };
+const $ob132 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/lowerir.onus:3599:32", def: "generator" };
+const $ob133 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/lowerir.onus:3641:31", def: "base_generator" };
+const $ob134 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/lowerir.onus:3648:30", def: "base_generator" };
+const $ob135 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/lowerir.onus:3657:36", def: "base_generator" };
+const $ob136 = { kind: "overflow", text: "fuel - 1 within Int", at: "self/lowerir.onus:3683:30", def: "gen_fields" };
+const $ob137 = { kind: "overflow", text: "-1 within Int", at: "self/lowerir.onus:3816:13", def: "site_or" };
+const $ob138 = { kind: "overflow", text: "-1 within Int", at: "self/lowerir.onus:3817:16", def: "site_or" };
+const $ob139 = { kind: "overflow", text: "-1 within Int", at: "self/lowerir.onus:3819:11", def: "site_or" };
+const $ob140 = { kind: "overflow", text: "-1 within Int", at: "self/lowerir.onus:3820:14", def: "site_or" };
 export const max_depth = 100000;
 
 export function skip($args) {
@@ -3745,7 +3745,7 @@ export function def_or({ o }) {
       break $m674$match;
     }
     if ($m674.tag === "None") {
-      return { id: $rt.int.neg(1, $ob120), kind: { tag: "Fn" }, name: "?", node: { tag: "NoNode" }, mod: $rt.int.neg(1, $ob121), file: $rt.int.neg(1, $ob122), key: $rt.int.neg(1, $ob123), span: { start: 0, end: 0 }, is_pub: false, is_sealed: false, is_intrinsic: false, parent: { tag: "None" }, frame: $rt.int.neg(1, $ob124), is_inout: false };
+      return { id: $rt.int.neg(1, $ob120), kind: { tag: "Fn" }, name: "?", node: { tag: "NoNode" }, mod: $rt.int.neg(1, $ob121), file: $rt.int.neg(1, $ob122), key: $rt.int.neg(1, $ob123), span: { start: 0, end: 0 }, is_pub: false, is_hardened: false, is_sealed: false, is_intrinsic: false, parent: { tag: "None" }, frame: $rt.int.neg(1, $ob124), is_inout: false };
       break $m674$match;
     }
     $rt.unreachable();

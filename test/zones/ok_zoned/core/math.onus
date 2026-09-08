@@ -1,0 +1,10 @@
+module core.math
+
+pub fn double(x: Int where it >= 0) -> Int
+  ensures result == 2 * x
+{
+  return 2 * x
+}
+
+path doubling
+  entry double

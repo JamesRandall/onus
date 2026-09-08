@@ -8,7 +8,7 @@
 
 The loop turns a **task** into a **change**: a set of Onus modules whose obligations are all proved or checked, opened for human review as an interface diff. It runs unattended. A human sees its output in the review tool, not its process.
 
-Its one discipline: **the loop edits bodies; it never edits claims.** Contracts, effects, claims, capabilities, paths, policies and `assume` leaves are the human's. If the loop cannot satisfy a contract, it stops and says so, with a proposal. It does not weaken the contract, widen an effect set, or insert an `assume` to get green. This is what makes its output trustworthy without reading it.
+Its one discipline: **the loop edits bodies; it never edits claims.** Contracts, effects, claims, capabilities, paths, policies and `assume` leaves are the human's. If the loop cannot satisfy a contract, it stops and says so, with a proposal. It does not weaken the contract, widen an effect set, or insert an `assume` to get green. This is what makes its output trustworthy without reading it. <!-- changed: 2026-09-07, docs/CHANGE-LOG-03.md, docs/CHANGES.md item 203 — this rule applies in the `hardened` and `critical` zones (language spec §21); in `draft` the loop may edit interfaces directly, proposals are unnecessary, and the ledger records the edits as loop-authored so the promotion audit can find them -->
 
 ---
 
@@ -51,6 +51,7 @@ The loop assembles the model's context from compiler output, not from source fil
    - `none` — bodies of other functions are never shown. Pure local reasoning.
    - `module` (default) — bodies of functions in the same module are shown as reference. This is how "like the other handlers" transfers without being stated.
    - `scope` — bodies of everything in scope.
+   The default follows the zone of the target's module (language spec §21): `draft` → `scope`, and the model may also see the conversation history for the module (design mode); `hardened` → `module`; `critical` → `none`. <!-- changed: 2026-09-07, docs/CHANGE-LOG-03.md, docs/CHANGES.md item 203 -->
 4. **Diagnostics** from the last check, as §13 JSON, filtered to the target and its callees. All of them, not the first.
 5. **The counterexample**, if any, rendered as concrete values against the contract text and the path condition that led there.
 6. **The standard library's** relevant interface entries, selected by type: if the target mentions `Grid`, `Grid`'s interface is present.
@@ -92,7 +93,7 @@ On stall, in order, one step per iteration:
 4. Try a different model or sampling temperature, if configured.
 5. Stop; blocked.
 
-Steps 3 and 4 are optional and off by default. <!-- changed: 2026-09-05, item 113 — v0 skips them; a model output that adds a helper is refused once and then out of scope -->
+Steps 3 and 4 are optional and off by default. <!-- changed: 2026-09-05, item 113 — v0 skips them; a model output that adds a helper is refused once and then out of scope --> In `critical`, escalation goes to the frontier model on the first stall, and `widen_effects` proposals are never emitted — an effect widening on a critical module is a human decision from the start. <!-- changed: 2026-09-07, docs/CHANGE-LOG-03.md, docs/CHANGES.md item 203 -->
 
 ### 4.2 Budgets
 
@@ -151,9 +152,9 @@ Checked obligations that are hit frequently in production, and never fail, are r
 
 - obligations that were green and now are not — the interfaces were sufficient to check but not to reconstruct; usually a missing example or invariant;
 - examples or properties that fail on the regenerated bodies — something the old body did that no claim required;
-- bodies that are green but differ in a way the review tool's diff can surface (different effects used, different callees). <!-- changed: 2026-09-05, item 115 — not reported in v0; the interface documents carry no call graph -->
+- bodies that are green but differ in a way the review tool's diff can surface (different effects used, different callees). <!-- changed: 2026-09-05, item 115 — not reported in v0; the interface documents carry no call graph --> <!-- 2026-09-07, docs/BENCHMARK.md: the first honest regeneration reconstructed mandelbrot's `main` as a different program with a green ledger; this finding is the one that matters and the next thing to build -->
 
-Each finding becomes a proposal. A module that survives regeneration with no findings has interfaces that fully describe it; that is the target state, and the review tool reports the fraction of modules that meet it.
+Each finding becomes a proposal. A module that survives regeneration with no findings has interfaces that fully describe it; that is the target state, and the review tool reports the fraction of modules that meet it. The audit is the promotion mechanism of language spec §21.3: `onus zone promote` runs it at the target zone's policy bundle, and its result is the promotion record. <!-- changed: 2026-09-07, docs/CHANGE-LOG-03.md, docs/CHANGES.md item 203 -->
 
 ---
 
@@ -164,6 +165,8 @@ Each finding becomes a proposal. A module that survives regeneration with no fin
 - Every model call is logged with the full context hash; a change's trace is sufficient to reproduce it given the same model.
 - If the compiler reports `E0999` (internal error), the loop stops and files it against the compiler, not against the task.
 
+
+The working tree is the loop's state during a run: the loop writes its working texts, elided bodies included, before every model call, so a model that can read files sees what the prompt shows and nothing more; when no change is opened the texts the run started from are written back. <!-- changed: 2026-09-07, docs/CHANGES.md item 205 --> A model run as a subprocess runs in an empty directory of its own with its file, shell, search and web tools disallowed; the prompt is all it has. <!-- changed: 2026-09-07, docs/CHANGES.md item 206 -->
 ---
 
 ## 10. Interfaces

@@ -13,6 +13,7 @@ import claimcheck
 import capabilities
 import verifier
 import paths
+import zones
 import obligations
 import json
 import loc
@@ -216,7 +217,10 @@ pub fn pass_index(name: Text) -> Int {
   if name == "paths" {
     return 11
   }
-  return 11
+  if name == "zones" {
+    return 12
+  }
+  return 12
 }
 
 fn def_text(d: Option[Text]) -> Text {
@@ -276,6 +280,9 @@ pub fn run_passes(
   }
   if to >= 11 and context.clean(ctx: ctx) {
     paths.paths_pass(ctx: inout ctx)
+  }
+  if to >= 12 and context.clean(ctx: ctx) {
+    zones.zones_pass(ctx: inout ctx, files: files)
   }
   return Unit
 }

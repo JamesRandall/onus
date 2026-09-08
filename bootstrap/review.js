@@ -8,61 +8,74 @@ import * as $std_map from "./std/map.js";
 import * as $diagjson from "./diagjson.js";
 import * as $interface from "./interface.js";
 import * as $pathreport from "./pathreport.js";
+import * as $ledger from "./ledger.js";
 import * as $idiff from "./idiff.js";
 import * as $std_io from "./std/io.js";
 
-const $ob1 = { kind: "overflow", text: "List.len(xs: parts) - 1 within Int", at: "self/review.onus:98:33", def: "last_segment" };
-const $ob2 = { kind: "overflow", text: "List.len(xs: edges) + 1 within Int", at: "self/review.onus:246:26", def: "layout_graph" };
-const $ob3 = { kind: "overflow", text: "layer + 1 within Int", at: "self/review.onus:251:56", def: "layout_graph" };
-const $ob4 = { kind: "overflow", text: "layer + 1 within Int", at: "self/review.onus:257:13", def: "layout_graph" };
-const $ob5 = { kind: "overflow", text: "deepest + 1 within Int", at: "self/review.onus:266:50", def: "layout_graph" };
-const $ob6 = { kind: "overflow", text: "int_or(o: Map.find(d: layer_of, key: x.after), dflt: deepest) + 1 within Int", at: "self/review.onus:277:14", def: "layout_graph" };
-const $ob7 = { kind: "overflow", text: "widest * node_w within Int", at: "self/review.onus:300:33", def: "layout_graph" };
-const $ob8 = { kind: "overflow", text: "margin * 2 + widest * node_w within Int", at: "self/review.onus:300:20", def: "layout_graph" };
-const $ob9 = { kind: "overflow", text: "widest - 1 within Int", at: "self/review.onus:300:52", def: "layout_graph" };
-const $ob10 = { kind: "overflow", text: "(widest - 1) * h_gap within Int", at: "self/review.onus:300:51", def: "layout_graph" };
-const $ob11 = { kind: "overflow", text: "margin * 2 + widest * node_w + (widest - 1) * h_gap within Int", at: "self/review.onus:300:20", def: "layout_graph" };
-const $ob12 = { kind: "overflow", text: "List.len(xs: ids) * node_w within Int", at: "self/review.onus:305:26", def: "layout_graph" };
-const $ob13 = { kind: "overflow", text: "List.len(xs: ids) - 1 within Int", at: "self/review.onus:305:56", def: "layout_graph" };
-const $ob14 = { kind: "overflow", text: "(List.len(xs: ids) - 1) * h_gap within Int", at: "self/review.onus:305:55", def: "layout_graph" };
-const $ob15 = { kind: "overflow", text: "List.len(xs: ids) * node_w + (List.len(xs: ids) - 1) * h_gap within Int", at: "self/review.onus:305:26", def: "layout_graph" };
-const $ob16 = { kind: "overflow", text: "width - row_width within Int", at: "self/review.onus:306:20", def: "layout_graph" };
-const $ob17 = { kind: "overflow", text: "depth * (node_h + v_gap) within Int", at: "self/review.onus:307:27", def: "layout_graph" };
-const $ob18 = { kind: "overflow", text: "margin + depth * (node_h + v_gap) within Int", at: "self/review.onus:307:18", def: "layout_graph" };
-const $ob19 = { kind: "overflow", text: "i * (node_w + h_gap) within Int", at: "self/review.onus:313:55", def: "layout_graph" };
-const $ob20 = { kind: "overflow", text: "x0 + i * (node_w + h_gap) within Int", at: "self/review.onus:313:50", def: "layout_graph" };
-const $ob21 = { kind: "overflow", text: "i + 1 within Int", at: "self/review.onus:315:11", def: "layout_graph" };
-const $ob22 = { kind: "overflow", text: "y + node_h within Int", at: "self/review.onus:317:32", def: "layout_graph" };
-const $ob23 = { kind: "overflow", text: "y + node_h + margin within Int", at: "self/review.onus:317:32", def: "layout_graph" };
-const $ob24 = { kind: "overflow", text: "x - pad within Int", at: "self/review.onus:371:17", def: "gate_svg" };
-const $ob25 = { kind: "overflow", text: "y - pad within Int", at: "self/review.onus:372:17", def: "gate_svg" };
-const $ob26 = { kind: "overflow", text: "y - pad - 16 within Int", at: "self/review.onus:372:17", def: "gate_svg" };
-const $ob27 = { kind: "overflow", text: "x2 + node_w within Int", at: "self/review.onus:373:18", def: "gate_svg" };
-const $ob28 = { kind: "overflow", text: "x2 + node_w + pad within Int", at: "self/review.onus:373:18", def: "gate_svg" };
-const $ob29 = { kind: "overflow", text: "y2 + node_h within Int", at: "self/review.onus:374:18", def: "gate_svg" };
-const $ob30 = { kind: "overflow", text: "y2 + node_h + pad within Int", at: "self/review.onus:374:18", def: "gate_svg" };
-const $ob31 = { kind: "overflow", text: "gx2 - gx within Int", at: "self/review.onus:377:32", def: "gate_svg" };
-const $ob32 = { kind: "overflow", text: "gy2 - gy within Int", at: "self/review.onus:378:8", def: "gate_svg" };
-const $ob33 = { kind: "overflow", text: "gx + 8 within Int", at: "self/review.onus:379:68", def: "gate_svg" };
-const $ob34 = { kind: "overflow", text: "gy + 13 within Int", at: "self/review.onus:380:8", def: "gate_svg" };
-const $ob35 = { kind: "overflow", text: "a.x + node_w / 2 within Int", at: "self/review.onus:396:19", def: "edge_from" };
-const $ob36 = { kind: "overflow", text: "a.y + node_h within Int", at: "self/review.onus:397:19", def: "edge_from" };
-const $ob37 = { kind: "overflow", text: "value.x + node_w / 2 within Int", at: "self/review.onus:398:19", def: "edge_from" };
-const $ob38 = { kind: "overflow", text: "y1 + y2 within Int", at: "self/review.onus:404:29", def: "edge_from" };
-const $ob39 = { kind: "overflow", text: "x1 + x2 within Int", at: "self/review.onus:412:67", def: "edge_from" };
-const $ob40 = { kind: "overflow", text: "y1 + y2 within Int", at: "self/review.onus:413:13", def: "edge_from" };
-const $ob41 = { kind: "overflow", text: "(y1 + y2) / 2 - 4 within Int", at: "self/review.onus:413:12", def: "edge_from" };
-const $ob42 = { kind: "overflow", text: "a.x + node_w / 2 within Int", at: "self/review.onus:430:57", def: "break_from" };
-const $ob43 = { kind: "overflow", text: "a.y + node_h within Int", at: "self/review.onus:431:10", def: "break_from" };
-const $ob44 = { kind: "overflow", text: "value.x + node_w / 2 within Int", at: "self/review.onus:432:25", def: "break_from" };
-const $ob45 = { kind: "overflow", text: "i + 1 within Int", at: "self/review.onus:536:9", def: "render_path_view" };
-const $ob46 = { kind: "overflow", text: "json_int(j: List.get(xs: start, i: 0)) - 1 within Int", at: "self/review.onus:810:30", def: "body_of" };
-const $ob47 = { kind: "overflow", text: "i + 1 within Int", at: "self/review.onus:818:9", def: "body_of" };
-const $ob48 = { kind: "overflow", text: "fn_count + 1 within Int", at: "self/review.onus:931:18", def: "render_interface_view" };
-const $ob49 = { kind: "overflow", text: "detected + surviving within Int", at: "self/review.onus:974:6", def: "coverage_line" };
-const $ob50 = { kind: "overflow", text: "n - 2 within Int", at: "self/review.onus:1546:33", def: "span_start" };
-const $ob51 = { kind: "overflow", text: "n - 1 within Int", at: "self/review.onus:1546:73", def: "span_start" };
-const $ob52 = { kind: "overflow", text: "i + 1 within Int", at: "self/review.onus:1836:11", def: "mapped" };
+const $ob1 = { kind: "overflow", text: "List.len(xs: parts) - 1 within Int", at: "self/review.onus:100:33", def: "last_segment" };
+const $ob2 = { kind: "overflow", text: "List.len(xs: edges) + 1 within Int", at: "self/review.onus:248:26", def: "layout_graph" };
+const $ob3 = { kind: "overflow", text: "layer + 1 within Int", at: "self/review.onus:253:56", def: "layout_graph" };
+const $ob4 = { kind: "overflow", text: "layer + 1 within Int", at: "self/review.onus:259:13", def: "layout_graph" };
+const $ob5 = { kind: "overflow", text: "deepest + 1 within Int", at: "self/review.onus:268:50", def: "layout_graph" };
+const $ob6 = { kind: "overflow", text: "int_or(o: Map.find(d: layer_of, key: x.after), dflt: deepest) + 1 within Int", at: "self/review.onus:279:14", def: "layout_graph" };
+const $ob7 = { kind: "overflow", text: "widest * node_w within Int", at: "self/review.onus:302:33", def: "layout_graph" };
+const $ob8 = { kind: "overflow", text: "margin * 2 + widest * node_w within Int", at: "self/review.onus:302:20", def: "layout_graph" };
+const $ob9 = { kind: "overflow", text: "widest - 1 within Int", at: "self/review.onus:302:52", def: "layout_graph" };
+const $ob10 = { kind: "overflow", text: "(widest - 1) * h_gap within Int", at: "self/review.onus:302:51", def: "layout_graph" };
+const $ob11 = { kind: "overflow", text: "margin * 2 + widest * node_w + (widest - 1) * h_gap within Int", at: "self/review.onus:302:20", def: "layout_graph" };
+const $ob12 = { kind: "overflow", text: "List.len(xs: ids) * node_w within Int", at: "self/review.onus:307:26", def: "layout_graph" };
+const $ob13 = { kind: "overflow", text: "List.len(xs: ids) - 1 within Int", at: "self/review.onus:307:56", def: "layout_graph" };
+const $ob14 = { kind: "overflow", text: "(List.len(xs: ids) - 1) * h_gap within Int", at: "self/review.onus:307:55", def: "layout_graph" };
+const $ob15 = { kind: "overflow", text: "List.len(xs: ids) * node_w + (List.len(xs: ids) - 1) * h_gap within Int", at: "self/review.onus:307:26", def: "layout_graph" };
+const $ob16 = { kind: "overflow", text: "width - row_width within Int", at: "self/review.onus:308:20", def: "layout_graph" };
+const $ob17 = { kind: "overflow", text: "depth * (node_h + v_gap) within Int", at: "self/review.onus:309:27", def: "layout_graph" };
+const $ob18 = { kind: "overflow", text: "margin + depth * (node_h + v_gap) within Int", at: "self/review.onus:309:18", def: "layout_graph" };
+const $ob19 = { kind: "overflow", text: "i * (node_w + h_gap) within Int", at: "self/review.onus:315:55", def: "layout_graph" };
+const $ob20 = { kind: "overflow", text: "x0 + i * (node_w + h_gap) within Int", at: "self/review.onus:315:50", def: "layout_graph" };
+const $ob21 = { kind: "overflow", text: "i + 1 within Int", at: "self/review.onus:317:11", def: "layout_graph" };
+const $ob22 = { kind: "overflow", text: "y + node_h within Int", at: "self/review.onus:319:32", def: "layout_graph" };
+const $ob23 = { kind: "overflow", text: "y + node_h + margin within Int", at: "self/review.onus:319:32", def: "layout_graph" };
+const $ob24 = { kind: "overflow", text: "x - pad within Int", at: "self/review.onus:373:17", def: "gate_svg" };
+const $ob25 = { kind: "overflow", text: "y - pad within Int", at: "self/review.onus:374:17", def: "gate_svg" };
+const $ob26 = { kind: "overflow", text: "y - pad - 16 within Int", at: "self/review.onus:374:17", def: "gate_svg" };
+const $ob27 = { kind: "overflow", text: "x2 + node_w within Int", at: "self/review.onus:375:18", def: "gate_svg" };
+const $ob28 = { kind: "overflow", text: "x2 + node_w + pad within Int", at: "self/review.onus:375:18", def: "gate_svg" };
+const $ob29 = { kind: "overflow", text: "y2 + node_h within Int", at: "self/review.onus:376:18", def: "gate_svg" };
+const $ob30 = { kind: "overflow", text: "y2 + node_h + pad within Int", at: "self/review.onus:376:18", def: "gate_svg" };
+const $ob31 = { kind: "overflow", text: "gx2 - gx within Int", at: "self/review.onus:379:32", def: "gate_svg" };
+const $ob32 = { kind: "overflow", text: "gy2 - gy within Int", at: "self/review.onus:380:8", def: "gate_svg" };
+const $ob33 = { kind: "overflow", text: "gx + 8 within Int", at: "self/review.onus:381:68", def: "gate_svg" };
+const $ob34 = { kind: "overflow", text: "gy + 13 within Int", at: "self/review.onus:382:8", def: "gate_svg" };
+const $ob35 = { kind: "overflow", text: "a.x + node_w / 2 within Int", at: "self/review.onus:398:19", def: "edge_from" };
+const $ob36 = { kind: "overflow", text: "a.y + node_h within Int", at: "self/review.onus:399:19", def: "edge_from" };
+const $ob37 = { kind: "overflow", text: "value.x + node_w / 2 within Int", at: "self/review.onus:400:19", def: "edge_from" };
+const $ob38 = { kind: "overflow", text: "y1 + y2 within Int", at: "self/review.onus:406:29", def: "edge_from" };
+const $ob39 = { kind: "overflow", text: "x1 + x2 within Int", at: "self/review.onus:414:67", def: "edge_from" };
+const $ob40 = { kind: "overflow", text: "y1 + y2 within Int", at: "self/review.onus:415:13", def: "edge_from" };
+const $ob41 = { kind: "overflow", text: "(y1 + y2) / 2 - 4 within Int", at: "self/review.onus:415:12", def: "edge_from" };
+const $ob42 = { kind: "overflow", text: "a.x + node_w / 2 within Int", at: "self/review.onus:432:57", def: "break_from" };
+const $ob43 = { kind: "overflow", text: "a.y + node_h within Int", at: "self/review.onus:433:10", def: "break_from" };
+const $ob44 = { kind: "overflow", text: "value.x + node_w / 2 within Int", at: "self/review.onus:434:25", def: "break_from" };
+const $ob45 = { kind: "overflow", text: "-1 within Int", at: "self/review.onus:534:19", def: "zone_regions_svg" };
+const $ob46 = { kind: "overflow", text: "-1 within Int", at: "self/review.onus:535:19", def: "zone_regions_svg" };
+const $ob47 = { kind: "overflow", text: "value.x + node_w within Int", at: "self/review.onus:546:30", def: "zone_regions_svg" };
+const $ob48 = { kind: "overflow", text: "value.y + node_h within Int", at: "self/review.onus:547:30", def: "zone_regions_svg" };
+const $ob49 = { kind: "overflow", text: "x0 - 14 within Int", at: "self/review.onus:555:65", def: "zone_regions_svg" };
+const $ob50 = { kind: "overflow", text: "y0 - 22 within Int", at: "self/review.onus:556:14", def: "zone_regions_svg" };
+const $ob51 = { kind: "overflow", text: "x1 - x0 within Int", at: "self/review.onus:557:38", def: "zone_regions_svg" };
+const $ob52 = { kind: "overflow", text: "x1 - x0 + 28 within Int", at: "self/review.onus:557:38", def: "zone_regions_svg" };
+const $ob53 = { kind: "overflow", text: "y1 - y0 within Int", at: "self/review.onus:558:14", def: "zone_regions_svg" };
+const $ob54 = { kind: "overflow", text: "y1 - y0 + 30 within Int", at: "self/review.onus:558:14", def: "zone_regions_svg" };
+const $ob55 = { kind: "overflow", text: "x0 - 6 within Int", at: "self/review.onus:559:67", def: "zone_regions_svg" };
+const $ob56 = { kind: "overflow", text: "y0 - 8 within Int", at: "self/review.onus:560:14", def: "zone_regions_svg" };
+const $ob57 = { kind: "overflow", text: "i + 1 within Int", at: "self/review.onus:583:9", def: "render_path_view" };
+const $ob58 = { kind: "overflow", text: "json_int(j: List.get(xs: start, i: 0)) - 1 within Int", at: "self/review.onus:864:30", def: "body_of" };
+const $ob59 = { kind: "overflow", text: "i + 1 within Int", at: "self/review.onus:872:9", def: "body_of" };
+const $ob60 = { kind: "overflow", text: "fn_count + 1 within Int", at: "self/review.onus:985:18", def: "render_interface_view" };
+const $ob61 = { kind: "overflow", text: "detected + surviving within Int", at: "self/review.onus:1028:6", def: "coverage_line" };
+const $ob62 = { kind: "overflow", text: "n - 2 within Int", at: "self/review.onus:1625:33", def: "span_start" };
+const $ob63 = { kind: "overflow", text: "n - 1 within Int", at: "self/review.onus:1625:73", def: "span_start" };
+const $ob64 = { kind: "overflow", text: "i + 1 within Int", at: "self/review.onus:1942:11", def: "mapped" };
 export function skip($args) {
   return undefined;
 }
@@ -592,7 +605,56 @@ export function push_nonempty({ out, s }) {
   return [undefined, out];
 }
 
-export function render_path_view({ r }) {
+export function zone_regions_svg({ layout, nodes, zone_of }) {
+  let out = $std_list.builder({  });
+  for (const z of ["critical", "hardened", "draft"]) {
+    let x0 = 1000000;
+    let y0 = 1000000;
+    let x1 = $rt.int.neg(1, $ob45);
+    let y1 = $rt.int.neg(1, $ob46);
+    for (const n of nodes) {
+      let zone = "draft";
+      const $m16 = $std_map.find({ d: zone_of, key: $json.str_at({ j: n, key: "module" }) });
+      $m16$match: {
+        if ($m16.tag === "Some") {
+          const value = $m16.value;
+          zone = value;
+          break $m16$match;
+        }
+        if ($m16.tag === "None") {
+          skip({  });
+          break $m16$match;
+        }
+        $rt.unreachable();
+      }
+      if (zone === z) {
+        const $m17 = placed_of({ layout: layout, id: $json.str_at({ j: n, key: "id" }) });
+        $m17$match: {
+          if ($m17.tag === "Some") {
+            const value = $m17.value;
+            x0 = min({ a: x0, b: value.x });
+            y0 = min({ a: y0, b: value.y });
+            x1 = max({ a: x1, b: $rt.int.add(value.x, node_w, $ob47) });
+            y1 = max({ a: y1, b: $rt.int.add(value.y, node_h, $ob48) });
+            break $m17$match;
+          }
+          if ($m17.tag === "None") {
+            skip({  });
+            break $m17$match;
+          }
+          $rt.unreachable();
+        }
+      }
+    }
+    if (x1 >= 0) {
+      const [, out$22] = $std_list.push({ b: out, x: "<g class=\"zone " + z + "\"><rect x=\"" + num({ n: $rt.int.sub(x0, 14, $ob49) }) + "\" y=\"" + num({ n: $rt.int.sub(y0, 22, $ob50) }) + "\" width=\"" + num({ n: $rt.int.add($rt.int.sub(x1, x0, $ob51), 28, $ob52) }) + "\" height=\"" + num({ n: $rt.int.add($rt.int.sub(y1, y0, $ob53), 30, $ob54) }) + "\" rx=\"10\"/><text class=\"small\" x=\"" + num({ n: $rt.int.sub(x0, 6, $ob55) }) + "\" y=\"" + num({ n: $rt.int.sub(y0, 8, $ob56) }) + "\">" + z + "</text></g>" });
+      out = out$22;
+    }
+  }
+  return $std_text.join({ parts: $std_list.finish({ b: out }), sep: "\n" });
+}
+
+export function render_path_view({ r, zone_of }) {
   const entry = $json.str_at({ j: r, key: "entry" });
   let breaks = $std_list.builder({  });
   let extras = $std_list.builder({  });
@@ -600,11 +662,11 @@ export function render_path_view({ r }) {
   for (const u of $json.list_at({ j: r, key: "unresolvable_calls" })) {
     const at = $json.str_at({ j: u, key: "at" });
     const b = { id: "break:" + num({ n: i }), after: first_segment({ name: at }), reason: $json.str_at({ j: u, key: "reason" }), at: at };
-    const [, breaks$22] = $std_list.push({ b: breaks, x: b });
-    breaks = breaks$22;
-    const [, extras$23] = $std_list.push({ b: extras, x: { id: b.id, after: b.after } });
-    extras = extras$23;
-    i = $rt.int.add(i, 1, $ob45);
+    const [, breaks$23] = $std_list.push({ b: breaks, x: b });
+    breaks = breaks$23;
+    const [, extras$24] = $std_list.push({ b: extras, x: { id: b.id, after: b.after } });
+    extras = extras$24;
+    i = $rt.int.add(i, 1, $ob57);
   }
   const graph = $json.at({ j: r, key: "graph" });
   const nodes = $json.list_at({ j: graph, key: "nodes" });
@@ -612,36 +674,41 @@ export function render_path_view({ r }) {
   const layout = layout_graph({ nodes: nodes, edges: edges, entry: entry, extras: $std_list.finish({ b: extras }) });
   let assumed_at = $std_list.builder({  });
   for (const a of $json.list_at({ j: r, key: "assumes" })) {
-    const [, assumed_at$24] = $std_list.push({ b: assumed_at, x: $json.str_at({ j: a, key: "at" }) });
-    assumed_at = assumed_at$24;
+    const [, assumed_at$25] = $std_list.push({ b: assumed_at, x: $json.str_at({ j: a, key: "at" }) });
+    assumed_at = assumed_at$25;
   }
   let recover_defs = $std_list.builder({  });
   for (const x of $json.list_at({ j: r, key: "recovers" })) {
-    const [, recover_defs$25] = $std_list.push({ b: recover_defs, x: $json.str_at({ j: x, key: "def" }) });
-    recover_defs = recover_defs$25;
+    const [, recover_defs$26] = $std_list.push({ b: recover_defs, x: $json.str_at({ j: x, key: "def" }) });
+    recover_defs = recover_defs$26;
   }
   const assumed_ids = texts_set({ xs: $std_list.finish({ b: assumed_at }) });
   const recover_ids = texts_set({ xs: $std_list.finish({ b: recover_defs }) });
   let svg = $std_list.builder({  });
+  const [, svg$27] = push_nonempty({ out: svg, s: zone_regions_svg({ layout: layout, nodes: nodes, zone_of: zone_of }) });
+  svg = svg$27;
   for (const g of $json.list_at({ j: r, key: "gates" })) {
-    const [, svg$26] = push_nonempty({ out: svg, s: gate_svg({ layout: layout, g: g }) });
-    svg = svg$26;
-  }
-  for (const e of edges) {
-    const [, svg$27] = push_nonempty({ out: svg, s: edge_svg({ layout: layout, e: e }) });
-    svg = svg$27;
-  }
-  for (const b of $std_list.finish({ b: breaks })) {
-    const [, svg$28] = push_nonempty({ out: svg, s: break_svg({ layout: layout, b: b }) });
+    const [, svg$28] = push_nonempty({ out: svg, s: gate_svg({ layout: layout, g: g }) });
     svg = svg$28;
   }
-  for (const n of nodes) {
-    const [, svg$29] = push_nonempty({ out: svg, s: node_svg({ layout: layout, n: n, assumed_ids: assumed_ids, recover_ids: recover_ids }) });
+  for (const e of edges) {
+    const [, svg$29] = push_nonempty({ out: svg, s: edge_svg({ layout: layout, e: e }) });
     svg = svg$29;
+  }
+  for (const b of $std_list.finish({ b: breaks })) {
+    const [, svg$30] = push_nonempty({ out: svg, s: break_svg({ layout: layout, b: b }) });
+    svg = svg$30;
+  }
+  for (const n of nodes) {
+    const [, svg$31] = push_nonempty({ out: svg, s: node_svg({ layout: layout, n: n, assumed_ids: assumed_ids, recover_ids: recover_ids }) });
+    svg = svg$31;
   }
   let ok_text = "failed";
   if ($json.bool_at({ j: r, key: "ok" })) {
     ok_text = "ok";
+  }
+  if ($json.bool_at({ j: r, key: "conditional" })) {
+    ok_text = ok_text + ", conditional on " + $std_text.join({ parts: $json.texts_at({ j: r, key: "conditional_on" }), sep: ", " });
   }
   const effects = $json.at({ j: r, key: "effects" });
   let head = "<h2>path <code>" + esc({ s: $json.str_at({ j: r, key: "path" }) }) + "</code> <span class=\"status " + ok_text + "\">" + ok_text + "</span></h2>\n<p>entry <code>" + esc({ s: entry }) + "</code> · " + num({ n: $std_list.len({ xs: $json.list_at({ j: r, key: "reachable" }) }) }) + " reachable · effects { " + esc({ s: $std_text.join({ parts: $json.texts_at({ j: effects, key: "actual" }), sep: ", " }) }) + " }";
@@ -667,8 +734,8 @@ export function render_path_view({ r }) {
   if ($std_list.len({ xs: assumes }) > 0) {
     let rows = $std_list.builder({  });
     for (const a of assumes) {
-      const [, rows$30] = $std_list.push({ b: rows, x: path_assume_row({ a: a }) });
-      rows = rows$30;
+      const [, rows$32] = $std_list.push({ b: rows, x: path_assume_row({ a: a }) });
+      rows = rows$32;
     }
     assumes_html = "<table><thead><tr><th>assume</th><th>at</th><th>justification</th><th>permitted by</th><th>verified</th></tr></thead><tbody>" + $std_text.join({ parts: $std_list.finish({ b: rows }), sep: "" }) + "</tbody></table>";
   }
@@ -677,8 +744,8 @@ export function render_path_view({ r }) {
   if ($std_list.len({ xs: caps }) > 0) {
     let rows = $std_list.builder({  });
     for (const c of caps) {
-      const [, rows$31] = $std_list.push({ b: rows, x: "<tr><td><code>" + esc({ s: $json.str_at({ j: c, key: "type" }) }) + "</code></td><td><code>" + esc({ s: $json.str_at({ j: c, key: "constructed_at" }) }) + "</code></td><td>" + esc({ s: joined_or({ xs: $json.texts_at({ j: c, key: "assumes" }), sep: "; ", dflt: "none recorded" }) }) + "</td></tr>" });
-      rows = rows$31;
+      const [, rows$33] = $std_list.push({ b: rows, x: "<tr><td><code>" + esc({ s: $json.str_at({ j: c, key: "type" }) }) + "</code></td><td><code>" + esc({ s: $json.str_at({ j: c, key: "constructed_at" }) }) + "</code></td><td>" + esc({ s: joined_or({ xs: $json.texts_at({ j: c, key: "assumes" }), sep: "; ", dflt: "none recorded" }) }) + "</td></tr>" });
+      rows = rows$33;
     }
     caps_html = "<h3>Capabilities</h3><table><thead><tr><th>type</th><th>constructed at</th><th>assumes</th></tr></thead><tbody>" + $std_text.join({ parts: $std_list.finish({ b: rows }), sep: "" }) + "</tbody></table>";
   }
@@ -687,15 +754,15 @@ export function render_path_view({ r }) {
   if ($std_list.len({ xs: recovers }) > 0) {
     let items = $std_list.builder({  });
     for (const x of recovers) {
-      const [, items$32] = $std_list.push({ b: items, x: "<li class=\"recover\"><code>" + esc({ s: $json.str_at({ j: x, key: "def" }) }) + "</code> at <code>" + esc({ s: $json.str_at({ j: x, key: "at" }) }) + "</code></li>" });
-      items = items$32;
+      const [, items$34] = $std_list.push({ b: items, x: "<li class=\"recover\"><code>" + esc({ s: $json.str_at({ j: x, key: "def" }) }) + "</code> at <code>" + esc({ s: $json.str_at({ j: x, key: "at" }) }) + "</code></li>" });
+      items = items$34;
     }
     recovers_html = "<h3>Recover sites</h3><ul>" + $std_text.join({ parts: $std_list.finish({ b: items }), sep: "" }) + "</ul>";
   }
   let rows = $std_list.builder({  });
   for (const l of $json.list_at({ j: r, key: "ledger" })) {
-    const [, rows$33] = $std_list.push({ b: rows, x: row_of({ l: l, def: $json.str_at({ j: l, key: "def" }), at: $json.str_at({ j: l, key: "at" }) }) });
-    rows = rows$33;
+    const [, rows$35] = $std_list.push({ b: rows, x: row_of({ l: l, def: $json.str_at({ j: l, key: "def" }), at: $json.str_at({ j: l, key: "at" }) }) });
+    rows = rows$35;
   }
   return "<section class=\"path\" data-path=\"" + esc({ s: $json.str_at({ j: r, key: "path" }) }) + "\">" + head + "\n<div class=\"graph\"><svg viewBox=\"0 0 " + num({ n: layout.width }) + " " + num({ n: layout.height }) + "\" width=\"" + num({ n: layout.width }) + "\" height=\"" + num({ n: layout.height }) + "\">" + $std_text.join({ parts: $std_list.finish({ b: svg }), sep: "\n" }) + "</svg></div>\n" + coverage_line({ c: $json.at({ j: r, key: "obligation_coverage" }) }) + "\n<h3>Assumptions</h3>" + assumes_html + caps_html + recovers_html + "\n<h3>Ledger (" + counts({ o: $json.at({ j: r, key: "obligations" }) }) + ")</h3>" + ledger_table({ rows: $std_list.finish({ b: rows }) }) + "\n</section>";
 }
@@ -746,8 +813,8 @@ export function ledger_table({ rows }) {
     if (l.pinned) {
       pinned = " (pinned)";
     }
-    const [, out$34] = $std_list.push({ b: out, x: "<tr class=\"ledger-row status-" + esc({ s: l.status }) + "\"><td class=\"status " + esc({ s: l.status }) + "\">" + esc({ s: l.status }) + pinned + "</td><td>" + esc({ s: l.kind }) + "</td><td><code>" + esc({ s: l.text }) + "</code></td><td><code>" + esc({ s: l.def }) + "</code></td><td><code>" + esc({ s: l.at }) + "</code></td><td>" + esc({ s: l.by }) + "</td></tr>" });
-    out = out$34;
+    const [, out$36] = $std_list.push({ b: out, x: "<tr class=\"ledger-row status-" + esc({ s: l.status }) + "\"><td class=\"status " + esc({ s: l.status }) + "\">" + esc({ s: l.status }) + pinned + "</td><td>" + esc({ s: l.kind }) + "</td><td><code>" + esc({ s: l.text }) + "</code></td><td><code>" + esc({ s: l.def }) + "</code></td><td><code>" + esc({ s: l.at }) + "</code></td><td>" + esc({ s: l.by }) + "</td></tr>" });
+    out = out$36;
   }
   return "<table class=\"ledger\"><thead><tr><th>status</th><th>kind</th><th>obligation</th><th>in</th><th>at</th><th>by</th></tr></thead><tbody>" + $std_text.join({ parts: $std_list.finish({ b: out }), sep: "" }) + "</tbody></table>";
 }
@@ -783,16 +850,16 @@ export function body_of({ lines, item }) {
   if ($std_list.len({ xs: start }) < 1 || $std_list.len({ xs: end }) < 1) {
     return "";
   }
-  const l1 = max({ a: 0, b: $rt.int.sub(json_int({ j: $std_list.get({ xs: start, i: 0 }) }), 1, $ob46) });
+  const l1 = max({ a: 0, b: $rt.int.sub(json_int({ j: $std_list.get({ xs: start, i: 0 }) }), 1, $ob58) });
   const l2 = min({ a: $std_list.len({ xs: lines }), b: json_int({ j: $std_list.get({ xs: end, i: 0 }) }) });
   let out = $std_list.builder({  });
   let i = 0;
   for (const line of lines) {
     if (i >= l1 && i < l2) {
-      const [, out$35] = $std_list.push({ b: out, x: line });
-      out = out$35;
+      const [, out$37] = $std_list.push({ b: out, x: line });
+      out = out$37;
     }
-    i = $rt.int.add(i, 1, $ob47);
+    i = $rt.int.add(i, 1, $ob59);
   }
   return $std_text.join({ parts: $std_list.finish({ b: out }), sep: "\n" });
 }
@@ -838,13 +905,13 @@ export function item_html({ doc_module, item, lines }) {
   let tests = $std_list.builder({  });
   for (const e of $json.list_at({ j: item, key: "examples" })) {
     const status = $json.str_at({ j: e, key: "status" });
-    const [, tests$36] = $std_list.push({ b: tests, x: "<span class=\"test " + esc({ s: $std_text.replace({ t: status, from: " ", to: "-" }) }) + "\">example " + esc({ s: $json.str_at({ j: e, key: "name" }) }) + ": " + esc({ s: status }) + "</span>" });
-    tests = tests$36;
+    const [, tests$38] = $std_list.push({ b: tests, x: "<span class=\"test " + esc({ s: $std_text.replace({ t: status, from: " ", to: "-" }) }) + "\">example " + esc({ s: $json.str_at({ j: e, key: "name" }) }) + ": " + esc({ s: status }) + "</span>" });
+    tests = tests$38;
   }
   for (const p of $json.list_at({ j: item, key: "properties" })) {
     const status = $json.str_at({ j: p, key: "status" });
-    const [, tests$37] = $std_list.push({ b: tests, x: "<span class=\"test " + esc({ s: status }) + "\">property " + esc({ s: $json.str_at({ j: p, key: "name" }) }) + ": " + esc({ s: status }) + "</span>" });
-    tests = tests$37;
+    const [, tests$39] = $std_list.push({ b: tests, x: "<span class=\"test " + esc({ s: status }) + "\">property " + esc({ s: $json.str_at({ j: p, key: "name" }) }) + ": " + esc({ s: status }) + "</span>" });
+    tests = tests$39;
   }
   let tests_html = $std_text.join({ parts: $std_list.finish({ b: tests }), sep: " " });
   if (tests_html !== "") {
@@ -852,16 +919,16 @@ export function item_html({ doc_module, item, lines }) {
   }
   let body_block = "";
   if (kind === "fn") {
-    const $m19 = lines;
-    $m19$match: {
-      if ($m19.tag === "None") {
+    const $m21 = lines;
+    $m21$match: {
+      if ($m21.tag === "None") {
         skip({  });
-        break $m19$match;
+        break $m21$match;
       }
-      if ($m19.tag === "Some") {
-        const value = $m19.value;
+      if ($m21.tag === "Some") {
+        const value = $m21.value;
         body_block = "<details class=\"body\" data-module=\"" + esc({ s: doc_module }) + "\" data-item=\"" + esc({ s: name }) + "\"><summary><code>{ ... }</code> <span class=\"small\">expand body (counted)</span></summary><pre>" + esc({ s: body_of({ lines: value, item: item }) }) + "</pre></details>";
-        break $m19$match;
+        break $m21$match;
       }
       $rt.unreachable();
     }
@@ -872,26 +939,26 @@ export function item_html({ doc_module, item, lines }) {
 export function render_interface_view({ doc, source }) {
   const module_name = $json.str_at({ j: doc, key: "module" });
   let lines = { tag: "None" };
-  const $m21 = source;
-  $m21$match: {
-    if ($m21.tag === "Some") {
-      const value = $m21.value;
+  const $m23 = source;
+  $m23$match: {
+    if ($m23.tag === "Some") {
+      const value = $m23.value;
       lines = { tag: "Some", value: $std_text.split({ t: value, sep: "\n" }) };
-      break $m21$match;
+      break $m23$match;
     }
-    if ($m21.tag === "None") {
+    if ($m23.tag === "None") {
       skip({  });
-      break $m21$match;
+      break $m23$match;
     }
     $rt.unreachable();
   }
   let items = $std_list.builder({  });
   let fn_count = 0;
   for (const item of $json.list_at({ j: doc, key: "items" })) {
-    const [, items$38] = $std_list.push({ b: items, x: item_html({ doc_module: module_name, item: item, lines: lines }) });
-    items = items$38;
+    const [, items$40] = $std_list.push({ b: items, x: item_html({ doc_module: module_name, item: item, lines: lines }) });
+    items = items$40;
     if ($json.str_at({ j: item, key: "kind" }) === "fn") {
-      fn_count = $rt.int.add(fn_count, 1, $ob48);
+      fn_count = $rt.int.add(fn_count, 1, $ob60);
     }
   }
   let test_module = "";
@@ -913,7 +980,7 @@ export function coverage_line({ c }) {
   const detected = $json.int_at({ j: c, key: "mutations_detected" });
   const surviving = $json.int_at({ j: c, key: "mutations_surviving" });
   let mutations = "no contract mutations run";
-  if ($rt.int.add(detected, surviving, $ob49) > 0) {
+  if ($rt.int.add(detected, surviving, $ob61) > 0) {
     let cls = "ok";
     if (surviving > 0) {
       cls = "surviving";
@@ -927,6 +994,19 @@ export function coverage_line({ c }) {
   return "<p class=\"coverage\">coverage: " + num({ n: $json.int_at({ j: c, key: "proved" }) }) + " proved · " + num({ n: $json.int_at({ j: c, key: "checked" }) }) + " checked, <span class=\"" + exercised_cls + "\">" + num({ n: $json.int_at({ j: c, key: "checked_exercised" }) }) + " exercised by tests</span> · " + plural({ n: $json.int_at({ j: c, key: "assumptions" }), word: "assumption" }) + ", " + num({ n: $json.int_at({ j: c, key: "assumptions_verifiable" }) }) + " verifiable, " + num({ n: $json.int_at({ j: c, key: "assumptions_verified" }) }) + " verified · " + mutations + "</p>";
 }
 
+export function render_promotions_view({ data }) {
+  const items = $json.list_at({ j: data, key: "promotions" });
+  if ($std_list.len({ xs: items }) === 0) {
+    return "";
+  }
+  let rows = $std_list.builder({  });
+  for (const p of items) {
+    const [, rows$41] = $std_list.push({ b: rows, x: "<tr class=\"" + esc({ s: $json.str_at({ j: p, key: "kind" }) }) + "\"><td><code>" + esc({ s: $json.str_at({ j: p, key: "module" }) }) + "</code></td><td>" + esc({ s: $json.str_at({ j: p, key: "kind" }) }) + "</td><td>" + esc({ s: $json.str_at({ j: p, key: "from" }) }) + " → " + esc({ s: $json.str_at({ j: p, key: "to" }) }) + "</td><td>" + esc({ s: $json.str_at({ j: p, key: "at" }) }) + "</td><td>" + esc({ s: $json.str_at({ j: p, key: "audit" }) }) + "</td></tr>" });
+    rows = rows$41;
+  }
+  return "<section class=\"promotions\"><h2>Promotions</h2>\n<table><thead><tr><th>module</th><th>change</th><th>zones</th><th>at</th><th>audit</th></tr></thead><tbody>\n" + $std_text.join({ parts: $std_list.finish({ b: rows }), sep: "\n" }) + "\n</tbody></table></section>";
+}
+
 export function render_ledger_view({ data }) {
   const modules = $json.list_at({ j: data, key: "modules" });
   let rows = $std_list.builder({  });
@@ -935,23 +1015,23 @@ export function render_ledger_view({ data }) {
   for (const m of modules) {
     const module_name = $json.str_at({ j: m, key: "module" });
     for (const l of $json.list_at({ j: m, key: "ledger" })) {
-      const [, rows$39] = $std_list.push({ b: rows, x: row_of({ l: l, def: module_name + "." + $json.str_at({ j: l, key: "def" }), at: loc_text({ l: $json.at({ j: l, key: "at" }) }) }) });
-      rows = rows$39;
+      const [, rows$42] = $std_list.push({ b: rows, x: row_of({ l: l, def: module_name + "." + $json.str_at({ j: l, key: "def" }), at: loc_text({ l: $json.at({ j: l, key: "at" }) }) }) });
+      rows = rows$42;
     }
     for (const a of $json.list_at({ j: m, key: "assumes" })) {
-      const [, assumes$40] = $std_list.push({ b: assumes, x: "<tr class=\"assumed\"><td><code>" + esc({ s: module_name }) + "." + esc({ s: $json.str_at({ j: a, key: "def" }) }) + "</code></td><td><code>" + esc({ s: $json.str_at({ j: a, key: "claim" }) }) + "</code></td><td>" + esc({ s: $json.str_at({ j: a, key: "justification" }) }) + "</td><td><code>" + esc({ s: loc_text({ l: $json.at({ j: a, key: "at" }) }) }) + "</code></td><td>" + esc({ s: freshness({ a: a }) }) + "</td></tr>" + verify_row({ a: a, cols: "5" }) });
-      assumes = assumes$40;
+      const [, assumes$43] = $std_list.push({ b: assumes, x: "<tr class=\"assumed\"><td><code>" + esc({ s: module_name }) + "." + esc({ s: $json.str_at({ j: a, key: "def" }) }) + "</code></td><td><code>" + esc({ s: $json.str_at({ j: a, key: "claim" }) }) + "</code></td><td>" + esc({ s: $json.str_at({ j: a, key: "justification" }) }) + "</td><td><code>" + esc({ s: loc_text({ l: $json.at({ j: a, key: "at" }) }) }) + "</code></td><td>" + esc({ s: freshness({ a: a }) }) + "</td></tr>" + verify_row({ a: a, cols: "5" }) });
+      assumes = assumes$43;
     }
     for (const x of $json.list_at({ j: m, key: "recovers" })) {
-      const [, recovers$41] = $std_list.push({ b: recovers, x: "<li class=\"recover\"><code>" + esc({ s: module_name }) + "." + esc({ s: $json.str_at({ j: x, key: "def" }) }) + "</code> at <code>" + esc({ s: loc_text({ l: $json.at({ j: x, key: "at" }) }) }) + "</code></li>" });
-      recovers = recovers$41;
+      const [, recovers$44] = $std_list.push({ b: recovers, x: "<li class=\"recover\"><code>" + esc({ s: module_name }) + "." + esc({ s: $json.str_at({ j: x, key: "def" }) }) + "</code> at <code>" + esc({ s: loc_text({ l: $json.at({ j: x, key: "at" }) }) }) + "</code></li>" });
+      recovers = recovers$44;
     }
   }
   let caps = $std_list.builder({  });
   for (const p of $json.list_at({ j: data, key: "paths" })) {
     for (const c of $json.list_at({ j: p, key: "capabilities" })) {
-      const [, caps$42] = $std_list.push({ b: caps, x: "<tr><td><code>" + esc({ s: $json.str_at({ j: p, key: "path" }) }) + "</code></td><td><code>" + esc({ s: $json.str_at({ j: c, key: "type" }) }) + "</code></td><td><code>" + esc({ s: $json.str_at({ j: c, key: "constructed_at" }) }) + "</code></td><td>" + esc({ s: joined_or({ xs: $json.texts_at({ j: c, key: "assumes" }), sep: "; ", dflt: "none recorded" }) }) + "</td></tr>" });
-      caps = caps$42;
+      const [, caps$45] = $std_list.push({ b: caps, x: "<tr><td><code>" + esc({ s: $json.str_at({ j: p, key: "path" }) }) + "</code></td><td><code>" + esc({ s: $json.str_at({ j: c, key: "type" }) }) + "</code></td><td><code>" + esc({ s: $json.str_at({ j: c, key: "constructed_at" }) }) + "</code></td><td>" + esc({ s: joined_or({ xs: $json.texts_at({ j: c, key: "assumes" }), sep: "; ", dflt: "none recorded" }) }) + "</td></tr>" });
+      caps = caps$45;
     }
   }
   let filters = $std_list.builder({  });
@@ -960,8 +1040,8 @@ export function render_ledger_view({ data }) {
     if (s === "all") {
       active = " active";
     }
-    const [, filters$43] = $std_list.push({ b: filters, x: "<button class=\"filter" + active + "\" data-status=\"" + s + "\">" + s + "</button>" });
-    filters = filters$43;
+    const [, filters$46] = $std_list.push({ b: filters, x: "<button class=\"filter" + active + "\" data-status=\"" + s + "\">" + s + "</button>" });
+    filters = filters$46;
   }
   const assume_rows = $std_list.finish({ b: assumes });
   let assumes_html = "<p>None.</p>";
@@ -987,8 +1067,8 @@ export function item_list({ xs }) {
   }
   let out = $std_list.builder({  });
   for (const x of xs) {
-    const [, out$44] = $std_list.push({ b: out, x: "<li><code>" + esc({ s: $json.str_at({ j: x, key: "kind" }) }) + " " + esc({ s: $json.str_at({ j: x, key: "name" }) }) + "</code> (" + esc({ s: $json.str_at({ j: x, key: "visibility" }) }) + ")</li>" });
-    out = out$44;
+    const [, out$47] = $std_list.push({ b: out, x: "<li><code>" + esc({ s: $json.str_at({ j: x, key: "kind" }) }) + " " + esc({ s: $json.str_at({ j: x, key: "name" }) }) + "</code> (" + esc({ s: $json.str_at({ j: x, key: "visibility" }) }) + ")</li>" });
+    out = out$47;
   }
   return $std_text.join({ parts: $std_list.finish({ b: out }), sep: "" });
 }
@@ -997,52 +1077,52 @@ export function changed_item({ c }) {
   let parts = $std_list.builder({  });
   const sig = $json.at({ j: c, key: "signature" });
   if (!$json.is_null({ j: sig })) {
-    const [, parts$45] = $std_list.push({ b: parts, x: "<div class=\"breaking\">signature changed<pre>- " + esc({ s: $json.str_at({ j: sig, key: "old" }) }) + "\n+ " + esc({ s: $json.str_at({ j: sig, key: "new" }) }) + "</pre></div>" });
-    parts = parts$45;
+    const [, parts$48] = $std_list.push({ b: parts, x: "<div class=\"breaking\">signature changed<pre>- " + esc({ s: $json.str_at({ j: sig, key: "old" }) }) + "\n+ " + esc({ s: $json.str_at({ j: sig, key: "new" }) }) + "</pre></div>" });
+    parts = parts$48;
   }
   const effects = $json.at({ j: c, key: "effects" });
   const widened = $json.texts_at({ j: effects, key: "added" });
   if ($std_list.len({ xs: widened }) > 0) {
-    const [, parts$46] = $std_list.push({ b: parts, x: "<div class=\"breaking\">effects widened: " + esc({ s: $std_text.join({ parts: widened, sep: ", " }) }) + "</div>" });
-    parts = parts$46;
+    const [, parts$49] = $std_list.push({ b: parts, x: "<div class=\"breaking\">effects widened: " + esc({ s: $std_text.join({ parts: widened, sep: ", " }) }) + "</div>" });
+    parts = parts$49;
   }
   const narrowed = $json.texts_at({ j: effects, key: "removed" });
   if ($std_list.len({ xs: narrowed }) > 0) {
-    const [, parts$47] = $std_list.push({ b: parts, x: "<div class=\"compatible\">effects narrowed: " + esc({ s: $std_text.join({ parts: narrowed, sep: ", " }) }) + "</div>" });
-    parts = parts$47;
+    const [, parts$50] = $std_list.push({ b: parts, x: "<div class=\"compatible\">effects narrowed: " + esc({ s: $std_text.join({ parts: narrowed, sep: ", " }) }) + "</div>" });
+    parts = parts$50;
   }
   for (const k of $json.list_at({ j: c, key: "contracts" })) {
     const compat = esc({ s: $json.str_at({ j: k, key: "compatibility" }) });
-    const [, parts$48] = $std_list.push({ b: parts, x: "<div class=\"" + compat + "\">" + esc({ s: $json.str_at({ j: k, key: "kind" }) }) + " " + esc({ s: $json.str_at({ j: k, key: "change" }) }) + ": <code>" + esc({ s: $json.str_at({ j: k, key: "text" }) }) + "</code> (" + compat + ")</div>" });
-    parts = parts$48;
+    const [, parts$51] = $std_list.push({ b: parts, x: "<div class=\"" + compat + "\">" + esc({ s: $json.str_at({ j: k, key: "kind" }) }) + " " + esc({ s: $json.str_at({ j: k, key: "change" }) }) + ": <code>" + esc({ s: $json.str_at({ j: k, key: "text" }) }) + "</code> (" + compat + ")</div>" });
+    parts = parts$51;
   }
   const assumes = $json.at({ j: c, key: "assumes" });
   for (const a of $json.texts_at({ j: assumes, key: "added" })) {
-    const [, parts$49] = $std_list.push({ b: parts, x: "<div class=\"assumed\">new assumption: <code>" + esc({ s: a }) + "</code></div>" });
-    parts = parts$49;
+    const [, parts$52] = $std_list.push({ b: parts, x: "<div class=\"assumed\">new assumption: <code>" + esc({ s: a }) + "</code></div>" });
+    parts = parts$52;
   }
   for (const a of $json.texts_at({ j: assumes, key: "removed" })) {
-    const [, parts$50] = $std_list.push({ b: parts, x: "<div class=\"compatible\">assumption removed: <code>" + esc({ s: a }) + "</code></div>" });
-    parts = parts$50;
+    const [, parts$53] = $std_list.push({ b: parts, x: "<div class=\"compatible\">assumption removed: <code>" + esc({ s: a }) + "</code></div>" });
+    parts = parts$53;
   }
   const recovers = $json.at({ j: c, key: "recovers" });
   const added = $json.int_at({ j: recovers, key: "added" });
   if (added > 0) {
-    const [, parts$51] = $std_list.push({ b: parts, x: "<div class=\"recover\">" + num({ n: added }) + " new " + site_word({ n: added }) + "</div>" });
-    parts = parts$51;
+    const [, parts$54] = $std_list.push({ b: parts, x: "<div class=\"recover\">" + num({ n: added }) + " new " + site_word({ n: added }) + "</div>" });
+    parts = parts$54;
   }
   const removed = $json.int_at({ j: recovers, key: "removed" });
   if (removed > 0) {
-    const [, parts$52] = $std_list.push({ b: parts, x: "<div class=\"compatible\">" + num({ n: removed }) + " " + site_word({ n: removed }) + " removed</div>" });
-    parts = parts$52;
+    const [, parts$55] = $std_list.push({ b: parts, x: "<div class=\"compatible\">" + num({ n: removed }) + " " + site_word({ n: removed }) + " removed</div>" });
+    parts = parts$55;
   }
   for (const o of $json.list_at({ j: c, key: "obligations" })) {
     let cls = "breaking";
     if ($json.str_at({ j: o, key: "to" }) === "proved") {
       cls = "compatible";
     }
-    const [, parts$53] = $std_list.push({ b: parts, x: "<div class=\"" + cls + "\">" + esc({ s: $json.str_at({ j: o, key: "kind" }) }) + " <code>" + esc({ s: $json.str_at({ j: o, key: "text" }) }) + "</code>: " + esc({ s: $json.str_at({ j: o, key: "from" }) }) + " → " + esc({ s: $json.str_at({ j: o, key: "to" }) }) + "</div>" });
-    parts = parts$53;
+    const [, parts$56] = $std_list.push({ b: parts, x: "<div class=\"" + cls + "\">" + esc({ s: $json.str_at({ j: o, key: "kind" }) }) + " <code>" + esc({ s: $json.str_at({ j: o, key: "text" }) }) + "</code>: " + esc({ s: $json.str_at({ j: o, key: "from" }) }) + " → " + esc({ s: $json.str_at({ j: o, key: "to" }) }) + "</div>" });
+    parts = parts$56;
   }
   let status = "<span class=\"status ok\">compatible</span>";
   if ($json.bool_at({ j: c, key: "breaking" })) {
@@ -1064,8 +1144,8 @@ export function render_diff_view({ diff }) {
   }
   let changed = $std_list.builder({  });
   for (const c of $json.list_at({ j: diff, key: "changed" })) {
-    const [, changed$54] = $std_list.push({ b: changed, x: changed_item({ c: c }) });
-    changed = changed$54;
+    const [, changed$57] = $std_list.push({ b: changed, x: changed_item({ c: c }) });
+    changed = changed$57;
   }
   let changed_html = $std_text.join({ parts: $std_list.finish({ b: changed }), sep: "" });
   if (changed_html === "") {
@@ -1114,8 +1194,8 @@ export function render_change({ c }) {
       if (!$json.is_null({ j: ce })) {
         counterexample = "<pre class=\"counterexample\">" + esc({ s: $json.compact({ j: ce }) }) + "</pre>";
       }
-      const [, rows$55] = $std_list.push({ b: rows, x: "<tr class=\"proposal\"><td><code>" + esc({ s: $json.str_at({ j: p, key: "kind" }) }) + "</code></td><td><code>" + esc({ s: $json.str_at({ j: p, key: "def" }) }) + "</code></td><td>" + code_or({ j: $json.at({ j: p, key: "current" }), dflt: "" }) + "</td><td>" + code_or({ j: $json.at({ j: p, key: "proposed" }), dflt: "<em>for the reviewer to write</em>" }) + "</td><td>" + esc({ s: $json.str_at({ j: p, key: "rationale" }) }) + counterexample + "</td></tr>" });
-      rows = rows$55;
+      const [, rows$58] = $std_list.push({ b: rows, x: "<tr class=\"proposal\"><td><code>" + esc({ s: $json.str_at({ j: p, key: "kind" }) }) + "</code></td><td><code>" + esc({ s: $json.str_at({ j: p, key: "def" }) }) + "</code></td><td>" + code_or({ j: $json.at({ j: p, key: "current" }), dflt: "" }) + "</td><td>" + code_or({ j: $json.at({ j: p, key: "proposed" }), dflt: "<em>for the reviewer to write</em>" }) + "</td><td>" + esc({ s: $json.str_at({ j: p, key: "rationale" }) }) + counterexample + "</td></tr>" });
+      rows = rows$58;
     }
     proposals_html = "<table><thead><tr><th>proposed by loop</th><th>on</th><th>current</th><th>proposed</th><th>why</th></tr></thead><tbody>" + $std_text.join({ parts: $std_list.finish({ b: rows }), sep: "" }) + "</tbody></table>";
   }
@@ -1138,8 +1218,8 @@ export function render_change({ c }) {
   if ($std_list.len({ xs: delta }) > 0) {
     let rows = $std_list.builder({  });
     for (const l of delta) {
-      const [, rows$56] = $std_list.push({ b: rows, x: "<tr><td><code>" + esc({ s: $json.str_at({ j: l, key: "kind" }) }) + " " + esc({ s: $json.str_at({ j: l, key: "text" }) }) + "</code></td><td><code>" + esc({ s: $json.str_at({ j: l, key: "def" }) }) + "</code></td>" + status_cell({ j: $json.at({ j: l, key: "before" }) }) + status_cell({ j: $json.at({ j: l, key: "after" }) }) + "</tr>" });
-      rows = rows$56;
+      const [, rows$59] = $std_list.push({ b: rows, x: "<tr><td><code>" + esc({ s: $json.str_at({ j: l, key: "kind" }) }) + " " + esc({ s: $json.str_at({ j: l, key: "text" }) }) + "</code></td><td><code>" + esc({ s: $json.str_at({ j: l, key: "def" }) }) + "</code></td>" + status_cell({ j: $json.at({ j: l, key: "before" }) }) + status_cell({ j: $json.at({ j: l, key: "after" }) }) + "</tr>" });
+      rows = rows$59;
     }
     ledger_html = "<table class=\"ledger\"><thead><tr><th>obligation</th><th>in</th><th>before</th><th>after</th></tr></thead><tbody>" + $std_text.join({ parts: $std_list.finish({ b: rows }), sep: "" }) + "</tbody></table>";
   }
@@ -1148,8 +1228,8 @@ export function render_change({ c }) {
   if ($std_list.len({ xs: audit }) > 0) {
     let items = $std_list.builder({  });
     for (const f of audit) {
-      const [, items$57] = $std_list.push({ b: items, x: "<li class=\"audit\"><code>" + esc({ s: $json.str_at({ j: f, key: "finding" }) }) + "</code> " + esc({ s: $json.str_at({ j: f, key: "detail" }) }) + "</li>" });
-      items = items$57;
+      const [, items$60] = $std_list.push({ b: items, x: "<li class=\"audit\"><code>" + esc({ s: $json.str_at({ j: f, key: "finding" }) }) + "</code> " + esc({ s: $json.str_at({ j: f, key: "detail" }) }) + "</li>" });
+      items = items$60;
     }
     audit_html = "<h4>Regeneration audit</h4><ul>" + $std_text.join({ parts: $std_list.finish({ b: items }), sep: "" }) + "</ul>";
   }
@@ -1158,8 +1238,8 @@ export function render_change({ c }) {
   if ($std_list.len({ xs: bodies }) > 0) {
     let parts = $std_list.builder({  });
     for (const b of bodies) {
-      const [, parts$58] = $std_list.push({ b: parts, x: "<h5><code>" + esc({ s: $json.str_at({ j: b, key: "module" }) }) + "</code></h5><pre class=\"before\">" + esc({ s: $json.str_at({ j: b, key: "before" }) }) + "</pre><pre class=\"after\">" + esc({ s: $json.str_at({ j: b, key: "after" }) }) + "</pre>" });
-      parts = parts$58;
+      const [, parts$61] = $std_list.push({ b: parts, x: "<h5><code>" + esc({ s: $json.str_at({ j: b, key: "module" }) }) + "</code></h5><pre class=\"before\">" + esc({ s: $json.str_at({ j: b, key: "before" }) }) + "</pre><pre class=\"after\">" + esc({ s: $json.str_at({ j: b, key: "after" }) }) + "</pre>" });
+      parts = parts$61;
     }
     bodies_html = "<details class=\"body\"><summary>Body diff (" + plural({ n: $std_list.len({ xs: bodies }), word: "file" }) + "; informational, counted if opened)</summary>" + $std_text.join({ parts: $std_list.finish({ b: parts }), sep: "" }) + "</details>";
   }
@@ -1172,8 +1252,8 @@ export function render_change({ c }) {
       if (!$json.is_null({ j: $json.at({ j: t, key: "escalation" }) })) {
         escalation = esc({ s: $json.str_at({ j: t, key: "escalation" }) });
       }
-      const [, rows$59] = $std_list.push({ b: rows, x: "<tr><td>" + json_num_text({ j: $json.at({ j: t, key: "iteration" }) }) + "</td><td>" + esc({ s: $json.str_at({ j: t, key: "classification" }) }) + "</td><td>" + json_num_text({ j: $json.at({ j: t, key: "diagnostics_before" }) }) + " → " + json_num_text({ j: $json.at({ j: t, key: "diagnostics_after" }) }) + "</td><td>" + json_num_text({ j: $json.at({ j: t, key: "mechanical_repairs" }) }) + "</td><td>" + json_num_text({ j: $json.at({ j: t, key: "tokens" }) }) + "</td><td>" + json_num_text({ j: $json.at({ j: t, key: "ms" }) }) + "</td><td>" + escalation + "</td></tr>" });
-      rows = rows$59;
+      const [, rows$62] = $std_list.push({ b: rows, x: "<tr><td>" + json_num_text({ j: $json.at({ j: t, key: "iteration" }) }) + "</td><td>" + esc({ s: $json.str_at({ j: t, key: "classification" }) }) + "</td><td>" + json_num_text({ j: $json.at({ j: t, key: "diagnostics_before" }) }) + " → " + json_num_text({ j: $json.at({ j: t, key: "diagnostics_after" }) }) + "</td><td>" + json_num_text({ j: $json.at({ j: t, key: "mechanical_repairs" }) }) + "</td><td>" + json_num_text({ j: $json.at({ j: t, key: "tokens" }) }) + "</td><td>" + json_num_text({ j: $json.at({ j: t, key: "ms" }) }) + "</td><td>" + escalation + "</td></tr>" });
+      rows = rows$62;
     }
     trace_html = "<details><summary>Trace (" + plural({ n: $std_list.len({ xs: trace }), word: "iteration" }) + ")</summary><table><thead><tr><th>iteration</th><th>result</th><th>diagnostics</th><th>repairs</th><th>tokens</th><th>ms</th><th>escalation</th></tr></thead><tbody>" + $std_text.join({ parts: $std_list.finish({ b: rows }), sep: "" }) + "</tbody></table></details>";
   }
@@ -1192,28 +1272,28 @@ export function render_changes_view({ changes }) {
   }
   let parts = $std_list.builder({  });
   for (const c of changes) {
-    const [, parts$60] = $std_list.push({ b: parts, x: render_change({ c: c }) });
-    parts = parts$60;
+    const [, parts$63] = $std_list.push({ b: parts, x: render_change({ c: c }) });
+    parts = parts$63;
   }
   return "<section class=\"changes\"><h2>Changes (" + num({ n: $std_list.len({ xs: changes }) }) + ")</h2>" + $std_text.join({ parts: $std_list.finish({ b: parts }), sep: "\n" }) + "</section>";
 }
 
 export function model_table({ ce }) {
-  const $m23 = ce;
-  $m23$match: {
-    if ($m23.tag === "JObject") {
-      const fields = $m23.fields;
+  const $m25 = ce;
+  $m25$match: {
+    if ($m25.tag === "JObject") {
+      const fields = $m25.fields;
       let rows = $std_list.builder({  });
       for (const f of fields) {
-        const [, rows$61] = $std_list.push({ b: rows, x: "<tr><td><code>" + esc({ s: f.key }) + "</code></td><td><code>" + esc({ s: plain({ j: f.value }) }) + "</code></td></tr>" });
-        rows = rows$61;
+        const [, rows$64] = $std_list.push({ b: rows, x: "<tr><td><code>" + esc({ s: f.key }) + "</code></td><td><code>" + esc({ s: plain({ j: f.value }) }) + "</code></td></tr>" });
+        rows = rows$64;
       }
       return "<table class=\"model\"><thead><tr><th>name</th><th>value</th></tr></thead><tbody>" + $std_text.join({ parts: $std_list.finish({ b: rows }), sep: "" }) + "</tbody></table>";
-      break $m23$match;
+      break $m25$match;
     }
     if (true) {
       return "";
-      break $m23$match;
+      break $m25$match;
     }
     $rt.unreachable();
   }
@@ -1239,8 +1319,8 @@ export function render_diagnostics_view({ diagnostics }) {
       const ob = $json.at({ j: d, key: "obligation" });
       ob_html = "<p class=\"contract\"><code>" + esc({ s: $json.str_at({ j: ob, key: "kind" }) }) + " " + esc({ s: $json.str_at({ j: ob, key: "text" }) }) + "</code> <span class=\"mark " + esc({ s: $json.str_at({ j: ob, key: "status" }) }) + "\">" + esc({ s: $json.str_at({ j: ob, key: "status" }) }) + "</span></p>" + model_table({ ce: $json.at({ j: ob, key: "counterexample" }) });
     }
-    const [, items$62] = $std_list.push({ b: items, x: "<article class=\"diagnostic\"><h4><code>" + esc({ s: $json.str_at({ j: d, key: "code" }) }) + "</code> " + esc({ s: $json.str_at({ j: d, key: "title" }) }) + " <span class=\"small\">" + esc({ s: $json.str_at({ j: location, key: "file" }) }) + ":" + span_start({ l: location }) + in_def + "</span></h4>" + context_html + ob_html + "</article>" });
-    items = items$62;
+    const [, items$65] = $std_list.push({ b: items, x: "<article class=\"diagnostic\"><h4><code>" + esc({ s: $json.str_at({ j: d, key: "code" }) }) + "</code> " + esc({ s: $json.str_at({ j: d, key: "title" }) }) + " <span class=\"small\">" + esc({ s: $json.str_at({ j: location, key: "file" }) }) + ":" + span_start({ l: location }) + in_def + "</span></h4>" + context_html + ob_html + "</article>" });
+    items = items$65;
   }
   return "<section><h2>Diagnostics (" + num({ n: $std_list.len({ xs: diagnostics }) }) + ")</h2>" + $std_text.join({ parts: $std_list.finish({ b: items }), sep: "" }) + "</section>";
 }
@@ -1252,10 +1332,10 @@ export function span_start({ l }) {
   if (n < 2) {
     return "0:0";
   }
-  return $std_list.get({ xs: parts, i: $rt.int.sub(n, 2, $ob50) }) + ":" + $std_list.get({ xs: parts, i: $rt.int.sub(n, 1, $ob51) });
+  return $std_list.get({ xs: parts, i: $rt.int.sub(n, 2, $ob62) }) + ":" + $std_list.get({ xs: parts, i: $rt.int.sub(n, 1, $ob63) });
 }
 
-export const css = "\n:root { color-scheme: light; --fg: #1f2328; --muted: #57606a; --line: #d0d7de; --bg: #ffffff; --panel: #f6f8fa; --amber: #fff3cd; --amber-line: #b8860b; --purple: #6f42c1; }\nbody { margin: 0; font: 14px/1.45 -apple-system, BlinkMacSystemFont, \"Segoe UI\", Helvetica, Arial, sans-serif; color: var(--fg); background: var(--bg); }\nheader { padding: 12px 24px; border-bottom: 1px solid var(--line); display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; }\nheader h1 { font-size: 16px; margin: 0; }\nnav button { font: inherit; background: none; border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; color: var(--fg); }\nnav button.active { background: var(--fg); color: var(--bg); border-color: var(--fg); }\nmain { padding: 16px 24px 48px; max-width: 1400px; }\n.view[hidden] { display: none; }\nh2 { font-size: 18px; margin: 20px 0 6px; } h3 { font-size: 15px; margin: 18px 0 6px; } h4 { margin: 12px 0 4px; }\ncode, pre { font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }\npre { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; overflow-x: auto; margin: 6px 0; white-space: pre-wrap; }\ntable { border-collapse: collapse; width: 100%; margin: 6px 0 12px; } th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); vertical-align: top; } th { color: var(--muted); font-weight: 600; }\n.meta, .small { color: var(--muted); } .small { font-size: 12px; }\n.item { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin: 10px 0; }\n.contract { margin: 2px 0 2px 12px; }\n.mark.checked { color: var(--muted); } .mark.failed, .status.failed, .breaking { color: #1f2328; font-weight: 600; } .status.ok, .compatible { color: var(--muted); }\n.assumed { background: var(--amber); } tr.assumed td { background: var(--amber); } div.assumed { border-left: 3px solid var(--amber-line); padding: 2px 8px; margin: 4px 0; }\n.recover { color: var(--purple); } div.recover { border-left: 3px solid var(--purple); padding: 2px 8px; margin: 4px 0; }\n.graph { overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }\nsvg text { font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: var(--fg); } svg text.small { font-size: 10.5px; fill: var(--muted); } svg text.name { font-weight: 600; }\nsvg .node rect { fill: #fff; stroke: #57606a; stroke-width: 1.2; } svg .node.entry rect { stroke-width: 2.4; stroke: #1f2328; } svg .node.intrinsic rect { stroke-dasharray: 4 3; }\nsvg .node.assumed rect { fill: var(--amber); stroke: var(--amber-line); } svg .node.recover rect { stroke: var(--purple); stroke-width: 2.4; }\nsvg .node.break rect { fill: #fff; stroke: #1f2328; stroke-dasharray: 2 4; } svg .edge { fill: none; stroke: #8c959f; stroke-width: 1.2; } svg .edge.back { stroke-dasharray: 6 3; } svg .edge.break { stroke: #1f2328; stroke-dasharray: 2 4; }\nsvg .edge-label { font-size: 10px; fill: var(--muted); text-anchor: middle; } svg .gate { fill: #d0d7de; fill-opacity: 0.35; stroke: #8c959f; stroke-dasharray: 8 4; } svg .gate-label { font-size: 11px; fill: var(--muted); }\n.filter.active { background: var(--fg); color: var(--bg); } .filter { font: inherit; border: 1px solid var(--line); border-radius: 6px; background: none; padding: 2px 8px; cursor: pointer; }\n.test.passed, .test.proved { color: var(--muted); } .test.failed { font-weight: 600; }\ndetails.body summary { cursor: pointer; color: var(--muted); }\npre.verify { margin: 6px 0 2px; background: #fff; } tr.verify-row td { background: var(--amber); border-top: none; padding-top: 0; }\n";
+export const css = "\n:root { color-scheme: light; --fg: #1f2328; --muted: #57606a; --line: #d0d7de; --bg: #ffffff; --panel: #f6f8fa; --amber: #fff3cd; --amber-line: #b8860b; --purple: #6f42c1; }\nbody { margin: 0; font: 14px/1.45 -apple-system, BlinkMacSystemFont, \"Segoe UI\", Helvetica, Arial, sans-serif; color: var(--fg); background: var(--bg); }\nheader { padding: 12px 24px; border-bottom: 1px solid var(--line); display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; }\nheader h1 { font-size: 16px; margin: 0; }\nnav button { font: inherit; background: none; border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; color: var(--fg); }\nnav button.active { background: var(--fg); color: var(--bg); border-color: var(--fg); }\nmain { padding: 16px 24px 48px; max-width: 1400px; }\n.view[hidden] { display: none; }\nh2 { font-size: 18px; margin: 20px 0 6px; } h3 { font-size: 15px; margin: 18px 0 6px; } h4 { margin: 12px 0 4px; }\ncode, pre { font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }\npre { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; overflow-x: auto; margin: 6px 0; white-space: pre-wrap; }\ntable { border-collapse: collapse; width: 100%; margin: 6px 0 12px; } th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); vertical-align: top; } th { color: var(--muted); font-weight: 600; }\n.meta, .small { color: var(--muted); } .small { font-size: 12px; }\n.item { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin: 10px 0; }\n.contract { margin: 2px 0 2px 12px; }\n.mark.checked { color: var(--muted); } .mark.failed, .status.failed, .breaking { color: #1f2328; font-weight: 600; } .status.ok, .compatible { color: var(--muted); }\n.assumed { background: var(--amber); } tr.assumed td { background: var(--amber); } div.assumed { border-left: 3px solid var(--amber-line); padding: 2px 8px; margin: 4px 0; }\n.recover { color: var(--purple); } div.recover { border-left: 3px solid var(--purple); padding: 2px 8px; margin: 4px 0; }\n.graph { overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }\nsvg text { font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: var(--fg); } svg text.small { font-size: 10.5px; fill: var(--muted); } svg text.name { font-weight: 600; }\nsvg .node rect { fill: #fff; stroke: #57606a; stroke-width: 1.2; } svg .node.entry rect { stroke-width: 2.4; stroke: #1f2328; } svg .node.intrinsic rect { stroke-dasharray: 4 3; }\nsvg .node.assumed rect { fill: var(--amber); stroke: var(--amber-line); } svg .node.recover rect { stroke: var(--purple); stroke-width: 2.4; }\nsvg .node.break rect { fill: #fff; stroke: #1f2328; stroke-dasharray: 2 4; } svg .edge { fill: none; stroke: #8c959f; stroke-width: 1.2; } svg .edge.back { stroke-dasharray: 6 3; } svg .edge.break { stroke: #1f2328; stroke-dasharray: 2 4; }\nsvg .edge-label { font-size: 10px; fill: var(--muted); text-anchor: middle; } svg .gate { fill: #d0d7de; fill-opacity: 0.35; stroke: #8c959f; stroke-dasharray: 8 4; } svg .gate-label { font-size: 11px; fill: var(--muted); } svg .zone rect { fill: none; stroke: #8c959f; stroke-width: 1; } svg .zone.critical rect { stroke: #1f2328; stroke-width: 1.6; } svg .zone.hardened rect { stroke: #57606a; } svg .zone.draft rect { stroke: #b8860b; stroke-dasharray: 3 3; } svg .zone text { fill: var(--muted); font-size: 10.5px; } tr.demotion td { background: var(--amber); }\n.filter.active { background: var(--fg); color: var(--bg); } .filter { font: inherit; border: 1px solid var(--line); border-radius: 6px; background: none; padding: 2px 8px; cursor: pointer; }\n.test.passed, .test.proved { color: var(--muted); } .test.failed { font-weight: 600; }\ndetails.body summary { cursor: pointer; color: var(--muted); }\npre.verify { margin: 6px 0 2px; background: #fff; } tr.verify-row td { background: var(--amber); border-top: none; padding-top: 0; }\n";
 
 export const script = "\n(function () {\n  var buttons = document.querySelectorAll('nav button[data-view]');\n  function show(name) {\n    document.querySelectorAll('.view').forEach(function (v) { v.hidden = v.getAttribute('data-view') !== name; });\n    buttons.forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-view') === name); });\n    try { localStorage.setItem('onus-review-view', name); } catch (e) {}\n  }\n  buttons.forEach(function (b) { b.addEventListener('click', function () { show(b.getAttribute('data-view')); }); });\n  var initial = null; try { initial = localStorage.getItem('onus-review-view'); } catch (e) {}\n  show(initial && document.querySelector('.view[data-view=\"' + initial + '\"]') ? initial : 'paths');\n  document.querySelectorAll('.filter').forEach(function (f) {\n    f.addEventListener('click', function () {\n      var status = f.getAttribute('data-status');\n      document.querySelectorAll('.filter').forEach(function (x) { x.classList.toggle('active', x === f); });\n      document.querySelectorAll('.ledger-view tr.ledger-row').forEach(function (row) { row.hidden = status !== 'all' && !row.classList.contains('status-' + status); });\n    });\n  });\n  var opened = {};\n  document.querySelectorAll('details.body').forEach(function (d) {\n    d.addEventListener('toggle', function () {\n      if (!d.open) return;\n      var m = d.getAttribute('data-module'); var item = d.getAttribute('data-item');\n      opened[m] = opened[m] || {}; opened[m][item] = true;\n      var n = Object.keys(opened[m]).length;\n      document.querySelectorAll('.rate[data-module=\"' + m + '\"]').forEach(function (r) {\n        var total = Number(r.getAttribute('data-total')) || 0;\n        r.textContent = n + ' of ' + total + ' bodies opened' + (total > 0 ? ' (' + Math.round(100 * n / total) + '%)' : '');\n      });\n    });\n  });\n})();\n";
 
@@ -1266,14 +1346,23 @@ export function count_label({ word, n }) {
   return word;
 }
 
+export function zones_of_modules({ data }) {
+  let out = $std_map.dict({  });
+  for (const m of $json.list_at({ j: data, key: "modules" })) {
+    const [, out$66] = $std_map.set({ d: out, key: $json.str_at({ j: m, key: "module" }), value: $json.str_at({ j: m, key: "zone" }) });
+    out = out$66;
+  }
+  return out;
+}
+
 export function render_page({ data }) {
   const paths = $json.list_at({ j: data, key: "paths" });
   let paths_html = "<section><h2>Paths</h2><p>The entry module declares no <code>path</code>.</p></section>";
   if ($std_list.len({ xs: paths }) > 0) {
     let parts = $std_list.builder({  });
     for (const r of paths) {
-      const [, parts$63] = $std_list.push({ b: parts, x: render_path_view({ r: r }) });
-      parts = parts$63;
+      const [, parts$67] = $std_list.push({ b: parts, x: render_path_view({ r: r, zone_of: zones_of_modules({ data: data }) }) });
+      parts = parts$67;
     }
     paths_html = $std_text.join({ parts: $std_list.finish({ b: parts }), sep: "\n" });
   }
@@ -1285,8 +1374,8 @@ export function render_page({ data }) {
     if ($json.has({ j: sources, key: name })) {
       source = { tag: "Some", value: $json.str_at({ j: sources, key: name }) };
     }
-    const [, modules$64] = $std_list.push({ b: modules, x: render_interface_view({ doc: m, source: source }) });
-    modules = modules$64;
+    const [, modules$68] = $std_list.push({ b: modules, x: render_interface_view({ doc: m, source: source }) });
+    modules = modules$68;
   }
   let modules_html = $std_text.join({ parts: $std_list.finish({ b: modules }), sep: "\n" });
   if (modules_html === "") {
@@ -1294,14 +1383,14 @@ export function render_page({ data }) {
   }
   const changes = $json.list_at({ j: data, key: "changes" });
   const diagnostics = $json.list_at({ j: data, key: "diagnostics" });
-  const views = [{ id: "paths", label: "Paths", html: paths_html }, { id: "interfaces", label: "Interfaces", html: modules_html }, { id: "ledger", label: "Ledger", html: render_ledger_view({ data: data }) }, { id: "diff", label: "Diff", html: render_diff_view({ diff: $json.at({ j: data, key: "diff" }) }) }, { id: "changes", label: count_label({ word: "Changes", n: $std_list.len({ xs: changes }) }), html: render_changes_view({ changes: changes }) }, { id: "diagnostics", label: count_label({ word: "Diagnostics", n: $std_list.len({ xs: diagnostics }) }), html: render_diagnostics_view({ diagnostics: diagnostics }) }];
+  const views = [{ id: "paths", label: "Paths", html: paths_html }, { id: "interfaces", label: "Interfaces", html: modules_html }, { id: "ledger", label: "Ledger", html: render_ledger_view({ data: data }) + render_promotions_view({ data: data }) }, { id: "diff", label: "Diff", html: render_diff_view({ diff: $json.at({ j: data, key: "diff" }) }) }, { id: "changes", label: count_label({ word: "Changes", n: $std_list.len({ xs: changes }) }), html: render_changes_view({ changes: changes }) }, { id: "diagnostics", label: count_label({ word: "Diagnostics", n: $std_list.len({ xs: diagnostics }) }), html: render_diagnostics_view({ diagnostics: diagnostics }) }];
   let buttons = $std_list.builder({  });
   let panels = $std_list.builder({  });
   for (const v of views) {
-    const [, buttons$65] = $std_list.push({ b: buttons, x: "<button data-view=\"" + v.id + "\">" + esc({ s: v.label }) + "</button>" });
-    buttons = buttons$65;
-    const [, panels$66] = $std_list.push({ b: panels, x: "<div class=\"view\" data-view=\"" + v.id + "\" hidden>" + v.html + "</div>" });
-    panels = panels$66;
+    const [, buttons$69] = $std_list.push({ b: buttons, x: "<button data-view=\"" + v.id + "\">" + esc({ s: v.label }) + "</button>" });
+    buttons = buttons$69;
+    const [, panels$70] = $std_list.push({ b: panels, x: "<div class=\"view\" data-view=\"" + v.id + "\" hidden>" + v.html + "</div>" });
+    panels = panels$70;
   }
   const entry = esc({ s: $json.str_at({ j: data, key: "entry" }) });
   const generated = $json.at({ j: data, key: "generated" });
@@ -1309,20 +1398,20 @@ export function render_page({ data }) {
 }
 
 export function module_of_file({ ctx, file }) {
-  const $hi32 = ctx.module_count;
-  for (let mid = 0; mid < $hi32; mid++) {
-    const $m33 = $std_map.find({ d: ctx.modules, key: mid });
-    $m33$match: {
-      if ($m33.tag === "Some") {
-        const value = $m33.value;
+  const $hi34 = ctx.module_count;
+  for (let mid = 0; mid < $hi34; mid++) {
+    const $m35 = $std_map.find({ d: ctx.modules, key: mid });
+    $m35$match: {
+      if ($m35.tag === "Some") {
+        const value = $m35.value;
         if (value.file === file) {
           return { tag: "Some", value: value };
         }
-        break $m33$match;
+        break $m35$match;
       }
-      if ($m33.tag === "None") {
+      if ($m35.tag === "None") {
         skip({  });
-        break $m33$match;
+        break $m35$match;
       }
       $rt.unreachable();
     }
@@ -1334,24 +1423,24 @@ export function review_data({ ctx, tab, against, now, changes }) {
   const generated = { tag: "JObject", fields: [$json.field({ key: "tool", value: $json.text({ t: "onus review" }) }), $json.field({ key: "at", value: $json.text({ t: now }) })] };
   let entry = first_path({ files: $std_list.finish({ b: ctx.files }) });
   let entry_name = { tag: "None" };
-  const $m38 = module_of_file({ ctx: ctx, file: 0 });
-  $m38$match: {
-    if ($m38.tag === "Some") {
-      const value = $m38.value;
+  const $m40 = module_of_file({ ctx: ctx, file: 0 });
+  $m40$match: {
+    if ($m40.tag === "Some") {
+      const value = $m40.value;
       entry = value.name;
       entry_name = { tag: "Some", value: value.name };
-      break $m38$match;
+      break $m40$match;
     }
-    if ($m38.tag === "None") {
+    if ($m40.tag === "None") {
       skip({  });
-      break $m38$match;
+      break $m40$match;
     }
     $rt.unreachable();
   }
   let diagnostics = $std_list.builder({  });
   for (const d of $std_list.finish({ b: ctx.diagnostics })) {
-    const [, diagnostics$67] = $std_list.push({ b: diagnostics, x: $diagjson.to_json({ ctx: ctx, tab: tab, d: d }) });
-    diagnostics = diagnostics$67;
+    const [, diagnostics$71] = $std_list.push({ b: diagnostics, x: $diagjson.to_json({ ctx: ctx, tab: tab, d: d }) });
+    diagnostics = diagnostics$71;
   }
   const diagnostics_json = { tag: "JArray", items: $std_list.finish({ b: diagnostics }) };
   const changes_json = { tag: "JArray", items: changes };
@@ -1361,63 +1450,72 @@ export function review_data({ ctx, tab, against, now, changes }) {
   let modules = $std_list.builder({  });
   let sources = $std_list.builder({  });
   let current = { tag: "None" };
-  const $hi48 = ctx.module_count;
-  for (let mid = 0; mid < $hi48; mid++) {
-    const $m49 = $std_map.find({ d: ctx.modules, key: mid });
-    $m49$match: {
-      if ($m49.tag === "Some") {
-        const value = $m49.value;
+  const $hi50 = ctx.module_count;
+  for (let mid = 0; mid < $hi50; mid++) {
+    const $m51 = $std_map.find({ d: ctx.modules, key: mid });
+    $m51$match: {
+      if ($m51.tag === "Some") {
+        const value = $m51.value;
         if (!value.is_std) {
           const doc = $interface.interface_of({ ctx: ctx, mod: mid });
-          const [, modules$68] = $std_list.push({ b: modules, x: doc });
-          modules = modules$68;
-          const [, sources$69] = push_source({ ctx: ctx, m: value, sources: sources });
-          sources = sources$69;
+          const [, modules$72] = $std_list.push({ b: modules, x: doc });
+          modules = modules$72;
+          const [, sources$73] = push_source({ ctx: ctx, m: value, sources: sources });
+          sources = sources$73;
           if ($rt.eq(entry_name, { tag: "Some", value: value.name }) && current.tag === "None") {
             current = { tag: "Some", value: doc };
           }
         }
-        break $m49$match;
+        break $m51$match;
       }
-      if ($m49.tag === "None") {
+      if ($m51.tag === "None") {
         skip({  });
-        break $m49$match;
+        break $m51$match;
       }
       $rt.unreachable();
     }
   }
   let paths = $std_list.builder({  });
   for (const k of $std_map.keys({ d: ctx.analyses })) {
-    const $m52 = $std_map.find({ d: ctx.analyses, key: k });
-    $m52$match: {
-      if ($m52.tag === "Some") {
-        const value = $m52.value;
-        const [, paths$70] = $std_list.push({ b: paths, x: $pathreport.path_report({ ctx: ctx, tab: tab, a: value }) });
-        paths = paths$70;
-        break $m52$match;
+    const $m54 = $std_map.find({ d: ctx.analyses, key: k });
+    $m54$match: {
+      if ($m54.tag === "Some") {
+        const value = $m54.value;
+        const [, paths$74] = $std_list.push({ b: paths, x: $pathreport.path_report({ ctx: ctx, tab: tab, a: value }) });
+        paths = paths$74;
+        break $m54$match;
       }
-      if ($m52.tag === "None") {
+      if ($m54.tag === "None") {
         skip({  });
-        break $m52$match;
+        break $m54$match;
       }
       $rt.unreachable();
     }
   }
-  return { tag: "JObject", fields: [$json.field({ key: "generated", value: generated }), $json.field({ key: "entry", value: $json.text({ t: entry }) }), $json.field({ key: "modules", value: { tag: "JArray", items: $std_list.finish({ b: modules }) } }), $json.field({ key: "sources", value: { tag: "JObject", fields: $std_list.finish({ b: sources }) } }), $json.field({ key: "paths", value: { tag: "JArray", items: $std_list.finish({ b: paths }) } }), $json.field({ key: "diagnostics", value: diagnostics_json }), $json.field({ key: "diff", value: diff_of({ against: against, current: current }) }), $json.field({ key: "changes", value: changes_json })] };
+  return { tag: "JObject", fields: [$json.field({ key: "generated", value: generated }), $json.field({ key: "entry", value: $json.text({ t: entry }) }), $json.field({ key: "modules", value: { tag: "JArray", items: $std_list.finish({ b: modules }) } }), $json.field({ key: "sources", value: { tag: "JObject", fields: $std_list.finish({ b: sources }) } }), $json.field({ key: "paths", value: { tag: "JArray", items: $std_list.finish({ b: paths }) } }), $json.field({ key: "diagnostics", value: diagnostics_json }), $json.field({ key: "diff", value: diff_of({ against: against, current: current }) }), $json.field({ key: "changes", value: changes_json }), $json.field({ key: "promotions", value: promotions_json({ ctx: ctx }) })] };
+}
+
+export function promotions_json({ ctx }) {
+  let items = $std_list.builder({  });
+  for (const r of ctx.promotions) {
+    const [, items$75] = $std_list.push({ b: items, x: $ledger.promotion_json({ r: r }) });
+    items = items$75;
+  }
+  return { tag: "JArray", items: $std_list.finish({ b: items }) };
 }
 
 export function push_source({ ctx, m, sources }) {
-  const $m57 = $std_map.find({ d: ctx.canonical, key: m.file });
-  $m57$match: {
-    if ($m57.tag === "Some") {
-      const value = $m57.value;
-      const [, sources$71] = $std_list.push({ b: sources, x: $json.field({ key: m.name, value: $json.text({ t: value }) }) });
-      sources = sources$71;
-      break $m57$match;
+  const $m60 = $std_map.find({ d: ctx.canonical, key: m.file });
+  $m60$match: {
+    if ($m60.tag === "Some") {
+      const value = $m60.value;
+      const [, sources$76] = $std_list.push({ b: sources, x: $json.field({ key: m.name, value: $json.text({ t: value }) }) });
+      sources = sources$76;
+      break $m60$match;
     }
-    if ($m57.tag === "None") {
+    if ($m60.tag === "None") {
       skip({  });
-      break $m57$match;
+      break $m60$match;
     }
     $rt.unreachable();
   }
@@ -1433,92 +1531,92 @@ export function first_path({ files }) {
 }
 
 export function diff_of({ against, current }) {
-  const $m58 = against;
-  $m58$match: {
-    if ($m58.tag === "None") {
+  const $m61 = against;
+  $m61$match: {
+    if ($m61.tag === "None") {
       return { tag: "JNull" };
-      break $m58$match;
+      break $m61$match;
     }
-    if ($m58.tag === "Some") {
-      const value = $m58.value;
+    if ($m61.tag === "Some") {
+      const value = $m61.value;
       return diff_against({ before: value, current: current });
-      break $m58$match;
+      break $m61$match;
     }
     $rt.unreachable();
   }
 }
 
 export function diff_against({ before, current }) {
-  const $m60 = current;
-  $m60$match: {
-    if ($m60.tag === "None") {
+  const $m63 = current;
+  $m63$match: {
+    if ($m63.tag === "None") {
       return { tag: "JNull" };
-      break $m60$match;
+      break $m63$match;
     }
-    if ($m60.tag === "Some") {
-      const value = $m60.value;
+    if ($m63.tag === "Some") {
+      const value = $m63.value;
       return $idiff.diff_json({ d: $idiff.interface_diff({ before: before, after: value }) });
-      break $m60$match;
+      break $m63$match;
     }
     $rt.unreachable();
   }
 }
 
 export function str_or_null({ j }) {
-  const $m62 = j;
-  $m62$match: {
-    if ($m62.tag === "JString") {
+  const $m65 = j;
+  $m65$match: {
+    if ($m65.tag === "JString") {
       return j;
-      break $m62$match;
+      break $m65$match;
     }
     if (true) {
       return { tag: "JNull" };
-      break $m62$match;
+      break $m65$match;
     }
     $rt.unreachable();
   }
 }
 
 export function str_or_empty({ j }) {
-  const $m64 = j;
-  $m64$match: {
-    if ($m64.tag === "JString") {
+  const $m67 = j;
+  $m67$match: {
+    if ($m67.tag === "JString") {
       return j;
-      break $m64$match;
+      break $m67$match;
     }
     if (true) {
       return $json.text({ t: "" });
-      break $m64$match;
+      break $m67$match;
     }
     $rt.unreachable();
   }
 }
 
 export function num_or_zero({ j }) {
-  const $m65 = j;
-  $m65$match: {
-    if ($m65.tag === "JNumber") {
+  const $m68 = j;
+  $m68$match: {
+    if ($m68.tag === "JNumber") {
       return j;
-      break $m65$match;
+      break $m68$match;
     }
     if (true) {
       return { tag: "JNumber", text: "0" };
-      break $m65$match;
+      break $m68$match;
     }
     $rt.unreachable();
   }
 }
 
 export function object_or_null({ j }) {
-  const $m67 = j;
-  $m67$match: {
-    if ($m67.tag === "JObject") {
+  const $m70 = j;
+  $m70$match: {
+    if ($m70.tag === "JObject") {
       return j;
-      break $m67$match;
+      break $m70$match;
     }
     if (true) {
       return { tag: "JNull" };
-      break $m67$match;
+      break $m70$match;
     }
     $rt.unreachable();
   }
@@ -1528,8 +1626,8 @@ export function objects_of({ j }) {
   let out = $std_list.builder({  });
   for (const x of $json.list_of({ j: j })) {
     if (x.tag === "JObject") {
-      const [, out$72] = $std_list.push({ b: out, x: x });
-      out = out$72;
+      const [, out$77] = $std_list.push({ b: out, x: x });
+      out = out$77;
     }
   }
   return $std_list.finish({ b: out });
@@ -1539,8 +1637,8 @@ export function strings_of({ j }) {
   let out = $std_list.builder({  });
   for (const x of $json.list_of({ j: j })) {
     if (x.tag === "JString") {
-      const [, out$73] = $std_list.push({ b: out, x: x });
-      out = out$73;
+      const [, out$78] = $std_list.push({ b: out, x: x });
+      out = out$78;
     }
   }
   return { tag: "JArray", items: $std_list.finish({ b: out }) };
@@ -1559,21 +1657,21 @@ export function mapped({ j, keys, kinds }) {
       const kind = kind_at({ kinds: kinds, i: i });
       const v = $json.at({ j: x, key: k });
       if (kind === "str") {
-        const [, fields$74] = $std_list.push({ b: fields, x: field({ key: k, value: str_or_empty({ j: v }) }) });
-        fields = fields$74;
+        const [, fields$79] = $std_list.push({ b: fields, x: field({ key: k, value: str_or_empty({ j: v }) }) });
+        fields = fields$79;
       } else {
         if (kind === "str?") {
-          const [, fields$75] = $std_list.push({ b: fields, x: field({ key: k, value: str_or_null({ j: v }) }) });
-          fields = fields$75;
+          const [, fields$80] = $std_list.push({ b: fields, x: field({ key: k, value: str_or_null({ j: v }) }) });
+          fields = fields$80;
         } else {
-          const [, fields$76] = $std_list.push({ b: fields, x: field({ key: k, value: num_or_zero({ j: v }) }) });
-          fields = fields$76;
+          const [, fields$81] = $std_list.push({ b: fields, x: field({ key: k, value: num_or_zero({ j: v }) }) });
+          fields = fields$81;
         }
       }
-      i = $rt.int.add(i, 1, $ob52);
+      i = $rt.int.add(i, 1, $ob64);
     }
-    const [, out$77] = $std_list.push({ b: out, x: { tag: "JObject", fields: $std_list.finish({ b: fields }) } });
-    out = out$77;
+    const [, out$82] = $std_list.push({ b: out, x: { tag: "JObject", fields: $std_list.finish({ b: fields }) } });
+    out = out$82;
   }
   return { tag: "JArray", items: $std_list.finish({ b: out }) };
 }
@@ -1595,15 +1693,15 @@ export function loop_change_of({ j }) {
     return { tag: "None" };
   }
   let target = { tag: "JNull" };
-  const $m75 = $json.at({ j: task, key: "target" });
-  $m75$match: {
-    if ($m75.tag === "JObject") {
+  const $m78 = $json.at({ j: task, key: "target" });
+  $m78$match: {
+    if ($m78.tag === "JObject") {
       target = { tag: "JObject", fields: [field({ key: "def", value: str_or_empty({ j: $json.at({ j: $json.at({ j: task, key: "target" }), key: "def" }) }) })] };
-      break $m75$match;
+      break $m78$match;
     }
     if (true) {
       skip({  });
-      break $m75$match;
+      break $m78$match;
     }
     $rt.unreachable();
   }
@@ -1611,8 +1709,8 @@ export function loop_change_of({ j }) {
   const metrics = $json.at({ j: j, key: "metrics" });
   let proposals = $std_list.builder({  });
   for (const x of objects_of({ j: $json.at({ j: j, key: "proposals" }) })) {
-    const [, proposals$78] = $std_list.push({ b: proposals, x: { tag: "JObject", fields: [field({ key: "kind", value: str_or_empty({ j: $json.at({ j: x, key: "kind" }) }) }), field({ key: "def", value: str_or_empty({ j: $json.at({ j: x, key: "def" }) }) }), field({ key: "current", value: str_or_null({ j: $json.at({ j: x, key: "current" }) }) }), field({ key: "proposed", value: str_or_null({ j: $json.at({ j: x, key: "proposed" }) }) }), field({ key: "rationale", value: str_or_empty({ j: $json.at({ j: x, key: "rationale" }) }) }), field({ key: "counterexample", value: object_or_null({ j: $json.at({ j: object_or_null({ j: $json.at({ j: x, key: "evidence" }) }), key: "counterexample" }) }) })] } });
-    proposals = proposals$78;
+    const [, proposals$83] = $std_list.push({ b: proposals, x: { tag: "JObject", fields: [field({ key: "kind", value: str_or_empty({ j: $json.at({ j: x, key: "kind" }) }) }), field({ key: "def", value: str_or_empty({ j: $json.at({ j: x, key: "def" }) }) }), field({ key: "current", value: str_or_null({ j: $json.at({ j: x, key: "current" }) }) }), field({ key: "proposed", value: str_or_null({ j: $json.at({ j: x, key: "proposed" }) }) }), field({ key: "rationale", value: str_or_empty({ j: $json.at({ j: x, key: "rationale" }) }) }), field({ key: "counterexample", value: object_or_null({ j: $json.at({ j: object_or_null({ j: $json.at({ j: x, key: "evidence" }) }), key: "counterexample" }) }) })] } });
+    proposals = proposals$83;
   }
   return { tag: "Some", value: { tag: "JObject", fields: [field({ key: "task", value: { tag: "JObject", fields: [field({ key: "id", value: $json.at({ j: task, key: "id" }) }), field({ key: "kind", value: str_or_empty({ j: $json.at({ j: task, key: "kind" }) }) }), field({ key: "scope", value: strings_of({ j: $json.at({ j: task, key: "scope" }) }) }), field({ key: "target", value: target })] } }), field({ key: "status", value: $json.text({ t: status }) }), field({ key: "cause", value: str_or_null({ j: $json.at({ j: j, key: "cause" }) }) }), field({ key: "generated", value: { tag: "JObject", fields: [field({ key: "at", value: str_or_empty({ j: $json.at({ j: generated, key: "at" }) }) }), field({ key: "model", value: str_or_empty({ j: $json.at({ j: generated, key: "model" }) }) })] } }), field({ key: "interface_diff", value: { tag: "JArray", items: objects_of({ j: $json.at({ j: j, key: "interface_diff" }) }) } }), field({ key: "ledger_delta", value: mapped({ j: $json.at({ j: j, key: "ledger_delta" }), keys: ["def", "kind", "text", "before", "after"], kinds: ["str", "str", "str", "str?", "str?"] }) }), field({ key: "body_diff", value: mapped({ j: $json.at({ j: j, key: "body_diff" }), keys: ["file", "module", "before", "after"], kinds: ["str", "str", "str", "str"] }) }), field({ key: "trace", value: mapped({ j: $json.at({ j: j, key: "trace" }), keys: ["iteration", "classification", "diagnostics_before", "diagnostics_after", "mechanical_repairs", "tokens", "ms", "escalation"], kinds: ["num", "str", "num", "num", "num", "num", "num", "str?"] }) }), field({ key: "metrics", value: { tag: "JObject", fields: [field({ key: "iterations", value: num_or_zero({ j: $json.at({ j: metrics, key: "iterations" }) }) }), field({ key: "mechanical_repairs", value: num_or_zero({ j: $json.at({ j: metrics, key: "mechanical_repairs" }) }) }), field({ key: "escalation_steps", value: num_or_zero({ j: $json.at({ j: metrics, key: "escalation_steps" }) }) }), field({ key: "proposals", value: num_or_zero({ j: $json.at({ j: metrics, key: "proposals" }) }) }), field({ key: "tokens", value: num_or_zero({ j: $json.at({ j: metrics, key: "tokens" }) }) })] } }), field({ key: "proposals", value: { tag: "JArray", items: $std_list.finish({ b: proposals }) } }), field({ key: "audit", value: mapped({ j: $json.at({ j: j, key: "audit" }), keys: ["finding", "detail"], kinds: ["str", "str"] }) })] } };
 }
@@ -1620,36 +1718,36 @@ export function loop_change_of({ j }) {
 export function read_changes({ files, root }) {
   const dir = root + "/.onus/changes";
   let out = [];
-  const $m85 = $std_io.list_dir({ files: files, path: dir });
-  $m85$match: {
-    if ($m85.tag === "Err") {
+  const $m88 = $std_io.list_dir({ files: files, path: dir });
+  $m88$match: {
+    if ($m88.tag === "Err") {
       return [];
-      break $m85$match;
+      break $m88$match;
     }
-    if ($m85.tag === "Ok") {
-      const value = $m85.value;
+    if ($m88.tag === "Ok") {
+      const value = $m88.value;
       for (const name of value) {
-        const [, out$79] = add_change({ files: files, path: dir + "/" + name + "/change.json", out: out });
-        out = out$79;
+        const [, out$84] = add_change({ files: files, path: dir + "/" + name + "/change.json", out: out });
+        out = out$84;
       }
       return out;
-      break $m85$match;
+      break $m88$match;
     }
     $rt.unreachable();
   }
 }
 
 export function add_change({ files, path, out }) {
-  const $m86 = read_change({ files: files, path: path });
-  $m86$match: {
-    if ($m86.tag === "Some") {
-      const value = $m86.value;
+  const $m89 = read_change({ files: files, path: path });
+  $m89$match: {
+    if ($m89.tag === "Some") {
+      const value = $m89.value;
       out = insert_newest_first({ xs: out, c: value });
-      break $m86$match;
+      break $m89$match;
     }
-    if ($m86.tag === "None") {
+    if ($m89.tag === "None") {
       skip({  });
-      break $m86$match;
+      break $m89$match;
     }
     $rt.unreachable();
   }
@@ -1658,32 +1756,32 @@ export function add_change({ files, path, out }) {
 }
 
 export function read_change({ files, path }) {
-  const $m87 = $std_io.read({ files: files, path: path });
-  $m87$match: {
-    if ($m87.tag === "Err") {
+  const $m90 = $std_io.read({ files: files, path: path });
+  $m90$match: {
+    if ($m90.tag === "Err") {
       return { tag: "None" };
-      break $m87$match;
+      break $m90$match;
     }
-    if ($m87.tag === "Ok") {
-      const value = $m87.value;
+    if ($m90.tag === "Ok") {
+      const value = $m90.value;
       return change_of_text({ text: value });
-      break $m87$match;
+      break $m90$match;
     }
     $rt.unreachable();
   }
 }
 
 export function change_of_text({ text }) {
-  const $m89 = $json.parse({ t: text });
-  $m89$match: {
-    if ($m89.tag === "None") {
+  const $m92 = $json.parse({ t: text });
+  $m92$match: {
+    if ($m92.tag === "None") {
       return { tag: "None" };
-      break $m89$match;
+      break $m92$match;
     }
-    if ($m89.tag === "Some") {
-      const value = $m89.value;
+    if ($m92.tag === "Some") {
+      const value = $m92.value;
       return loop_change_of({ j: value });
-      break $m89$match;
+      break $m92$match;
     }
     $rt.unreachable();
   }
@@ -1695,16 +1793,16 @@ export function insert_newest_first({ xs, c }) {
   let placed = false;
   for (const x of xs) {
     if (!placed && $std_text.compare({ a: $json.str_at({ j: $json.at({ j: x, key: "generated" }), key: "at" }), b: at }) < 0) {
-      const [, out$80] = $std_list.push({ b: out, x: c });
-      out = out$80;
+      const [, out$85] = $std_list.push({ b: out, x: c });
+      out = out$85;
       placed = true;
     }
-    const [, out$81] = $std_list.push({ b: out, x: x });
-    out = out$81;
+    const [, out$86] = $std_list.push({ b: out, x: x });
+    out = out$86;
   }
   if (!placed) {
-    const [, out$82] = $std_list.push({ b: out, x: c });
-    out = out$82;
+    const [, out$87] = $std_list.push({ b: out, x: c });
+    out = out$87;
   }
   return $std_list.finish({ b: out });
 }

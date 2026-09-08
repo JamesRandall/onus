@@ -21,6 +21,8 @@ pub record QName {
 
 pub record Visibility {
   is_pub: Bool
+  -- `hardened` (spec §21.1): a public item of a draft module a higher zone may depend on.
+  is_hardened: Bool
   is_sealed: Bool
 }
 

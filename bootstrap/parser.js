@@ -759,7 +759,7 @@ export function starts_item({ kind }) {
   $m104$match: {
     if ($m104.tag === "Keyword") {
       const word = $m104.word;
-      return word === "pub" || word === "sealed" || word === "fn" || word === "const" || word === "type" || word === "record" || word === "union" || word === "interface" || word === "impl" || word === "claim" || word === "capability" || word === "path" || word === "policy" || word === "example" || word === "property";
+      return word === "pub" || word === "hardened" || word === "sealed" || word === "fn" || word === "const" || word === "type" || word === "record" || word === "union" || word === "interface" || word === "impl" || word === "claim" || word === "capability" || word === "path" || word === "policy" || word === "example" || word === "property";
       break $m104$match;
     }
     if (true) {
@@ -1078,186 +1078,189 @@ export function visibility({ p }) {
   const [$r175, p$129] = accept_word({ p: p, want: "pub" });
   p = p$129;
   const is_pub = $r175;
-  const [$r176, p$130] = accept_word({ p: p, want: "sealed" });
+  const [$r176, p$130] = accept_word({ p: p, want: "hardened" });
   p = p$130;
-  const is_sealed = $r176;
-  return [{ is_pub: is_pub, is_sealed: is_sealed }, p];
+  const is_hardened = $r176;
+  const [$r177, p$131] = accept_word({ p: p, want: "sealed" });
+  p = p$131;
+  const is_sealed = $r177;
+  return [{ is_pub: is_pub, is_hardened: is_hardened, is_sealed: is_sealed }, p];
 }
 
 export function parse_item({ p }) {
   try {
     const start = here({ p: p });
-    const [, p$131] = expecting({ p: p, kinds: ["pub", "sealed", "fn", "const", "type", "record", "union", "interface", "impl", "claim", "capability", "path", "policy", "example", "property", "intrinsic"] });
-    p = p$131;
-    const [$r178, p$132] = at_word({ p: p, want: "impl" });
+    const [, p$132] = expecting({ p: p, kinds: ["pub", "hardened", "sealed", "fn", "const", "type", "record", "union", "interface", "impl", "claim", "capability", "path", "policy", "example", "property", "intrinsic"] });
     p = p$132;
-    if ($r178) {
-      const [$r179, p$133] = parse_impl({ p: p, start: start });
-      p = p$133;
-      const d = $rt.unwrap($r179);
+    const [$r179, p$133] = at_word({ p: p, want: "impl" });
+    p = p$133;
+    if ($r179) {
+      const [$r180, p$134] = parse_impl({ p: p, start: start });
+      p = p$134;
+      const d = $rt.unwrap($r180);
       return [{ tag: "Ok", value: { tag: "ImplItem", decl: d } }, p];
     }
-    const [$r182, p$134] = at_word({ p: p, want: "path" });
-    p = p$134;
-    if ($r182) {
-      const [$r183, p$135] = parse_path({ p: p, start: start });
-      p = p$135;
-      const d = $rt.unwrap($r183);
+    const [$r183, p$135] = at_word({ p: p, want: "path" });
+    p = p$135;
+    if ($r183) {
+      const [$r184, p$136] = parse_path({ p: p, start: start });
+      p = p$136;
+      const d = $rt.unwrap($r184);
       return [{ tag: "Ok", value: { tag: "PathItem", decl: d } }, p];
     }
-    const [$r186, p$136] = at_word({ p: p, want: "policy" });
-    p = p$136;
-    if ($r186) {
-      const [$r187, p$137] = parse_policy({ p: p, start: start });
-      p = p$137;
-      const d = $rt.unwrap($r187);
+    const [$r187, p$137] = at_word({ p: p, want: "policy" });
+    p = p$137;
+    if ($r187) {
+      const [$r188, p$138] = parse_policy({ p: p, start: start });
+      p = p$138;
+      const d = $rt.unwrap($r188);
       return [{ tag: "Ok", value: { tag: "PolicyItem", decl: d } }, p];
     }
-    const [$r190, p$138] = at_word({ p: p, want: "example" });
-    p = p$138;
-    if ($r190) {
-      const [$r191, p$139] = parse_example({ p: p, start: start });
-      p = p$139;
-      const d = $rt.unwrap($r191);
+    const [$r191, p$139] = at_word({ p: p, want: "example" });
+    p = p$139;
+    if ($r191) {
+      const [$r192, p$140] = parse_example({ p: p, start: start });
+      p = p$140;
+      const d = $rt.unwrap($r192);
       return [{ tag: "Ok", value: { tag: "ExampleItem", decl: d } }, p];
     }
-    const [$r194, p$140] = at_word({ p: p, want: "property" });
-    p = p$140;
-    if ($r194) {
-      const [$r195, p$141] = parse_property({ p: p, start: start });
-      p = p$141;
-      const d = $rt.unwrap($r195);
+    const [$r195, p$141] = at_word({ p: p, want: "property" });
+    p = p$141;
+    if ($r195) {
+      const [$r196, p$142] = parse_property({ p: p, start: start });
+      p = p$142;
+      const d = $rt.unwrap($r196);
       return [{ tag: "Ok", value: { tag: "PropertyItem", decl: d } }, p];
     }
-    const [$r198, p$142] = visibility({ p: p });
-    p = p$142;
-    const vis = $r198;
-    const [, p$143] = expecting({ p: p, kinds: ["fn", "const", "intrinsic", "type", "record", "union", "interface", "claim", "capability"] });
+    const [$r199, p$143] = visibility({ p: p });
     p = p$143;
-    const [$r199, p$144] = at_word({ p: p, want: "fn" });
+    const vis = $r199;
+    const [, p$144] = expecting({ p: p, kinds: ["fn", "const", "intrinsic", "type", "record", "union", "interface", "claim", "capability"] });
     p = p$144;
-    if ($r199) {
-      const [$r200, p$145] = parse_fn({ p: p, start: start, vis: vis, is_const: false, is_intrinsic: false });
-      p = p$145;
-      const d = $rt.unwrap($r200);
+    const [$r200, p$145] = at_word({ p: p, want: "fn" });
+    p = p$145;
+    if ($r200) {
+      const [$r201, p$146] = parse_fn({ p: p, start: start, vis: vis, is_const: false, is_intrinsic: false });
+      p = p$146;
+      const d = $rt.unwrap($r201);
       return [{ tag: "Ok", value: { tag: "FnItem", decl: d } }, p];
     }
-    const [$r203, p$146] = at_word({ p: p, want: "const" });
-    p = p$146;
-    if ($r203) {
-      const [$r204, p$147] = at_word_n({ p: p, n: 1, want: "fn" });
-      p = p$147;
-      if ($r204) {
-        const [, p$148] = skip({ p: p });
-        p = p$148;
-        const [$r205, p$149] = parse_fn({ p: p, start: start, vis: vis, is_const: true, is_intrinsic: false });
+    const [$r204, p$147] = at_word({ p: p, want: "const" });
+    p = p$147;
+    if ($r204) {
+      const [$r205, p$148] = at_word_n({ p: p, n: 1, want: "fn" });
+      p = p$148;
+      if ($r205) {
+        const [, p$149] = skip({ p: p });
         p = p$149;
-        const d = $rt.unwrap($r205);
+        const [$r206, p$150] = parse_fn({ p: p, start: start, vis: vis, is_const: true, is_intrinsic: false });
+        p = p$150;
+        const d = $rt.unwrap($r206);
         return [{ tag: "Ok", value: { tag: "FnItem", decl: d } }, p];
       }
-      const [$r208, p$150] = at_word_n({ p: p, n: 1, want: "intrinsic" });
-      p = p$150;
-      let $sc210 = $r208;
-      if ($sc210) {
-        const [$r209, p$151] = at_word_n({ p: p, n: 2, want: "fn" });
-        p = p$151;
-        $sc210 = $r209;
-      }
-      if ($sc210) {
-        const [, p$152] = skip({ p: p });
+      const [$r209, p$151] = at_word_n({ p: p, n: 1, want: "intrinsic" });
+      p = p$151;
+      let $sc211 = $r209;
+      if ($sc211) {
+        const [$r210, p$152] = at_word_n({ p: p, n: 2, want: "fn" });
         p = p$152;
+        $sc211 = $r210;
+      }
+      if ($sc211) {
         const [, p$153] = skip({ p: p });
         p = p$153;
-        const [$r211, p$154] = parse_fn({ p: p, start: start, vis: vis, is_const: true, is_intrinsic: true });
+        const [, p$154] = skip({ p: p });
         p = p$154;
-        const d = $rt.unwrap($r211);
+        const [$r212, p$155] = parse_fn({ p: p, start: start, vis: vis, is_const: true, is_intrinsic: true });
+        p = p$155;
+        const d = $rt.unwrap($r212);
         return [{ tag: "Ok", value: { tag: "FnItem", decl: d } }, p];
       }
-      const [$r214, p$155] = parse_const({ p: p, start: start, vis: vis });
-      p = p$155;
-      const d = $rt.unwrap($r214);
+      const [$r215, p$156] = parse_const({ p: p, start: start, vis: vis });
+      p = p$156;
+      const d = $rt.unwrap($r215);
       return [{ tag: "Ok", value: { tag: "ConstItem", decl: d } }, p];
     }
-    const [$r217, p$156] = at_word({ p: p, want: "intrinsic" });
-    p = p$156;
-    if ($r217) {
-      const [$r218, p$157] = at_word_n({ p: p, n: 1, want: "fn" });
-      p = p$157;
-      if ($r218) {
-        const [, p$158] = skip({ p: p });
-        p = p$158;
-        const [$r219, p$159] = parse_fn({ p: p, start: start, vis: vis, is_const: false, is_intrinsic: true });
+    const [$r218, p$157] = at_word({ p: p, want: "intrinsic" });
+    p = p$157;
+    if ($r218) {
+      const [$r219, p$158] = at_word_n({ p: p, n: 1, want: "fn" });
+      p = p$158;
+      if ($r219) {
+        const [, p$159] = skip({ p: p });
         p = p$159;
-        const d = $rt.unwrap($r219);
+        const [$r220, p$160] = parse_fn({ p: p, start: start, vis: vis, is_const: false, is_intrinsic: true });
+        p = p$160;
+        const d = $rt.unwrap($r220);
         return [{ tag: "Ok", value: { tag: "FnItem", decl: d } }, p];
       }
-      const [$r222, p$160] = at_word_n({ p: p, n: 1, want: "type" });
-      p = p$160;
-      if ($r222) {
-        const [, p$161] = skip({ p: p });
-        p = p$161;
-        const [$r223, p$162] = parse_intrinsic_type({ p: p, start: start, vis: vis });
+      const [$r223, p$161] = at_word_n({ p: p, n: 1, want: "type" });
+      p = p$161;
+      if ($r223) {
+        const [, p$162] = skip({ p: p });
         p = p$162;
-        const d = $rt.unwrap($r223);
+        const [$r224, p$163] = parse_intrinsic_type({ p: p, start: start, vis: vis });
+        p = p$163;
+        const d = $rt.unwrap($r224);
         return [{ tag: "Ok", value: { tag: "IntrinsicTypeItem", decl: d } }, p];
       }
-      const [, p$163] = skip({ p: p });
-      p = p$163;
-      const [$r226, p$164] = fail({ p: p, expected: "`fn` or `type` after `intrinsic`" });
+      const [, p$164] = skip({ p: p });
       p = p$164;
-      return [{ tag: "Err", error: $r226 }, p];
+      const [$r227, p$165] = fail({ p: p, expected: "`fn` or `type` after `intrinsic`" });
+      p = p$165;
+      return [{ tag: "Err", error: $r227 }, p];
     }
-    const [$r228, p$165] = at_word({ p: p, want: "type" });
-    p = p$165;
-    if ($r228) {
-      const [$r229, p$166] = parse_type_alias({ p: p, start: start, vis: vis });
-      p = p$166;
-      const d = $rt.unwrap($r229);
+    const [$r229, p$166] = at_word({ p: p, want: "type" });
+    p = p$166;
+    if ($r229) {
+      const [$r230, p$167] = parse_type_alias({ p: p, start: start, vis: vis });
+      p = p$167;
+      const d = $rt.unwrap($r230);
       return [{ tag: "Ok", value: { tag: "TypeAliasItem", decl: d } }, p];
     }
-    const [$r232, p$167] = at_word({ p: p, want: "record" });
-    p = p$167;
-    if ($r232) {
-      const [$r233, p$168] = parse_record({ p: p, start: start, vis: vis });
-      p = p$168;
-      const d = $rt.unwrap($r233);
+    const [$r233, p$168] = at_word({ p: p, want: "record" });
+    p = p$168;
+    if ($r233) {
+      const [$r234, p$169] = parse_record({ p: p, start: start, vis: vis });
+      p = p$169;
+      const d = $rt.unwrap($r234);
       return [{ tag: "Ok", value: { tag: "RecordItem", decl: d } }, p];
     }
-    const [$r236, p$169] = at_word({ p: p, want: "union" });
-    p = p$169;
-    if ($r236) {
-      const [$r237, p$170] = parse_union({ p: p, start: start, vis: vis });
-      p = p$170;
-      const d = $rt.unwrap($r237);
+    const [$r237, p$170] = at_word({ p: p, want: "union" });
+    p = p$170;
+    if ($r237) {
+      const [$r238, p$171] = parse_union({ p: p, start: start, vis: vis });
+      p = p$171;
+      const d = $rt.unwrap($r238);
       return [{ tag: "Ok", value: { tag: "UnionItem", decl: d } }, p];
     }
-    const [$r240, p$171] = at_word({ p: p, want: "interface" });
-    p = p$171;
-    if ($r240) {
-      const [$r241, p$172] = parse_interface({ p: p, start: start, vis: vis });
-      p = p$172;
-      const d = $rt.unwrap($r241);
+    const [$r241, p$172] = at_word({ p: p, want: "interface" });
+    p = p$172;
+    if ($r241) {
+      const [$r242, p$173] = parse_interface({ p: p, start: start, vis: vis });
+      p = p$173;
+      const d = $rt.unwrap($r242);
       return [{ tag: "Ok", value: { tag: "InterfaceItem", decl: d } }, p];
     }
-    const [$r244, p$173] = at_word({ p: p, want: "claim" });
-    p = p$173;
-    if ($r244) {
-      const [$r245, p$174] = parse_claim({ p: p, start: start, vis: vis });
-      p = p$174;
-      const d = $rt.unwrap($r245);
+    const [$r245, p$174] = at_word({ p: p, want: "claim" });
+    p = p$174;
+    if ($r245) {
+      const [$r246, p$175] = parse_claim({ p: p, start: start, vis: vis });
+      p = p$175;
+      const d = $rt.unwrap($r246);
       return [{ tag: "Ok", value: { tag: "ClaimItem", decl: d } }, p];
     }
-    const [$r248, p$175] = at_word({ p: p, want: "capability" });
-    p = p$175;
-    if ($r248) {
-      const [$r249, p$176] = parse_capability({ p: p, start: start, vis: vis });
-      p = p$176;
-      const d = $rt.unwrap($r249);
+    const [$r249, p$176] = at_word({ p: p, want: "capability" });
+    p = p$176;
+    if ($r249) {
+      const [$r250, p$177] = parse_capability({ p: p, start: start, vis: vis });
+      p = p$177;
+      const d = $rt.unwrap($r250);
       return [{ tag: "Ok", value: { tag: "CapabilityItem", decl: d } }, p];
     }
-    const [$r252, p$177] = fail({ p: p, expected: "an item (fn, type, const, record, union, interface, impl, claim, capability, path, policy, example or property)" });
-    p = p$177;
-    return [{ tag: "Err", error: $r252 }, p];
+    const [$r253, p$178] = fail({ p: p, expected: "an item (fn, type, const, record, union, interface, impl, claim, capability, path, policy, example or property)" });
+    p = p$178;
+    return [{ tag: "Err", error: $r253 }, p];
   } catch ($e) {
     if ($e instanceof $rt.EarlyReturn) return [$e.value, p];
     throw $e;
@@ -1266,83 +1269,83 @@ export function parse_item({ p }) {
 
 export function parse_fn({ p, start, vis, is_const, is_intrinsic }) {
   try {
-    const [$r254, p$178] = expect_word({ p: p, want: "fn" });
-    p = p$178;
-    const fn_tok = $rt.unwrap($r254);
-    const [$r255, p$179] = expect_name({ p: p });
+    const [$r255, p$179] = expect_word({ p: p, want: "fn" });
     p = p$179;
-    const name = $rt.unwrap($r255);
+    const fn_tok = $rt.unwrap($r255);
+    const [$r256, p$180] = expect_name({ p: p });
+    p = p$180;
+    const name = $rt.unwrap($r256);
     p = { ...p, current_def: name.text };
     if (is_intrinsic && !p.is_std_module) {
-      const [, p$180] = report({ p: p, code: "E0102", start: fn_tok.start, end: name.span.end, detail: "intrinsic declarations are reserved for `module std.…`" });
-      p = p$180;
+      const [, p$181] = report({ p: p, code: "E0102", start: fn_tok.start, end: name.span.end, detail: "intrinsic declarations are reserved for `module std.…`" });
+      p = p$181;
     }
     let tparams = [];
-    const [$r257, p$181] = at_punct({ p: p, want: "[" });
-    p = p$181;
-    if ($r257) {
-      const [$r258, p$182] = parse_tparams({ p: p });
-      p = p$182;
-      tparams = $rt.unwrap($r258);
+    const [$r258, p$182] = at_punct({ p: p, want: "[" });
+    p = p$182;
+    if ($r258) {
+      const [$r259, p$183] = parse_tparams({ p: p });
+      p = p$183;
+      tparams = $rt.unwrap($r259);
     }
-    const [$r259, p$183] = param_list({ p: p, rank: r_param_list });
-    p = p$183;
-    const params = $rt.unwrap($r259);
-    const [$r260, p$184] = need_punct({ p: p, want: "->" });
+    const [$r260, p$184] = param_list({ p: p, rank: r_param_list });
     p = p$184;
-    $rt.unwrap($r260);
+    const params = $rt.unwrap($r260);
+    const [$r261, p$185] = need_punct({ p: p, want: "->" });
+    p = p$185;
+    $rt.unwrap($r261);
     const saved = p.no_brace;
     p = { ...p, no_brace: true };
-    const [$r262, p$185] = parse_type({ p: p, rank: r_type });
-    p = p$185;
-    const ret = $rt.unwrap($r262);
-    p = { ...p, no_brace: saved };
-    const [$r264, p$186] = effects_opt({ p: p });
+    const [$r263, p$186] = parse_type({ p: p, rank: r_type });
     p = p$186;
-    const effects = $rt.unwrap($r264);
-    let claim_list = $std_list.builder({  });
-    const [$r265, p$187] = accept_word({ p: p, want: "claims" });
+    const ret = $rt.unwrap($r263);
+    p = { ...p, no_brace: saved };
+    const [$r265, p$187] = effects_opt({ p: p });
     p = p$187;
-    if ($r265) {
-      const [$r266, p$188] = dotted({ p: p });
-      p = p$188;
-      const first = $rt.unwrap($r266);
-      const [, claim_list$189] = $std_list.push({ b: claim_list, x: first });
-      claim_list = claim_list$189;
+    const effects = $rt.unwrap($r265);
+    let claim_list = $std_list.builder({  });
+    const [$r266, p$188] = accept_word({ p: p, want: "claims" });
+    p = p$188;
+    if ($r266) {
+      const [$r267, p$189] = dotted({ p: p });
+      p = p$189;
+      const first = $rt.unwrap($r267);
+      const [, claim_list$190] = $std_list.push({ b: claim_list, x: first });
+      claim_list = claim_list$190;
       const toks0 = p.toks;
       const start0 = p.pos;
-      const [$r267, p$190] = at_punct({ p: p, want: "," });
-      p = p$190;
-      let $go270 = $r267 && p.pos < $std_list.len({ xs: p.toks }) - 1;
-      while ($go270) {
-        const [, p$191] = skip({ p: p });
-        p = p$191;
-        const [$r269, p$192] = dotted({ p: p });
+      const [$r268, p$191] = at_punct({ p: p, want: "," });
+      p = p$191;
+      let $go271 = $r268 && p.pos < $std_list.len({ xs: p.toks }) - 1;
+      while ($go271) {
+        const [, p$192] = skip({ p: p });
         p = p$192;
-        const more = $rt.unwrap($r269);
-        const [, claim_list$193] = $std_list.push({ b: claim_list, x: more });
-        claim_list = claim_list$193;
-        const [$r271, p$194] = at_punct({ p: p, want: "," });
-        p = p$194;
-        $go270 = $r271 && p.pos < $std_list.len({ xs: p.toks }) - 1;
+        const [$r270, p$193] = dotted({ p: p });
+        p = p$193;
+        const more = $rt.unwrap($r270);
+        const [, claim_list$194] = $std_list.push({ b: claim_list, x: more });
+        claim_list = claim_list$194;
+        const [$r272, p$195] = at_punct({ p: p, want: "," });
+        p = p$195;
+        $go271 = $r272 && p.pos < $std_list.len({ xs: p.toks }) - 1;
       }
     }
-    const [$r272, p$195] = parse_contracts({ p: p });
-    p = p$195;
-    const contracts = $rt.unwrap($r272);
+    const [$r273, p$196] = parse_contracts({ p: p });
+    p = p$196;
+    const contracts = $rt.unwrap($r273);
     let body = { tag: "None" };
     if (is_intrinsic) {
-      const [$r274, p$196] = at_punct({ p: p, want: "{" });
-      p = p$196;
-      if ($r274) {
-        const [$r275, p$197] = fail({ p: p, expected: "a newline: an intrinsic function has no body" });
-        p = p$197;
-        return [{ tag: "Err", error: $r275 }, p];
+      const [$r275, p$197] = at_punct({ p: p, want: "{" });
+      p = p$197;
+      if ($r275) {
+        const [$r276, p$198] = fail({ p: p, expected: "a newline: an intrinsic function has no body" });
+        p = p$198;
+        return [{ tag: "Err", error: $r276 }, p];
       }
     } else {
-      const [$r277, p$198] = parse_block({ p: p, rank: r_block, allow_elided: true });
-      p = p$198;
-      const b = $rt.unwrap($r277);
+      const [$r278, p$199] = parse_block({ p: p, rank: r_block, allow_elided: true });
+      p = p$199;
+      const b = $rt.unwrap($r278);
       body = { tag: "Some", value: b };
     }
     return [{ tag: "Ok", value: { vis: vis, is_const: is_const, is_intrinsic: is_intrinsic, name: name, tparams: tparams, params: params, ret: ret, effects: effects, claim_list: $std_list.finish({ b: claim_list }), contracts: contracts, body: body, span: span_from({ p: p, start: start }) } }, p];
@@ -1354,24 +1357,24 @@ export function parse_fn({ p, start, vis, is_const, is_intrinsic }) {
 
 export function parse_intrinsic_type({ p, start, vis }) {
   try {
-    const [$r281, p$199] = expect_word({ p: p, want: "type" });
-    p = p$199;
-    const type_tok = $rt.unwrap($r281);
-    const [$r282, p$200] = expect_tname({ p: p });
+    const [$r282, p$200] = expect_word({ p: p, want: "type" });
     p = p$200;
-    const name = $rt.unwrap($r282);
+    const type_tok = $rt.unwrap($r282);
+    const [$r283, p$201] = expect_tname({ p: p });
+    p = p$201;
+    const name = $rt.unwrap($r283);
     p = { ...p, current_def: name.text };
     if (!p.is_std_module) {
-      const [, p$201] = report({ p: p, code: "E0102", start: type_tok.start, end: name.span.end, detail: "intrinsic declarations are reserved for `module std.…`" });
-      p = p$201;
+      const [, p$202] = report({ p: p, code: "E0102", start: type_tok.start, end: name.span.end, detail: "intrinsic declarations are reserved for `module std.…`" });
+      p = p$202;
     }
     let tparams = [];
-    const [$r284, p$202] = at_punct({ p: p, want: "[" });
-    p = p$202;
-    if ($r284) {
-      const [$r285, p$203] = parse_tparams({ p: p });
-      p = p$203;
-      tparams = $rt.unwrap($r285);
+    const [$r285, p$203] = at_punct({ p: p, want: "[" });
+    p = p$203;
+    if ($r285) {
+      const [$r286, p$204] = parse_tparams({ p: p });
+      p = p$204;
+      tparams = $rt.unwrap($r286);
     }
     return [{ tag: "Ok", value: { vis: vis, name: name, tparams: tparams, span: span_from({ p: p, start: start }) } }, p];
   } catch ($e) {
@@ -1385,54 +1388,54 @@ export function parse_contracts({ p }) {
     let out = $std_list.builder({  });
     const toks0 = p.toks;
     const start0 = p.pos;
-    const [$r288, p$204] = at_word({ p: p, want: "requires" });
-    p = p$204;
-    let $sc291 = $r288;
-    if (!$sc291) {
-      const [$r289, p$205] = at_word({ p: p, want: "ensures" });
-      p = p$205;
-      $sc291 = $r289;
-    }
-    if (!$sc291) {
-      const [$r290, p$206] = at_word({ p: p, want: "decreases" });
+    const [$r289, p$205] = at_word({ p: p, want: "requires" });
+    p = p$205;
+    let $sc292 = $r289;
+    if (!$sc292) {
+      const [$r290, p$206] = at_word({ p: p, want: "ensures" });
       p = p$206;
-      $sc291 = $r290;
+      $sc292 = $r290;
     }
-    let $go299 = $sc291 && p.pos < $std_list.len({ xs: p.toks }) - 1;
-    while ($go299) {
-      const s = here({ p: p });
-      const [$r293, p$207] = advance({ p: p });
+    if (!$sc292) {
+      const [$r291, p$207] = at_word({ p: p, want: "decreases" });
       p = p$207;
-      const kw = $r293;
+      $sc292 = $r291;
+    }
+    let $go300 = $sc292 && p.pos < $std_list.len({ xs: p.toks }) - 1;
+    while ($go300) {
+      const s = here({ p: p });
+      const [$r294, p$208] = advance({ p: p });
+      p = p$208;
+      const kw = $r294;
       const clause = ident_of({ t: kw }).text;
       let is_proved = false;
       if (clause !== "decreases") {
-        const [$r294, p$208] = accept_word({ p: p, want: "proved" });
-        p = p$208;
-        is_proved = $r294;
+        const [$r295, p$209] = accept_word({ p: p, want: "proved" });
+        p = p$209;
+        is_proved = $r295;
       }
       const saved = p.no_brace;
       p = { ...p, no_brace: true };
-      const [$r296, p$209] = parse_expr({ p: p, rank: r_expr });
-      p = p$209;
-      const e = $rt.unwrap($r296);
+      const [$r297, p$210] = parse_expr({ p: p, rank: r_expr });
+      p = p$210;
+      const e = $rt.unwrap($r297);
       p = { ...p, no_brace: saved };
-      const [, out$210] = $std_list.push({ b: out, x: { clause: clause, is_proved: is_proved, expr: e, span: span_from({ p: p, start: s }) } });
-      out = out$210;
-      const [$r300, p$211] = at_word({ p: p, want: "requires" });
-      p = p$211;
-      let $sc303 = $r300;
-      if (!$sc303) {
-        const [$r301, p$212] = at_word({ p: p, want: "ensures" });
-        p = p$212;
-        $sc303 = $r301;
-      }
-      if (!$sc303) {
-        const [$r302, p$213] = at_word({ p: p, want: "decreases" });
+      const [, out$211] = $std_list.push({ b: out, x: { clause: clause, is_proved: is_proved, expr: e, span: span_from({ p: p, start: s }) } });
+      out = out$211;
+      const [$r301, p$212] = at_word({ p: p, want: "requires" });
+      p = p$212;
+      let $sc304 = $r301;
+      if (!$sc304) {
+        const [$r302, p$213] = at_word({ p: p, want: "ensures" });
         p = p$213;
-        $sc303 = $r302;
+        $sc304 = $r302;
       }
-      $go299 = $sc303 && p.pos < $std_list.len({ xs: p.toks }) - 1;
+      if (!$sc304) {
+        const [$r303, p$214] = at_word({ p: p, want: "decreases" });
+        p = p$214;
+        $sc304 = $r303;
+      }
+      $go300 = $sc304 && p.pos < $std_list.len({ xs: p.toks }) - 1;
     }
     return [{ tag: "Ok", value: $std_list.finish({ b: out }) }, p];
   } catch ($e) {
@@ -1442,58 +1445,58 @@ export function parse_contracts({ p }) {
 }
 
 export function effects_opt({ p }) {
-  const [$r305, p$214] = accept_word({ p: p, want: "may" });
-  p = p$214;
-  if (!$r305) {
+  const [$r306, p$215] = accept_word({ p: p, want: "may" });
+  p = p$215;
+  if (!$r306) {
     return [{ tag: "Ok", value: [] }, p];
   }
-  const [$r307, p$215] = effect_list({ p: p });
-  p = p$215;
-  return [$r307, p];
+  const [$r308, p$216] = effect_list({ p: p });
+  p = p$216;
+  return [$r308, p];
 }
 
 export function effect_list({ p }) {
   try {
     let out = $std_list.builder({  });
-    const [$r308, p$216] = effect_ref({ p: p });
-    p = p$216;
-    const first = $rt.unwrap($r308);
-    const [, out$217] = $std_list.push({ b: out, x: first });
-    out = out$217;
+    const [$r309, p$217] = effect_ref({ p: p });
+    p = p$217;
+    const first = $rt.unwrap($r309);
+    const [, out$218] = $std_list.push({ b: out, x: first });
+    out = out$218;
     const toks0 = p.toks;
     const start0 = p.pos;
-    const [$r309, p$218] = at_punct({ p: p, want: "," });
-    p = p$218;
-    let $sc311 = $r309;
-    if ($sc311) {
-      const [$r310, p$219] = effect_follows({ p: p });
-      p = p$219;
-      $sc311 = $r310;
-    }
-    if ($sc311) {
-      $sc311 = p.pos < $std_list.len({ xs: p.toks }) - 1;
-    }
-    let $go314 = $sc311;
-    while ($go314) {
-      const [, p$220] = skip({ p: p });
+    const [$r310, p$219] = at_punct({ p: p, want: "," });
+    p = p$219;
+    let $sc312 = $r310;
+    if ($sc312) {
+      const [$r311, p$220] = effect_follows({ p: p });
       p = p$220;
-      const [$r313, p$221] = effect_ref({ p: p });
+      $sc312 = $r311;
+    }
+    if ($sc312) {
+      $sc312 = p.pos < $std_list.len({ xs: p.toks }) - 1;
+    }
+    let $go315 = $sc312;
+    while ($go315) {
+      const [, p$221] = skip({ p: p });
       p = p$221;
-      const more = $rt.unwrap($r313);
-      const [, out$222] = $std_list.push({ b: out, x: more });
-      out = out$222;
-      const [$r315, p$223] = at_punct({ p: p, want: "," });
-      p = p$223;
-      let $sc317 = $r315;
-      if ($sc317) {
-        const [$r316, p$224] = effect_follows({ p: p });
-        p = p$224;
-        $sc317 = $r316;
+      const [$r314, p$222] = effect_ref({ p: p });
+      p = p$222;
+      const more = $rt.unwrap($r314);
+      const [, out$223] = $std_list.push({ b: out, x: more });
+      out = out$223;
+      const [$r316, p$224] = at_punct({ p: p, want: "," });
+      p = p$224;
+      let $sc318 = $r316;
+      if ($sc318) {
+        const [$r317, p$225] = effect_follows({ p: p });
+        p = p$225;
+        $sc318 = $r317;
       }
-      if ($sc317) {
-        $sc317 = p.pos < $std_list.len({ xs: p.toks }) - 1;
+      if ($sc318) {
+        $sc318 = p.pos < $std_list.len({ xs: p.toks }) - 1;
       }
-      $go314 = $sc317;
+      $go315 = $sc318;
     }
     return [{ tag: "Ok", value: $std_list.finish({ b: out }) }, p];
   } catch ($e) {
@@ -1503,37 +1506,37 @@ export function effect_list({ p }) {
 }
 
 export function effect_follows({ p }) {
-  const [$r319, p$225] = at_name({ p: p, n: 1 });
-  p = p$225;
-  let $sc321 = $r319;
-  if (!$sc321) {
-    const [$r320, p$226] = at_word_n({ p: p, n: 1, want: "recover" });
-    p = p$226;
-    $sc321 = $r320;
-  }
-  let $sc323 = $sc321;
-  if ($sc323) {
-    const [$r322, p$227] = at_punct_n({ p: p, n: 2, want: ":" });
+  const [$r320, p$226] = at_name({ p: p, n: 1 });
+  p = p$226;
+  let $sc322 = $r320;
+  if (!$sc322) {
+    const [$r321, p$227] = at_word_n({ p: p, n: 1, want: "recover" });
     p = p$227;
-    $sc323 = !$r322;
+    $sc322 = $r321;
   }
-  return [$sc323, p];
+  let $sc324 = $sc322;
+  if ($sc324) {
+    const [$r323, p$228] = at_punct_n({ p: p, n: 2, want: ":" });
+    p = p$228;
+    $sc324 = !$r323;
+  }
+  return [$sc324, p];
 }
 
 export function effect_ref({ p }) {
   try {
     const s = here({ p: p });
     const t = peek({ p: p, n: 0 });
-    const [$r324, p$228] = accept_word({ p: p, want: "recover" });
-    p = p$228;
-    if ($r324) {
+    const [$r325, p$229] = accept_word({ p: p, want: "recover" });
+    p = p$229;
+    if ($r325) {
       const id = ident_of({ t: t });
       const name = { segments: [id], span: id.span };
       return [{ tag: "Ok", value: { name: name, span: span_from({ p: p, start: s }) } }, p];
     }
-    const [$r328, p$229] = module_name({ p: p });
-    p = p$229;
-    const name = $rt.unwrap($r328);
+    const [$r329, p$230] = module_name({ p: p });
+    p = p$230;
+    const name = $rt.unwrap($r329);
     return [{ tag: "Ok", value: { name: name, span: span_from({ p: p, start: s }) } }, p];
   } catch ($e) {
     if ($e instanceof $rt.EarlyReturn) return [$e.value, p];
@@ -1543,70 +1546,70 @@ export function effect_ref({ p }) {
 
 export function parse_tparams({ p }) {
   try {
-    const [$r331, p$230] = need_punct({ p: p, want: "[" });
-    p = p$230;
-    $rt.unwrap($r331);
+    const [$r332, p$231] = need_punct({ p: p, want: "[" });
+    p = p$231;
+    $rt.unwrap($r332);
     let out = $std_list.builder({  });
     let more = true;
     const toks0 = p.toks;
     const start0 = p.pos;
     while (more && p.pos < $std_list.len({ xs: p.toks }) - 1) {
       const s = here({ p: p });
-      const [$r333, p$231] = at_tname({ p: p, n: 0 });
-      p = p$231;
-      if ($r333) {
-        const [$r334, p$232] = expect_tname({ p: p });
-        p = p$232;
-        const name = $rt.unwrap($r334);
-        let bound = { tag: "None" };
-        const [$r336, p$233] = accept_punct({ p: p, want: ":" });
+      const [$r334, p$232] = at_tname({ p: p, n: 0 });
+      p = p$232;
+      if ($r334) {
+        const [$r335, p$233] = expect_tname({ p: p });
         p = p$233;
-        if ($r336) {
-          const [$r337, p$234] = expect_tname({ p: p });
-          p = p$234;
-          const b = $rt.unwrap($r337);
+        const name = $rt.unwrap($r335);
+        let bound = { tag: "None" };
+        const [$r337, p$234] = accept_punct({ p: p, want: ":" });
+        p = p$234;
+        if ($r337) {
+          const [$r338, p$235] = expect_tname({ p: p });
+          p = p$235;
+          const b = $rt.unwrap($r338);
           bound = { tag: "Some", value: b };
         }
-        const [, out$235] = $std_list.push({ b: out, x: { tag: "TypeParam", name: name, bound: bound, span: span_from({ p: p, start: s }) } });
-        out = out$235;
+        const [, out$236] = $std_list.push({ b: out, x: { tag: "TypeParam", name: name, bound: bound, span: span_from({ p: p, start: s }) } });
+        out = out$236;
       } else {
-        const [$r340, p$236] = accept_word({ p: p, want: "const" });
-        p = p$236;
-        if ($r340) {
-          const [$r341, p$237] = expect_name({ p: p });
-          p = p$237;
-          const name = $rt.unwrap($r341);
-          const [$r342, p$238] = need_punct({ p: p, want: ":" });
+        const [$r341, p$237] = accept_word({ p: p, want: "const" });
+        p = p$237;
+        if ($r341) {
+          const [$r342, p$238] = expect_name({ p: p });
           p = p$238;
-          $rt.unwrap($r342);
-          const [$r343, p$239] = parse_type({ p: p, rank: r_type });
+          const name = $rt.unwrap($r342);
+          const [$r343, p$239] = need_punct({ p: p, want: ":" });
           p = p$239;
-          const ty = $rt.unwrap($r343);
-          const [, out$240] = $std_list.push({ b: out, x: { tag: "ConstParam", name: name, ty: ty, span: span_from({ p: p, start: s }) } });
-          out = out$240;
+          $rt.unwrap($r343);
+          const [$r344, p$240] = parse_type({ p: p, rank: r_type });
+          p = p$240;
+          const ty = $rt.unwrap($r344);
+          const [, out$241] = $std_list.push({ b: out, x: { tag: "ConstParam", name: name, ty: ty, span: span_from({ p: p, start: s }) } });
+          out = out$241;
         } else {
-          const [$r345, p$241] = at_name({ p: p, n: 0 });
-          p = p$241;
-          if ($r345) {
-            const [$r346, p$242] = expect_name({ p: p });
-            p = p$242;
-            const name = $rt.unwrap($r346);
-            const [, out$243] = $std_list.push({ b: out, x: { tag: "EffectParam", name: name, span: span_from({ p: p, start: s }) } });
-            out = out$243;
+          const [$r346, p$242] = at_name({ p: p, n: 0 });
+          p = p$242;
+          if ($r346) {
+            const [$r347, p$243] = expect_name({ p: p });
+            p = p$243;
+            const name = $rt.unwrap($r347);
+            const [, out$244] = $std_list.push({ b: out, x: { tag: "EffectParam", name: name, span: span_from({ p: p, start: s }) } });
+            out = out$244;
           } else {
-            const [$r348, p$244] = fail({ p: p, expected: "a type parameter, `const` parameter or effect parameter" });
-            p = p$244;
-            return [{ tag: "Err", error: $r348 }, p];
+            const [$r349, p$245] = fail({ p: p, expected: "a type parameter, `const` parameter or effect parameter" });
+            p = p$245;
+            return [{ tag: "Err", error: $r349 }, p];
           }
         }
       }
-      const [$r350, p$245] = accept_punct({ p: p, want: "," });
-      p = p$245;
-      more = $r350;
+      const [$r351, p$246] = accept_punct({ p: p, want: "," });
+      p = p$246;
+      more = $r351;
     }
-    const [$r351, p$246] = need_punct({ p: p, want: "]" });
-    p = p$246;
-    $rt.unwrap($r351);
+    const [$r352, p$247] = need_punct({ p: p, want: "]" });
+    p = p$247;
+    $rt.unwrap($r352);
     return [{ tag: "Ok", value: $std_list.finish({ b: out }) }, p];
   } catch ($e) {
     if ($e instanceof $rt.EarlyReturn) return [$e.value, p];
@@ -1616,30 +1619,30 @@ export function parse_tparams({ p }) {
 
 export function param_list({ p, rank }) {
   try {
-    const [$r353, p$247] = need_punct({ p: p, want: "(" });
-    p = p$247;
-    $rt.unwrap($r353);
-    let out = $std_list.builder({  });
-    const [$r354, p$248] = at_punct({ p: p, want: ")" });
+    const [$r354, p$248] = need_punct({ p: p, want: "(" });
     p = p$248;
-    if (!$r354) {
+    $rt.unwrap($r354);
+    let out = $std_list.builder({  });
+    const [$r355, p$249] = at_punct({ p: p, want: ")" });
+    p = p$249;
+    if (!$r355) {
       let more = true;
       const toks0 = p.toks;
       const start0 = p.pos;
       while (more && p.pos < $std_list.len({ xs: p.toks }) - 1) {
-        const [$r356, p$249] = parse_param({ p: p, rank: r_param });
-        p = p$249;
-        const param = $rt.unwrap($r356);
-        const [, out$250] = $std_list.push({ b: out, x: param });
-        out = out$250;
-        const [$r357, p$251] = accept_punct({ p: p, want: "," });
-        p = p$251;
-        more = $r357;
+        const [$r357, p$250] = parse_param({ p: p, rank: r_param });
+        p = p$250;
+        const param = $rt.unwrap($r357);
+        const [, out$251] = $std_list.push({ b: out, x: param });
+        out = out$251;
+        const [$r358, p$252] = accept_punct({ p: p, want: "," });
+        p = p$252;
+        more = $r358;
       }
     }
-    const [$r358, p$252] = need_punct({ p: p, want: ")" });
-    p = p$252;
-    $rt.unwrap($r358);
+    const [$r359, p$253] = need_punct({ p: p, want: ")" });
+    p = p$253;
+    $rt.unwrap($r359);
     return [{ tag: "Ok", value: $std_list.finish({ b: out }) }, p];
   } catch ($e) {
     if ($e instanceof $rt.EarlyReturn) return [$e.value, p];
@@ -1650,20 +1653,20 @@ export function param_list({ p, rank }) {
 export function parse_param({ p, rank }) {
   try {
     const s = here({ p: p });
-    const [$r360, p$253] = expect_name({ p: p });
-    p = p$253;
-    const name = $rt.unwrap($r360);
-    const [$r361, p$254] = need_punct({ p: p, want: ":" });
+    const [$r361, p$254] = expect_name({ p: p });
     p = p$254;
-    $rt.unwrap($r361);
-    const [$r362, p$255] = accept_word({ p: p, want: "inout" });
+    const name = $rt.unwrap($r361);
+    const [$r362, p$255] = need_punct({ p: p, want: ":" });
     p = p$255;
-    const is_inout = $r362;
+    $rt.unwrap($r362);
+    const [$r363, p$256] = accept_word({ p: p, want: "inout" });
+    p = p$256;
+    const is_inout = $r363;
     const saved = p.no_brace;
     p = { ...p, no_brace: false };
-    const [$r364, p$256] = parse_type({ p: p, rank: r_type });
-    p = p$256;
-    const ty = $rt.unwrap($r364);
+    const [$r365, p$257] = parse_type({ p: p, rank: r_type });
+    p = p$257;
+    const ty = $rt.unwrap($r365);
     p = { ...p, no_brace: saved };
     return [{ tag: "Ok", value: { is_inout: is_inout, name: name, ty: ty, span: span_from({ p: p, start: s }) } }, p];
   } catch ($e) {
@@ -1674,25 +1677,25 @@ export function parse_param({ p, rank }) {
 
 export function parse_const({ p, start, vis }) {
   try {
-    const [$r368, p$257] = need_word({ p: p, want: "const" });
-    p = p$257;
-    $rt.unwrap($r368);
-    const [$r369, p$258] = expect_name({ p: p });
+    const [$r369, p$258] = need_word({ p: p, want: "const" });
     p = p$258;
-    const name = $rt.unwrap($r369);
-    p = { ...p, current_def: name.text };
-    const [$r371, p$259] = need_punct({ p: p, want: ":" });
+    $rt.unwrap($r369);
+    const [$r370, p$259] = expect_name({ p: p });
     p = p$259;
-    $rt.unwrap($r371);
-    const [$r372, p$260] = parse_type({ p: p, rank: r_type });
+    const name = $rt.unwrap($r370);
+    p = { ...p, current_def: name.text };
+    const [$r372, p$260] = need_punct({ p: p, want: ":" });
     p = p$260;
-    const ty = $rt.unwrap($r372);
-    const [$r373, p$261] = need_punct({ p: p, want: "=" });
+    $rt.unwrap($r372);
+    const [$r373, p$261] = parse_type({ p: p, rank: r_type });
     p = p$261;
-    $rt.unwrap($r373);
-    const [$r374, p$262] = parse_expr({ p: p, rank: r_expr });
+    const ty = $rt.unwrap($r373);
+    const [$r374, p$262] = need_punct({ p: p, want: "=" });
     p = p$262;
-    const value = $rt.unwrap($r374);
+    $rt.unwrap($r374);
+    const [$r375, p$263] = parse_expr({ p: p, rank: r_expr });
+    p = p$263;
+    const value = $rt.unwrap($r375);
     return [{ tag: "Ok", value: { vis: vis, name: name, ty: ty, value: value, span: span_from({ p: p, start: start }) } }, p];
   } catch ($e) {
     if ($e instanceof $rt.EarlyReturn) return [$e.value, p];
@@ -1702,19 +1705,19 @@ export function parse_const({ p, start, vis }) {
 
 export function parse_type_alias({ p, start, vis }) {
   try {
-    const [$r377, p$263] = need_word({ p: p, want: "type" });
-    p = p$263;
-    $rt.unwrap($r377);
-    const [$r378, p$264] = expect_tname({ p: p });
+    const [$r378, p$264] = need_word({ p: p, want: "type" });
     p = p$264;
-    const name = $rt.unwrap($r378);
-    p = { ...p, current_def: name.text };
-    const [$r380, p$265] = need_punct({ p: p, want: "=" });
+    $rt.unwrap($r378);
+    const [$r379, p$265] = expect_tname({ p: p });
     p = p$265;
-    $rt.unwrap($r380);
-    const [$r381, p$266] = parse_type({ p: p, rank: r_type });
+    const name = $rt.unwrap($r379);
+    p = { ...p, current_def: name.text };
+    const [$r381, p$266] = need_punct({ p: p, want: "=" });
     p = p$266;
-    const ty = $rt.unwrap($r381);
+    $rt.unwrap($r381);
+    const [$r382, p$267] = parse_type({ p: p, rank: r_type });
+    p = p$267;
+    const ty = $rt.unwrap($r382);
     return [{ tag: "Ok", value: { vis: vis, name: name, ty: ty, span: span_from({ p: p, start: start }) } }, p];
   } catch ($e) {
     if ($e instanceof $rt.EarlyReturn) return [$e.value, p];
@@ -1724,24 +1727,24 @@ export function parse_type_alias({ p, start, vis }) {
 
 export function parse_record({ p, start, vis }) {
   try {
-    const [$r384, p$267] = need_word({ p: p, want: "record" });
-    p = p$267;
-    $rt.unwrap($r384);
-    const [$r385, p$268] = expect_tname({ p: p });
+    const [$r385, p$268] = need_word({ p: p, want: "record" });
     p = p$268;
-    const name = $rt.unwrap($r385);
+    $rt.unwrap($r385);
+    const [$r386, p$269] = expect_tname({ p: p });
+    p = p$269;
+    const name = $rt.unwrap($r386);
     p = { ...p, current_def: name.text };
     let tparams = [];
-    const [$r387, p$269] = at_punct({ p: p, want: "[" });
-    p = p$269;
-    if ($r387) {
-      const [$r388, p$270] = parse_tparams({ p: p });
-      p = p$270;
-      tparams = $rt.unwrap($r388);
+    const [$r388, p$270] = at_punct({ p: p, want: "[" });
+    p = p$270;
+    if ($r388) {
+      const [$r389, p$271] = parse_tparams({ p: p });
+      p = p$271;
+      tparams = $rt.unwrap($r389);
     }
-    const [$r389, p$271] = braced_fields({ p: p });
-    p = p$271;
-    const fields = $rt.unwrap($r389);
+    const [$r390, p$272] = braced_fields({ p: p });
+    p = p$272;
+    const fields = $rt.unwrap($r390);
     return [{ tag: "Ok", value: { vis: vis, name: name, tparams: tparams, fields: fields, span: span_from({ p: p, start: start }) } }, p];
   } catch ($e) {
     if ($e instanceof $rt.EarlyReturn) return [$e.value, p];
@@ -1752,15 +1755,15 @@ export function parse_record({ p, start, vis }) {
 export function parse_field({ p }) {
   try {
     const s = here({ p: p });
-    const [$r392, p$272] = expect_name({ p: p });
-    p = p$272;
-    const name = $rt.unwrap($r392);
-    const [$r393, p$273] = need_punct({ p: p, want: ":" });
+    const [$r393, p$273] = expect_name({ p: p });
     p = p$273;
-    $rt.unwrap($r393);
-    const [$r394, p$274] = parse_type({ p: p, rank: r_type });
+    const name = $rt.unwrap($r393);
+    const [$r394, p$274] = need_punct({ p: p, want: ":" });
     p = p$274;
-    const ty = $rt.unwrap($r394);
+    $rt.unwrap($r394);
+    const [$r395, p$275] = parse_type({ p: p, rank: r_type });
+    p = p$275;
+    const ty = $rt.unwrap($r395);
     return [{ tag: "Ok", value: { name: name, ty: ty, span: span_from({ p: p, start: s }) } }, p];
   } catch ($e) {
     if ($e instanceof $rt.EarlyReturn) return [$e.value, p];
@@ -1770,81 +1773,81 @@ export function parse_field({ p }) {
 
 export function braced_fields({ p }) {
   try {
-    const [$r397, p$275] = need_punct({ p: p, want: "{" });
-    p = p$275;
-    $rt.unwrap($r397);
-    let out = $std_list.builder({  });
-    const [$r398, p$276] = accept_newline({ p: p });
+    const [$r398, p$276] = need_punct({ p: p, want: "{" });
     p = p$276;
-    if ($r398) {
+    $rt.unwrap($r398);
+    let out = $std_list.builder({  });
+    const [$r399, p$277] = accept_newline({ p: p });
+    p = p$277;
+    if ($r399) {
       const toks0 = p.toks;
       const start0 = p.pos;
-      const [$r399, p$277] = at_punct({ p: p, want: "}" });
-      p = p$277;
-      let $go404 = !$r399 && !at_eof({ p: p }) && p.pos < $std_list.len({ xs: p.toks }) - 1;
-      while ($go404) {
+      const [$r400, p$278] = at_punct({ p: p, want: "}" });
+      p = p$278;
+      let $go405 = !$r400 && !at_eof({ p: p }) && p.pos < $std_list.len({ xs: p.toks }) - 1;
+      while ($go405) {
         const before = p.pos;
-        const [$r402, p$278] = parse_field({ p: p });
-        p = p$278;
-        const $m401 = $r402;
-        $m401$match: {
-          if ($m401.tag === "Ok") {
-            const value = $m401.value;
-            const [, out$279] = $std_list.push({ b: out, x: value });
-            out = out$279;
-            const [$r403, p$280] = terminator({ p: p, in_block: true });
-            p = p$280;
-            const term = $r403;
+        const [$r403, p$279] = parse_field({ p: p });
+        p = p$279;
+        const $m402 = $r403;
+        $m402$match: {
+          if ($m402.tag === "Ok") {
+            const value = $m402.value;
+            const [, out$280] = $std_list.push({ b: out, x: value });
+            out = out$280;
+            const [$r404, p$281] = terminator({ p: p, in_block: true });
+            p = p$281;
+            const term = $r404;
             if (term.tag === "Ok") {
               p = p;
             } else {
-              const [, p$281] = recover_to_line_end({ p: p });
-              p = p$281;
-              const [, p$282] = skip_newline({ p: p });
+              const [, p$282] = recover_to_line_end({ p: p });
               p = p$282;
-            }
-            break $m401$match;
-          }
-          if ($m401.tag === "Err") {
-            const error = $m401.error;
-            if (p.pos === before) {
-              const [, p$283] = skip({ p: p });
+              const [, p$283] = skip_newline({ p: p });
               p = p$283;
             }
-            const [, p$284] = recover_to_line_end({ p: p });
-            p = p$284;
-            const [, p$285] = skip_newline({ p: p });
+            break $m402$match;
+          }
+          if ($m402.tag === "Err") {
+            const error = $m402.error;
+            if (p.pos === before) {
+              const [, p$284] = skip({ p: p });
+              p = p$284;
+            }
+            const [, p$285] = recover_to_line_end({ p: p });
             p = p$285;
-            break $m401$match;
+            const [, p$286] = skip_newline({ p: p });
+            p = p$286;
+            break $m402$match;
           }
           $rt.unreachable();
         }
         if (p.pos === before) {
-          const [, p$286] = skip({ p: p });
-          p = p$286;
+          const [, p$287] = skip({ p: p });
+          p = p$287;
         }
-        const [$r405, p$287] = at_punct({ p: p, want: "}" });
-        p = p$287;
-        $go404 = !$r405 && !at_eof({ p: p }) && p.pos < $std_list.len({ xs: p.toks }) - 1;
+        const [$r406, p$288] = at_punct({ p: p, want: "}" });
+        p = p$288;
+        $go405 = !$r406 && !at_eof({ p: p }) && p.pos < $std_list.len({ xs: p.toks }) - 1;
       }
-      const [$r406, p$288] = need_punct({ p: p, want: "}" });
-      p = p$288;
-      $rt.unwrap($r406);
+      const [$r407, p$289] = need_punct({ p: p, want: "}" });
+      p = p$289;
+      $rt.unwrap($r407);
       return [{ tag: "Ok", value: $std_list.finish({ b: out }) }, p];
     }
-    const [$r408, p$289] = accept_punct({ p: p, want: "}" });
-    p = p$289;
-    if ($r408) {
-      return [{ tag: "Ok", value: $std_list.finish({ b: out }) }, p];
-    }
-    const [$r410, p$290] = parse_field({ p: p });
+    const [$r409, p$290] = accept_punct({ p: p, want: "}" });
     p = p$290;
-    const one = $rt.unwrap($r410);
-    const [, out$291] = $std_list.push({ b: out, x: one });
-    out = out$291;
-    const [$r411, p$292] = need_punct({ p: p, want: "}" });
-    p = p$292;
-    $rt.unwrap($r411);
+    if ($r409) {
+      return [{ tag: "Ok", value: $std_list.finish({ b: out }) }, p];
+    }
+    const [$r411, p$291] = parse_field({ p: p });
+    p = p$291;
+    const one = $rt.unwrap($r411);
+    const [, out$292] = $std_list.push({ b: out, x: one });
+    out = out$292;
+    const [$r412, p$293] = need_punct({ p: p, want: "}" });
+    p = p$293;
+    $rt.unwrap($r412);
     return [{ tag: "Ok", value: $std_list.finish({ b: out }) }, p];
   } catch ($e) {
     if ($e instanceof $rt.EarlyReturn) return [$e.value, p];
@@ -1854,77 +1857,77 @@ export function braced_fields({ p }) {
 
 export function parse_union({ p, start, vis }) {
   try {
-    const [$r413, p$293] = need_word({ p: p, want: "union" });
-    p = p$293;
-    $rt.unwrap($r413);
-    const [$r414, p$294] = expect_tname({ p: p });
+    const [$r414, p$294] = need_word({ p: p, want: "union" });
     p = p$294;
-    const name = $rt.unwrap($r414);
+    $rt.unwrap($r414);
+    const [$r415, p$295] = expect_tname({ p: p });
+    p = p$295;
+    const name = $rt.unwrap($r415);
     p = { ...p, current_def: name.text };
     let tparams = [];
-    const [$r416, p$295] = at_punct({ p: p, want: "[" });
-    p = p$295;
-    if ($r416) {
-      const [$r417, p$296] = parse_tparams({ p: p });
-      p = p$296;
-      tparams = $rt.unwrap($r417);
+    const [$r417, p$296] = at_punct({ p: p, want: "[" });
+    p = p$296;
+    if ($r417) {
+      const [$r418, p$297] = parse_tparams({ p: p });
+      p = p$297;
+      tparams = $rt.unwrap($r418);
     }
-    const [$r418, p$297] = need_punct({ p: p, want: "=" });
-    p = p$297;
-    $rt.unwrap($r418);
-    const [$r419, p$298] = need_newline({ p: p });
+    const [$r419, p$298] = need_punct({ p: p, want: "=" });
     p = p$298;
     $rt.unwrap($r419);
+    const [$r420, p$299] = need_newline({ p: p });
+    p = p$299;
+    $rt.unwrap($r420);
     let variants = $std_list.builder({  });
     let end = prev({ p: p }).end;
     const toks0 = p.toks;
     const start0 = p.pos;
-    const [$r420, p$299] = at_punct({ p: p, want: "|" });
-    p = p$299;
-    let $go432 = $r420 && p.pos < $std_list.len({ xs: p.toks }) - 1;
-    while ($go432) {
+    const [$r421, p$300] = at_punct({ p: p, want: "|" });
+    p = p$300;
+    let $go433 = $r421 && p.pos < $std_list.len({ xs: p.toks }) - 1;
+    while ($go433) {
       const s = here({ p: p });
-      const [, p$300] = skip({ p: p });
-      p = p$300;
-      const [$r422, p$301] = expect_tname({ p: p });
+      const [, p$301] = skip({ p: p });
       p = p$301;
-      const vname = $rt.unwrap($r422);
-      let fields = $std_list.builder({  });
-      const [$r423, p$302] = accept_word({ p: p, want: "of" });
+      const [$r423, p$302] = expect_tname({ p: p });
       p = p$302;
-      if ($r423) {
-        const [$r424, p$303] = parse_field({ p: p });
-        p = p$303;
-        const first = $rt.unwrap($r424);
-        const [, fields$304] = $std_list.push({ b: fields, x: first });
-        fields = fields$304;
+      const vname = $rt.unwrap($r423);
+      let fields = $std_list.builder({  });
+      const [$r424, p$303] = accept_word({ p: p, want: "of" });
+      p = p$303;
+      if ($r424) {
+        const [$r425, p$304] = parse_field({ p: p });
+        p = p$304;
+        const first = $rt.unwrap($r425);
+        const [, fields$305] = $std_list.push({ b: fields, x: first });
+        fields = fields$305;
         const start1 = p.pos;
-        const [$r425, p$305] = at_punct({ p: p, want: "," });
-        p = p$305;
-        let $go428 = $r425 && p.pos < $std_list.len({ xs: p.toks }) - 1;
-        while ($go428) {
-          const [, p$306] = skip({ p: p });
-          p = p$306;
-          const [$r427, p$307] = parse_field({ p: p });
+        const [$r426, p$306] = at_punct({ p: p, want: "," });
+        p = p$306;
+        let $go429 = $r426 && p.pos < $std_list.len({ xs: p.toks }) - 1;
+        while ($go429) {
+          const [, p$307] = skip({ p: p });
           p = p$307;
-          const more = $rt.unwrap($r427);
-          const [, fields$308] = $std_list.push({ b: fields, x: more });
-          fields = fields$308;
-          const [$r429, p$309] = at_punct({ p: p, want: "," });
-          p = p$309;
-          $go428 = $r429 && p.pos < $std_list.len({ xs: p.toks }) - 1;
+          const [$r428, p$308] = parse_field({ p: p });
+          p = p$308;
+          const more = $rt.unwrap($r428);
+          const [, fields$309] = $std_list.push({ b: fields, x: more });
+          fields = fields$309;
+          const [$r430, p$310] = at_punct({ p: p, want: "," });
+          p = p$310;
+          $go429 = $r430 && p.pos < $std_list.len({ xs: p.toks }) - 1;
         }
       }
       const vspan = span_from({ p: p, start: s });
       end = vspan.end;
-      const [, variants$310] = $std_list.push({ b: variants, x: { name: vname, fields: $std_list.finish({ b: fields }), span: vspan } });
-      variants = variants$310;
-      const [$r431, p$311] = need_newline({ p: p });
-      p = p$311;
-      $rt.unwrap($r431);
-      const [$r433, p$312] = at_punct({ p: p, want: "|" });
+      const [, variants$311] = $std_list.push({ b: variants, x: { name: vname, fields: $std_list.finish({ b: fields }), span: vspan } });
+      variants = variants$311;
+      const [$r432, p$312] = need_newline({ p: p });
       p = p$312;
-      $go432 = $r433 && p.pos < $std_list.len({ xs: p.toks }) - 1;
+      $rt.unwrap($r432);
+      const [$r434, p$313] = at_punct({ p: p, want: "|" });
+      p = p$313;
+      $go433 = $r434 && p.pos < $std_list.len({ xs: p.toks }) - 1;
     }
     return [{ tag: "Ok", value: { vis: vis, name: name, tparams: tparams, variants: $std_list.finish({ b: variants }), span: { start: start, end: end } } }, p];
   } catch ($e) {
@@ -1935,94 +1938,94 @@ export function parse_union({ p, start, vis }) {
 
 export function parse_interface({ p, start, vis }) {
   try {
-    const [$r437, p$313] = need_word({ p: p, want: "interface" });
-    p = p$313;
-    $rt.unwrap($r437);
-    const [$r438, p$314] = expect_tname({ p: p });
+    const [$r438, p$314] = need_word({ p: p, want: "interface" });
     p = p$314;
-    const name = $rt.unwrap($r438);
-    p = { ...p, current_def: name.text };
-    const [$r440, p$315] = need_punct({ p: p, want: "[" });
+    $rt.unwrap($r438);
+    const [$r439, p$315] = expect_tname({ p: p });
     p = p$315;
-    $rt.unwrap($r440);
-    const [$r441, p$316] = expect_tname({ p: p });
+    const name = $rt.unwrap($r439);
+    p = { ...p, current_def: name.text };
+    const [$r441, p$316] = need_punct({ p: p, want: "[" });
     p = p$316;
-    const tparam = $rt.unwrap($r441);
-    const [$r442, p$317] = need_punct({ p: p, want: "]" });
+    $rt.unwrap($r441);
+    const [$r442, p$317] = expect_tname({ p: p });
     p = p$317;
-    $rt.unwrap($r442);
-    const [$r443, p$318] = need_punct({ p: p, want: "{" });
+    const tparam = $rt.unwrap($r442);
+    const [$r443, p$318] = need_punct({ p: p, want: "]" });
     p = p$318;
     $rt.unwrap($r443);
-    let items = $std_list.builder({  });
-    const [$r444, p$319] = accept_newline({ p: p });
+    const [$r444, p$319] = need_punct({ p: p, want: "{" });
     p = p$319;
-    if ($r444) {
+    $rt.unwrap($r444);
+    let items = $std_list.builder({  });
+    const [$r445, p$320] = accept_newline({ p: p });
+    p = p$320;
+    if ($r445) {
       const toks0 = p.toks;
       const start0 = p.pos;
-      const [$r445, p$320] = at_punct({ p: p, want: "}" });
-      p = p$320;
-      let $go450 = !$r445 && !at_eof({ p: p }) && p.pos < $std_list.len({ xs: p.toks }) - 1;
-      while ($go450) {
+      const [$r446, p$321] = at_punct({ p: p, want: "}" });
+      p = p$321;
+      let $go451 = !$r446 && !at_eof({ p: p }) && p.pos < $std_list.len({ xs: p.toks }) - 1;
+      while ($go451) {
         const before = p.pos;
-        const [$r448, p$321] = iface_item({ p: p });
-        p = p$321;
-        const $m447 = $r448;
-        $m447$match: {
-          if ($m447.tag === "Ok") {
-            const value = $m447.value;
-            const [, items$322] = $std_list.push({ b: items, x: value });
-            items = items$322;
-            const [$r449, p$323] = terminator({ p: p, in_block: true });
-            p = p$323;
-            const term = $r449;
+        const [$r449, p$322] = iface_item({ p: p });
+        p = p$322;
+        const $m448 = $r449;
+        $m448$match: {
+          if ($m448.tag === "Ok") {
+            const value = $m448.value;
+            const [, items$323] = $std_list.push({ b: items, x: value });
+            items = items$323;
+            const [$r450, p$324] = terminator({ p: p, in_block: true });
+            p = p$324;
+            const term = $r450;
             if (term.tag === "Ok") {
               p = p;
             } else {
-              const [, p$324] = recover_to_line_end({ p: p });
-              p = p$324;
-              const [, p$325] = skip_newline({ p: p });
+              const [, p$325] = recover_to_line_end({ p: p });
               p = p$325;
-            }
-            break $m447$match;
-          }
-          if ($m447.tag === "Err") {
-            const error = $m447.error;
-            if (p.pos === before) {
-              const [, p$326] = skip({ p: p });
+              const [, p$326] = skip_newline({ p: p });
               p = p$326;
             }
-            const [, p$327] = recover_to_line_end({ p: p });
-            p = p$327;
-            const [, p$328] = skip_newline({ p: p });
+            break $m448$match;
+          }
+          if ($m448.tag === "Err") {
+            const error = $m448.error;
+            if (p.pos === before) {
+              const [, p$327] = skip({ p: p });
+              p = p$327;
+            }
+            const [, p$328] = recover_to_line_end({ p: p });
             p = p$328;
-            break $m447$match;
+            const [, p$329] = skip_newline({ p: p });
+            p = p$329;
+            break $m448$match;
           }
           $rt.unreachable();
         }
         if (p.pos === before) {
-          const [, p$329] = skip({ p: p });
-          p = p$329;
+          const [, p$330] = skip({ p: p });
+          p = p$330;
         }
-        const [$r451, p$330] = at_punct({ p: p, want: "}" });
-        p = p$330;
-        $go450 = !$r451 && !at_eof({ p: p }) && p.pos < $std_list.len({ xs: p.toks }) - 1;
+        const [$r452, p$331] = at_punct({ p: p, want: "}" });
+        p = p$331;
+        $go451 = !$r452 && !at_eof({ p: p }) && p.pos < $std_list.len({ xs: p.toks }) - 1;
       }
-      const [$r452, p$331] = need_punct({ p: p, want: "}" });
-      p = p$331;
-      $rt.unwrap($r452);
-    } else {
-      const [$r453, p$332] = accept_punct({ p: p, want: "}" });
+      const [$r453, p$332] = need_punct({ p: p, want: "}" });
       p = p$332;
-      if (!$r453) {
-        const [$r454, p$333] = iface_item({ p: p });
-        p = p$333;
-        const one = $rt.unwrap($r454);
-        const [, items$334] = $std_list.push({ b: items, x: one });
-        items = items$334;
-        const [$r455, p$335] = need_punct({ p: p, want: "}" });
-        p = p$335;
-        $rt.unwrap($r455);
+      $rt.unwrap($r453);
+    } else {
+      const [$r454, p$333] = accept_punct({ p: p, want: "}" });
+      p = p$333;
+      if (!$r454) {
+        const [$r455, p$334] = iface_item({ p: p });
+        p = p$334;
+        const one = $rt.unwrap($r455);
+        const [, items$335] = $std_list.push({ b: items, x: one });
+        items = items$335;
+        const [$r456, p$336] = need_punct({ p: p, want: "}" });
+        p = p$336;
+        $rt.unwrap($r456);
       }
     }
     return [{ tag: "Ok", value: { vis: vis, name: name, tparam: tparam, items: $std_list.finish({ b: items }), span: span_from({ p: p, start: start }) } }, p];
@@ -2035,44 +2038,44 @@ export function parse_interface({ p, start, vis }) {
 export function iface_item({ p }) {
   try {
     const s = here({ p: p });
-    const [$r458, p$336] = accept_word({ p: p, want: "law" });
-    p = p$336;
-    if ($r458) {
-      const [$r459, p$337] = expect_name({ p: p });
-      p = p$337;
-      const name = $rt.unwrap($r459);
-      const [$r460, p$338] = param_list({ p: p, rank: r_param_list });
+    const [$r459, p$337] = accept_word({ p: p, want: "law" });
+    p = p$337;
+    if ($r459) {
+      const [$r460, p$338] = expect_name({ p: p });
       p = p$338;
-      const params = $rt.unwrap($r460);
-      const [$r461, p$339] = parse_assertion_block({ p: p, rank: r_block });
+      const name = $rt.unwrap($r460);
+      const [$r461, p$339] = param_list({ p: p, rank: r_param_list });
       p = p$339;
-      const body = $rt.unwrap($r461);
+      const params = $rt.unwrap($r461);
+      const [$r462, p$340] = parse_assertion_block({ p: p, rank: r_block });
+      p = p$340;
+      const body = $rt.unwrap($r462);
       return [{ tag: "Ok", value: { tag: "LawItem", decl: { name: name, params: params, body: body, span: span_from({ p: p, start: s }) } } }, p];
     }
-    const [$r465, p$340] = need_word({ p: p, want: "fn" });
-    p = p$340;
-    $rt.unwrap($r465);
-    const [$r466, p$341] = expect_name({ p: p });
+    const [$r466, p$341] = need_word({ p: p, want: "fn" });
     p = p$341;
-    const name = $rt.unwrap($r466);
-    const [$r467, p$342] = param_list({ p: p, rank: r_param_list });
+    $rt.unwrap($r466);
+    const [$r467, p$342] = expect_name({ p: p });
     p = p$342;
-    const params = $rt.unwrap($r467);
-    const [$r468, p$343] = need_punct({ p: p, want: "->" });
+    const name = $rt.unwrap($r467);
+    const [$r468, p$343] = param_list({ p: p, rank: r_param_list });
     p = p$343;
-    $rt.unwrap($r468);
+    const params = $rt.unwrap($r468);
+    const [$r469, p$344] = need_punct({ p: p, want: "->" });
+    p = p$344;
+    $rt.unwrap($r469);
     const saved = p.no_brace;
     p = { ...p, no_brace: true };
-    const [$r470, p$344] = parse_type({ p: p, rank: r_type });
-    p = p$344;
-    const ret = $rt.unwrap($r470);
-    p = { ...p, no_brace: saved };
-    const [$r472, p$345] = effects_opt({ p: p });
+    const [$r471, p$345] = parse_type({ p: p, rank: r_type });
     p = p$345;
-    const effects = $rt.unwrap($r472);
-    const [$r473, p$346] = parse_contracts({ p: p });
+    const ret = $rt.unwrap($r471);
+    p = { ...p, no_brace: saved };
+    const [$r473, p$346] = effects_opt({ p: p });
     p = p$346;
-    const contracts = $rt.unwrap($r473);
+    const effects = $rt.unwrap($r473);
+    const [$r474, p$347] = parse_contracts({ p: p });
+    p = p$347;
+    const contracts = $rt.unwrap($r474);
     return [{ tag: "Ok", value: { tag: "IfaceFnItem", decl: { name: name, params: params, ret: ret, effects: effects, contracts: contracts, span: span_from({ p: p, start: s }) } } }, p];
   } catch ($e) {
     if ($e instanceof $rt.EarlyReturn) return [$e.value, p];
@@ -2082,105 +2085,105 @@ export function iface_item({ p }) {
 
 export function parse_impl({ p, start }) {
   try {
-    const [$r477, p$347] = need_word({ p: p, want: "impl" });
-    p = p$347;
-    $rt.unwrap($r477);
-    const [$r478, p$348] = expect_tname({ p: p });
+    const [$r478, p$348] = need_word({ p: p, want: "impl" });
     p = p$348;
-    const iface = $rt.unwrap($r478);
-    const [$r479, p$349] = need_punct({ p: p, want: "[" });
+    $rt.unwrap($r478);
+    const [$r479, p$349] = expect_tname({ p: p });
     p = p$349;
-    $rt.unwrap($r479);
-    const target_start = here({ p: p });
-    const [$r480, p$350] = parse_type({ p: p, rank: r_type });
+    const iface = $rt.unwrap($r479);
+    const [$r480, p$350] = need_punct({ p: p, want: "[" });
     p = p$350;
-    const target = $rt.unwrap($r480);
-    const target_end = prev({ p: p }).end;
-    const [$r481, p$351] = need_punct({ p: p, want: "]" });
+    $rt.unwrap($r480);
+    const target_start = here({ p: p });
+    const [$r481, p$351] = parse_type({ p: p, rank: r_type });
     p = p$351;
-    $rt.unwrap($r481);
+    const target = $rt.unwrap($r481);
+    const target_end = prev({ p: p }).end;
+    const [$r482, p$352] = need_punct({ p: p, want: "]" });
+    p = p$352;
+    $rt.unwrap($r482);
     const impl_name = iface.text + "[" + source_text({ p: p, start: target_start, end: target_end }) + "]";
     p = { ...p, current_def: impl_name };
-    const [$r483, p$352] = need_punct({ p: p, want: "{" });
-    p = p$352;
-    $rt.unwrap($r483);
-    let fns = $std_list.builder({  });
-    const [$r484, p$353] = accept_newline({ p: p });
+    const [$r484, p$353] = need_punct({ p: p, want: "{" });
     p = p$353;
-    if ($r484) {
+    $rt.unwrap($r484);
+    let fns = $std_list.builder({  });
+    const [$r485, p$354] = accept_newline({ p: p });
+    p = p$354;
+    if ($r485) {
       const toks0 = p.toks;
       const start0 = p.pos;
-      const [$r485, p$354] = at_punct({ p: p, want: "}" });
-      p = p$354;
-      let $go491 = !$r485 && !at_eof({ p: p }) && p.pos < $std_list.len({ xs: p.toks }) - 1;
-      while ($go491) {
+      const [$r486, p$355] = at_punct({ p: p, want: "}" });
+      p = p$355;
+      let $go492 = !$r486 && !at_eof({ p: p }) && p.pos < $std_list.len({ xs: p.toks }) - 1;
+      while ($go492) {
         const before = p.pos;
         const s = here({ p: p });
-        const [$r487, p$355] = visibility({ p: p });
-        p = p$355;
-        const vis = $r487;
-        const [$r489, p$356] = parse_fn({ p: p, start: s, vis: vis, is_const: false, is_intrinsic: false });
+        const [$r488, p$356] = visibility({ p: p });
         p = p$356;
-        const $m488 = $r489;
-        $m488$match: {
-          if ($m488.tag === "Ok") {
-            const value = $m488.value;
-            const [, fns$357] = $std_list.push({ b: fns, x: value });
-            fns = fns$357;
-            const [$r490, p$358] = terminator({ p: p, in_block: true });
-            p = p$358;
-            const term = $r490;
+        const vis = $r488;
+        const [$r490, p$357] = parse_fn({ p: p, start: s, vis: vis, is_const: false, is_intrinsic: false });
+        p = p$357;
+        const $m489 = $r490;
+        $m489$match: {
+          if ($m489.tag === "Ok") {
+            const value = $m489.value;
+            const [, fns$358] = $std_list.push({ b: fns, x: value });
+            fns = fns$358;
+            const [$r491, p$359] = terminator({ p: p, in_block: true });
+            p = p$359;
+            const term = $r491;
             if (term.tag === "Ok") {
               p = p;
             } else {
-              const [, p$359] = recover_to_line_end({ p: p });
-              p = p$359;
-              const [, p$360] = skip_newline({ p: p });
+              const [, p$360] = recover_to_line_end({ p: p });
               p = p$360;
-            }
-            break $m488$match;
-          }
-          if ($m488.tag === "Err") {
-            const error = $m488.error;
-            if (p.pos === before) {
-              const [, p$361] = skip({ p: p });
+              const [, p$361] = skip_newline({ p: p });
               p = p$361;
             }
-            const [, p$362] = recover_to_line_end({ p: p });
-            p = p$362;
-            const [, p$363] = skip_newline({ p: p });
+            break $m489$match;
+          }
+          if ($m489.tag === "Err") {
+            const error = $m489.error;
+            if (p.pos === before) {
+              const [, p$362] = skip({ p: p });
+              p = p$362;
+            }
+            const [, p$363] = recover_to_line_end({ p: p });
             p = p$363;
-            break $m488$match;
+            const [, p$364] = skip_newline({ p: p });
+            p = p$364;
+            break $m489$match;
           }
           $rt.unreachable();
         }
         if (p.pos === before) {
-          const [, p$364] = skip({ p: p });
-          p = p$364;
+          const [, p$365] = skip({ p: p });
+          p = p$365;
         }
-        const [$r492, p$365] = at_punct({ p: p, want: "}" });
-        p = p$365;
-        $go491 = !$r492 && !at_eof({ p: p }) && p.pos < $std_list.len({ xs: p.toks }) - 1;
+        const [$r493, p$366] = at_punct({ p: p, want: "}" });
+        p = p$366;
+        $go492 = !$r493 && !at_eof({ p: p }) && p.pos < $std_list.len({ xs: p.toks }) - 1;
       }
-      const [$r493, p$366] = need_punct({ p: p, want: "}" });
-      p = p$366;
-      $rt.unwrap($r493);
-    } else {
-      const [$r494, p$367] = accept_punct({ p: p, want: "}" });
+      const [$r494, p$367] = need_punct({ p: p, want: "}" });
       p = p$367;
-      if (!$r494) {
+      $rt.unwrap($r494);
+    } else {
+      const [$r495, p$368] = accept_punct({ p: p, want: "}" });
+      p = p$368;
+      if (!$r495) {
         const s = here({ p: p });
-        const [$r495, p$368] = visibility({ p: p });
-        p = p$368;
-        const vis = $r495;
-        const [$r496, p$369] = parse_fn({ p: p, start: s, vis: vis, is_const: false, is_intrinsic: false });
+        const [$r496, p$369] = visibility({ p: p });
         p = p$369;
-        const one = $rt.unwrap($r496);
-        const [, fns$370] = $std_list.push({ b: fns, x: one });
-        fns = fns$370;
-        const [$r497, p$371] = need_punct({ p: p, want: "}" });
-        p = p$371;
-        $rt.unwrap($r497);
+        const vis = $r496;
+        const [$r497, p$370] = parse_fn({ p: p, start: s, vis: vis, is_const: false, is_intrinsic: false });
+        p = p$370;
+        const one = $rt.unwrap($r497);
+        const [, fns$371] = $std_list.push({ b: fns, x: one });
+        fns = fns$371;
+        const [$r498, p$372] = need_punct({ p: p, want: "}" });
+        p = p$372;
+        $rt.unwrap($r498);
       }
     }
     return [{ tag: "Ok", value: { iface: iface, target: target, fns: $std_list.finish({ b: fns }), span: span_from({ p: p, start: start }) } }, p];
@@ -2192,42 +2195,42 @@ export function parse_impl({ p, start }) {
 
 export function parse_claim({ p, start, vis }) {
   try {
-    const [$r500, p$372] = need_word({ p: p, want: "claim" });
-    p = p$372;
-    $rt.unwrap($r500);
-    let name = { text: "", span: { start: 0, end: 0 } };
-    const [$r503, p$373] = at_name({ p: p, n: 0 });
+    const [$r501, p$373] = need_word({ p: p, want: "claim" });
     p = p$373;
-    if ($r503) {
-      const [$r504, p$374] = advance({ p: p });
-      p = p$374;
-      const t = $r504;
+    $rt.unwrap($r501);
+    let name = { text: "", span: { start: 0, end: 0 } };
+    const [$r504, p$374] = at_name({ p: p, n: 0 });
+    p = p$374;
+    if ($r504) {
+      const [$r505, p$375] = advance({ p: p });
+      p = p$375;
+      const t = $r505;
       name = ident_of({ t: t });
     } else {
-      const [$r505, p$375] = expect_tname({ p: p });
-      p = p$375;
-      name = $rt.unwrap($r505);
+      const [$r506, p$376] = expect_tname({ p: p });
+      p = p$376;
+      name = $rt.unwrap($r506);
     }
     p = { ...p, current_def: name.text };
-    const [$r507, p$376] = accept_punct({ p: p, want: ":=" });
-    p = p$376;
-    if ($r507) {
-      const [$r508, p$377] = claim_or({ p: p, rank: r_claim_or });
-      p = p$377;
-      const pred = $rt.unwrap($r508);
+    const [$r508, p$377] = accept_punct({ p: p, want: ":=" });
+    p = p$377;
+    if ($r508) {
+      const [$r509, p$378] = claim_or({ p: p, rank: r_claim_or });
+      p = p$378;
+      const pred = $rt.unwrap($r509);
       return [{ tag: "Ok", value: { vis: vis, name: name, body: { tag: "Derived", pred: pred }, span: span_from({ p: p, start: start }) } }, p];
     }
-    const [$r512, p$378] = at_text_lit({ p: p });
-    p = p$378;
-    if ($r512) {
-      const [$r513, p$379] = advance({ p: p });
-      p = p$379;
-      const t = $r513;
+    const [$r513, p$379] = at_text_lit({ p: p });
+    p = p$379;
+    if ($r513) {
+      const [$r514, p$380] = advance({ p: p });
+      p = p$380;
+      const t = $r514;
       return [{ tag: "Ok", value: { vis: vis, name: name, body: { tag: "Asserted", description: text_value({ t: t }) }, span: span_from({ p: p, start: start }) } }, p];
     }
-    const [$r517, p$380] = fail({ p: p, expected: "`:=` or a description text" });
-    p = p$380;
-    return [{ tag: "Err", error: $r517 }, p];
+    const [$r518, p$381] = fail({ p: p, expected: "`:=` or a description text" });
+    p = p$381;
+    return [{ tag: "Err", error: $r518 }, p];
   } catch ($e) {
     if ($e instanceof $rt.EarlyReturn) return [$e.value, p];
     throw $e;
@@ -2237,42 +2240,42 @@ export function parse_claim({ p, start, vis }) {
 export function claim_or({ p, rank }) {
   try {
     const s = here({ p: p });
-    const [$r519, p$381] = claim_and({ p: p, rank: r_claim_and });
-    p = p$381;
-    const first = $rt.unwrap($r519);
-    const [$r520, p$382] = at_word({ p: p, want: "or" });
+    const [$r520, p$382] = claim_and({ p: p, rank: r_claim_and });
     p = p$382;
-    if (!$r520) {
+    const first = $rt.unwrap($r520);
+    const [$r521, p$383] = at_word({ p: p, want: "or" });
+    p = p$383;
+    if (!$r521) {
       return [{ tag: "Ok", value: first.pred }, p];
     }
     let operands = $std_list.builder({  });
-    const [, operands$383] = $std_list.push({ b: operands, x: first.pred });
-    operands = operands$383;
+    const [, operands$384] = $std_list.push({ b: operands, x: first.pred });
+    operands = operands$384;
     let mixed = first.chained;
     const toks0 = p.toks;
     const start0 = p.pos;
-    const [$r522, p$384] = at_word({ p: p, want: "or" });
-    p = p$384;
-    let $go525 = $r522 && p.pos < $std_list.len({ xs: p.toks }) - 1;
-    while ($go525) {
-      const [, p$385] = skip({ p: p });
-      p = p$385;
-      const [$r524, p$386] = claim_and({ p: p, rank: r_claim_and });
+    const [$r523, p$385] = at_word({ p: p, want: "or" });
+    p = p$385;
+    let $go526 = $r523 && p.pos < $std_list.len({ xs: p.toks }) - 1;
+    while ($go526) {
+      const [, p$386] = skip({ p: p });
       p = p$386;
-      const next = $rt.unwrap($r524);
+      const [$r525, p$387] = claim_and({ p: p, rank: r_claim_and });
+      p = p$387;
+      const next = $rt.unwrap($r525);
       if (next.chained) {
         mixed = true;
       }
-      const [, operands$387] = $std_list.push({ b: operands, x: next.pred });
-      operands = operands$387;
-      const [$r526, p$388] = at_word({ p: p, want: "or" });
-      p = p$388;
-      $go525 = $r526 && p.pos < $std_list.len({ xs: p.toks }) - 1;
+      const [, operands$388] = $std_list.push({ b: operands, x: next.pred });
+      operands = operands$388;
+      const [$r527, p$389] = at_word({ p: p, want: "or" });
+      p = p$389;
+      $go526 = $r527 && p.pos < $std_list.len({ xs: p.toks }) - 1;
     }
     const span = span_from({ p: p, start: s });
     if (mixed) {
-      const [, p$389] = report({ p: p, code: "E0007", start: span.start, end: span.end, detail: "write `(a and b) or c` or `a and (b or c)`" });
-      p = p$389;
+      const [, p$390] = report({ p: p, code: "E0007", start: span.start, end: span.end, detail: "write `(a and b) or c` or `a and (b or c)`" });
+      p = p$390;
     }
     return [{ tag: "Ok", value: { tag: "ClaimOr", operands: $std_list.finish({ b: operands }), span: span } }, p];
   } catch ($e) {
@@ -2284,33 +2287,33 @@ export function claim_or({ p, rank }) {
 export function claim_and({ p, rank }) {
   try {
     const s = here({ p: p });
-    const [$r529, p$390] = claim_not({ p: p, rank: r_claim_not });
-    p = p$390;
-    const first = $rt.unwrap($r529);
-    const [$r530, p$391] = at_word({ p: p, want: "and" });
+    const [$r530, p$391] = claim_not({ p: p, rank: r_claim_not });
     p = p$391;
-    if (!$r530) {
+    const first = $rt.unwrap($r530);
+    const [$r531, p$392] = at_word({ p: p, want: "and" });
+    p = p$392;
+    if (!$r531) {
       return [{ tag: "Ok", value: { pred: first, chained: false } }, p];
     }
     let operands = $std_list.builder({  });
-    const [, operands$392] = $std_list.push({ b: operands, x: first });
-    operands = operands$392;
+    const [, operands$393] = $std_list.push({ b: operands, x: first });
+    operands = operands$393;
     const toks0 = p.toks;
     const start0 = p.pos;
-    const [$r533, p$393] = at_word({ p: p, want: "and" });
-    p = p$393;
-    let $go536 = $r533 && p.pos < $std_list.len({ xs: p.toks }) - 1;
-    while ($go536) {
-      const [, p$394] = skip({ p: p });
-      p = p$394;
-      const [$r535, p$395] = claim_not({ p: p, rank: r_claim_not });
+    const [$r534, p$394] = at_word({ p: p, want: "and" });
+    p = p$394;
+    let $go537 = $r534 && p.pos < $std_list.len({ xs: p.toks }) - 1;
+    while ($go537) {
+      const [, p$395] = skip({ p: p });
       p = p$395;
-      const next = $rt.unwrap($r535);
-      const [, operands$396] = $std_list.push({ b: operands, x: next });
-      operands = operands$396;
-      const [$r537, p$397] = at_word({ p: p, want: "and" });
-      p = p$397;
-      $go536 = $r537 && p.pos < $std_list.len({ xs: p.toks }) - 1;
+      const [$r536, p$396] = claim_not({ p: p, rank: r_claim_not });
+      p = p$396;
+      const next = $rt.unwrap($r536);
+      const [, operands$397] = $std_list.push({ b: operands, x: next });
+      operands = operands$397;
+      const [$r538, p$398] = at_word({ p: p, want: "and" });
+      p = p$398;
+      $go537 = $r538 && p.pos < $std_list.len({ xs: p.toks }) - 1;
     }
     return [{ tag: "Ok", value: { pred: { tag: "ClaimAnd", operands: $std_list.finish({ b: operands }), span: span_from({ p: p, start: s }) }, chained: true } }, p];
   } catch ($e) {
@@ -2322,17 +2325,17 @@ export function claim_and({ p, rank }) {
 export function claim_not({ p, rank }) {
   try {
     const s = here({ p: p });
-    const [$r541, p$398] = accept_word({ p: p, want: "not" });
-    p = p$398;
-    if ($r541) {
-      const [$r542, p$399] = claim_atom({ p: p, rank: r_claim_atom });
-      p = p$399;
-      const operand = $rt.unwrap($r542);
+    const [$r542, p$399] = accept_word({ p: p, want: "not" });
+    p = p$399;
+    if ($r542) {
+      const [$r543, p$400] = claim_atom({ p: p, rank: r_claim_atom });
+      p = p$400;
+      const operand = $rt.unwrap($r543);
       return [{ tag: "Ok", value: { tag: "ClaimNot", operand: operand, span: span_from({ p: p, start: s }) } }, p];
     }
-    const [$r545, p$400] = claim_atom({ p: p, rank: r_claim_atom });
-    p = p$400;
-    return [$r545, p];
+    const [$r546, p$401] = claim_atom({ p: p, rank: r_claim_atom });
+    p = p$401;
+    return [$r546, p];
   } catch ($e) {
     if ($e instanceof $rt.EarlyReturn) return [$e.value, p];
     throw $e;
@@ -2342,56 +2345,56 @@ export function claim_not({ p, rank }) {
 export function claim_atom({ p, rank }) {
   try {
     const s = here({ p: p });
-    const [$r546, p$401] = accept_punct({ p: p, want: "(" });
-    p = p$401;
-    if ($r546) {
-      const [$r547, p$402] = claim_or({ p: p, rank: r_claim_or });
-      p = p$402;
-      const inner = $rt.unwrap($r547);
-      const [$r548, p$403] = need_punct({ p: p, want: ")" });
+    const [$r547, p$402] = accept_punct({ p: p, want: "(" });
+    p = p$402;
+    if ($r547) {
+      const [$r548, p$403] = claim_or({ p: p, rank: r_claim_or });
       p = p$403;
-      $rt.unwrap($r548);
+      const inner = $rt.unwrap($r548);
+      const [$r549, p$404] = need_punct({ p: p, want: ")" });
+      p = p$404;
+      $rt.unwrap($r549);
       return [{ tag: "Ok", value: inner }, p];
     }
-    const [$r550, p$404] = accept_word({ p: p, want: "effects" });
-    p = p$404;
-    if ($r550) {
-      const [$r551, p$405] = need_punct({ p: p, want: "==" });
-      p = p$405;
-      $rt.unwrap($r551);
-      const [$r552, p$406] = need_punct({ p: p, want: "{" });
+    const [$r551, p$405] = accept_word({ p: p, want: "effects" });
+    p = p$405;
+    if ($r551) {
+      const [$r552, p$406] = need_punct({ p: p, want: "==" });
       p = p$406;
       $rt.unwrap($r552);
-      let effects = [];
-      const [$r553, p$407] = at_punct({ p: p, want: "}" });
+      const [$r553, p$407] = need_punct({ p: p, want: "{" });
       p = p$407;
-      if (!$r553) {
-        const [$r554, p$408] = effect_list({ p: p });
-        p = p$408;
-        effects = $rt.unwrap($r554);
+      $rt.unwrap($r553);
+      let effects = [];
+      const [$r554, p$408] = at_punct({ p: p, want: "}" });
+      p = p$408;
+      if (!$r554) {
+        const [$r555, p$409] = effect_list({ p: p });
+        p = p$409;
+        effects = $rt.unwrap($r555);
       }
-      const [$r555, p$409] = need_punct({ p: p, want: "}" });
-      p = p$409;
-      $rt.unwrap($r555);
+      const [$r556, p$410] = need_punct({ p: p, want: "}" });
+      p = p$410;
+      $rt.unwrap($r556);
       return [{ tag: "Ok", value: { tag: "ClaimEffectsEq", effects: effects, span: span_from({ p: p, start: s }) } }, p];
     }
-    const [$r558, p$410] = at_name({ p: p, n: 0 });
-    p = p$410;
-    let $sc560 = $r558;
-    if (!$sc560) {
-      const [$r559, p$411] = at_tname({ p: p, n: 0 });
-      p = p$411;
-      $sc560 = $r559;
-    }
-    if ($sc560) {
-      const [$r561, p$412] = dotted({ p: p });
+    const [$r559, p$411] = at_name({ p: p, n: 0 });
+    p = p$411;
+    let $sc561 = $r559;
+    if (!$sc561) {
+      const [$r560, p$412] = at_tname({ p: p, n: 0 });
       p = p$412;
-      const name = $rt.unwrap($r561);
+      $sc561 = $r560;
+    }
+    if ($sc561) {
+      const [$r562, p$413] = dotted({ p: p });
+      p = p$413;
+      const name = $rt.unwrap($r562);
       return [{ tag: "Ok", value: { tag: "ClaimAtom", name: name, span: span_from({ p: p, start: s }) } }, p];
     }
-    const [$r564, p$413] = fail({ p: p, expected: "an effect, a claim, `effects == { ... }` or `(`" });
-    p = p$413;
-    return [{ tag: "Err", error: $r564 }, p];
+    const [$r565, p$414] = fail({ p: p, expected: "an effect, a claim, `effects == { ... }` or `(`" });
+    p = p$414;
+    return [{ tag: "Err", error: $r565 }, p];
   } catch ($e) {
     if ($e instanceof $rt.EarlyReturn) return [$e.value, p];
     throw $e;
@@ -2400,60 +2403,60 @@ export function claim_atom({ p, rank }) {
 
 export function parse_capability({ p, start, vis }) {
   try {
-    const [$r566, p$414] = need_word({ p: p, want: "capability" });
-    p = p$414;
-    $rt.unwrap($r566);
-    const [$r567, p$415] = expect_tname({ p: p });
+    const [$r567, p$415] = need_word({ p: p, want: "capability" });
     p = p$415;
-    const name = $rt.unwrap($r567);
+    $rt.unwrap($r567);
+    const [$r568, p$416] = expect_tname({ p: p });
+    p = p$416;
+    const name = $rt.unwrap($r568);
     p = { ...p, current_def: name.text };
     let tparams = [];
-    const [$r569, p$416] = at_punct({ p: p, want: "[" });
-    p = p$416;
-    if ($r569) {
-      const [$r570, p$417] = parse_tparams({ p: p });
-      p = p$417;
-      tparams = $rt.unwrap($r570);
+    const [$r570, p$417] = at_punct({ p: p, want: "[" });
+    p = p$417;
+    if ($r570) {
+      const [$r571, p$418] = parse_tparams({ p: p });
+      p = p$418;
+      tparams = $rt.unwrap($r571);
     }
-    const [$r571, p$418] = need_newline({ p: p });
-    p = p$418;
-    $rt.unwrap($r571);
+    const [$r572, p$419] = need_newline({ p: p });
+    p = p$419;
+    $rt.unwrap($r572);
     let grant_list = $std_list.builder({  });
     let end = name.span.end;
     const toks0 = p.toks;
     const start0 = p.pos;
-    const [$r572, p$419] = at_word({ p: p, want: "grants" });
-    p = p$419;
-    let $go583 = $r572 && p.pos < $std_list.len({ xs: p.toks }) - 1;
-    while ($go583) {
+    const [$r573, p$420] = at_word({ p: p, want: "grants" });
+    p = p$420;
+    let $go584 = $r573 && p.pos < $std_list.len({ xs: p.toks }) - 1;
+    while ($go584) {
       const s = here({ p: p });
-      const [, p$420] = skip({ p: p });
-      p = p$420;
-      const [$r574, p$421] = effect_ref({ p: p });
+      const [, p$421] = skip({ p: p });
       p = p$421;
-      const effect = $rt.unwrap($r574);
-      let when_cond = { tag: "None" };
-      const [$r576, p$422] = accept_word({ p: p, want: "when" });
+      const [$r575, p$422] = effect_ref({ p: p });
       p = p$422;
-      if ($r576) {
+      const effect = $rt.unwrap($r575);
+      let when_cond = { tag: "None" };
+      const [$r577, p$423] = accept_word({ p: p, want: "when" });
+      p = p$423;
+      if ($r577) {
         const saved = p.no_brace;
         p = { ...p, no_brace: true };
-        const [$r578, p$423] = parse_expr({ p: p, rank: r_expr });
-        p = p$423;
-        const e = $rt.unwrap($r578);
+        const [$r579, p$424] = parse_expr({ p: p, rank: r_expr });
+        p = p$424;
+        const e = $rt.unwrap($r579);
         p = { ...p, no_brace: saved };
         when_cond = { tag: "Some", value: e };
       }
       const gspan = span_from({ p: p, start: s });
       end = gspan.end;
-      const [, grant_list$424] = $std_list.push({ b: grant_list, x: { effect: effect, when_cond: when_cond, span: gspan } });
-      grant_list = grant_list$424;
-      const [$r582, p$425] = need_newline({ p: p });
-      p = p$425;
-      $rt.unwrap($r582);
-      const [$r584, p$426] = at_word({ p: p, want: "grants" });
+      const [, grant_list$425] = $std_list.push({ b: grant_list, x: { effect: effect, when_cond: when_cond, span: gspan } });
+      grant_list = grant_list$425;
+      const [$r583, p$426] = need_newline({ p: p });
       p = p$426;
-      $go583 = $r584 && p.pos < $std_list.len({ xs: p.toks }) - 1;
+      $rt.unwrap($r583);
+      const [$r585, p$427] = at_word({ p: p, want: "grants" });
+      p = p$427;
+      $go584 = $r585 && p.pos < $std_list.len({ xs: p.toks }) - 1;
     }
     return [{ tag: "Ok", value: { vis: vis, name: name, tparams: tparams, grant_list: $std_list.finish({ b: grant_list }), span: { start: start, end: end } } }, p];
   } catch ($e) {
@@ -2464,25 +2467,25 @@ export function parse_capability({ p, start, vis }) {
 
 export function parse_path({ p, start }) {
   try {
-    const [$r588, p$427] = need_word({ p: p, want: "path" });
-    p = p$427;
-    $rt.unwrap($r588);
-    const [$r589, p$428] = expect_name({ p: p });
+    const [$r589, p$428] = need_word({ p: p, want: "path" });
     p = p$428;
-    const name = $rt.unwrap($r589);
-    p = { ...p, current_def: name.text };
-    const [$r591, p$429] = need_newline({ p: p });
+    $rt.unwrap($r589);
+    const [$r590, p$429] = expect_name({ p: p });
     p = p$429;
-    $rt.unwrap($r591);
-    const [$r592, p$430] = need_word({ p: p, want: "entry" });
+    const name = $rt.unwrap($r590);
+    p = { ...p, current_def: name.text };
+    const [$r592, p$430] = need_newline({ p: p });
     p = p$430;
     $rt.unwrap($r592);
-    const [$r593, p$431] = expect_name({ p: p });
+    const [$r593, p$431] = need_word({ p: p, want: "entry" });
     p = p$431;
-    const entry_fn = $rt.unwrap($r593);
-    const [$r594, p$432] = need_newline({ p: p });
+    $rt.unwrap($r593);
+    const [$r594, p$432] = expect_name({ p: p });
     p = p$432;
-    $rt.unwrap($r594);
+    const entry_fn = $rt.unwrap($r594);
+    const [$r595, p$433] = need_newline({ p: p });
+    p = p$433;
+    $rt.unwrap($r595);
     let clauses = $std_list.builder({  });
     let end = entry_fn.span.end;
     let more = true;
@@ -2490,147 +2493,147 @@ export function parse_path({ p, start }) {
     const start0 = p.pos;
     while (more && p.pos < $std_list.len({ xs: p.toks }) - 1) {
       const s = here({ p: p });
-      const [$r596, p$433] = accept_word({ p: p, want: "effects" });
-      p = p$433;
-      if ($r596) {
-        const [$r597, p$434] = need_punct({ p: p, want: "<=" });
-        p = p$434;
-        $rt.unwrap($r597);
-        const [$r598, p$435] = need_punct({ p: p, want: "{" });
+      const [$r597, p$434] = accept_word({ p: p, want: "effects" });
+      p = p$434;
+      if ($r597) {
+        const [$r598, p$435] = need_punct({ p: p, want: "<=" });
         p = p$435;
         $rt.unwrap($r598);
-        let effects = [];
-        const [$r599, p$436] = at_punct({ p: p, want: "}" });
+        const [$r599, p$436] = need_punct({ p: p, want: "{" });
         p = p$436;
-        if (!$r599) {
-          const [$r600, p$437] = effect_list({ p: p });
-          p = p$437;
-          effects = $rt.unwrap($r600);
+        $rt.unwrap($r599);
+        let effects = [];
+        const [$r600, p$437] = at_punct({ p: p, want: "}" });
+        p = p$437;
+        if (!$r600) {
+          const [$r601, p$438] = effect_list({ p: p });
+          p = p$438;
+          effects = $rt.unwrap($r601);
         }
-        const [$r601, p$438] = need_punct({ p: p, want: "}" });
-        p = p$438;
-        $rt.unwrap($r601);
+        const [$r602, p$439] = need_punct({ p: p, want: "}" });
+        p = p$439;
+        $rt.unwrap($r602);
         const cspan = span_from({ p: p, start: s });
         end = cspan.end;
-        const [, clauses$439] = $std_list.push({ b: clauses, x: { tag: "PathEffects", effects: effects, span: cspan } });
-        clauses = clauses$439;
-        const [$r603, p$440] = need_newline({ p: p });
-        p = p$440;
-        $rt.unwrap($r603);
-      } else {
-        const [$r604, p$441] = accept_word({ p: p, want: "forbid" });
+        const [, clauses$440] = $std_list.push({ b: clauses, x: { tag: "PathEffects", effects: effects, span: cspan } });
+        clauses = clauses$440;
+        const [$r604, p$441] = need_newline({ p: p });
         p = p$441;
-        if ($r604) {
-          const [$r605, p$442] = need_punct({ p: p, want: "{" });
-          p = p$442;
-          $rt.unwrap($r605);
-          let effects = [];
-          const [$r606, p$443] = at_punct({ p: p, want: "}" });
+        $rt.unwrap($r604);
+      } else {
+        const [$r605, p$442] = accept_word({ p: p, want: "forbid" });
+        p = p$442;
+        if ($r605) {
+          const [$r606, p$443] = need_punct({ p: p, want: "{" });
           p = p$443;
-          if (!$r606) {
-            const [$r607, p$444] = effect_list({ p: p });
-            p = p$444;
-            effects = $rt.unwrap($r607);
+          $rt.unwrap($r606);
+          let effects = [];
+          const [$r607, p$444] = at_punct({ p: p, want: "}" });
+          p = p$444;
+          if (!$r607) {
+            const [$r608, p$445] = effect_list({ p: p });
+            p = p$445;
+            effects = $rt.unwrap($r608);
           }
-          const [$r608, p$445] = need_punct({ p: p, want: "}" });
-          p = p$445;
-          $rt.unwrap($r608);
+          const [$r609, p$446] = need_punct({ p: p, want: "}" });
+          p = p$446;
+          $rt.unwrap($r609);
           const cspan = span_from({ p: p, start: s });
           end = cspan.end;
-          const [, clauses$446] = $std_list.push({ b: clauses, x: { tag: "PathForbid", effects: effects, span: cspan } });
-          clauses = clauses$446;
-          const [$r610, p$447] = need_newline({ p: p });
-          p = p$447;
-          $rt.unwrap($r610);
-        } else {
-          const [$r611, p$448] = accept_word({ p: p, want: "require" });
+          const [, clauses$447] = $std_list.push({ b: clauses, x: { tag: "PathForbid", effects: effects, span: cspan } });
+          clauses = clauses$447;
+          const [$r611, p$448] = need_newline({ p: p });
           p = p$448;
-          if ($r611) {
-            const [$r612, p$449] = need_punct({ p: p, want: "{" });
-            p = p$449;
-            $rt.unwrap($r612);
-            let claim_list = $std_list.builder({  });
-            const [$r613, p$450] = at_punct({ p: p, want: "}" });
+          $rt.unwrap($r611);
+        } else {
+          const [$r612, p$449] = accept_word({ p: p, want: "require" });
+          p = p$449;
+          if ($r612) {
+            const [$r613, p$450] = need_punct({ p: p, want: "{" });
             p = p$450;
-            if (!$r613) {
-              const [$r614, p$451] = dotted({ p: p });
-              p = p$451;
-              const first = $rt.unwrap($r614);
-              const [, claim_list$452] = $std_list.push({ b: claim_list, x: first });
-              claim_list = claim_list$452;
+            $rt.unwrap($r613);
+            let claim_list = $std_list.builder({  });
+            const [$r614, p$451] = at_punct({ p: p, want: "}" });
+            p = p$451;
+            if (!$r614) {
+              const [$r615, p$452] = dotted({ p: p });
+              p = p$452;
+              const first = $rt.unwrap($r615);
+              const [, claim_list$453] = $std_list.push({ b: claim_list, x: first });
+              claim_list = claim_list$453;
               const start1 = p.pos;
-              const [$r615, p$453] = at_punct({ p: p, want: "," });
-              p = p$453;
-              let $go618 = $r615 && p.pos < $std_list.len({ xs: p.toks }) - 1;
-              while ($go618) {
-                const [, p$454] = skip({ p: p });
-                p = p$454;
-                const [$r617, p$455] = dotted({ p: p });
+              const [$r616, p$454] = at_punct({ p: p, want: "," });
+              p = p$454;
+              let $go619 = $r616 && p.pos < $std_list.len({ xs: p.toks }) - 1;
+              while ($go619) {
+                const [, p$455] = skip({ p: p });
                 p = p$455;
-                const next = $rt.unwrap($r617);
-                const [, claim_list$456] = $std_list.push({ b: claim_list, x: next });
-                claim_list = claim_list$456;
-                const [$r619, p$457] = at_punct({ p: p, want: "," });
-                p = p$457;
-                $go618 = $r619 && p.pos < $std_list.len({ xs: p.toks }) - 1;
+                const [$r618, p$456] = dotted({ p: p });
+                p = p$456;
+                const next = $rt.unwrap($r618);
+                const [, claim_list$457] = $std_list.push({ b: claim_list, x: next });
+                claim_list = claim_list$457;
+                const [$r620, p$458] = at_punct({ p: p, want: "," });
+                p = p$458;
+                $go619 = $r620 && p.pos < $std_list.len({ xs: p.toks }) - 1;
               }
             }
-            const [$r620, p$458] = need_punct({ p: p, want: "}" });
-            p = p$458;
-            $rt.unwrap($r620);
+            const [$r621, p$459] = need_punct({ p: p, want: "}" });
+            p = p$459;
+            $rt.unwrap($r621);
             const cspan = span_from({ p: p, start: s });
             end = cspan.end;
-            const [, clauses$459] = $std_list.push({ b: clauses, x: { tag: "PathRequire", claim_list: $std_list.finish({ b: claim_list }), span: cspan } });
-            clauses = clauses$459;
-            const [$r622, p$460] = need_newline({ p: p });
-            p = p$460;
-            $rt.unwrap($r622);
-          } else {
-            const [$r623, p$461] = accept_word({ p: p, want: "policy" });
+            const [, clauses$460] = $std_list.push({ b: clauses, x: { tag: "PathRequire", claim_list: $std_list.finish({ b: claim_list }), span: cspan } });
+            clauses = clauses$460;
+            const [$r623, p$461] = need_newline({ p: p });
             p = p$461;
-            if ($r623) {
-              const [$r624, p$462] = expect_name({ p: p });
-              p = p$462;
-              const pname = $rt.unwrap($r624);
-              let except_list = $std_list.builder({  });
-              const [$r625, p$463] = accept_word({ p: p, want: "except" });
+            $rt.unwrap($r623);
+          } else {
+            const [$r624, p$462] = accept_word({ p: p, want: "policy" });
+            p = p$462;
+            if ($r624) {
+              const [$r625, p$463] = expect_name({ p: p });
               p = p$463;
-              if ($r625) {
-                const [$r626, p$464] = need_punct({ p: p, want: "{" });
-                p = p$464;
-                $rt.unwrap($r626);
-                const [$r627, p$465] = dotted({ p: p });
+              const pname = $rt.unwrap($r625);
+              let except_list = $std_list.builder({  });
+              const [$r626, p$464] = accept_word({ p: p, want: "except" });
+              p = p$464;
+              if ($r626) {
+                const [$r627, p$465] = need_punct({ p: p, want: "{" });
                 p = p$465;
-                const first = $rt.unwrap($r627);
-                const [, except_list$466] = $std_list.push({ b: except_list, x: first });
-                except_list = except_list$466;
+                $rt.unwrap($r627);
+                const [$r628, p$466] = dotted({ p: p });
+                p = p$466;
+                const first = $rt.unwrap($r628);
+                const [, except_list$467] = $std_list.push({ b: except_list, x: first });
+                except_list = except_list$467;
                 const start2 = p.pos;
-                const [$r628, p$467] = at_punct({ p: p, want: "," });
-                p = p$467;
-                let $go631 = $r628 && p.pos < $std_list.len({ xs: p.toks }) - 1;
-                while ($go631) {
-                  const [, p$468] = skip({ p: p });
-                  p = p$468;
-                  const [$r630, p$469] = dotted({ p: p });
+                const [$r629, p$468] = at_punct({ p: p, want: "," });
+                p = p$468;
+                let $go632 = $r629 && p.pos < $std_list.len({ xs: p.toks }) - 1;
+                while ($go632) {
+                  const [, p$469] = skip({ p: p });
                   p = p$469;
-                  const next = $rt.unwrap($r630);
-                  const [, except_list$470] = $std_list.push({ b: except_list, x: next });
-                  except_list = except_list$470;
-                  const [$r632, p$471] = at_punct({ p: p, want: "," });
-                  p = p$471;
-                  $go631 = $r632 && p.pos < $std_list.len({ xs: p.toks }) - 1;
+                  const [$r631, p$470] = dotted({ p: p });
+                  p = p$470;
+                  const next = $rt.unwrap($r631);
+                  const [, except_list$471] = $std_list.push({ b: except_list, x: next });
+                  except_list = except_list$471;
+                  const [$r633, p$472] = at_punct({ p: p, want: "," });
+                  p = p$472;
+                  $go632 = $r633 && p.pos < $std_list.len({ xs: p.toks }) - 1;
                 }
-                const [$r633, p$472] = need_punct({ p: p, want: "}" });
-                p = p$472;
-                $rt.unwrap($r633);
+                const [$r634, p$473] = need_punct({ p: p, want: "}" });
+                p = p$473;
+                $rt.unwrap($r634);
               }
               const cspan = span_from({ p: p, start: s });
               end = cspan.end;
-              const [, clauses$473] = $std_list.push({ b: clauses, x: { tag: "PathPolicy", name: pname, except_list: $std_list.finish({ b: except_list }), span: cspan } });
-              clauses = clauses$473;
-              const [$r635, p$474] = need_newline({ p: p });
-              p = p$474;
-              $rt.unwrap($r635);
+              const [, clauses$474] = $std_list.push({ b: clauses, x: { tag: "PathPolicy", name: pname, except_list: $std_list.finish({ b: except_list }), span: cspan } });
+              clauses = clauses$474;
+              const [$r636, p$475] = need_newline({ p: p });
+              p = p$475;
+              $rt.unwrap($r636);
             } else {
               more = false;
             }
@@ -2647,69 +2650,69 @@ export function parse_path({ p, start }) {
 
 export function parse_policy({ p, start }) {
   try {
-    const [$r639, p$475] = need_word({ p: p, want: "policy" });
-    p = p$475;
-    $rt.unwrap($r639);
-    const [$r640, p$476] = expect_name({ p: p });
+    const [$r640, p$476] = need_word({ p: p, want: "policy" });
     p = p$476;
-    const name = $rt.unwrap($r640);
-    p = { ...p, current_def: name.text };
-    const [$r642, p$477] = need_newline({ p: p });
+    $rt.unwrap($r640);
+    const [$r641, p$477] = expect_name({ p: p });
     p = p$477;
-    $rt.unwrap($r642);
-    const [$r643, p$478] = need_word({ p: p, want: "forbid" });
+    const name = $rt.unwrap($r641);
+    p = { ...p, current_def: name.text };
+    const [$r643, p$478] = need_newline({ p: p });
     p = p$478;
     $rt.unwrap($r643);
-    const [$r644, p$479] = need_word({ p: p, want: "assume" });
+    const [$r644, p$479] = need_word({ p: p, want: "forbid" });
     p = p$479;
     $rt.unwrap($r644);
-    const [$r645, p$480] = need_word({ p: p, want: "outside" });
+    const [$r645, p$480] = need_word({ p: p, want: "assume" });
     p = p$480;
     $rt.unwrap($r645);
-    const [$r646, p$481] = need_punct({ p: p, want: "{" });
+    const [$r646, p$481] = need_word({ p: p, want: "outside" });
     p = p$481;
     $rt.unwrap($r646);
+    const [$r647, p$482] = need_punct({ p: p, want: "{" });
+    p = p$482;
+    $rt.unwrap($r647);
     let outside_list = $std_list.builder({  });
     let more = true;
     const toks0 = p.toks;
     const start0 = p.pos;
     while (more && p.pos < $std_list.len({ xs: p.toks }) - 1) {
       const s = here({ p: p });
-      const [$r648, p$482] = accept_word({ p: p, want: "self" });
-      p = p$482;
-      if ($r648) {
-        const [, outside_list$483] = $std_list.push({ b: outside_list, x: { name: { tag: "None" }, glob: false, span: span_from({ p: p, start: s }) } });
-        outside_list = outside_list$483;
+      const [$r649, p$483] = accept_word({ p: p, want: "self" });
+      p = p$483;
+      if ($r649) {
+        const [, outside_list$484] = $std_list.push({ b: outside_list, x: { name: { tag: "None" }, glob: false, span: span_from({ p: p, start: s }) } });
+        outside_list = outside_list$484;
       } else {
-        const [$r651, p$484] = module_name({ p: p });
-        p = p$484;
-        const n = $rt.unwrap($r651);
-        let glob = false;
-        const [$r652, p$485] = at_punct({ p: p, want: "." });
+        const [$r652, p$485] = module_name({ p: p });
         p = p$485;
-        let $sc654 = $r652;
-        if ($sc654) {
-          const [$r653, p$486] = at_punct_n({ p: p, n: 1, want: "*" });
-          p = p$486;
-          $sc654 = $r653;
-        }
-        if ($sc654) {
-          const [, p$487] = skip({ p: p });
+        const n = $rt.unwrap($r652);
+        let glob = false;
+        const [$r653, p$486] = at_punct({ p: p, want: "." });
+        p = p$486;
+        let $sc655 = $r653;
+        if ($sc655) {
+          const [$r654, p$487] = at_punct_n({ p: p, n: 1, want: "*" });
           p = p$487;
+          $sc655 = $r654;
+        }
+        if ($sc655) {
           const [, p$488] = skip({ p: p });
           p = p$488;
+          const [, p$489] = skip({ p: p });
+          p = p$489;
           glob = true;
         }
-        const [, outside_list$489] = $std_list.push({ b: outside_list, x: { name: { tag: "Some", value: n }, glob: glob, span: span_from({ p: p, start: s }) } });
-        outside_list = outside_list$489;
+        const [, outside_list$490] = $std_list.push({ b: outside_list, x: { name: { tag: "Some", value: n }, glob: glob, span: span_from({ p: p, start: s }) } });
+        outside_list = outside_list$490;
       }
-      const [$r657, p$490] = accept_punct({ p: p, want: "," });
-      p = p$490;
-      more = $r657;
+      const [$r658, p$491] = accept_punct({ p: p, want: "," });
+      p = p$491;
+      more = $r658;
     }
-    const [$r658, p$491] = need_punct({ p: p, want: "}" });
-    p = p$491;
-    $rt.unwrap($r658);
+    const [$r659, p$492] = need_punct({ p: p, want: "}" });
+    p = p$492;
+    $rt.unwrap($r659);
     return [{ tag: "Ok", value: { name: name, outside_list: $std_list.finish({ b: outside_list }), span: span_from({ p: p, start: start }) } }, p];
   } catch ($e) {
     if ($e instanceof $rt.EarlyReturn) return [$e.value, p];
@@ -2719,16 +2722,16 @@ export function parse_policy({ p, start }) {
 
 export function parse_example({ p, start }) {
   try {
-    const [$r661, p$492] = need_word({ p: p, want: "example" });
-    p = p$492;
-    $rt.unwrap($r661);
-    const [$r662, p$493] = expect_name({ p: p });
+    const [$r662, p$493] = need_word({ p: p, want: "example" });
     p = p$493;
-    const name = $rt.unwrap($r662);
-    p = { ...p, current_def: name.text };
-    const [$r664, p$494] = parse_assertion_block({ p: p, rank: r_block });
+    $rt.unwrap($r662);
+    const [$r663, p$494] = expect_name({ p: p });
     p = p$494;
-    const body = $rt.unwrap($r664);
+    const name = $rt.unwrap($r663);
+    p = { ...p, current_def: name.text };
+    const [$r665, p$495] = parse_assertion_block({ p: p, rank: r_block });
+    p = p$495;
+    const body = $rt.unwrap($r665);
     return [{ tag: "Ok", value: { name: name, body: body, span: span_from({ p: p, start: start }) } }, p];
   } catch ($e) {
     if ($e instanceof $rt.EarlyReturn) return [$e.value, p];
@@ -2738,19 +2741,19 @@ export function parse_example({ p, start }) {
 
 export function parse_property({ p, start }) {
   try {
-    const [$r667, p$495] = need_word({ p: p, want: "property" });
-    p = p$495;
-    $rt.unwrap($r667);
-    const [$r668, p$496] = expect_name({ p: p });
+    const [$r668, p$496] = need_word({ p: p, want: "property" });
     p = p$496;
-    const name = $rt.unwrap($r668);
-    p = { ...p, current_def: name.text };
-    const [$r670, p$497] = param_list({ p: p, rank: r_param_list });
+    $rt.unwrap($r668);
+    const [$r669, p$497] = expect_name({ p: p });
     p = p$497;
-    const params = $rt.unwrap($r670);
-    const [$r671, p$498] = parse_assertion_block({ p: p, rank: r_block });
+    const name = $rt.unwrap($r669);
+    p = { ...p, current_def: name.text };
+    const [$r671, p$498] = param_list({ p: p, rank: r_param_list });
     p = p$498;
-    const body = $rt.unwrap($r671);
+    const params = $rt.unwrap($r671);
+    const [$r672, p$499] = parse_assertion_block({ p: p, rank: r_block });
+    p = p$499;
+    const body = $rt.unwrap($r672);
     return [{ tag: "Ok", value: { name: name, params: params, body: body, span: span_from({ p: p, start: start }) } }, p];
   } catch ($e) {
     if ($e instanceof $rt.EarlyReturn) return [$e.value, p];
@@ -2761,48 +2764,48 @@ export function parse_property({ p, start }) {
 export function parse_type({ p, rank }) {
   try {
     const s = here({ p: p });
-    const [$r674, p$499] = accept_word({ p: p, want: "fn" });
-    p = p$499;
-    if ($r674) {
-      const [$r675, p$500] = param_list({ p: p, rank: r_param_list });
-      p = p$500;
-      const params = $rt.unwrap($r675);
-      const [$r676, p$501] = need_punct({ p: p, want: "->" });
+    const [$r675, p$500] = accept_word({ p: p, want: "fn" });
+    p = p$500;
+    if ($r675) {
+      const [$r676, p$501] = param_list({ p: p, rank: r_param_list });
       p = p$501;
-      $rt.unwrap($r676);
-      const [$r677, p$502] = parse_type({ p: p, rank: r_type });
+      const params = $rt.unwrap($r676);
+      const [$r677, p$502] = need_punct({ p: p, want: "->" });
       p = p$502;
-      const ret = $rt.unwrap($r677);
-      const [$r678, p$503] = effects_opt({ p: p });
+      $rt.unwrap($r677);
+      const [$r678, p$503] = parse_type({ p: p, rank: r_type });
       p = p$503;
-      const effects = $rt.unwrap($r678);
+      const ret = $rt.unwrap($r678);
+      const [$r679, p$504] = effects_opt({ p: p });
+      p = p$504;
+      const effects = $rt.unwrap($r679);
       return [{ tag: "Ok", value: { tag: "FnType", params: params, ret: ret, effects: effects, span: span_from({ p: p, start: s }) } }, p];
     }
-    const [$r681, p$504] = qtname_ahead({ p: p });
-    p = p$504;
-    if (!$r681) {
-      const [$r682, p$505] = fail({ p: p, expected: "a type" });
-      p = p$505;
-      return [{ tag: "Err", error: $r682 }, p];
+    const [$r682, p$505] = qtname_ahead({ p: p });
+    p = p$505;
+    if (!$r682) {
+      const [$r683, p$506] = fail({ p: p, expected: "a type" });
+      p = p$506;
+      return [{ tag: "Err", error: $r683 }, p];
     }
-    const [$r684, p$506] = qtname({ p: p });
-    p = p$506;
-    const name = $rt.unwrap($r684);
-    let args = [];
-    const [$r685, p$507] = at_punct({ p: p, want: "[" });
+    const [$r685, p$507] = qtname({ p: p });
     p = p$507;
-    if ($r685) {
-      const [$r686, p$508] = type_args({ p: p, rank: r_type_args });
-      p = p$508;
-      args = $rt.unwrap($r686);
+    const name = $rt.unwrap($r685);
+    let args = [];
+    const [$r686, p$508] = at_punct({ p: p, want: "[" });
+    p = p$508;
+    if ($r686) {
+      const [$r687, p$509] = type_args({ p: p, rank: r_type_args });
+      p = p$509;
+      args = $rt.unwrap($r687);
     }
     let where_ = { tag: "None" };
-    const [$r688, p$509] = accept_word({ p: p, want: "where" });
-    p = p$509;
-    if ($r688) {
-      const [$r689, p$510] = parse_expr({ p: p, rank: r_expr });
-      p = p$510;
-      const e = $rt.unwrap($r689);
+    const [$r689, p$510] = accept_word({ p: p, want: "where" });
+    p = p$510;
+    if ($r689) {
+      const [$r690, p$511] = parse_expr({ p: p, rank: r_expr });
+      p = p$511;
+      const e = $rt.unwrap($r690);
       where_ = { tag: "Some", value: e };
     }
     return [{ tag: "Ok", value: { tag: "NamedType", name: name, args: args, where_: where_, span: span_from({ p: p, start: s }) } }, p];
@@ -2815,30 +2818,30 @@ export function parse_type({ p, rank }) {
 export function parse_binder_type({ p, rank }) {
   try {
     const s = here({ p: p });
-    const [$r693, p$511] = at_word({ p: p, want: "fn" });
-    p = p$511;
-    if ($r693) {
-      const [$r694, p$512] = parse_type({ p: p, rank: r_type });
-      p = p$512;
-      return [$r694, p];
+    const [$r694, p$512] = at_word({ p: p, want: "fn" });
+    p = p$512;
+    if ($r694) {
+      const [$r695, p$513] = parse_type({ p: p, rank: r_type });
+      p = p$513;
+      return [$r695, p];
     }
-    const [$r695, p$513] = qtname_ahead({ p: p });
-    p = p$513;
-    if (!$r695) {
-      const [$r696, p$514] = fail({ p: p, expected: "a type" });
-      p = p$514;
-      return [{ tag: "Err", error: $r696 }, p];
+    const [$r696, p$514] = qtname_ahead({ p: p });
+    p = p$514;
+    if (!$r696) {
+      const [$r697, p$515] = fail({ p: p, expected: "a type" });
+      p = p$515;
+      return [{ tag: "Err", error: $r697 }, p];
     }
-    const [$r698, p$515] = qtname({ p: p });
-    p = p$515;
-    const name = $rt.unwrap($r698);
-    let args = [];
-    const [$r699, p$516] = at_punct({ p: p, want: "[" });
+    const [$r699, p$516] = qtname({ p: p });
     p = p$516;
-    if ($r699) {
-      const [$r700, p$517] = type_args({ p: p, rank: r_type_args });
-      p = p$517;
-      args = $rt.unwrap($r700);
+    const name = $rt.unwrap($r699);
+    let args = [];
+    const [$r700, p$517] = at_punct({ p: p, want: "[" });
+    p = p$517;
+    if ($r700) {
+      const [$r701, p$518] = type_args({ p: p, rank: r_type_args });
+      p = p$518;
+      args = $rt.unwrap($r701);
     }
     return [{ tag: "Ok", value: { tag: "NamedType", name: name, args: args, where_: { tag: "None" }, span: span_from({ p: p, start: s }) } }, p];
   } catch ($e) {
@@ -2849,9 +2852,9 @@ export function parse_binder_type({ p, rank }) {
 
 export function type_args({ p, rank }) {
   try {
-    const [$r704, p$518] = need_punct({ p: p, want: "[" });
-    p = p$518;
-    $rt.unwrap($r704);
+    const [$r705, p$519] = need_punct({ p: p, want: "[" });
+    p = p$519;
+    $rt.unwrap($r705);
     let out = $std_list.builder({  });
     const saved = p.no_brace;
     p = { ...p, no_brace: false };
@@ -2859,19 +2862,19 @@ export function type_args({ p, rank }) {
     const toks0 = p.toks;
     const start0 = p.pos;
     while (more && p.pos < $std_list.len({ xs: p.toks }) - 1) {
-      const [$r707, p$519] = type_arg({ p: p, rank: r_type_arg });
-      p = p$519;
-      const a = $rt.unwrap($r707);
-      const [, out$520] = $std_list.push({ b: out, x: a });
-      out = out$520;
-      const [$r708, p$521] = accept_punct({ p: p, want: "," });
-      p = p$521;
-      more = $r708;
+      const [$r708, p$520] = type_arg({ p: p, rank: r_type_arg });
+      p = p$520;
+      const a = $rt.unwrap($r708);
+      const [, out$521] = $std_list.push({ b: out, x: a });
+      out = out$521;
+      const [$r709, p$522] = accept_punct({ p: p, want: "," });
+      p = p$522;
+      more = $r709;
     }
     p = { ...p, no_brace: saved };
-    const [$r710, p$522] = need_punct({ p: p, want: "]" });
-    p = p$522;
-    $rt.unwrap($r710);
+    const [$r711, p$523] = need_punct({ p: p, want: "]" });
+    p = p$523;
+    $rt.unwrap($r711);
     return [{ tag: "Ok", value: $std_list.finish({ b: out }) }, p];
   } catch ($e) {
     if ($e instanceof $rt.EarlyReturn) return [$e.value, p];
@@ -2883,39 +2886,39 @@ export function type_arg({ p, rank }) {
   try {
     const s = here({ p: p });
     let label = { tag: "None" };
-    const [$r713, p$523] = at_name({ p: p, n: 0 });
-    p = p$523;
-    let $sc715 = $r713;
-    if ($sc715) {
-      const [$r714, p$524] = at_punct_n({ p: p, n: 1, want: ":" });
-      p = p$524;
-      $sc715 = $r714;
-    }
-    if ($sc715) {
-      const [$r716, p$525] = expect_name({ p: p });
+    const [$r714, p$524] = at_name({ p: p, n: 0 });
+    p = p$524;
+    let $sc716 = $r714;
+    if ($sc716) {
+      const [$r715, p$525] = at_punct_n({ p: p, n: 1, want: ":" });
       p = p$525;
-      const l = $rt.unwrap($r716);
-      const [, p$526] = skip({ p: p });
+      $sc716 = $r715;
+    }
+    if ($sc716) {
+      const [$r717, p$526] = expect_name({ p: p });
       p = p$526;
+      const l = $rt.unwrap($r717);
+      const [, p$527] = skip({ p: p });
+      p = p$527;
       label = { tag: "Some", value: l };
     }
-    const [$r718, p$527] = at_word({ p: p, want: "fn" });
-    p = p$527;
-    let $sc720 = $r718;
-    if (!$sc720) {
-      const [$r719, p$528] = qtname_ahead({ p: p });
-      p = p$528;
-      $sc720 = $r719;
-    }
-    if ($sc720) {
-      const [$r721, p$529] = parse_type({ p: p, rank: r_type });
+    const [$r719, p$528] = at_word({ p: p, want: "fn" });
+    p = p$528;
+    let $sc721 = $r719;
+    if (!$sc721) {
+      const [$r720, p$529] = qtname_ahead({ p: p });
       p = p$529;
-      const ty = $rt.unwrap($r721);
+      $sc721 = $r720;
+    }
+    if ($sc721) {
+      const [$r722, p$530] = parse_type({ p: p, rank: r_type });
+      p = p$530;
+      const ty = $rt.unwrap($r722);
       return [{ tag: "Ok", value: { tag: "TypeArgType", label: label, ty: ty, span: span_from({ p: p, start: s }) } }, p];
     }
-    const [$r724, p$530] = parse_expr({ p: p, rank: r_expr });
-    p = p$530;
-    const e = $rt.unwrap($r724);
+    const [$r725, p$531] = parse_expr({ p: p, rank: r_expr });
+    p = p$531;
+    const e = $rt.unwrap($r725);
     return [{ tag: "Ok", value: { tag: "TypeArgConst", label: label, expr: e, span: span_from({ p: p, start: s }) } }, p];
   } catch ($e) {
     if ($e instanceof $rt.EarlyReturn) return [$e.value, p];
@@ -2929,25 +2932,25 @@ export function parse_block({ p, rank, allow_elided }) {
     const saved_assert = p.assertion_block;
     const saved_brace = p.no_brace;
     p = { ...p, assertion_block: false, no_brace: false };
-    const [$r728, p$531] = need_punct({ p: p, want: "{" });
-    p = p$531;
-    $rt.unwrap($r728);
-    let $sc730 = allow_elided;
-    if ($sc730) {
-      const [$r729, p$532] = accept_punct({ p: p, want: "..." });
-      p = p$532;
-      $sc730 = $r729;
-    }
-    if ($sc730) {
-      const [$r731, p$533] = need_punct({ p: p, want: "}" });
+    const [$r729, p$532] = need_punct({ p: p, want: "{" });
+    p = p$532;
+    $rt.unwrap($r729);
+    let $sc731 = allow_elided;
+    if ($sc731) {
+      const [$r730, p$533] = accept_punct({ p: p, want: "..." });
       p = p$533;
-      $rt.unwrap($r731);
+      $sc731 = $r730;
+    }
+    if ($sc731) {
+      const [$r732, p$534] = need_punct({ p: p, want: "}" });
+      p = p$534;
+      $rt.unwrap($r732);
       p = { ...p, assertion_block: saved_assert, no_brace: saved_brace };
       return [{ tag: "Ok", value: { stmts: [], elided: true, span: span_from({ p: p, start: s }) } }, p];
     }
-    const [$r735, p$534] = braced_stmts({ p: p, rank: r_stmts });
-    p = p$534;
-    const stmts = $rt.unwrap($r735);
+    const [$r736, p$535] = braced_stmts({ p: p, rank: r_stmts });
+    p = p$535;
+    const stmts = $rt.unwrap($r736);
     p = { ...p, assertion_block: saved_assert, no_brace: saved_brace };
     return [{ tag: "Ok", value: { stmts: stmts, elided: false, span: span_from({ p: p, start: s }) } }, p];
   } catch ($e) {
@@ -2962,12 +2965,12 @@ export function parse_assertion_block({ p, rank }) {
     const saved_assert = p.assertion_block;
     const saved_brace = p.no_brace;
     p = { ...p, assertion_block: true, no_brace: false };
-    const [$r740, p$535] = need_punct({ p: p, want: "{" });
-    p = p$535;
-    $rt.unwrap($r740);
-    const [$r741, p$536] = braced_stmts({ p: p, rank: r_stmts });
+    const [$r741, p$536] = need_punct({ p: p, want: "{" });
     p = p$536;
-    const stmts = $rt.unwrap($r741);
+    $rt.unwrap($r741);
+    const [$r742, p$537] = braced_stmts({ p: p, rank: r_stmts });
+    p = p$537;
+    const stmts = $rt.unwrap($r742);
     p = { ...p, assertion_block: saved_assert, no_brace: saved_brace };
     return [{ tag: "Ok", value: { stmts: stmts, elided: false, span: span_from({ p: p, start: s }) } }, p];
   } catch ($e) {
@@ -2979,77 +2982,77 @@ export function parse_assertion_block({ p, rank }) {
 export function braced_stmts({ p, rank }) {
   try {
     let out = $std_list.builder({  });
-    const [$r745, p$537] = accept_newline({ p: p });
-    p = p$537;
-    if ($r745) {
+    const [$r746, p$538] = accept_newline({ p: p });
+    p = p$538;
+    if ($r746) {
       const toks0 = p.toks;
       const start0 = p.pos;
-      const [$r746, p$538] = at_punct({ p: p, want: "}" });
-      p = p$538;
-      let $go751 = !$r746 && !at_eof({ p: p }) && p.pos < $std_list.len({ xs: p.toks }) - 1;
-      while ($go751) {
+      const [$r747, p$539] = at_punct({ p: p, want: "}" });
+      p = p$539;
+      let $go752 = !$r747 && !at_eof({ p: p }) && p.pos < $std_list.len({ xs: p.toks }) - 1;
+      while ($go752) {
         const before = p.pos;
-        const [$r749, p$539] = parse_stmt({ p: p, rank: r_stmt });
-        p = p$539;
-        const $m748 = $r749;
-        $m748$match: {
-          if ($m748.tag === "Ok") {
-            const value = $m748.value;
-            const [, out$540] = $std_list.push({ b: out, x: value });
-            out = out$540;
-            const [$r750, p$541] = terminator({ p: p, in_block: true });
-            p = p$541;
-            const term = $r750;
+        const [$r750, p$540] = parse_stmt({ p: p, rank: r_stmt });
+        p = p$540;
+        const $m749 = $r750;
+        $m749$match: {
+          if ($m749.tag === "Ok") {
+            const value = $m749.value;
+            const [, out$541] = $std_list.push({ b: out, x: value });
+            out = out$541;
+            const [$r751, p$542] = terminator({ p: p, in_block: true });
+            p = p$542;
+            const term = $r751;
             if (term.tag === "Ok") {
               p = p;
             } else {
-              const [, p$542] = recover_to_line_end({ p: p });
-              p = p$542;
-              const [, p$543] = skip_newline({ p: p });
+              const [, p$543] = recover_to_line_end({ p: p });
               p = p$543;
-            }
-            break $m748$match;
-          }
-          if ($m748.tag === "Err") {
-            const error = $m748.error;
-            if (p.pos === before) {
-              const [, p$544] = skip({ p: p });
+              const [, p$544] = skip_newline({ p: p });
               p = p$544;
             }
-            const [, p$545] = recover_to_line_end({ p: p });
-            p = p$545;
-            const [, p$546] = skip_newline({ p: p });
+            break $m749$match;
+          }
+          if ($m749.tag === "Err") {
+            const error = $m749.error;
+            if (p.pos === before) {
+              const [, p$545] = skip({ p: p });
+              p = p$545;
+            }
+            const [, p$546] = recover_to_line_end({ p: p });
             p = p$546;
-            break $m748$match;
+            const [, p$547] = skip_newline({ p: p });
+            p = p$547;
+            break $m749$match;
           }
           $rt.unreachable();
         }
         if (p.pos === before) {
-          const [, p$547] = skip({ p: p });
-          p = p$547;
+          const [, p$548] = skip({ p: p });
+          p = p$548;
         }
-        const [$r752, p$548] = at_punct({ p: p, want: "}" });
-        p = p$548;
-        $go751 = !$r752 && !at_eof({ p: p }) && p.pos < $std_list.len({ xs: p.toks }) - 1;
+        const [$r753, p$549] = at_punct({ p: p, want: "}" });
+        p = p$549;
+        $go752 = !$r753 && !at_eof({ p: p }) && p.pos < $std_list.len({ xs: p.toks }) - 1;
       }
-      const [$r753, p$549] = need_punct({ p: p, want: "}" });
-      p = p$549;
-      $rt.unwrap($r753);
+      const [$r754, p$550] = need_punct({ p: p, want: "}" });
+      p = p$550;
+      $rt.unwrap($r754);
       return [{ tag: "Ok", value: $std_list.finish({ b: out }) }, p];
     }
-    const [$r755, p$550] = accept_punct({ p: p, want: "}" });
-    p = p$550;
-    if ($r755) {
-      return [{ tag: "Ok", value: $std_list.finish({ b: out }) }, p];
-    }
-    const [$r757, p$551] = parse_stmt({ p: p, rank: r_stmt });
+    const [$r756, p$551] = accept_punct({ p: p, want: "}" });
     p = p$551;
-    const one = $rt.unwrap($r757);
-    const [, out$552] = $std_list.push({ b: out, x: one });
-    out = out$552;
-    const [$r758, p$553] = need_punct({ p: p, want: "}" });
-    p = p$553;
-    $rt.unwrap($r758);
+    if ($r756) {
+      return [{ tag: "Ok", value: $std_list.finish({ b: out }) }, p];
+    }
+    const [$r758, p$552] = parse_stmt({ p: p, rank: r_stmt });
+    p = p$552;
+    const one = $rt.unwrap($r758);
+    const [, out$553] = $std_list.push({ b: out, x: one });
+    out = out$553;
+    const [$r759, p$554] = need_punct({ p: p, want: "}" });
+    p = p$554;
+    $rt.unwrap($r759);
     return [{ tag: "Ok", value: $std_list.finish({ b: out }) }, p];
   } catch ($e) {
     if ($e instanceof $rt.EarlyReturn) return [$e.value, p];
@@ -3060,274 +3063,274 @@ export function braced_stmts({ p, rank }) {
 export function parse_stmt({ p, rank }) {
   try {
     const s = here({ p: p });
-    const [, p$554] = expecting({ p: p, kinds: ["let", "var", "return", "if", "match", "loop", "for", "assume"] });
-    p = p$554;
-    const [$r760, p$555] = at_word({ p: p, want: "let" });
+    const [, p$555] = expecting({ p: p, kinds: ["let", "var", "return", "if", "match", "loop", "for", "assume"] });
     p = p$555;
-    let $sc762 = $r760;
-    if (!$sc762) {
-      const [$r761, p$556] = at_word({ p: p, want: "var" });
-      p = p$556;
-      $sc762 = $r761;
-    }
-    if ($sc762) {
-      const [$r763, p$557] = advance({ p: p });
+    const [$r761, p$556] = at_word({ p: p, want: "let" });
+    p = p$556;
+    let $sc763 = $r761;
+    if (!$sc763) {
+      const [$r762, p$557] = at_word({ p: p, want: "var" });
       p = p$557;
-      const kw = $r763;
-      const [$r764, p$558] = expect_name({ p: p });
+      $sc763 = $r762;
+    }
+    if ($sc763) {
+      const [$r764, p$558] = advance({ p: p });
       p = p$558;
-      const name = $rt.unwrap($r764);
-      const [$r765, p$559] = need_punct({ p: p, want: ":" });
+      const kw = $r764;
+      const [$r765, p$559] = expect_name({ p: p });
       p = p$559;
-      $rt.unwrap($r765);
-      const [$r766, p$560] = parse_type({ p: p, rank: r_type });
+      const name = $rt.unwrap($r765);
+      const [$r766, p$560] = need_punct({ p: p, want: ":" });
       p = p$560;
-      const ty = $rt.unwrap($r766);
-      const [$r767, p$561] = need_punct({ p: p, want: "=" });
+      $rt.unwrap($r766);
+      const [$r767, p$561] = parse_type({ p: p, rank: r_type });
       p = p$561;
-      $rt.unwrap($r767);
-      const [$r768, p$562] = parse_expr({ p: p, rank: r_expr });
+      const ty = $rt.unwrap($r767);
+      const [$r768, p$562] = need_punct({ p: p, want: "=" });
       p = p$562;
-      const value = $rt.unwrap($r768);
+      $rt.unwrap($r768);
+      const [$r769, p$563] = parse_expr({ p: p, rank: r_expr });
+      p = p$563;
+      const value = $rt.unwrap($r769);
       if (ident_of({ t: kw }).text === "let") {
         return [{ tag: "Ok", value: { tag: "Let", name: name, ty: ty, value: value, span: span_from({ p: p, start: s }) } }, p];
       }
       return [{ tag: "Ok", value: { tag: "Var", name: name, ty: ty, value: value, span: span_from({ p: p, start: s }) } }, p];
     }
-    const [$r773, p$563] = accept_word({ p: p, want: "return" });
-    p = p$563;
-    if ($r773) {
-      const [$r774, p$564] = parse_expr({ p: p, rank: r_expr });
-      p = p$564;
-      const value = $rt.unwrap($r774);
+    const [$r774, p$564] = accept_word({ p: p, want: "return" });
+    p = p$564;
+    if ($r774) {
+      const [$r775, p$565] = parse_expr({ p: p, rank: r_expr });
+      p = p$565;
+      const value = $rt.unwrap($r775);
       return [{ tag: "Ok", value: { tag: "Return", value: value, span: span_from({ p: p, start: s }) } }, p];
     }
-    const [$r777, p$565] = at_word({ p: p, want: "if" });
-    p = p$565;
-    if ($r777) {
-      const [$r778, p$566] = parse_if({ p: p, rank: r_if });
-      p = p$566;
-      return [$r778, p];
+    const [$r778, p$566] = at_word({ p: p, want: "if" });
+    p = p$566;
+    if ($r778) {
+      const [$r779, p$567] = parse_if({ p: p, rank: r_if });
+      p = p$567;
+      return [$r779, p];
     }
-    const [$r779, p$567] = accept_word({ p: p, want: "match" });
-    p = p$567;
-    if ($r779) {
+    const [$r780, p$568] = accept_word({ p: p, want: "match" });
+    p = p$568;
+    if ($r780) {
       const saved = p.no_brace;
       p = { ...p, no_brace: true };
-      const [$r781, p$568] = parse_expr({ p: p, rank: r_expr });
-      p = p$568;
-      const scrutinee = $rt.unwrap($r781);
-      p = { ...p, no_brace: saved };
-      const [$r783, p$569] = need_word({ p: p, want: "with" });
+      const [$r782, p$569] = parse_expr({ p: p, rank: r_expr });
       p = p$569;
-      $rt.unwrap($r783);
-      const [$r784, p$570] = need_newline({ p: p });
+      const scrutinee = $rt.unwrap($r782);
+      p = { ...p, no_brace: saved };
+      const [$r784, p$570] = need_word({ p: p, want: "with" });
       p = p$570;
       $rt.unwrap($r784);
+      const [$r785, p$571] = need_newline({ p: p });
+      p = p$571;
+      $rt.unwrap($r785);
       let arms = $std_list.builder({  });
       let end = span_of_expr({ e: scrutinee }).end;
-      const [$r785, p$571] = at_punct({ p: p, want: "|" });
-      p = p$571;
-      let more = $r785;
+      const [$r786, p$572] = at_punct({ p: p, want: "|" });
+      p = p$572;
+      let more = $r786;
       const toks0 = p.toks;
       const start0 = p.pos;
       while (more && p.pos < $std_list.len({ xs: p.toks }) - 1) {
         const as_ = here({ p: p });
-        const [, p$572] = skip({ p: p });
-        p = p$572;
-        const [$r787, p$573] = parse_pattern({ p: p, rank: r_pattern });
+        const [, p$573] = skip({ p: p });
         p = p$573;
-        const pattern = $rt.unwrap($r787);
-        let guard = { tag: "None" };
-        const [$r789, p$574] = accept_word({ p: p, want: "when" });
+        const [$r788, p$574] = parse_pattern({ p: p, rank: r_pattern });
         p = p$574;
-        if ($r789) {
-          const [$r790, p$575] = parse_expr({ p: p, rank: r_expr });
-          p = p$575;
-          const g = $rt.unwrap($r790);
+        const pattern = $rt.unwrap($r788);
+        let guard = { tag: "None" };
+        const [$r790, p$575] = accept_word({ p: p, want: "when" });
+        p = p$575;
+        if ($r790) {
+          const [$r791, p$576] = parse_expr({ p: p, rank: r_expr });
+          p = p$576;
+          const g = $rt.unwrap($r791);
           guard = { tag: "Some", value: g };
         }
-        const [$r792, p$576] = need_punct({ p: p, want: "->" });
-        p = p$576;
-        $rt.unwrap($r792);
-        let body = { tag: "ArmBlock", block: { stmts: [], elided: false, span: span_from({ p: p, start: as_ }) } };
-        const [$r795, p$577] = at_punct({ p: p, want: "{" });
+        const [$r793, p$577] = need_punct({ p: p, want: "->" });
         p = p$577;
-        if ($r795) {
-          const [$r796, p$578] = parse_block({ p: p, rank: r_block, allow_elided: false });
-          p = p$578;
-          const b = $rt.unwrap($r796);
+        $rt.unwrap($r793);
+        let body = { tag: "ArmBlock", block: { stmts: [], elided: false, span: span_from({ p: p, start: as_ }) } };
+        const [$r796, p$578] = at_punct({ p: p, want: "{" });
+        p = p$578;
+        if ($r796) {
+          const [$r797, p$579] = parse_block({ p: p, rank: r_block, allow_elided: false });
+          p = p$579;
+          const b = $rt.unwrap($r797);
           body = { tag: "ArmBlock", block: b };
         } else {
-          const [$r798, p$579] = parse_stmt({ p: p, rank: r_stmt });
-          p = p$579;
-          const st = $rt.unwrap($r798);
+          const [$r799, p$580] = parse_stmt({ p: p, rank: r_stmt });
+          p = p$580;
+          const st = $rt.unwrap($r799);
           body = { tag: "ArmStmt", stmt: st };
         }
         const aspan = span_from({ p: p, start: as_ });
         end = aspan.end;
-        const [, arms$580] = $std_list.push({ b: arms, x: { pattern: pattern, guard: guard, body: body, span: aspan } });
-        arms = arms$580;
-        const [$r801, p$581] = terminator({ p: p, in_block: true });
-        p = p$581;
-        $rt.unwrap($r801);
-        const [$r802, p$582] = at_punct({ p: p, want: "|" });
+        const [, arms$581] = $std_list.push({ b: arms, x: { pattern: pattern, guard: guard, body: body, span: aspan } });
+        arms = arms$581;
+        const [$r802, p$582] = terminator({ p: p, in_block: true });
         p = p$582;
-        let $sc804 = $r802;
-        if ($sc804) {
-          const [$r803, p$583] = at_punct({ p: p, want: "}" });
-          p = p$583;
-          $sc804 = !$r803;
+        $rt.unwrap($r802);
+        const [$r803, p$583] = at_punct({ p: p, want: "|" });
+        p = p$583;
+        let $sc805 = $r803;
+        if ($sc805) {
+          const [$r804, p$584] = at_punct({ p: p, want: "}" });
+          p = p$584;
+          $sc805 = !$r804;
         }
-        if ($sc804) {
-          $sc804 = !at_eof({ p: p });
+        if ($sc805) {
+          $sc805 = !at_eof({ p: p });
         }
-        more = $sc804;
+        more = $sc805;
       }
       return [{ tag: "Ok", value: { tag: "Match", scrutinee: scrutinee, arms: $std_list.finish({ b: arms }), span: { start: s, end: end } } }, p];
     }
-    const [$r808, p$584] = accept_word({ p: p, want: "loop" });
-    p = p$584;
-    if ($r808) {
-      const [$r809, p$585] = need_word({ p: p, want: "while" });
-      p = p$585;
-      $rt.unwrap($r809);
+    const [$r809, p$585] = accept_word({ p: p, want: "loop" });
+    p = p$585;
+    if ($r809) {
+      const [$r810, p$586] = need_word({ p: p, want: "while" });
+      p = p$586;
+      $rt.unwrap($r810);
       const saved = p.no_brace;
       p = { ...p, no_brace: true };
-      const [$r811, p$586] = parse_expr({ p: p, rank: r_expr });
-      p = p$586;
-      const cond = $rt.unwrap($r811);
+      const [$r812, p$587] = parse_expr({ p: p, rank: r_expr });
+      p = p$587;
+      const cond = $rt.unwrap($r812);
       let clauses = $std_list.builder({  });
       const toks0 = p.toks;
       const start0 = p.pos;
-      const [$r812, p$587] = at_word({ p: p, want: "invariant" });
-      p = p$587;
-      let $sc814 = $r812;
-      if (!$sc814) {
-        const [$r813, p$588] = at_word({ p: p, want: "decreases" });
-        p = p$588;
-        $sc814 = $r813;
-      }
-      let $go819 = $sc814 && p.pos < $std_list.len({ xs: p.toks }) - 1;
-      while ($go819) {
-        const cs = here({ p: p });
-        const [$r816, p$589] = advance({ p: p });
+      const [$r813, p$588] = at_word({ p: p, want: "invariant" });
+      p = p$588;
+      let $sc815 = $r813;
+      if (!$sc815) {
+        const [$r814, p$589] = at_word({ p: p, want: "decreases" });
         p = p$589;
-        const kw = $r816;
-        const [$r817, p$590] = parse_expr({ p: p, rank: r_expr });
+        $sc815 = $r814;
+      }
+      let $go820 = $sc815 && p.pos < $std_list.len({ xs: p.toks }) - 1;
+      while ($go820) {
+        const cs = here({ p: p });
+        const [$r817, p$590] = advance({ p: p });
         p = p$590;
-        const e = $rt.unwrap($r817);
-        const [, clauses$591] = $std_list.push({ b: clauses, x: { clause: ident_of({ t: kw }).text, expr: e, span: span_from({ p: p, start: cs }) } });
-        clauses = clauses$591;
-        const [$r820, p$592] = at_word({ p: p, want: "invariant" });
-        p = p$592;
-        let $sc822 = $r820;
-        if (!$sc822) {
-          const [$r821, p$593] = at_word({ p: p, want: "decreases" });
-          p = p$593;
-          $sc822 = $r821;
+        const kw = $r817;
+        const [$r818, p$591] = parse_expr({ p: p, rank: r_expr });
+        p = p$591;
+        const e = $rt.unwrap($r818);
+        const [, clauses$592] = $std_list.push({ b: clauses, x: { clause: ident_of({ t: kw }).text, expr: e, span: span_from({ p: p, start: cs }) } });
+        clauses = clauses$592;
+        const [$r821, p$593] = at_word({ p: p, want: "invariant" });
+        p = p$593;
+        let $sc823 = $r821;
+        if (!$sc823) {
+          const [$r822, p$594] = at_word({ p: p, want: "decreases" });
+          p = p$594;
+          $sc823 = $r822;
         }
-        $go819 = $sc822 && p.pos < $std_list.len({ xs: p.toks }) - 1;
+        $go820 = $sc823 && p.pos < $std_list.len({ xs: p.toks }) - 1;
       }
       p = { ...p, no_brace: saved };
-      const [$r824, p$594] = parse_block({ p: p, rank: r_block, allow_elided: false });
-      p = p$594;
-      const body = $rt.unwrap($r824);
+      const [$r825, p$595] = parse_block({ p: p, rank: r_block, allow_elided: false });
+      p = p$595;
+      const body = $rt.unwrap($r825);
       return [{ tag: "Ok", value: { tag: "Loop", cond: cond, clauses: $std_list.finish({ b: clauses }), body: body, span: span_from({ p: p, start: s }) } }, p];
     }
-    const [$r827, p$595] = accept_word({ p: p, want: "for" });
-    p = p$595;
-    if ($r827) {
-      const [$r828, p$596] = expect_name({ p: p });
-      p = p$596;
-      const name = $rt.unwrap($r828);
-      const [$r829, p$597] = need_punct({ p: p, want: ":" });
+    const [$r828, p$596] = accept_word({ p: p, want: "for" });
+    p = p$596;
+    if ($r828) {
+      const [$r829, p$597] = expect_name({ p: p });
       p = p$597;
-      $rt.unwrap($r829);
-      const [$r830, p$598] = parse_type({ p: p, rank: r_type });
+      const name = $rt.unwrap($r829);
+      const [$r830, p$598] = need_punct({ p: p, want: ":" });
       p = p$598;
-      const ty = $rt.unwrap($r830);
-      const [$r831, p$599] = need_word({ p: p, want: "in" });
+      $rt.unwrap($r830);
+      const [$r831, p$599] = parse_type({ p: p, rank: r_type });
       p = p$599;
-      $rt.unwrap($r831);
+      const ty = $rt.unwrap($r831);
+      const [$r832, p$600] = need_word({ p: p, want: "in" });
+      p = p$600;
+      $rt.unwrap($r832);
       const saved = p.no_brace;
       p = { ...p, no_brace: true };
-      const [$r833, p$600] = parse_domain({ p: p, rank: r_domain });
-      p = p$600;
-      const domain = $rt.unwrap($r833);
-      p = { ...p, no_brace: saved };
-      const [$r835, p$601] = parse_block({ p: p, rank: r_block, allow_elided: false });
+      const [$r834, p$601] = parse_domain({ p: p, rank: r_domain });
       p = p$601;
-      const body = $rt.unwrap($r835);
+      const domain = $rt.unwrap($r834);
+      p = { ...p, no_brace: saved };
+      const [$r836, p$602] = parse_block({ p: p, rank: r_block, allow_elided: false });
+      p = p$602;
+      const body = $rt.unwrap($r836);
       return [{ tag: "Ok", value: { tag: "For", name: name, ty: ty, domain: domain, body: body, span: span_from({ p: p, start: s }) } }, p];
     }
-    const [$r838, p$602] = accept_word({ p: p, want: "assume" });
-    p = p$602;
-    if ($r838) {
-      const [$r839, p$603] = dotted({ p: p });
-      p = p$603;
-      const claim = $rt.unwrap($r839);
-      let justification = "";
-      const [$r840, p$604] = at_text_lit({ p: p });
+    const [$r839, p$603] = accept_word({ p: p, want: "assume" });
+    p = p$603;
+    if ($r839) {
+      const [$r840, p$604] = dotted({ p: p });
       p = p$604;
-      if ($r840) {
-        const [$r841, p$605] = advance({ p: p });
-        p = p$605;
-        const t = $r841;
+      const claim = $rt.unwrap($r840);
+      let justification = "";
+      const [$r841, p$605] = at_text_lit({ p: p });
+      p = p$605;
+      if ($r841) {
+        const [$r842, p$606] = advance({ p: p });
+        p = p$606;
+        const t = $r842;
         justification = text_value({ t: t });
       } else {
-        const [$r842, p$606] = fail({ p: p, expected: "a text literal" });
-        p = p$606;
-        return [{ tag: "Err", error: $r842 }, p];
+        const [$r843, p$607] = fail({ p: p, expected: "a text literal" });
+        p = p$607;
+        return [{ tag: "Err", error: $r843 }, p];
       }
       let verify_block = { tag: "None" };
-      const [$r845, p$607] = at_word({ p: p, want: "verify" });
-      p = p$607;
-      if ($r845) {
+      const [$r846, p$608] = at_word({ p: p, want: "verify" });
+      p = p$608;
+      if ($r846) {
         const vs = here({ p: p });
-        const [, p$608] = skip({ p: p });
-        p = p$608;
-        const [$r846, p$609] = param_list({ p: p, rank: r_param_list });
+        const [, p$609] = skip({ p: p });
         p = p$609;
-        const params = $rt.unwrap($r846);
-        const [$r847, p$610] = effects_opt({ p: p });
+        const [$r847, p$610] = param_list({ p: p, rank: r_param_list });
         p = p$610;
-        const effects = $rt.unwrap($r847);
-        const [$r848, p$611] = parse_assertion_block({ p: p, rank: r_block });
+        const params = $rt.unwrap($r847);
+        const [$r848, p$611] = effects_opt({ p: p });
         p = p$611;
-        const body = $rt.unwrap($r848);
+        const effects = $rt.unwrap($r848);
+        const [$r849, p$612] = parse_assertion_block({ p: p, rank: r_block });
+        p = p$612;
+        const body = $rt.unwrap($r849);
         verify_block = { tag: "Some", value: { params: params, effects: effects, body: body, span: span_from({ p: p, start: vs }) } };
       }
       return [{ tag: "Ok", value: { tag: "Assume", claim: claim, justification: justification, verify_block: verify_block, span: span_from({ p: p, start: s }) } }, p];
     }
-    const [$r853, p$612] = parse_expr({ p: p, rank: r_expr });
-    p = p$612;
-    const e = $rt.unwrap($r853);
-    const $m854 = e;
-    $m854$match: {
-      if ($m854.tag === "Name") {
-        const name = $m854.name;
-        const span = $m854.span;
-        const [$r855, p$613] = accept_punct({ p: p, want: "=" });
-        p = p$613;
-        if ($r855) {
-          const [$r856, p$614] = parse_expr({ p: p, rank: r_expr });
-          p = p$614;
-          const value = $rt.unwrap($r856);
+    const [$r854, p$613] = parse_expr({ p: p, rank: r_expr });
+    p = p$613;
+    const e = $rt.unwrap($r854);
+    const $m855 = e;
+    $m855$match: {
+      if ($m855.tag === "Name") {
+        const name = $m855.name;
+        const span = $m855.span;
+        const [$r856, p$614] = accept_punct({ p: p, want: "=" });
+        p = p$614;
+        if ($r856) {
+          const [$r857, p$615] = parse_expr({ p: p, rank: r_expr });
+          p = p$615;
+          const value = $rt.unwrap($r857);
           return [{ tag: "Ok", value: { tag: "Assign", name: name, value: value, span: span_from({ p: p, start: s }) } }, p];
         }
-        break $m854$match;
+        break $m855$match;
       }
       if (true) {
         p = p;
-        break $m854$match;
+        break $m855$match;
       }
       $rt.unreachable();
     }
     if (!p.assertion_block && !is_call_for_effect({ e: e })) {
       const espan = span_of_expr({ e: e });
-      const [, p$615] = report({ p: p, code: "E0002", start: espan.start, end: espan.end, detail: "a bare expression statement must be a call (or `try` of a call)" });
-      p = p$615;
+      const [, p$616] = report({ p: p, code: "E0002", start: espan.start, end: espan.end, detail: "a bare expression statement must be a call (or `try` of a call)" });
+      p = p$616;
     }
     return [{ tag: "Ok", value: { tag: "ExprStmt", expr: e, span: span_from({ p: p, start: s }) } }, p];
   } catch ($e) {
@@ -3339,34 +3342,34 @@ export function parse_stmt({ p, rank }) {
 export function parse_if({ p, rank }) {
   try {
     const s = here({ p: p });
-    const [$r861, p$616] = need_word({ p: p, want: "if" });
-    p = p$616;
-    $rt.unwrap($r861);
+    const [$r862, p$617] = need_word({ p: p, want: "if" });
+    p = p$617;
+    $rt.unwrap($r862);
     const saved = p.no_brace;
     p = { ...p, no_brace: true };
-    const [$r863, p$617] = parse_expr({ p: p, rank: r_expr });
-    p = p$617;
-    const cond = $rt.unwrap($r863);
-    p = { ...p, no_brace: saved };
-    const [$r865, p$618] = parse_block({ p: p, rank: r_block, allow_elided: false });
+    const [$r864, p$618] = parse_expr({ p: p, rank: r_expr });
     p = p$618;
-    const then_block = $rt.unwrap($r865);
-    let else_block = { tag: "None" };
-    const [$r867, p$619] = accept_word({ p: p, want: "else" });
+    const cond = $rt.unwrap($r864);
+    p = { ...p, no_brace: saved };
+    const [$r866, p$619] = parse_block({ p: p, rank: r_block, allow_elided: false });
     p = p$619;
-    if ($r867) {
-      const [$r868, p$620] = at_word({ p: p, want: "if" });
-      p = p$620;
-      if ($r868) {
-        const [$r869, p$621] = parse_if({ p: p, rank: r_if });
-        p = p$621;
-        const nested = $rt.unwrap($r869);
+    const then_block = $rt.unwrap($r866);
+    let else_block = { tag: "None" };
+    const [$r868, p$620] = accept_word({ p: p, want: "else" });
+    p = p$620;
+    if ($r868) {
+      const [$r869, p$621] = at_word({ p: p, want: "if" });
+      p = p$621;
+      if ($r869) {
+        const [$r870, p$622] = parse_if({ p: p, rank: r_if });
+        p = p$622;
+        const nested = $rt.unwrap($r870);
         const nspan = span_of_stmt({ st: nested });
         else_block = { tag: "Some", value: { stmts: [nested], elided: false, span: nspan } };
       } else {
-        const [$r872, p$622] = parse_block({ p: p, rank: r_block, allow_elided: false });
-        p = p$622;
-        const b = $rt.unwrap($r872);
+        const [$r873, p$623] = parse_block({ p: p, rank: r_block, allow_elided: false });
+        p = p$623;
+        const b = $rt.unwrap($r873);
         else_block = { tag: "Some", value: b };
       }
     }
@@ -3380,15 +3383,15 @@ export function parse_if({ p, rank }) {
 export function parse_domain({ p, rank }) {
   try {
     const s = here({ p: p });
-    const [$r876, p$623] = parse_expr({ p: p, rank: r_expr });
-    p = p$623;
-    const first = $rt.unwrap($r876);
-    const [$r877, p$624] = accept_punct({ p: p, want: "..<" });
+    const [$r877, p$624] = parse_expr({ p: p, rank: r_expr });
     p = p$624;
-    if ($r877) {
-      const [$r878, p$625] = parse_expr({ p: p, rank: r_expr });
-      p = p$625;
-      const hi = $rt.unwrap($r878);
+    const first = $rt.unwrap($r877);
+    const [$r878, p$625] = accept_punct({ p: p, want: "..<" });
+    p = p$625;
+    if ($r878) {
+      const [$r879, p$626] = parse_expr({ p: p, rank: r_expr });
+      p = p$626;
+      const hi = $rt.unwrap($r879);
       return [{ tag: "Ok", value: { tag: "RangeDomain", lo: first, hi: hi, span: span_from({ p: p, start: s }) } }, p];
     }
     return [{ tag: "Ok", value: { tag: "InDomain", expr: first, span: span_from({ p: p, start: s }) } }, p];
@@ -3399,289 +3402,263 @@ export function parse_domain({ p, rank }) {
 }
 
 export function span_of_expr({ e }) {
-  const $m883 = e;
-  $m883$match: {
-    if ($m883.tag === "IntLit") {
-      const value = $m883.value;
-      const text = $m883.text;
-      const span = $m883.span;
+  const $m884 = e;
+  $m884$match: {
+    if ($m884.tag === "IntLit") {
+      const value = $m884.value;
+      const text = $m884.text;
+      const span = $m884.span;
       return span;
-      break $m883$match;
+      break $m884$match;
     }
-    if ($m883.tag === "FloatLit") {
-      const value = $m883.value;
-      const span = $m883.span;
+    if ($m884.tag === "FloatLit") {
+      const value = $m884.value;
+      const span = $m884.span;
       return span;
-      break $m883$match;
+      break $m884$match;
     }
-    if ($m883.tag === "TextLit") {
-      const value = $m883.value;
-      const span = $m883.span;
+    if ($m884.tag === "TextLit") {
+      const value = $m884.value;
+      const span = $m884.span;
       return span;
-      break $m883$match;
+      break $m884$match;
     }
-    if ($m883.tag === "BoolLit") {
-      const value = $m883.value;
-      const span = $m883.span;
+    if ($m884.tag === "BoolLit") {
+      const value = $m884.value;
+      const span = $m884.span;
       return span;
-      break $m883$match;
+      break $m884$match;
     }
-    if ($m883.tag === "DurationLit") {
-      const nanos = $m883.nanos;
-      const span = $m883.span;
+    if ($m884.tag === "DurationLit") {
+      const nanos = $m884.nanos;
+      const span = $m884.span;
       return span;
-      break $m883$match;
+      break $m884$match;
     }
-    if ($m883.tag === "Name") {
-      const name = $m883.name;
-      const span = $m883.span;
+    if ($m884.tag === "Name") {
+      const name = $m884.name;
+      const span = $m884.span;
       return span;
-      break $m883$match;
+      break $m884$match;
     }
-    if ($m883.tag === "It") {
-      const span = $m883.span;
+    if ($m884.tag === "It") {
+      const span = $m884.span;
       return span;
-      break $m883$match;
+      break $m884$match;
     }
-    if ($m883.tag === "ResultRef") {
-      const span = $m883.span;
+    if ($m884.tag === "ResultRef") {
+      const span = $m884.span;
       return span;
-      break $m883$match;
+      break $m884$match;
     }
-    if ($m883.tag === "Ctor") {
-      const name = $m883.name;
-      const args = $m883.args;
-      const fields = $m883.fields;
-      const span = $m883.span;
+    if ($m884.tag === "Ctor") {
+      const name = $m884.name;
+      const args = $m884.args;
+      const fields = $m884.fields;
+      const span = $m884.span;
       return span;
-      break $m883$match;
+      break $m884$match;
     }
-    if ($m883.tag === "RecordUpdate") {
-      const base = $m883.base;
-      const fields = $m883.fields;
-      const span = $m883.span;
+    if ($m884.tag === "RecordUpdate") {
+      const base = $m884.base;
+      const fields = $m884.fields;
+      const span = $m884.span;
       return span;
-      break $m883$match;
+      break $m884$match;
     }
-    if ($m883.tag === "ListLit") {
-      const elems = $m883.elems;
-      const span = $m883.span;
+    if ($m884.tag === "ListLit") {
+      const elems = $m884.elems;
+      const span = $m884.span;
       return span;
-      break $m883$match;
+      break $m884$match;
     }
-    if ($m883.tag === "Try") {
-      const expr = $m883.expr;
-      const else_ = $m883.else_;
-      const span = $m883.span;
+    if ($m884.tag === "Try") {
+      const expr = $m884.expr;
+      const else_ = $m884.else_;
+      const span = $m884.span;
       return span;
-      break $m883$match;
+      break $m884$match;
     }
-    if ($m883.tag === "Recover") {
-      const body = $m883.body;
-      const span = $m883.span;
+    if ($m884.tag === "Recover") {
+      const body = $m884.body;
+      const span = $m884.span;
       return span;
-      break $m883$match;
+      break $m884$match;
     }
-    if ($m883.tag === "Old") {
-      const name = $m883.name;
-      const span = $m883.span;
+    if ($m884.tag === "Old") {
+      const name = $m884.name;
+      const span = $m884.span;
       return span;
-      break $m883$match;
+      break $m884$match;
     }
-    if ($m883.tag === "Quantifier") {
-      const quant = $m883.quant;
-      const name = $m883.name;
-      const ty = $m883.ty;
-      const domain = $m883.domain;
-      const where_ = $m883.where_;
-      const body = $m883.body;
-      const span = $m883.span;
+    if ($m884.tag === "Quantifier") {
+      const quant = $m884.quant;
+      const name = $m884.name;
+      const ty = $m884.ty;
+      const domain = $m884.domain;
+      const where_ = $m884.where_;
+      const body = $m884.body;
+      const span = $m884.span;
       return span;
-      break $m883$match;
+      break $m884$match;
     }
-    if ($m883.tag === "Closure") {
-      const params = $m883.params;
-      const ret = $m883.ret;
-      const effects = $m883.effects;
-      const body = $m883.body;
-      const span = $m883.span;
+    if ($m884.tag === "Closure") {
+      const params = $m884.params;
+      const ret = $m884.ret;
+      const effects = $m884.effects;
+      const body = $m884.body;
+      const span = $m884.span;
       return span;
-      break $m883$match;
+      break $m884$match;
     }
-    if ($m883.tag === "Fake") {
-      const capability = $m883.capability;
-      const fields = $m883.fields;
-      const span = $m883.span;
+    if ($m884.tag === "Fake") {
+      const capability = $m884.capability;
+      const fields = $m884.fields;
+      const span = $m884.span;
       return span;
-      break $m883$match;
+      break $m884$match;
     }
-    if ($m883.tag === "Hole") {
-      const span = $m883.span;
+    if ($m884.tag === "Hole") {
+      const span = $m884.span;
       return span;
-      break $m883$match;
+      break $m884$match;
     }
-    if ($m883.tag === "FieldAccess") {
-      const object = $m883.object;
-      const name = $m883.name;
-      const span = $m883.span;
+    if ($m884.tag === "FieldAccess") {
+      const object = $m884.object;
+      const name = $m884.name;
+      const span = $m884.span;
       return span;
-      break $m883$match;
+      break $m884$match;
     }
-    if ($m883.tag === "Call") {
-      const callee = $m883.callee;
-      const targs = $m883.targs;
-      const args = $m883.args;
-      const span = $m883.span;
+    if ($m884.tag === "Call") {
+      const callee = $m884.callee;
+      const targs = $m884.targs;
+      const args = $m884.args;
+      const span = $m884.span;
       return span;
-      break $m883$match;
+      break $m884$match;
     }
-    if ($m883.tag === "Unary") {
-      const op = $m883.op;
-      const operand = $m883.operand;
-      const span = $m883.span;
+    if ($m884.tag === "Unary") {
+      const op = $m884.op;
+      const operand = $m884.operand;
+      const span = $m884.span;
       return span;
-      break $m883$match;
+      break $m884$match;
     }
-    if ($m883.tag === "Binary") {
-      const op = $m883.op;
-      const left = $m883.left;
-      const right = $m883.right;
-      const span = $m883.span;
+    if ($m884.tag === "Binary") {
+      const op = $m884.op;
+      const left = $m884.left;
+      const right = $m884.right;
+      const span = $m884.span;
       return span;
-      break $m883$match;
+      break $m884$match;
     }
-    if ($m883.tag === "And") {
-      const operands = $m883.operands;
-      const span = $m883.span;
+    if ($m884.tag === "And") {
+      const operands = $m884.operands;
+      const span = $m884.span;
       return span;
-      break $m883$match;
+      break $m884$match;
     }
-    if ($m883.tag === "Or") {
-      const operands = $m883.operands;
-      const span = $m883.span;
+    if ($m884.tag === "Or") {
+      const operands = $m884.operands;
+      const span = $m884.span;
       return span;
-      break $m883$match;
+      break $m884$match;
     }
-    if ($m883.tag === "Is") {
-      const expr = $m883.expr;
-      const pattern = $m883.pattern;
-      const span = $m883.span;
+    if ($m884.tag === "Is") {
+      const expr = $m884.expr;
+      const pattern = $m884.pattern;
+      const span = $m884.span;
       return span;
-      break $m883$match;
+      break $m884$match;
     }
     $rt.unreachable();
   }
 }
 
 export function span_of_stmt({ st }) {
-  const $m884 = st;
-  $m884$match: {
-    if ($m884.tag === "Let") {
-      const name = $m884.name;
-      const ty = $m884.ty;
-      const value = $m884.value;
-      const span = $m884.span;
+  const $m885 = st;
+  $m885$match: {
+    if ($m885.tag === "Let") {
+      const name = $m885.name;
+      const ty = $m885.ty;
+      const value = $m885.value;
+      const span = $m885.span;
       return span;
-      break $m884$match;
+      break $m885$match;
     }
-    if ($m884.tag === "Var") {
-      const name = $m884.name;
-      const ty = $m884.ty;
-      const value = $m884.value;
-      const span = $m884.span;
+    if ($m885.tag === "Var") {
+      const name = $m885.name;
+      const ty = $m885.ty;
+      const value = $m885.value;
+      const span = $m885.span;
       return span;
-      break $m884$match;
+      break $m885$match;
     }
-    if ($m884.tag === "Assign") {
-      const name = $m884.name;
-      const value = $m884.value;
-      const span = $m884.span;
+    if ($m885.tag === "Assign") {
+      const name = $m885.name;
+      const value = $m885.value;
+      const span = $m885.span;
       return span;
-      break $m884$match;
+      break $m885$match;
     }
-    if ($m884.tag === "Return") {
-      const value = $m884.value;
-      const span = $m884.span;
+    if ($m885.tag === "Return") {
+      const value = $m885.value;
+      const span = $m885.span;
       return span;
-      break $m884$match;
+      break $m885$match;
     }
-    if ($m884.tag === "If") {
-      const cond = $m884.cond;
-      const then_block = $m884.then_block;
-      const else_block = $m884.else_block;
-      const span = $m884.span;
+    if ($m885.tag === "If") {
+      const cond = $m885.cond;
+      const then_block = $m885.then_block;
+      const else_block = $m885.else_block;
+      const span = $m885.span;
       return span;
-      break $m884$match;
+      break $m885$match;
     }
-    if ($m884.tag === "Match") {
-      const scrutinee = $m884.scrutinee;
-      const arms = $m884.arms;
-      const span = $m884.span;
+    if ($m885.tag === "Match") {
+      const scrutinee = $m885.scrutinee;
+      const arms = $m885.arms;
+      const span = $m885.span;
       return span;
-      break $m884$match;
+      break $m885$match;
     }
-    if ($m884.tag === "Loop") {
-      const cond = $m884.cond;
-      const clauses = $m884.clauses;
-      const body = $m884.body;
-      const span = $m884.span;
+    if ($m885.tag === "Loop") {
+      const cond = $m885.cond;
+      const clauses = $m885.clauses;
+      const body = $m885.body;
+      const span = $m885.span;
       return span;
-      break $m884$match;
+      break $m885$match;
     }
-    if ($m884.tag === "For") {
-      const name = $m884.name;
-      const ty = $m884.ty;
-      const domain = $m884.domain;
-      const body = $m884.body;
-      const span = $m884.span;
+    if ($m885.tag === "For") {
+      const name = $m885.name;
+      const ty = $m885.ty;
+      const domain = $m885.domain;
+      const body = $m885.body;
+      const span = $m885.span;
       return span;
-      break $m884$match;
+      break $m885$match;
     }
-    if ($m884.tag === "Assume") {
-      const claim = $m884.claim;
-      const justification = $m884.justification;
-      const verify_block = $m884.verify_block;
-      const span = $m884.span;
+    if ($m885.tag === "Assume") {
+      const claim = $m885.claim;
+      const justification = $m885.justification;
+      const verify_block = $m885.verify_block;
+      const span = $m885.span;
       return span;
-      break $m884$match;
+      break $m885$match;
     }
-    if ($m884.tag === "ExprStmt") {
-      const expr = $m884.expr;
-      const span = $m884.span;
+    if ($m885.tag === "ExprStmt") {
+      const expr = $m885.expr;
+      const span = $m885.span;
       return span;
-      break $m884$match;
+      break $m885$match;
     }
     $rt.unreachable();
   }
 }
 
 export function is_call_for_effect({ e }) {
-  const $m885 = e;
-  $m885$match: {
-    if ($m885.tag === "Call") {
-      const callee = $m885.callee;
-      const targs = $m885.targs;
-      const args = $m885.args;
-      const span = $m885.span;
-      return true;
-      break $m885$match;
-    }
-    if ($m885.tag === "Try") {
-      const expr = $m885.expr;
-      const else_ = $m885.else_;
-      const span = $m885.span;
-      return is_call_for_effect_of_try({ e: expr });
-      break $m885$match;
-    }
-    if (true) {
-      return false;
-      break $m885$match;
-    }
-    $rt.unreachable();
-  }
-}
-
-export function is_call_for_effect_of_try({ e }) {
   const $m886 = e;
   $m886$match: {
     if ($m886.tag === "Call") {
@@ -3696,7 +3673,7 @@ export function is_call_for_effect_of_try({ e }) {
       const expr = $m886.expr;
       const else_ = $m886.else_;
       const span = $m886.span;
-      return expr.tag === "Call";
+      return is_call_for_effect_of_try({ e: expr });
       break $m886$match;
     }
     if (true) {
@@ -3707,34 +3684,60 @@ export function is_call_for_effect_of_try({ e }) {
   }
 }
 
+export function is_call_for_effect_of_try({ e }) {
+  const $m887 = e;
+  $m887$match: {
+    if ($m887.tag === "Call") {
+      const callee = $m887.callee;
+      const targs = $m887.targs;
+      const args = $m887.args;
+      const span = $m887.span;
+      return true;
+      break $m887$match;
+    }
+    if ($m887.tag === "Try") {
+      const expr = $m887.expr;
+      const else_ = $m887.else_;
+      const span = $m887.span;
+      return expr.tag === "Call";
+      break $m887$match;
+    }
+    if (true) {
+      return false;
+      break $m887$match;
+    }
+    $rt.unreachable();
+  }
+}
+
 export function parse_expr({ p, rank }) {
   try {
     const s = here({ p: p });
-    const [$r887, p$626] = or_expr({ p: p, rank: r_or });
-    p = p$626;
-    const left = $rt.unwrap($r887);
-    const [$r888, p$627] = at_word({ p: p, want: "implies" });
+    const [$r888, p$627] = or_expr({ p: p, rank: r_or });
     p = p$627;
-    if (!$r888) {
+    const left = $rt.unwrap($r888);
+    const [$r889, p$628] = at_word({ p: p, want: "implies" });
+    p = p$628;
+    if (!$r889) {
       return [{ tag: "Ok", value: left }, p];
     }
-    const [, p$628] = skip({ p: p });
-    p = p$628;
-    const [$r890, p$629] = or_expr({ p: p, rank: r_or });
+    const [, p$629] = skip({ p: p });
     p = p$629;
-    const right = $rt.unwrap($r890);
-    const span = span_from({ p: p, start: s });
-    const [$r891, p$630] = at_word({ p: p, want: "implies" });
+    const [$r891, p$630] = or_expr({ p: p, rank: r_or });
     p = p$630;
-    if ($r891) {
+    const right = $rt.unwrap($r891);
+    const span = span_from({ p: p, start: s });
+    const [$r892, p$631] = at_word({ p: p, want: "implies" });
+    p = p$631;
+    if ($r892) {
       const t = peek({ p: p, n: 0 });
-      const [, p$631] = report({ p: p, code: "E0011", start: t.start, end: t.end, detail: "parenthesise one side: `(a implies b) implies c` or `a implies (b implies c)`" });
-      p = p$631;
-      const [, p$632] = skip({ p: p });
+      const [, p$632] = report({ p: p, code: "E0011", start: t.start, end: t.end, detail: "parenthesise one side: `(a implies b) implies c` or `a implies (b implies c)`" });
       p = p$632;
-      const [$r892, p$633] = or_expr({ p: p, rank: r_or });
+      const [, p$633] = skip({ p: p });
       p = p$633;
-      const extra = $rt.unwrap($r892);
+      const [$r893, p$634] = or_expr({ p: p, rank: r_or });
+      p = p$634;
+      const extra = $rt.unwrap($r893);
     }
     return [{ tag: "Ok", value: { tag: "Binary", op: "implies", left: left, right: right, span: span } }, p];
   } catch ($e) {
@@ -3746,42 +3749,42 @@ export function parse_expr({ p, rank }) {
 export function or_expr({ p, rank }) {
   try {
     const s = here({ p: p });
-    const [$r895, p$634] = and_expr({ p: p, rank: r_and });
-    p = p$634;
-    const first = $rt.unwrap($r895);
-    const [$r896, p$635] = at_word({ p: p, want: "or" });
+    const [$r896, p$635] = and_expr({ p: p, rank: r_and });
     p = p$635;
-    if (!$r896) {
+    const first = $rt.unwrap($r896);
+    const [$r897, p$636] = at_word({ p: p, want: "or" });
+    p = p$636;
+    if (!$r897) {
       return [{ tag: "Ok", value: first.expr }, p];
     }
     let operands = $std_list.builder({  });
-    const [, operands$636] = $std_list.push({ b: operands, x: first.expr });
-    operands = operands$636;
+    const [, operands$637] = $std_list.push({ b: operands, x: first.expr });
+    operands = operands$637;
     let mixed = first.chained;
     const toks0 = p.toks;
     const start0 = p.pos;
-    const [$r898, p$637] = at_word({ p: p, want: "or" });
-    p = p$637;
-    let $go901 = $r898 && p.pos < $std_list.len({ xs: p.toks }) - 1;
-    while ($go901) {
-      const [, p$638] = skip({ p: p });
-      p = p$638;
-      const [$r900, p$639] = and_expr({ p: p, rank: r_and });
+    const [$r899, p$638] = at_word({ p: p, want: "or" });
+    p = p$638;
+    let $go902 = $r899 && p.pos < $std_list.len({ xs: p.toks }) - 1;
+    while ($go902) {
+      const [, p$639] = skip({ p: p });
       p = p$639;
-      const next = $rt.unwrap($r900);
+      const [$r901, p$640] = and_expr({ p: p, rank: r_and });
+      p = p$640;
+      const next = $rt.unwrap($r901);
       if (next.chained) {
         mixed = true;
       }
-      const [, operands$640] = $std_list.push({ b: operands, x: next.expr });
-      operands = operands$640;
-      const [$r902, p$641] = at_word({ p: p, want: "or" });
-      p = p$641;
-      $go901 = $r902 && p.pos < $std_list.len({ xs: p.toks }) - 1;
+      const [, operands$641] = $std_list.push({ b: operands, x: next.expr });
+      operands = operands$641;
+      const [$r903, p$642] = at_word({ p: p, want: "or" });
+      p = p$642;
+      $go902 = $r903 && p.pos < $std_list.len({ xs: p.toks }) - 1;
     }
     const span = span_from({ p: p, start: s });
     if (mixed) {
-      const [, p$642] = report({ p: p, code: "E0007", start: span.start, end: span.end, detail: "write `(a and b) or c` or `a and (b or c)`" });
-      p = p$642;
+      const [, p$643] = report({ p: p, code: "E0007", start: span.start, end: span.end, detail: "write `(a and b) or c` or `a and (b or c)`" });
+      p = p$643;
     }
     return [{ tag: "Ok", value: { tag: "Or", operands: $std_list.finish({ b: operands }), span: span } }, p];
   } catch ($e) {
@@ -3793,33 +3796,33 @@ export function or_expr({ p, rank }) {
 export function and_expr({ p, rank }) {
   try {
     const s = here({ p: p });
-    const [$r905, p$643] = not_expr({ p: p, rank: r_not });
-    p = p$643;
-    const first = $rt.unwrap($r905);
-    const [$r906, p$644] = at_word({ p: p, want: "and" });
+    const [$r906, p$644] = not_expr({ p: p, rank: r_not });
     p = p$644;
-    if (!$r906) {
+    const first = $rt.unwrap($r906);
+    const [$r907, p$645] = at_word({ p: p, want: "and" });
+    p = p$645;
+    if (!$r907) {
       return [{ tag: "Ok", value: { expr: first, chained: false } }, p];
     }
     let operands = $std_list.builder({  });
-    const [, operands$645] = $std_list.push({ b: operands, x: first });
-    operands = operands$645;
+    const [, operands$646] = $std_list.push({ b: operands, x: first });
+    operands = operands$646;
     const toks0 = p.toks;
     const start0 = p.pos;
-    const [$r909, p$646] = at_word({ p: p, want: "and" });
-    p = p$646;
-    let $go912 = $r909 && p.pos < $std_list.len({ xs: p.toks }) - 1;
-    while ($go912) {
-      const [, p$647] = skip({ p: p });
-      p = p$647;
-      const [$r911, p$648] = not_expr({ p: p, rank: r_not });
+    const [$r910, p$647] = at_word({ p: p, want: "and" });
+    p = p$647;
+    let $go913 = $r910 && p.pos < $std_list.len({ xs: p.toks }) - 1;
+    while ($go913) {
+      const [, p$648] = skip({ p: p });
       p = p$648;
-      const next = $rt.unwrap($r911);
-      const [, operands$649] = $std_list.push({ b: operands, x: next });
-      operands = operands$649;
-      const [$r913, p$650] = at_word({ p: p, want: "and" });
-      p = p$650;
-      $go912 = $r913 && p.pos < $std_list.len({ xs: p.toks }) - 1;
+      const [$r912, p$649] = not_expr({ p: p, rank: r_not });
+      p = p$649;
+      const next = $rt.unwrap($r912);
+      const [, operands$650] = $std_list.push({ b: operands, x: next });
+      operands = operands$650;
+      const [$r914, p$651] = at_word({ p: p, want: "and" });
+      p = p$651;
+      $go913 = $r914 && p.pos < $std_list.len({ xs: p.toks }) - 1;
     }
     return [{ tag: "Ok", value: { expr: { tag: "And", operands: $std_list.finish({ b: operands }), span: span_from({ p: p, start: s }) }, chained: true } }, p];
   } catch ($e) {
@@ -3831,17 +3834,17 @@ export function and_expr({ p, rank }) {
 export function not_expr({ p, rank }) {
   try {
     const s = here({ p: p });
-    const [$r917, p$651] = accept_word({ p: p, want: "not" });
-    p = p$651;
-    if ($r917) {
-      const [$r918, p$652] = cmp_expr({ p: p, rank: r_cmp });
-      p = p$652;
-      const operand = $rt.unwrap($r918);
+    const [$r918, p$652] = accept_word({ p: p, want: "not" });
+    p = p$652;
+    if ($r918) {
+      const [$r919, p$653] = cmp_expr({ p: p, rank: r_cmp });
+      p = p$653;
+      const operand = $rt.unwrap($r919);
       return [{ tag: "Ok", value: { tag: "Unary", op: "not", operand: operand, span: span_from({ p: p, start: s }) } }, p];
     }
-    const [$r921, p$653] = cmp_expr({ p: p, rank: r_cmp });
-    p = p$653;
-    return [$r921, p];
+    const [$r922, p$654] = cmp_expr({ p: p, rank: r_cmp });
+    p = p$654;
+    return [$r922, p];
   } catch ($e) {
     if ($e instanceof $rt.EarlyReturn) return [$e.value, p];
     throw $e;
@@ -3849,48 +3852,48 @@ export function not_expr({ p, rank }) {
 }
 
 export function is_cmp_op({ kind }) {
-  const $m922 = kind;
-  $m922$match: {
-    if ($m922.tag === "Punct") {
-      const text = $m922.text;
+  const $m923 = kind;
+  $m923$match: {
+    if ($m923.tag === "Punct") {
+      const text = $m923.text;
       return text === "==" || text === "!=" || text === "<" || text === "<=" || text === ">" || text === ">=";
-      break $m922$match;
+      break $m923$match;
     }
     if (true) {
       return false;
-      break $m922$match;
+      break $m923$match;
     }
     $rt.unreachable();
   }
 }
 
 export function is_add_op({ kind }) {
-  const $m923 = kind;
-  $m923$match: {
-    if ($m923.tag === "Punct") {
-      const text = $m923.text;
+  const $m924 = kind;
+  $m924$match: {
+    if ($m924.tag === "Punct") {
+      const text = $m924.text;
       return text === "+" || text === "-" || text === "++";
-      break $m923$match;
+      break $m924$match;
     }
     if (true) {
       return false;
-      break $m923$match;
+      break $m924$match;
     }
     $rt.unreachable();
   }
 }
 
 export function is_mul_op({ kind }) {
-  const $m924 = kind;
-  $m924$match: {
-    if ($m924.tag === "Punct") {
-      const text = $m924.text;
+  const $m925 = kind;
+  $m925$match: {
+    if ($m925.tag === "Punct") {
+      const text = $m925.text;
       return text === "*" || text === "/" || text === "%";
-      break $m924$match;
+      break $m925$match;
     }
     if (true) {
       return false;
-      break $m924$match;
+      break $m925$match;
     }
     $rt.unreachable();
   }
@@ -3899,40 +3902,40 @@ export function is_mul_op({ kind }) {
 export function cmp_expr({ p, rank }) {
   try {
     const s = here({ p: p });
-    const [$r925, p$654] = add_expr({ p: p, rank: r_add });
-    p = p$654;
-    const left = $rt.unwrap($r925);
-    const [$r926, p$655] = at_word({ p: p, want: "is" });
+    const [$r926, p$655] = add_expr({ p: p, rank: r_add });
     p = p$655;
-    if ($r926) {
-      const [, p$656] = skip({ p: p });
-      p = p$656;
-      const [$r927, p$657] = parse_pattern({ p: p, rank: r_pattern });
+    const left = $rt.unwrap($r926);
+    const [$r927, p$656] = at_word({ p: p, want: "is" });
+    p = p$656;
+    if ($r927) {
+      const [, p$657] = skip({ p: p });
       p = p$657;
-      const pattern = $rt.unwrap($r927);
+      const [$r928, p$658] = parse_pattern({ p: p, rank: r_pattern });
+      p = p$658;
+      const pattern = $rt.unwrap($r928);
       return [{ tag: "Ok", value: { tag: "Is", expr: left, pattern: pattern, span: span_from({ p: p, start: s }) } }, p];
     }
-    const [$r930, p$658] = at_cmp_op({ p: p });
-    p = p$658;
-    if (!$r930) {
+    const [$r931, p$659] = at_cmp_op({ p: p });
+    p = p$659;
+    if (!$r931) {
       return [{ tag: "Ok", value: left }, p];
     }
-    const [$r932, p$659] = advance({ p: p });
-    p = p$659;
-    const op_tok = $r932;
-    const [$r933, p$660] = add_expr({ p: p, rank: r_add });
+    const [$r933, p$660] = advance({ p: p });
     p = p$660;
-    const right = $rt.unwrap($r933);
+    const op_tok = $r933;
+    const [$r934, p$661] = add_expr({ p: p, rank: r_add });
+    p = p$661;
+    const right = $rt.unwrap($r934);
     const span = span_from({ p: p, start: s });
     if (is_cmp_op({ kind: kind_at({ p: p, n: 0 }) })) {
       const t = peek({ p: p, n: 0 });
-      const [, p$661] = report({ p: p, code: "E0006", start: t.start, end: t.end, detail: "write `a < b and b < c`" });
-      p = p$661;
-      const [, p$662] = skip({ p: p });
+      const [, p$662] = report({ p: p, code: "E0006", start: t.start, end: t.end, detail: "write `a < b and b < c`" });
       p = p$662;
-      const [$r934, p$663] = add_expr({ p: p, rank: r_add });
+      const [, p$663] = skip({ p: p });
       p = p$663;
-      const extra = $rt.unwrap($r934);
+      const [$r935, p$664] = add_expr({ p: p, rank: r_add });
+      p = p$664;
+      const extra = $rt.unwrap($r935);
     }
     return [{ tag: "Ok", value: { tag: "Binary", op: ident_of({ t: op_tok }).text, left: left, right: right, span: span } }, p];
   } catch ($e) {
@@ -3944,25 +3947,25 @@ export function cmp_expr({ p, rank }) {
 export function add_expr({ p, rank }) {
   try {
     const s = here({ p: p });
-    const [$r937, p$664] = mul_expr({ p: p, rank: r_mul });
-    p = p$664;
-    let left = $rt.unwrap($r937);
+    const [$r938, p$665] = mul_expr({ p: p, rank: r_mul });
+    p = p$665;
+    let left = $rt.unwrap($r938);
     const toks0 = p.toks;
     const start0 = p.pos;
-    const [$r938, p$665] = at_add_op({ p: p });
-    p = p$665;
-    let $go943 = $r938 && p.pos < $std_list.len({ xs: p.toks }) - 1;
-    while ($go943) {
-      const [$r940, p$666] = advance({ p: p });
-      p = p$666;
-      const op_tok = $r940;
-      const [$r941, p$667] = mul_expr({ p: p, rank: r_mul });
+    const [$r939, p$666] = at_add_op({ p: p });
+    p = p$666;
+    let $go944 = $r939 && p.pos < $std_list.len({ xs: p.toks }) - 1;
+    while ($go944) {
+      const [$r941, p$667] = advance({ p: p });
       p = p$667;
-      const right = $rt.unwrap($r941);
-      left = { tag: "Binary", op: ident_of({ t: op_tok }).text, left: left, right: right, span: span_from({ p: p, start: s }) };
-      const [$r944, p$668] = at_add_op({ p: p });
+      const op_tok = $r941;
+      const [$r942, p$668] = mul_expr({ p: p, rank: r_mul });
       p = p$668;
-      $go943 = $r944 && p.pos < $std_list.len({ xs: p.toks }) - 1;
+      const right = $rt.unwrap($r942);
+      left = { tag: "Binary", op: ident_of({ t: op_tok }).text, left: left, right: right, span: span_from({ p: p, start: s }) };
+      const [$r945, p$669] = at_add_op({ p: p });
+      p = p$669;
+      $go944 = $r945 && p.pos < $std_list.len({ xs: p.toks }) - 1;
     }
     return [{ tag: "Ok", value: left }, p];
   } catch ($e) {
@@ -3974,25 +3977,25 @@ export function add_expr({ p, rank }) {
 export function mul_expr({ p, rank }) {
   try {
     const s = here({ p: p });
-    const [$r946, p$669] = unary_expr({ p: p, rank: r_unary });
-    p = p$669;
-    let left = $rt.unwrap($r946);
+    const [$r947, p$670] = unary_expr({ p: p, rank: r_unary });
+    p = p$670;
+    let left = $rt.unwrap($r947);
     const toks0 = p.toks;
     const start0 = p.pos;
-    const [$r947, p$670] = at_mul_op({ p: p });
-    p = p$670;
-    let $go952 = $r947 && p.pos < $std_list.len({ xs: p.toks }) - 1;
-    while ($go952) {
-      const [$r949, p$671] = advance({ p: p });
-      p = p$671;
-      const op_tok = $r949;
-      const [$r950, p$672] = unary_expr({ p: p, rank: r_unary });
+    const [$r948, p$671] = at_mul_op({ p: p });
+    p = p$671;
+    let $go953 = $r948 && p.pos < $std_list.len({ xs: p.toks }) - 1;
+    while ($go953) {
+      const [$r950, p$672] = advance({ p: p });
       p = p$672;
-      const right = $rt.unwrap($r950);
-      left = { tag: "Binary", op: ident_of({ t: op_tok }).text, left: left, right: right, span: span_from({ p: p, start: s }) };
-      const [$r953, p$673] = at_mul_op({ p: p });
+      const op_tok = $r950;
+      const [$r951, p$673] = unary_expr({ p: p, rank: r_unary });
       p = p$673;
-      $go952 = $r953 && p.pos < $std_list.len({ xs: p.toks }) - 1;
+      const right = $rt.unwrap($r951);
+      left = { tag: "Binary", op: ident_of({ t: op_tok }).text, left: left, right: right, span: span_from({ p: p, start: s }) };
+      const [$r954, p$674] = at_mul_op({ p: p });
+      p = p$674;
+      $go953 = $r954 && p.pos < $std_list.len({ xs: p.toks }) - 1;
     }
     return [{ tag: "Ok", value: left }, p];
   } catch ($e) {
@@ -4004,17 +4007,17 @@ export function mul_expr({ p, rank }) {
 export function unary_expr({ p, rank }) {
   try {
     const s = here({ p: p });
-    const [$r955, p$674] = accept_punct({ p: p, want: "-" });
-    p = p$674;
-    if ($r955) {
-      const [$r956, p$675] = postfix_expr({ p: p, rank: r_postfix });
-      p = p$675;
-      const operand = $rt.unwrap($r956);
+    const [$r956, p$675] = accept_punct({ p: p, want: "-" });
+    p = p$675;
+    if ($r956) {
+      const [$r957, p$676] = postfix_expr({ p: p, rank: r_postfix });
+      p = p$676;
+      const operand = $rt.unwrap($r957);
       return [{ tag: "Ok", value: { tag: "Unary", op: "neg", operand: operand, span: span_from({ p: p, start: s }) } }, p];
     }
-    const [$r959, p$676] = postfix_expr({ p: p, rank: r_postfix });
-    p = p$676;
-    return [$r959, p];
+    const [$r960, p$677] = postfix_expr({ p: p, rank: r_postfix });
+    p = p$677;
+    return [$r960, p];
   } catch ($e) {
     if ($e instanceof $rt.EarlyReturn) return [$e.value, p];
     throw $e;
@@ -4022,89 +4025,89 @@ export function unary_expr({ p, rank }) {
 }
 
 export function name_chain({ e }) {
-  const $m960 = e;
-  $m960$match: {
-    if ($m960.tag === "Name") {
-      const name = $m960.name;
-      const span = $m960.span;
+  const $m961 = e;
+  $m961$match: {
+    if ($m961.tag === "Name") {
+      const name = $m961.name;
+      const span = $m961.span;
       return { tag: "Some", value: [name] };
-      break $m960$match;
+      break $m961$match;
     }
-    if ($m960.tag === "FieldAccess") {
-      const object = $m960.object;
-      const name = $m960.name;
-      const span = $m960.span;
-      const $m962 = name_chain_of_object({ e: object });
-      $m962$match: {
-        if ($m962.tag === "Some") {
-          const value = $m962.value;
+    if ($m961.tag === "FieldAccess") {
+      const object = $m961.object;
+      const name = $m961.name;
+      const span = $m961.span;
+      const $m963 = name_chain_of_object({ e: object });
+      $m963$match: {
+        if ($m963.tag === "Some") {
+          const value = $m963.value;
           return { tag: "Some", value: $std_list.append({ xs: value, x: name }) };
-          break $m962$match;
+          break $m963$match;
         }
-        if ($m962.tag === "None") {
+        if ($m963.tag === "None") {
           return { tag: "None" };
-          break $m962$match;
+          break $m963$match;
         }
         $rt.unreachable();
       }
-      break $m960$match;
+      break $m961$match;
     }
     if (true) {
       return { tag: "None" };
-      break $m960$match;
+      break $m961$match;
     }
     $rt.unreachable();
   }
 }
 
 export function name_chain_of_object({ e }) {
-  const $m966 = e;
-  $m966$match: {
-    if ($m966.tag === "Name") {
-      const name = $m966.name;
-      const span = $m966.span;
+  const $m967 = e;
+  $m967$match: {
+    if ($m967.tag === "Name") {
+      const name = $m967.name;
+      const span = $m967.span;
       return { tag: "Some", value: [name] };
-      break $m966$match;
+      break $m967$match;
     }
-    if ($m966.tag === "FieldAccess") {
-      const object = $m966.object;
-      const name = $m966.name;
-      const span = $m966.span;
-      const $m968 = single_name({ e: object });
-      $m968$match: {
-        if ($m968.tag === "Some") {
-          const value = $m968.value;
+    if ($m967.tag === "FieldAccess") {
+      const object = $m967.object;
+      const name = $m967.name;
+      const span = $m967.span;
+      const $m969 = single_name({ e: object });
+      $m969$match: {
+        if ($m969.tag === "Some") {
+          const value = $m969.value;
           return { tag: "Some", value: [value, name] };
-          break $m968$match;
+          break $m969$match;
         }
-        if ($m968.tag === "None") {
+        if ($m969.tag === "None") {
           return { tag: "None" };
-          break $m968$match;
+          break $m969$match;
         }
         $rt.unreachable();
       }
-      break $m966$match;
+      break $m967$match;
     }
     if (true) {
       return { tag: "None" };
-      break $m966$match;
+      break $m967$match;
     }
     $rt.unreachable();
   }
 }
 
 export function single_name({ e }) {
-  const $m972 = e;
-  $m972$match: {
-    if ($m972.tag === "Name") {
-      const name = $m972.name;
-      const span = $m972.span;
+  const $m973 = e;
+  $m973$match: {
+    if ($m973.tag === "Name") {
+      const name = $m973.name;
+      const span = $m973.span;
       return { tag: "Some", value: name };
-      break $m972$match;
+      break $m973$match;
     }
     if (true) {
       return { tag: "None" };
-      break $m972$match;
+      break $m973$match;
     }
     $rt.unreachable();
   }
@@ -4113,79 +4116,79 @@ export function single_name({ e }) {
 export function postfix_expr({ p, rank }) {
   try {
     const s = here({ p: p });
-    const [$r975, p$677] = primary({ p: p, rank: r_primary });
-    p = p$677;
-    let e = $rt.unwrap($r975);
+    const [$r976, p$678] = primary({ p: p, rank: r_primary });
+    p = p$678;
+    let e = $rt.unwrap($r976);
     let more = true;
     const toks0 = p.toks;
     const start0 = p.pos;
     while (more && p.pos < $std_list.len({ xs: p.toks }) - 1) {
-      const [$r977, p$678] = at_punct({ p: p, want: "." });
-      p = p$678;
-      if ($r977) {
-        const [$r978, p$679] = at_name({ p: p, n: 1 });
-        p = p$679;
-        if ($r978) {
-          const [, p$680] = skip({ p: p });
-          p = p$680;
-          const [$r979, p$681] = expect_name({ p: p });
+      const [$r978, p$679] = at_punct({ p: p, want: "." });
+      p = p$679;
+      if ($r978) {
+        const [$r979, p$680] = at_name({ p: p, n: 1 });
+        p = p$680;
+        if ($r979) {
+          const [, p$681] = skip({ p: p });
           p = p$681;
-          const name = $rt.unwrap($r979);
+          const [$r980, p$682] = expect_name({ p: p });
+          p = p$682;
+          const name = $rt.unwrap($r980);
           e = { tag: "FieldAccess", object: e, name: name, span: span_from({ p: p, start: s }) };
         } else {
-          const [$r981, p$682] = at_tname({ p: p, n: 1 });
-          p = p$682;
-          if ($r981) {
-            const $m982 = name_chain({ e: e });
-            $m982$match: {
-              if ($m982.tag === "Some") {
-                const value = $m982.value;
-                const [, p$683] = skip({ p: p });
-                p = p$683;
-                const [$r983, p$684] = expect_tname({ p: p });
+          const [$r982, p$683] = at_tname({ p: p, n: 1 });
+          p = p$683;
+          if ($r982) {
+            const $m983 = name_chain({ e: e });
+            $m983$match: {
+              if ($m983.tag === "Some") {
+                const value = $m983.value;
+                const [, p$684] = skip({ p: p });
                 p = p$684;
-                const tn = $rt.unwrap($r983);
-                const qn = qname_of({ segments: $std_list.append({ xs: value, x: tn }) });
-                const [$r984, p$685] = ctor_rest({ p: p, rank: r_ctor_rest, start: s, name: qn });
+                const [$r984, p$685] = expect_tname({ p: p });
                 p = p$685;
-                e = $rt.unwrap($r984);
-                break $m982$match;
-              }
-              if ($m982.tag === "None") {
-                const t = peek({ p: p, n: 1 });
-                const [$r985, p$686] = fail_at({ p: p, expected: "a field name after `.`", t: t });
+                const tn = $rt.unwrap($r984);
+                const qn = qname_of({ segments: $std_list.append({ xs: value, x: tn }) });
+                const [$r985, p$686] = ctor_rest({ p: p, rank: r_ctor_rest, start: s, name: qn });
                 p = p$686;
-                return [{ tag: "Err", error: $r985 }, p];
-                break $m982$match;
+                e = $rt.unwrap($r985);
+                break $m983$match;
+              }
+              if ($m983.tag === "None") {
+                const t = peek({ p: p, n: 1 });
+                const [$r986, p$687] = fail_at({ p: p, expected: "a field name after `.`", t: t });
+                p = p$687;
+                return [{ tag: "Err", error: $r986 }, p];
+                break $m983$match;
               }
               $rt.unreachable();
             }
           } else {
-            const [, p$687] = skip({ p: p });
-            p = p$687;
-            const [$r987, p$688] = fail({ p: p, expected: "a field name after `.`" });
+            const [, p$688] = skip({ p: p });
             p = p$688;
-            return [{ tag: "Err", error: $r987 }, p];
+            const [$r988, p$689] = fail({ p: p, expected: "a field name after `.`" });
+            p = p$689;
+            return [{ tag: "Err", error: $r988 }, p];
           }
         }
       } else {
-        const [$r989, p$689] = at_punct({ p: p, want: "[" });
-        p = p$689;
-        if ($r989) {
-          const [$r990, p$690] = type_args({ p: p, rank: r_type_args });
-          p = p$690;
-          const targs = $rt.unwrap($r990);
-          const [$r991, p$691] = call_args({ p: p, rank: r_call_args });
+        const [$r990, p$690] = at_punct({ p: p, want: "[" });
+        p = p$690;
+        if ($r990) {
+          const [$r991, p$691] = type_args({ p: p, rank: r_type_args });
           p = p$691;
-          const args = $rt.unwrap($r991);
+          const targs = $rt.unwrap($r991);
+          const [$r992, p$692] = call_args({ p: p, rank: r_call_args });
+          p = p$692;
+          const args = $rt.unwrap($r992);
           e = { tag: "Call", callee: e, targs: { tag: "Some", value: targs }, args: args, span: span_from({ p: p, start: s }) };
         } else {
-          const [$r994, p$692] = at_punct({ p: p, want: "(" });
-          p = p$692;
-          if ($r994) {
-            const [$r995, p$693] = call_args({ p: p, rank: r_call_args });
-            p = p$693;
-            const args = $rt.unwrap($r995);
+          const [$r995, p$693] = at_punct({ p: p, want: "(" });
+          p = p$693;
+          if ($r995) {
+            const [$r996, p$694] = call_args({ p: p, rank: r_call_args });
+            p = p$694;
+            const args = $rt.unwrap($r996);
             e = { tag: "Call", callee: e, targs: { tag: "None" }, args: args, span: span_from({ p: p, start: s }) };
           } else {
             more = false;
@@ -4202,43 +4205,43 @@ export function postfix_expr({ p, rank }) {
 
 export function call_args({ p, rank }) {
   try {
-    const [$r999, p$694] = need_punct({ p: p, want: "(" });
-    p = p$694;
-    $rt.unwrap($r999);
+    const [$r1000, p$695] = need_punct({ p: p, want: "(" });
+    p = p$695;
+    $rt.unwrap($r1000);
     let out = $std_list.builder({  });
     const saved = p.no_brace;
     p = { ...p, no_brace: false };
-    const [$r1001, p$695] = at_punct({ p: p, want: ")" });
-    p = p$695;
-    if (!$r1001) {
+    const [$r1002, p$696] = at_punct({ p: p, want: ")" });
+    p = p$696;
+    if (!$r1002) {
       let more = true;
       const toks0 = p.toks;
       const start0 = p.pos;
       while (more && p.pos < $std_list.len({ xs: p.toks }) - 1) {
         const s = here({ p: p });
-        const [$r1003, p$696] = expect_name({ p: p });
-        p = p$696;
-        const name = $rt.unwrap($r1003);
-        const [$r1004, p$697] = need_punct({ p: p, want: ":" });
+        const [$r1004, p$697] = expect_name({ p: p });
         p = p$697;
-        $rt.unwrap($r1004);
-        const [$r1005, p$698] = accept_word({ p: p, want: "inout" });
+        const name = $rt.unwrap($r1004);
+        const [$r1005, p$698] = need_punct({ p: p, want: ":" });
         p = p$698;
-        const is_inout = $r1005;
-        const [$r1006, p$699] = parse_expr({ p: p, rank: r_expr });
+        $rt.unwrap($r1005);
+        const [$r1006, p$699] = accept_word({ p: p, want: "inout" });
         p = p$699;
-        const value = $rt.unwrap($r1006);
-        const [, out$700] = $std_list.push({ b: out, x: { name: name, is_inout: is_inout, value: value, span: span_from({ p: p, start: s }) } });
-        out = out$700;
-        const [$r1008, p$701] = accept_punct({ p: p, want: "," });
-        p = p$701;
-        more = $r1008;
+        const is_inout = $r1006;
+        const [$r1007, p$700] = parse_expr({ p: p, rank: r_expr });
+        p = p$700;
+        const value = $rt.unwrap($r1007);
+        const [, out$701] = $std_list.push({ b: out, x: { name: name, is_inout: is_inout, value: value, span: span_from({ p: p, start: s }) } });
+        out = out$701;
+        const [$r1009, p$702] = accept_punct({ p: p, want: "," });
+        p = p$702;
+        more = $r1009;
       }
     }
     p = { ...p, no_brace: saved };
-    const [$r1010, p$702] = need_punct({ p: p, want: ")" });
-    p = p$702;
-    $rt.unwrap($r1010);
+    const [$r1011, p$703] = need_punct({ p: p, want: ")" });
+    p = p$703;
+    $rt.unwrap($r1011);
     return [{ tag: "Ok", value: $std_list.finish({ b: out }) }, p];
   } catch ($e) {
     if ($e instanceof $rt.EarlyReturn) return [$e.value, p];
@@ -4249,25 +4252,25 @@ export function call_args({ p, rank }) {
 export function ctor_rest({ p, rank, start, name }) {
   try {
     let args = { tag: "None" };
-    const [$r1013, p$703] = at_punct({ p: p, want: "(" });
-    p = p$703;
-    if ($r1013) {
-      const [$r1014, p$704] = call_args({ p: p, rank: r_call_args });
-      p = p$704;
-      const a = $rt.unwrap($r1014);
+    const [$r1014, p$704] = at_punct({ p: p, want: "(" });
+    p = p$704;
+    if ($r1014) {
+      const [$r1015, p$705] = call_args({ p: p, rank: r_call_args });
+      p = p$705;
+      const a = $rt.unwrap($r1015);
       args = { tag: "Some", value: a };
     }
     let fields = { tag: "None" };
-    let $sc1018 = !p.no_brace;
-    if ($sc1018) {
-      const [$r1017, p$705] = at_punct({ p: p, want: "{" });
-      p = p$705;
-      $sc1018 = $r1017;
-    }
-    if ($sc1018) {
-      const [$r1019, p$706] = field_inits({ p: p, rank: r_field_inits });
+    let $sc1019 = !p.no_brace;
+    if ($sc1019) {
+      const [$r1018, p$706] = at_punct({ p: p, want: "{" });
       p = p$706;
-      const f = $rt.unwrap($r1019);
+      $sc1019 = $r1018;
+    }
+    if ($sc1019) {
+      const [$r1020, p$707] = field_inits({ p: p, rank: r_field_inits });
+      p = p$707;
+      const f = $rt.unwrap($r1020);
       fields = { tag: "Some", value: f };
     }
     return [{ tag: "Ok", value: { tag: "Ctor", name: name, args: args, fields: fields, span: span_from({ p: p, start: start }) } }, p];
@@ -4279,46 +4282,46 @@ export function ctor_rest({ p, rank, start, name }) {
 
 export function field_inits({ p, rank }) {
   try {
-    const [$r1023, p$707] = need_punct({ p: p, want: "{" });
-    p = p$707;
-    $rt.unwrap($r1023);
+    const [$r1024, p$708] = need_punct({ p: p, want: "{" });
+    p = p$708;
+    $rt.unwrap($r1024);
     let out = $std_list.builder({  });
     const saved = p.no_brace;
     p = { ...p, no_brace: false };
-    const [, p$708] = skip_newline({ p: p });
-    p = p$708;
-    const [$r1025, p$709] = at_punct({ p: p, want: "}" });
+    const [, p$709] = skip_newline({ p: p });
     p = p$709;
-    if (!$r1025) {
+    const [$r1026, p$710] = at_punct({ p: p, want: "}" });
+    p = p$710;
+    if (!$r1026) {
       let more = true;
       const toks0 = p.toks;
       const start0 = p.pos;
       while (more && p.pos < $std_list.len({ xs: p.toks }) - 1) {
-        const [, p$710] = skip_newline({ p: p });
-        p = p$710;
-        const s = here({ p: p });
-        const [$r1027, p$711] = expect_name({ p: p });
+        const [, p$711] = skip_newline({ p: p });
         p = p$711;
-        const name = $rt.unwrap($r1027);
-        const [$r1028, p$712] = need_punct({ p: p, want: ":" });
+        const s = here({ p: p });
+        const [$r1028, p$712] = expect_name({ p: p });
         p = p$712;
-        $rt.unwrap($r1028);
-        const [$r1029, p$713] = parse_expr({ p: p, rank: r_expr });
+        const name = $rt.unwrap($r1028);
+        const [$r1029, p$713] = need_punct({ p: p, want: ":" });
         p = p$713;
-        const value = $rt.unwrap($r1029);
-        const [, out$714] = $std_list.push({ b: out, x: { name: name, value: value, span: span_from({ p: p, start: s }) } });
-        out = out$714;
-        const [$r1031, p$715] = accept_punct({ p: p, want: "," });
-        p = p$715;
-        more = $r1031;
+        $rt.unwrap($r1029);
+        const [$r1030, p$714] = parse_expr({ p: p, rank: r_expr });
+        p = p$714;
+        const value = $rt.unwrap($r1030);
+        const [, out$715] = $std_list.push({ b: out, x: { name: name, value: value, span: span_from({ p: p, start: s }) } });
+        out = out$715;
+        const [$r1032, p$716] = accept_punct({ p: p, want: "," });
+        p = p$716;
+        more = $r1032;
       }
-      const [, p$716] = skip_newline({ p: p });
-      p = p$716;
+      const [, p$717] = skip_newline({ p: p });
+      p = p$717;
     }
     p = { ...p, no_brace: saved };
-    const [$r1033, p$717] = need_punct({ p: p, want: "}" });
-    p = p$717;
-    $rt.unwrap($r1033);
+    const [$r1034, p$718] = need_punct({ p: p, want: "}" });
+    p = p$718;
+    $rt.unwrap($r1034);
     return [{ tag: "Ok", value: $std_list.finish({ b: out }) }, p];
   } catch ($e) {
     if ($e instanceof $rt.EarlyReturn) return [$e.value, p];
@@ -4330,339 +4333,339 @@ export function primary({ p, rank }) {
   try {
     const s = here({ p: p });
     const t = peek({ p: p, n: 0 });
-    const [, p$718] = expecting({ p: p, kinds: primary_start({ no_brace: p.no_brace }) });
-    p = p$718;
-    const $m1035 = t.kind;
-    $m1035$match: {
-      if ($m1035.tag === "Hole") {
-        const [$r1036, p$719] = take({ p: p });
-        p = p$719;
-        const taken = $rt.unwrap($r1036);
-        return [{ tag: "Ok", value: { tag: "Hole", span: span_of({ t: t }) } }, p];
-        break $m1035$match;
-      }
-      if ($m1035.tag === "IntLit") {
-        const value = $m1035.value;
-        const text = $m1035.text;
-        const [$r1039, p$720] = take({ p: p });
+    const [, p$719] = expecting({ p: p, kinds: primary_start({ no_brace: p.no_brace }) });
+    p = p$719;
+    const $m1036 = t.kind;
+    $m1036$match: {
+      if ($m1036.tag === "Hole") {
+        const [$r1037, p$720] = take({ p: p });
         p = p$720;
-        const taken = $rt.unwrap($r1039);
-        return [{ tag: "Ok", value: { tag: "IntLit", value: value, text: text, span: span_of({ t: t }) } }, p];
-        break $m1035$match;
+        const taken = $rt.unwrap($r1037);
+        return [{ tag: "Ok", value: { tag: "Hole", span: span_of({ t: t }) } }, p];
+        break $m1036$match;
       }
-      if ($m1035.tag === "FloatLit") {
-        const value = $m1035.value;
-        const [$r1042, p$721] = take({ p: p });
+      if ($m1036.tag === "IntLit") {
+        const value = $m1036.value;
+        const text = $m1036.text;
+        const [$r1040, p$721] = take({ p: p });
         p = p$721;
-        const taken = $rt.unwrap($r1042);
-        return [{ tag: "Ok", value: { tag: "FloatLit", value: value, span: span_of({ t: t }) } }, p];
-        break $m1035$match;
+        const taken = $rt.unwrap($r1040);
+        return [{ tag: "Ok", value: { tag: "IntLit", value: value, text: text, span: span_of({ t: t }) } }, p];
+        break $m1036$match;
       }
-      if ($m1035.tag === "TextLit") {
-        const value = $m1035.value;
-        const [$r1045, p$722] = take({ p: p });
+      if ($m1036.tag === "FloatLit") {
+        const value = $m1036.value;
+        const [$r1043, p$722] = take({ p: p });
         p = p$722;
-        const taken = $rt.unwrap($r1045);
-        return [{ tag: "Ok", value: { tag: "TextLit", value: value, span: span_of({ t: t }) } }, p];
-        break $m1035$match;
+        const taken = $rt.unwrap($r1043);
+        return [{ tag: "Ok", value: { tag: "FloatLit", value: value, span: span_of({ t: t }) } }, p];
+        break $m1036$match;
       }
-      if ($m1035.tag === "DurationLit") {
-        const nanos = $m1035.nanos;
-        const [$r1048, p$723] = take({ p: p });
+      if ($m1036.tag === "TextLit") {
+        const value = $m1036.value;
+        const [$r1046, p$723] = take({ p: p });
         p = p$723;
-        const taken = $rt.unwrap($r1048);
-        return [{ tag: "Ok", value: { tag: "DurationLit", nanos: nanos, span: span_of({ t: t }) } }, p];
-        break $m1035$match;
+        const taken = $rt.unwrap($r1046);
+        return [{ tag: "Ok", value: { tag: "TextLit", value: value, span: span_of({ t: t }) } }, p];
+        break $m1036$match;
       }
-      if ($m1035.tag === "TName") {
-        const text = $m1035.text;
-        const [$r1051, p$724] = expect_tname({ p: p });
+      if ($m1036.tag === "DurationLit") {
+        const nanos = $m1036.nanos;
+        const [$r1049, p$724] = take({ p: p });
         p = p$724;
-        const tn = $rt.unwrap($r1051);
-        const [$r1052, p$725] = ctor_rest({ p: p, rank: r_ctor_rest, start: s, name: qname_of({ segments: [tn] }) });
-        p = p$725;
-        return [$r1052, p];
-        break $m1035$match;
+        const taken = $rt.unwrap($r1049);
+        return [{ tag: "Ok", value: { tag: "DurationLit", nanos: nanos, span: span_of({ t: t }) } }, p];
+        break $m1036$match;
       }
-      if ($m1035.tag === "Keyword") {
-        const word = $m1035.word;
+      if ($m1036.tag === "TName") {
+        const text = $m1036.text;
+        const [$r1052, p$725] = expect_tname({ p: p });
+        p = p$725;
+        const tn = $rt.unwrap($r1052);
+        const [$r1053, p$726] = ctor_rest({ p: p, rank: r_ctor_rest, start: s, name: qname_of({ segments: [tn] }) });
+        p = p$726;
+        return [$r1053, p];
+        break $m1036$match;
+      }
+      if ($m1036.tag === "Keyword") {
+        const word = $m1036.word;
         if (word === "true" || word === "false") {
-          const [$r1053, p$726] = need_word({ p: p, want: word });
-          p = p$726;
-          $rt.unwrap($r1053);
+          const [$r1054, p$727] = need_word({ p: p, want: word });
+          p = p$727;
+          $rt.unwrap($r1054);
           return [{ tag: "Ok", value: { tag: "BoolLit", value: word === "true", span: span_of({ t: t }) } }, p];
         }
         if (word === "it") {
-          const [$r1056, p$727] = need_word({ p: p, want: word });
-          p = p$727;
-          $rt.unwrap($r1056);
+          const [$r1057, p$728] = need_word({ p: p, want: word });
+          p = p$728;
+          $rt.unwrap($r1057);
           return [{ tag: "Ok", value: { tag: "It", span: span_of({ t: t }) } }, p];
         }
         if (word === "result") {
-          const [$r1059, p$728] = need_word({ p: p, want: word });
-          p = p$728;
-          $rt.unwrap($r1059);
+          const [$r1060, p$729] = need_word({ p: p, want: word });
+          p = p$729;
+          $rt.unwrap($r1060);
           return [{ tag: "Ok", value: { tag: "ResultRef", span: span_of({ t: t }) } }, p];
         }
         if (word === "try") {
-          const [$r1062, p$729] = need_word({ p: p, want: word });
-          p = p$729;
-          $rt.unwrap($r1062);
-          const [$r1063, p$730] = parse_expr({ p: p, rank: r_expr });
+          const [$r1063, p$730] = need_word({ p: p, want: word });
           p = p$730;
-          const expr = $rt.unwrap($r1063);
-          let else_ = { tag: "None" };
-          const [$r1065, p$731] = at_word({ p: p, want: "else" });
+          $rt.unwrap($r1063);
+          const [$r1064, p$731] = parse_expr({ p: p, rank: r_expr });
           p = p$731;
-          if ($r1065) {
+          const expr = $rt.unwrap($r1064);
+          let else_ = { tag: "None" };
+          const [$r1066, p$732] = at_word({ p: p, want: "else" });
+          p = p$732;
+          if ($r1066) {
             const es = here({ p: p });
-            const [, p$732] = skip({ p: p });
-            p = p$732;
-            let name = { text: "_", span: span_of({ t: peek({ p: p, n: 0 }) }) };
-            const [$r1067, p$733] = at_punct({ p: p, want: "_" });
+            const [, p$733] = skip({ p: p });
             p = p$733;
-            if ($r1067) {
-              const [, p$734] = skip({ p: p });
-              p = p$734;
-            } else {
-              const [$r1068, p$735] = expect_name({ p: p });
+            let name = { text: "_", span: span_of({ t: peek({ p: p, n: 0 }) }) };
+            const [$r1068, p$734] = at_punct({ p: p, want: "_" });
+            p = p$734;
+            if ($r1068) {
+              const [, p$735] = skip({ p: p });
               p = p$735;
-              name = $rt.unwrap($r1068);
+            } else {
+              const [$r1069, p$736] = expect_name({ p: p });
+              p = p$736;
+              name = $rt.unwrap($r1069);
             }
-            const [$r1069, p$736] = need_punct({ p: p, want: ":" });
-            p = p$736;
-            $rt.unwrap($r1069);
-            const [$r1070, p$737] = parse_expr({ p: p, rank: r_expr });
+            const [$r1070, p$737] = need_punct({ p: p, want: ":" });
             p = p$737;
-            const eexpr = $rt.unwrap($r1070);
+            $rt.unwrap($r1070);
+            const [$r1071, p$738] = parse_expr({ p: p, rank: r_expr });
+            p = p$738;
+            const eexpr = $rt.unwrap($r1071);
             else_ = { tag: "Some", value: { name: name, expr: eexpr, span: span_from({ p: p, start: es }) } };
           }
           return [{ tag: "Ok", value: { tag: "Try", expr: expr, else_: else_, span: span_from({ p: p, start: s }) } }, p];
         }
         if (word === "recover") {
-          const [$r1075, p$738] = need_word({ p: p, want: word });
-          p = p$738;
-          $rt.unwrap($r1075);
-          const [$r1076, p$739] = parse_assertion_block({ p: p, rank: r_block });
+          const [$r1076, p$739] = need_word({ p: p, want: word });
           p = p$739;
-          const body = $rt.unwrap($r1076);
+          $rt.unwrap($r1076);
+          const [$r1077, p$740] = parse_assertion_block({ p: p, rank: r_block });
+          p = p$740;
+          const body = $rt.unwrap($r1077);
           return [{ tag: "Ok", value: { tag: "Recover", body: body, span: span_from({ p: p, start: s }) } }, p];
         }
         if (word === "old") {
-          const [$r1079, p$740] = need_word({ p: p, want: word });
-          p = p$740;
-          $rt.unwrap($r1079);
-          const [$r1080, p$741] = need_punct({ p: p, want: "(" });
+          const [$r1080, p$741] = need_word({ p: p, want: word });
           p = p$741;
           $rt.unwrap($r1080);
-          const [$r1081, p$742] = expect_name({ p: p });
+          const [$r1081, p$742] = need_punct({ p: p, want: "(" });
           p = p$742;
-          const name = $rt.unwrap($r1081);
-          const [$r1082, p$743] = need_punct({ p: p, want: ")" });
+          $rt.unwrap($r1081);
+          const [$r1082, p$743] = expect_name({ p: p });
           p = p$743;
-          $rt.unwrap($r1082);
+          const name = $rt.unwrap($r1082);
+          const [$r1083, p$744] = need_punct({ p: p, want: ")" });
+          p = p$744;
+          $rt.unwrap($r1083);
           return [{ tag: "Ok", value: { tag: "Old", name: name, span: span_from({ p: p, start: s }) } }, p];
         }
         if (word === "forall" || word === "exists") {
-          const [$r1085, p$744] = need_word({ p: p, want: word });
-          p = p$744;
-          $rt.unwrap($r1085);
-          const [$r1086, p$745] = expect_name({ p: p });
+          const [$r1086, p$745] = need_word({ p: p, want: word });
           p = p$745;
-          const name = $rt.unwrap($r1086);
-          const [$r1087, p$746] = need_punct({ p: p, want: ":" });
+          $rt.unwrap($r1086);
+          const [$r1087, p$746] = expect_name({ p: p });
           p = p$746;
-          $rt.unwrap($r1087);
-          const [$r1088, p$747] = parse_binder_type({ p: p, rank: r_binder_type });
+          const name = $rt.unwrap($r1087);
+          const [$r1088, p$747] = need_punct({ p: p, want: ":" });
           p = p$747;
-          const ty = $rt.unwrap($r1088);
-          let domain = { tag: "None" };
-          const [$r1090, p$748] = accept_word({ p: p, want: "in" });
+          $rt.unwrap($r1088);
+          const [$r1089, p$748] = parse_binder_type({ p: p, rank: r_binder_type });
           p = p$748;
-          if ($r1090) {
-            const [$r1091, p$749] = parse_domain({ p: p, rank: r_domain });
-            p = p$749;
-            const d = $rt.unwrap($r1091);
+          const ty = $rt.unwrap($r1089);
+          let domain = { tag: "None" };
+          const [$r1091, p$749] = accept_word({ p: p, want: "in" });
+          p = p$749;
+          if ($r1091) {
+            const [$r1092, p$750] = parse_domain({ p: p, rank: r_domain });
+            p = p$750;
+            const d = $rt.unwrap($r1092);
             domain = { tag: "Some", value: d };
           }
           let where_ = { tag: "None" };
-          const [$r1094, p$750] = accept_word({ p: p, want: "where" });
-          p = p$750;
-          if ($r1094) {
-            const [$r1095, p$751] = parse_expr({ p: p, rank: r_expr });
-            p = p$751;
-            const w = $rt.unwrap($r1095);
+          const [$r1095, p$751] = accept_word({ p: p, want: "where" });
+          p = p$751;
+          if ($r1095) {
+            const [$r1096, p$752] = parse_expr({ p: p, rank: r_expr });
+            p = p$752;
+            const w = $rt.unwrap($r1096);
             where_ = { tag: "Some", value: w };
           }
-          const [$r1097, p$752] = need_punct({ p: p, want: ":" });
-          p = p$752;
-          $rt.unwrap($r1097);
-          const [$r1098, p$753] = parse_expr({ p: p, rank: r_expr });
+          const [$r1098, p$753] = need_punct({ p: p, want: ":" });
           p = p$753;
-          const body = $rt.unwrap($r1098);
+          $rt.unwrap($r1098);
+          const [$r1099, p$754] = parse_expr({ p: p, rank: r_expr });
+          p = p$754;
+          const body = $rt.unwrap($r1099);
           return [{ tag: "Ok", value: { tag: "Quantifier", quant: word, name: name, ty: ty, domain: domain, where_: where_, body: body, span: span_from({ p: p, start: s }) } }, p];
         }
         if (word === "fn") {
-          const [$r1101, p$754] = need_word({ p: p, want: word });
-          p = p$754;
-          $rt.unwrap($r1101);
-          const [$r1102, p$755] = param_list({ p: p, rank: r_param_list });
+          const [$r1102, p$755] = need_word({ p: p, want: word });
           p = p$755;
-          const params = $rt.unwrap($r1102);
-          const [$r1103, p$756] = need_punct({ p: p, want: "->" });
+          $rt.unwrap($r1102);
+          const [$r1103, p$756] = param_list({ p: p, rank: r_param_list });
           p = p$756;
-          $rt.unwrap($r1103);
+          const params = $rt.unwrap($r1103);
+          const [$r1104, p$757] = need_punct({ p: p, want: "->" });
+          p = p$757;
+          $rt.unwrap($r1104);
           const saved = p.no_brace;
           p = { ...p, no_brace: true };
-          const [$r1105, p$757] = parse_type({ p: p, rank: r_type });
-          p = p$757;
-          const ret = $rt.unwrap($r1105);
-          p = { ...p, no_brace: saved };
-          const [$r1107, p$758] = effects_opt({ p: p });
+          const [$r1106, p$758] = parse_type({ p: p, rank: r_type });
           p = p$758;
-          const effects = $rt.unwrap($r1107);
-          const [$r1108, p$759] = parse_block({ p: p, rank: r_block, allow_elided: false });
+          const ret = $rt.unwrap($r1106);
+          p = { ...p, no_brace: saved };
+          const [$r1108, p$759] = effects_opt({ p: p });
           p = p$759;
-          const body = $rt.unwrap($r1108);
+          const effects = $rt.unwrap($r1108);
+          const [$r1109, p$760] = parse_block({ p: p, rank: r_block, allow_elided: false });
+          p = p$760;
+          const body = $rt.unwrap($r1109);
           return [{ tag: "Ok", value: { tag: "Closure", params: params, ret: ret, effects: effects, body: body, span: span_from({ p: p, start: s }) } }, p];
         }
         if (word === "fake") {
-          const [$r1111, p$760] = need_word({ p: p, want: word });
-          p = p$760;
-          $rt.unwrap($r1111);
+          const [$r1112, p$761] = need_word({ p: p, want: word });
+          p = p$761;
+          $rt.unwrap($r1112);
           if (!p.is_test_module) {
-            const [, p$761] = report({ p: p, code: "E0012", start: t.start, end: t.end, detail: "`fake` constructs capabilities only inside a `test module`" });
-            p = p$761;
+            const [, p$762] = report({ p: p, code: "E0012", start: t.start, end: t.end, detail: "`fake` constructs capabilities only inside a `test module`" });
+            p = p$762;
           }
-          const [$r1112, p$762] = qtname({ p: p });
-          p = p$762;
-          const capability = $rt.unwrap($r1112);
-          const [$r1113, p$763] = field_inits({ p: p, rank: r_field_inits });
+          const [$r1113, p$763] = qtname({ p: p });
           p = p$763;
-          const fields = $rt.unwrap($r1113);
+          const capability = $rt.unwrap($r1113);
+          const [$r1114, p$764] = field_inits({ p: p, rank: r_field_inits });
+          p = p$764;
+          const fields = $rt.unwrap($r1114);
           return [{ tag: "Ok", value: { tag: "Fake", capability: capability, fields: fields, span: span_from({ p: p, start: s }) } }, p];
         }
         if ($tokens.is_soft_keyword({ word: word })) {
-          const [$r1116, p$764] = expect_name({ p: p });
-          p = p$764;
-          const name = $rt.unwrap($r1116);
+          const [$r1117, p$765] = expect_name({ p: p });
+          p = p$765;
+          const name = $rt.unwrap($r1117);
           return [{ tag: "Ok", value: { tag: "Name", name: name, span: name.span } }, p];
         }
-        const [$r1119, p$765] = fail({ p: p, expected: "an expression" });
-        p = p$765;
-        return [{ tag: "Err", error: $r1119 }, p];
-        break $m1035$match;
+        const [$r1120, p$766] = fail({ p: p, expected: "an expression" });
+        p = p$766;
+        return [{ tag: "Err", error: $r1120 }, p];
+        break $m1036$match;
       }
-      if ($m1035.tag === "Punct") {
-        const text = $m1035.text;
+      if ($m1036.tag === "Punct") {
+        const text = $m1036.text;
         if (text === "{") {
           if (p.no_brace) {
-            const [$r1121, p$766] = fail({ p: p, expected: "an expression (parenthesise a record update in this position)" });
-            p = p$766;
-            return [{ tag: "Err", error: $r1121 }, p];
+            const [$r1122, p$767] = fail({ p: p, expected: "an expression (parenthesise a record update in this position)" });
+            p = p$767;
+            return [{ tag: "Err", error: $r1122 }, p];
           }
-          const [$r1123, p$767] = need_punct({ p: p, want: text });
-          p = p$767;
-          $rt.unwrap($r1123);
-          const [$r1124, p$768] = parse_expr({ p: p, rank: r_expr });
+          const [$r1124, p$768] = need_punct({ p: p, want: text });
           p = p$768;
-          const base = $rt.unwrap($r1124);
-          const [$r1125, p$769] = need_word({ p: p, want: "with" });
+          $rt.unwrap($r1124);
+          const [$r1125, p$769] = parse_expr({ p: p, rank: r_expr });
           p = p$769;
-          $rt.unwrap($r1125);
+          const base = $rt.unwrap($r1125);
+          const [$r1126, p$770] = need_word({ p: p, want: "with" });
+          p = p$770;
+          $rt.unwrap($r1126);
           let fields = $std_list.builder({  });
           let more = true;
           const toks0 = p.toks;
           const start0 = p.pos;
           while (more && p.pos < $std_list.len({ xs: p.toks }) - 1) {
-            const [, p$770] = skip_newline({ p: p });
-            p = p$770;
-            const fs = here({ p: p });
-            const [$r1127, p$771] = expect_name({ p: p });
+            const [, p$771] = skip_newline({ p: p });
             p = p$771;
-            const fname = $rt.unwrap($r1127);
-            const [$r1128, p$772] = need_punct({ p: p, want: ":" });
+            const fs = here({ p: p });
+            const [$r1128, p$772] = expect_name({ p: p });
             p = p$772;
-            $rt.unwrap($r1128);
-            const [$r1129, p$773] = parse_expr({ p: p, rank: r_expr });
+            const fname = $rt.unwrap($r1128);
+            const [$r1129, p$773] = need_punct({ p: p, want: ":" });
             p = p$773;
-            const value = $rt.unwrap($r1129);
-            const [, fields$774] = $std_list.push({ b: fields, x: { name: fname, value: value, span: span_from({ p: p, start: fs }) } });
-            fields = fields$774;
-            const [$r1131, p$775] = accept_punct({ p: p, want: "," });
-            p = p$775;
-            more = $r1131;
+            $rt.unwrap($r1129);
+            const [$r1130, p$774] = parse_expr({ p: p, rank: r_expr });
+            p = p$774;
+            const value = $rt.unwrap($r1130);
+            const [, fields$775] = $std_list.push({ b: fields, x: { name: fname, value: value, span: span_from({ p: p, start: fs }) } });
+            fields = fields$775;
+            const [$r1132, p$776] = accept_punct({ p: p, want: "," });
+            p = p$776;
+            more = $r1132;
           }
-          const [, p$776] = skip_newline({ p: p });
-          p = p$776;
-          const [$r1132, p$777] = need_punct({ p: p, want: "}" });
+          const [, p$777] = skip_newline({ p: p });
           p = p$777;
-          $rt.unwrap($r1132);
+          const [$r1133, p$778] = need_punct({ p: p, want: "}" });
+          p = p$778;
+          $rt.unwrap($r1133);
           return [{ tag: "Ok", value: { tag: "RecordUpdate", base: base, fields: $std_list.finish({ b: fields }), span: span_from({ p: p, start: s }) } }, p];
         }
         if (text === "(") {
-          const [$r1135, p$778] = need_punct({ p: p, want: text });
-          p = p$778;
-          $rt.unwrap($r1135);
+          const [$r1136, p$779] = need_punct({ p: p, want: text });
+          p = p$779;
+          $rt.unwrap($r1136);
           const saved = p.no_brace;
           p = { ...p, no_brace: false };
-          const [$r1137, p$779] = parse_expr({ p: p, rank: r_expr });
-          p = p$779;
-          const inner = $rt.unwrap($r1137);
-          p = { ...p, no_brace: saved };
-          const [$r1139, p$780] = need_punct({ p: p, want: ")" });
+          const [$r1138, p$780] = parse_expr({ p: p, rank: r_expr });
           p = p$780;
-          $rt.unwrap($r1139);
+          const inner = $rt.unwrap($r1138);
+          p = { ...p, no_brace: saved };
+          const [$r1140, p$781] = need_punct({ p: p, want: ")" });
+          p = p$781;
+          $rt.unwrap($r1140);
           return [{ tag: "Ok", value: inner }, p];
         }
         if (text === "[") {
-          const [$r1141, p$781] = need_punct({ p: p, want: text });
-          p = p$781;
-          $rt.unwrap($r1141);
+          const [$r1142, p$782] = need_punct({ p: p, want: text });
+          p = p$782;
+          $rt.unwrap($r1142);
           let elems = $std_list.builder({  });
           const saved = p.no_brace;
           p = { ...p, no_brace: false };
-          const [$r1143, p$782] = at_punct({ p: p, want: "]" });
-          p = p$782;
-          if (!$r1143) {
+          const [$r1144, p$783] = at_punct({ p: p, want: "]" });
+          p = p$783;
+          if (!$r1144) {
             let more = true;
             const toks0 = p.toks;
             const start0 = p.pos;
             while (more && p.pos < $std_list.len({ xs: p.toks }) - 1) {
-              const [$r1145, p$783] = parse_expr({ p: p, rank: r_expr });
-              p = p$783;
-              const e = $rt.unwrap($r1145);
-              const [, elems$784] = $std_list.push({ b: elems, x: e });
-              elems = elems$784;
-              const [$r1146, p$785] = accept_punct({ p: p, want: "," });
-              p = p$785;
-              more = $r1146;
+              const [$r1146, p$784] = parse_expr({ p: p, rank: r_expr });
+              p = p$784;
+              const e = $rt.unwrap($r1146);
+              const [, elems$785] = $std_list.push({ b: elems, x: e });
+              elems = elems$785;
+              const [$r1147, p$786] = accept_punct({ p: p, want: "," });
+              p = p$786;
+              more = $r1147;
             }
           }
           p = { ...p, no_brace: saved };
-          const [$r1148, p$786] = need_punct({ p: p, want: "]" });
-          p = p$786;
-          $rt.unwrap($r1148);
+          const [$r1149, p$787] = need_punct({ p: p, want: "]" });
+          p = p$787;
+          $rt.unwrap($r1149);
           return [{ tag: "Ok", value: { tag: "ListLit", elems: $std_list.finish({ b: elems }), span: span_from({ p: p, start: s }) } }, p];
         }
-        const [$r1151, p$787] = fail({ p: p, expected: "an expression" });
-        p = p$787;
-        return [{ tag: "Err", error: $r1151 }, p];
-        break $m1035$match;
-      }
-      if ($m1035.tag === "Name") {
-        const text = $m1035.text;
-        const [$r1153, p$788] = expect_name({ p: p });
+        const [$r1152, p$788] = fail({ p: p, expected: "an expression" });
         p = p$788;
-        const name = $rt.unwrap($r1153);
+        return [{ tag: "Err", error: $r1152 }, p];
+        break $m1036$match;
+      }
+      if ($m1036.tag === "Name") {
+        const text = $m1036.text;
+        const [$r1154, p$789] = expect_name({ p: p });
+        p = p$789;
+        const name = $rt.unwrap($r1154);
         return [{ tag: "Ok", value: { tag: "Name", name: name, span: name.span } }, p];
-        break $m1035$match;
+        break $m1036$match;
       }
       if (true) {
-        const [$r1156, p$789] = fail({ p: p, expected: "an expression" });
-        p = p$789;
-        return [{ tag: "Err", error: $r1156 }, p];
-        break $m1035$match;
+        const [$r1157, p$790] = fail({ p: p, expected: "an expression" });
+        p = p$790;
+        return [{ tag: "Err", error: $r1157 }, p];
+        break $m1036$match;
       }
       $rt.unreachable();
     }
@@ -4684,51 +4687,51 @@ export function parse_pattern({ p, rank }) {
   try {
     const s = here({ p: p });
     const t = peek({ p: p, n: 0 });
-    const [, p$790] = expecting({ p: p, kinds: ["_", "int", "float", "text", "duration", "true", "false", "-", "tname", "name"] });
-    p = p$790;
-    const [$r1158, p$791] = accept_punct({ p: p, want: "_" });
+    const [, p$791] = expecting({ p: p, kinds: ["_", "int", "float", "text", "duration", "true", "false", "-", "tname", "name"] });
     p = p$791;
-    if ($r1158) {
+    const [$r1159, p$792] = accept_punct({ p: p, want: "_" });
+    p = p$792;
+    if ($r1159) {
       return [{ tag: "Ok", value: { tag: "WildcardPat", span: span_of({ t: t }) } }, p];
     }
-    const [$r1161, p$792] = at_literal_pattern({ p: p });
-    p = p$792;
-    if ($r1161) {
-      const [$r1162, p$793] = unary_expr({ p: p, rank: r_unary });
-      p = p$793;
-      const lit = $rt.unwrap($r1162);
+    const [$r1162, p$793] = at_literal_pattern({ p: p });
+    p = p$793;
+    if ($r1162) {
+      const [$r1163, p$794] = unary_expr({ p: p, rank: r_unary });
+      p = p$794;
+      const lit = $rt.unwrap($r1163);
       if (!is_literal({ e: lit })) {
-        const [$r1163, p$794] = fail_at({ p: p, expected: "a literal pattern", t: t });
-        p = p$794;
-        return [{ tag: "Err", error: $r1163 }, p];
+        const [$r1164, p$795] = fail_at({ p: p, expected: "a literal pattern", t: t });
+        p = p$795;
+        return [{ tag: "Err", error: $r1164 }, p];
       }
       return [{ tag: "Ok", value: { tag: "LitPat", literal: lit, span: span_from({ p: p, start: s }) } }, p];
     }
-    const [$r1167, p$795] = at_tname({ p: p, n: 0 });
-    p = p$795;
-    if ($r1167) {
-      const [$r1168, p$796] = variant_pattern({ p: p, rank: r_variant_pattern, start: s });
-      p = p$796;
-      return [$r1168, p];
+    const [$r1168, p$796] = at_tname({ p: p, n: 0 });
+    p = p$796;
+    if ($r1168) {
+      const [$r1169, p$797] = variant_pattern({ p: p, rank: r_variant_pattern, start: s });
+      p = p$797;
+      return [$r1169, p];
     }
-    const [$r1169, p$797] = at_name({ p: p, n: 0 });
-    p = p$797;
-    if ($r1169) {
-      const [$r1170, p$798] = qtname_ahead({ p: p });
-      p = p$798;
-      if (!$r1170) {
-        const [$r1171, p$799] = expect_name({ p: p });
-        p = p$799;
-        const name = $rt.unwrap($r1171);
+    const [$r1170, p$798] = at_name({ p: p, n: 0 });
+    p = p$798;
+    if ($r1170) {
+      const [$r1171, p$799] = qtname_ahead({ p: p });
+      p = p$799;
+      if (!$r1171) {
+        const [$r1172, p$800] = expect_name({ p: p });
+        p = p$800;
+        const name = $rt.unwrap($r1172);
         return [{ tag: "Ok", value: { tag: "BindPat", name: name, span: name.span } }, p];
       }
-      const [$r1174, p$800] = variant_pattern({ p: p, rank: r_variant_pattern, start: s });
-      p = p$800;
-      return [$r1174, p];
+      const [$r1175, p$801] = variant_pattern({ p: p, rank: r_variant_pattern, start: s });
+      p = p$801;
+      return [$r1175, p];
     }
-    const [$r1175, p$801] = fail({ p: p, expected: "a pattern" });
-    p = p$801;
-    return [{ tag: "Err", error: $r1175 }, p];
+    const [$r1176, p$802] = fail({ p: p, expected: "a pattern" });
+    p = p$802;
+    return [{ tag: "Err", error: $r1176 }, p];
   } catch ($e) {
     if ($e instanceof $rt.EarlyReturn) return [$e.value, p];
     throw $e;
@@ -4736,91 +4739,91 @@ export function parse_pattern({ p, rank }) {
 }
 
 export function starts_literal_pattern({ kind }) {
-  const $m1177 = kind;
-  $m1177$match: {
-    if ($m1177.tag === "IntLit") {
-      const value = $m1177.value;
-      const text = $m1177.text;
+  const $m1178 = kind;
+  $m1178$match: {
+    if ($m1178.tag === "IntLit") {
+      const value = $m1178.value;
+      const text = $m1178.text;
       return true;
-      break $m1177$match;
+      break $m1178$match;
     }
-    if ($m1177.tag === "FloatLit") {
-      const value = $m1177.value;
+    if ($m1178.tag === "FloatLit") {
+      const value = $m1178.value;
       return true;
-      break $m1177$match;
+      break $m1178$match;
     }
-    if ($m1177.tag === "TextLit") {
-      const value = $m1177.value;
+    if ($m1178.tag === "TextLit") {
+      const value = $m1178.value;
       return true;
-      break $m1177$match;
+      break $m1178$match;
     }
-    if ($m1177.tag === "DurationLit") {
-      const nanos = $m1177.nanos;
+    if ($m1178.tag === "DurationLit") {
+      const nanos = $m1178.nanos;
       return true;
-      break $m1177$match;
+      break $m1178$match;
     }
-    if ($m1177.tag === "Keyword") {
-      const word = $m1177.word;
+    if ($m1178.tag === "Keyword") {
+      const word = $m1178.word;
       return word === "true" || word === "false";
-      break $m1177$match;
+      break $m1178$match;
     }
-    if ($m1177.tag === "Punct") {
-      const text = $m1177.text;
+    if ($m1178.tag === "Punct") {
+      const text = $m1178.text;
       return text === "-";
-      break $m1177$match;
+      break $m1178$match;
     }
     if (true) {
       return false;
-      break $m1177$match;
+      break $m1178$match;
     }
     $rt.unreachable();
   }
 }
 
 export function is_literal({ e }) {
-  const $m1178 = e;
-  $m1178$match: {
-    if ($m1178.tag === "IntLit") {
-      const value = $m1178.value;
-      const text = $m1178.text;
-      const span = $m1178.span;
+  const $m1179 = e;
+  $m1179$match: {
+    if ($m1179.tag === "IntLit") {
+      const value = $m1179.value;
+      const text = $m1179.text;
+      const span = $m1179.span;
       return true;
-      break $m1178$match;
+      break $m1179$match;
     }
-    if ($m1178.tag === "FloatLit") {
-      const value = $m1178.value;
-      const span = $m1178.span;
+    if ($m1179.tag === "FloatLit") {
+      const value = $m1179.value;
+      const span = $m1179.span;
       return true;
-      break $m1178$match;
+      break $m1179$match;
     }
-    if ($m1178.tag === "TextLit") {
-      const value = $m1178.value;
-      const span = $m1178.span;
+    if ($m1179.tag === "TextLit") {
+      const value = $m1179.value;
+      const span = $m1179.span;
       return true;
-      break $m1178$match;
+      break $m1179$match;
     }
-    if ($m1178.tag === "BoolLit") {
-      const value = $m1178.value;
-      const span = $m1178.span;
+    if ($m1179.tag === "BoolLit") {
+      const value = $m1179.value;
+      const span = $m1179.span;
       return true;
-      break $m1178$match;
+      break $m1179$match;
     }
-    if ($m1178.tag === "DurationLit") {
-      const nanos = $m1178.nanos;
-      const span = $m1178.span;
+    if ($m1179.tag === "DurationLit") {
+      const nanos = $m1179.nanos;
+      const span = $m1179.span;
       return true;
-      break $m1178$match;
+      break $m1179$match;
     }
-    if ($m1178.tag === "Unary") {
-      const op = $m1178.op;
-      const operand = $m1178.operand;
-      const span = $m1178.span;
+    if ($m1179.tag === "Unary") {
+      const op = $m1179.op;
+      const operand = $m1179.operand;
+      const span = $m1179.span;
       return op === "neg" && (operand.tag === "IntLit" || operand.tag === "FloatLit" || operand.tag === "DurationLit");
-      break $m1178$match;
+      break $m1179$match;
     }
     if (true) {
       return false;
-      break $m1178$match;
+      break $m1179$match;
     }
     $rt.unreachable();
   }
@@ -4828,45 +4831,45 @@ export function is_literal({ e }) {
 
 export function variant_pattern({ p, rank, start }) {
   try {
-    const [$r1179, p$802] = qtname({ p: p });
-    p = p$802;
-    const name = $rt.unwrap($r1179);
-    let fields = { tag: "None" };
-    const [$r1181, p$803] = accept_punct({ p: p, want: "(" });
+    const [$r1180, p$803] = qtname({ p: p });
     p = p$803;
-    if ($r1181) {
+    const name = $rt.unwrap($r1180);
+    let fields = { tag: "None" };
+    const [$r1182, p$804] = accept_punct({ p: p, want: "(" });
+    p = p$804;
+    if ($r1182) {
       let out = $std_list.builder({  });
       let more = true;
       const toks0 = p.toks;
       const start0 = p.pos;
       while (more && p.pos < $std_list.len({ xs: p.toks }) - 1) {
         const fs = here({ p: p });
-        const [$r1183, p$804] = accept_punct({ p: p, want: "_" });
-        p = p$804;
-        if ($r1183) {
-          const [, out$805] = $std_list.push({ b: out, x: { tag: "PatFieldSkip", span: span_from({ p: p, start: fs }) } });
-          out = out$805;
+        const [$r1184, p$805] = accept_punct({ p: p, want: "_" });
+        p = p$805;
+        if ($r1184) {
+          const [, out$806] = $std_list.push({ b: out, x: { tag: "PatFieldSkip", span: span_from({ p: p, start: fs }) } });
+          out = out$806;
         } else {
-          const [$r1185, p$806] = accept_punct({ p: p, want: ".." });
-          p = p$806;
-          if ($r1185) {
-            const [, out$807] = $std_list.push({ b: out, x: { tag: "PatFieldRest", span: span_from({ p: p, start: fs }) } });
-            out = out$807;
+          const [$r1186, p$807] = accept_punct({ p: p, want: ".." });
+          p = p$807;
+          if ($r1186) {
+            const [, out$808] = $std_list.push({ b: out, x: { tag: "PatFieldRest", span: span_from({ p: p, start: fs }) } });
+            out = out$808;
           } else {
-            const [$r1187, p$808] = expect_name({ p: p });
-            p = p$808;
-            const n = $rt.unwrap($r1187);
-            const [, out$809] = $std_list.push({ b: out, x: { tag: "PatFieldName", name: n, span: n.span } });
-            out = out$809;
+            const [$r1188, p$809] = expect_name({ p: p });
+            p = p$809;
+            const n = $rt.unwrap($r1188);
+            const [, out$810] = $std_list.push({ b: out, x: { tag: "PatFieldName", name: n, span: n.span } });
+            out = out$810;
           }
         }
-        const [$r1189, p$810] = accept_punct({ p: p, want: "," });
-        p = p$810;
-        more = $r1189;
+        const [$r1190, p$811] = accept_punct({ p: p, want: "," });
+        p = p$811;
+        more = $r1190;
       }
-      const [$r1190, p$811] = need_punct({ p: p, want: ")" });
-      p = p$811;
-      $rt.unwrap($r1190);
+      const [$r1191, p$812] = need_punct({ p: p, want: ")" });
+      p = p$812;
+      $rt.unwrap($r1191);
       fields = { tag: "Some", value: $std_list.finish({ b: out }) };
     }
     return [{ tag: "Ok", value: { tag: "VariantPat", name: name, fields: fields, span: span_from({ p: p, start: start }) } }, p];

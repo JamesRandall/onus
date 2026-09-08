@@ -1,0 +1,13 @@
+module core
+
+-- The refinement of the result is checked at runtime; nothing exercises it (spec §21, `checked_requires_example`).
+pub fn half(x: Int) -> Int where it >= 0 may panic {
+  return x / 2
+}
+
+path halving
+  entry half
+
+example halves {
+  half(x: 4) == 2
+}

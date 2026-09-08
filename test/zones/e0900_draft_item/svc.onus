@@ -1,0 +1,7 @@
+module svc
+import payments
+
+-- `payments.refund` is not `hardened`: a hardened module may not rest on it (spec §21.1).
+pub fn undo(x: Int) -> Int {
+  return payments.refund(pence: x)
+}

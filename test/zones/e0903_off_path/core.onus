@@ -1,0 +1,12 @@
+module core
+
+pub fn covered(x: Int) -> Int {
+  return x
+}
+
+pub fn stray(x: Int) -> Int {
+  return x + 1
+}
+
+path main_path
+  entry covered

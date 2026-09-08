@@ -1,0 +1,7 @@
+signature = "b3:fab5b81addd38180a301a26f68e8470e36817e2ee8719045165d326c1a057d0a"
+
+[zones]
+"core.*" = "critical"
+"core.math" = "draft"
+"svc" = "hardened"
+default = "draft"

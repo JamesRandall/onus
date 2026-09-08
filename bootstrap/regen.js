@@ -22,79 +22,80 @@ import * as $codes from "./codes.js";
 import * as $lexer from "./lexer.js";
 import * as $parser from "./parser.js";
 import * as $tokens from "./tokens.js";
+import * as $zones from "./zones.js";
 import * as $assumptions from "./assumptions.js";
 
-const $ob1 = { kind: "overflow", text: "n - 1 within Int", at: "self/regen.onus:73:41", def: "trim_end" };
-const $ob2 = { kind: "overflow", text: "n - 1 - i within Int", at: "self/regen.onus:73:41", def: "trim_end" };
-const $ob3 = { kind: "overflow", text: "end - 1 within Int", at: "self/regen.onus:75:15", def: "trim_end" };
-const $ob4 = { kind: "overflow", text: "i - 1 within Int", at: "self/regen.onus:118:73", def: "has_word" };
-const $ob5 = { kind: "overflow", text: "i + w within Int", at: "self/regen.onus:119:36", def: "has_word" };
-const $ob6 = { kind: "overflow", text: "i + w within Int", at: "self/regen.onus:120:55", def: "has_word" };
-const $ob7 = { kind: "overflow", text: "at + w within Int", at: "self/regen.onus:134:16", def: "matches_at" };
-const $ob8 = { kind: "overflow", text: "at + k within Int", at: "self/regen.onus:138:29", def: "matches_at" };
-const $ob9 = { kind: "overflow", text: "n - 1 within Int", at: "self/regen.onus:470:45", def: "strip_quotes" };
-const $ob10 = { kind: "overflow", text: "n - 1 within Int", at: "self/regen.onus:472:44", def: "strip_quotes" };
-const $ob11 = { kind: "overflow", text: "k + 1 within Int", at: "self/regen.onus:498:13", def: "env_line" };
-const $ob12 = { kind: "overflow", text: "Text.count(t: system) + Text.count(t: prompt) within Int", at: "self/regen.onus:580:11", def: "estimate" };
-const $ob13 = { kind: "overflow", text: "Text.count(t: system) + Text.count(t: prompt) + Text.count(t: text) within Int", at: "self/regen.onus:580:11", def: "estimate" };
-const $ob14 = { kind: "overflow", text: "Text.count(t: system) + Text.count(t: prompt) + Text.count(t: text) + 3 within Int", at: "self/regen.onus:580:11", def: "estimate" };
-const $ob15 = { kind: "overflow", text: "n - 1 within Int", at: "self/regen.onus:591:30", def: "at_or_last" };
-const $ob16 = { kind: "overflow", text: "Text.count(t: head) + 1 within Int", at: "self/regen.onus:606:49", def: "model_from_spec" };
-const $ob17 = { kind: "overflow", text: "Text.count(t: text) + 3 within Int", at: "self/regen.onus:754:24", def: "generate" };
-const $ob18 = { kind: "overflow", text: "json.int_at(j: usage, key: \"input_tokens\") + json.int_at(j: usage, key: \"output_tokens\") within Int", at: "self/regen.onus:759:16", def: "generate" };
-const $ob19 = { kind: "overflow", text: "fence + 3 within Int", at: "self/regen.onus:941:16", def: "after_fence" };
-const $ob20 = { kind: "overflow", text: "i + 4 within Int", at: "self/regen.onus:948:43", def: "after_fence" };
-const $ob21 = { kind: "overflow", text: "i + 4 within Int", at: "self/regen.onus:949:9", def: "after_fence" };
-const $ob22 = { kind: "overflow", text: "-1 within Int", at: "self/regen.onus:951:27", def: "after_fence" };
-const $ob23 = { kind: "overflow", text: "last_newline + 1 within Int", at: "self/regen.onus:968:45", def: "after_fence" };
-const $ob24 = { kind: "overflow", text: "Text.count(t: text) + 1 within Int", at: "self/regen.onus:1100:19", def: "apply_repairs" };
-const $ob25 = { kind: "overflow", text: "applied + 1 within Int", at: "self/regen.onus:1110:17", def: "apply_repairs" };
-const $ob26 = { kind: "overflow", text: "List.len(xs: parts) - 1 within Int", at: "self/regen.onus:1410:33", def: "last_segment" };
-const $ob27 = { kind: "overflow", text: "n_history - 1 within Int", at: "self/regen.onus:1567:55", def: "assemble" };
-const $ob28 = { kind: "overflow", text: "n_history - 1 within Int", at: "self/regen.onus:1627:14", def: "assemble" };
-const $ob29 = { kind: "overflow", text: "i + 1 within Int", at: "self/regen.onus:1643:11", def: "assemble" };
-const $ob30 = { kind: "overflow", text: "n_history - 1 within Int", at: "self/regen.onus:1661:55", def: "assemble" };
-const $ob31 = { kind: "overflow", text: "line - 1 within Int", at: "self/regen.onus:2295:54", def: "syntax_notes" };
-const $ob32 = { kind: "overflow", text: "scan + 1 within Int", at: "self/regen.onus:2300:18", def: "syntax_notes" };
-const $ob33 = { kind: "overflow", text: "line - 2 within Int", at: "self/regen.onus:2320:16", def: "syntax_notes" };
-const $ob34 = { kind: "overflow", text: "-1 within Int", at: "self/regen.onus:2390:20", def: "effects_of" };
-const $ob35 = { kind: "overflow", text: "i - 1 within Int", at: "self/regen.onus:2393:78", def: "effects_of" };
-const $ob36 = { kind: "overflow", text: "i + 3 within Int", at: "self/regen.onus:2394:28", def: "effects_of" };
-const $ob37 = { kind: "overflow", text: "i + 3 within Int", at: "self/regen.onus:2394:83", def: "effects_of" };
-const $ob38 = { kind: "overflow", text: "i + 3 within Int", at: "self/regen.onus:2396:17", def: "effects_of" };
-const $ob39 = { kind: "overflow", text: "k + 1 within Int", at: "self/regen.onus:2411:15", def: "effects_of" };
-const $ob40 = { kind: "overflow", text: "-1 within Int", at: "self/regen.onus:2457:20", def: "last_close" };
-const $ob41 = { kind: "overflow", text: "n - 1 within Int", at: "self/regen.onus:2460:20", def: "last_close" };
-const $ob42 = { kind: "overflow", text: "n - 1 - i within Int", at: "self/regen.onus:2460:20", def: "last_close" };
-const $ob43 = { kind: "overflow", text: "close + 1 within Int", at: "self/regen.onus:2478:63", def: "proposal_between" };
-const $ob44 = { kind: "overflow", text: "r.ladder + 1 within Int", at: "self/regen.onus:2622:24", def: "escalate" };
-const $ob45 = { kind: "overflow", text: "r.escalation_steps + 1 within Int", at: "self/regen.onus:2622:56", def: "escalate" };
-const $ob46 = { kind: "overflow", text: "guard - 1 within Int", at: "self/regen.onus:2630:13", def: "escalate" };
-const $ob47 = { kind: "overflow", text: "r.checks + 1 within Int", at: "self/regen.onus:2726:24", def: "check_working" };
-const $ob48 = { kind: "overflow", text: "r.calls + 1 within Int", at: "self/regen.onus:2758:23", def: "ask" };
-const $ob49 = { kind: "overflow", text: "r.tokens + answer.tokens within Int", at: "self/regen.onus:2758:44", def: "ask" };
-const $ob50 = { kind: "overflow", text: "n_history - 1 within Int", at: "self/regen.onus:2910:41", def: "conclude" };
-const $ob51 = { kind: "overflow", text: "io.time(clock: clock) - t0 within Int", at: "self/regen.onus:3015:54", def: "ticket" };
-const $ob52 = { kind: "overflow", text: "r.claim_edits + 1 within Int", at: "self/regen.onus:3092:31", def: "splice_found" };
-const $ob53 = { kind: "overflow", text: "sp.count + 1 within Int", at: "self/regen.onus:3173:41", def: "splice_into" };
-const $ob54 = { kind: "overflow", text: "repairs + applied.applied within Int", at: "self/regen.onus:3258:23", def: "repair_rounds" };
-const $ob55 = { kind: "overflow", text: "r.mechanical + repairs within Int", at: "self/regen.onus:3277:28", def: "repair_rounds" };
-const $ob56 = { kind: "overflow", text: "io.time(clock: clock) - r.started within Int", at: "self/regen.onus:3337:6", def: "iterate" };
-const $ob57 = { kind: "overflow", text: "io.time(clock: clock) - t0 within Int", at: "self/regen.onus:3418:11", def: "iterate" };
-const $ob58 = { kind: "overflow", text: "r.helper_attempts + 1 within Int", at: "self/regen.onus:3443:35", def: "iterate" };
-const $ob59 = { kind: "overflow", text: "io.time(clock: clock) - t0 within Int", at: "self/regen.onus:3476:13", def: "iterate" };
-const $ob60 = { kind: "overflow", text: "io.time(clock: clock) - t0 within Int", at: "self/regen.onus:3509:11", def: "iterate" };
-const $ob61 = { kind: "overflow", text: "io.time(clock: clock) - t0 within Int", at: "self/regen.onus:3536:11", def: "iterate" };
-const $ob62 = { kind: "overflow", text: "r.mechanical - mechanical_before within Int", at: "self/regen.onus:3564:22", def: "iterate" };
-const $ob63 = { kind: "overflow", text: "io.time(clock: clock) - t0 within Int", at: "self/regen.onus:3578:11", def: "iterate" };
-const $ob64 = { kind: "overflow", text: "List.len(xs: checked.json) + List.len(xs: failing) within Int", at: "self/regen.onus:3591:19", def: "iterate" };
-const $ob65 = { kind: "overflow", text: "size + 1 within Int", at: "self/regen.onus:3607:30", def: "iterate" };
-const $ob66 = { kind: "overflow", text: "n_history - 2 within Int", at: "self/regen.onus:3609:63", def: "iterate" };
-const $ob67 = { kind: "overflow", text: "List.len(xs: prev.diagnostics) + List.len(xs: prev.failing) within Int", at: "self/regen.onus:3610:23", def: "iterate" };
-const $ob68 = { kind: "overflow", text: "r.grew + 1 within Int", at: "self/regen.onus:3616:30", def: "iterate" };
-const $ob69 = { kind: "overflow", text: "io.time(clock: clock) - t0 within Int", at: "self/regen.onus:3640:9", def: "iterate" };
-const $ob70 = { kind: "overflow", text: "stray + 1 within Int", at: "self/regen.onus:3806:15", def: "run_task" };
-const $ob71 = { kind: "overflow", text: "task.budget.iterations + 1 within Int", at: "self/regen.onus:3842:31", def: "run_task" };
+const $ob1 = { kind: "overflow", text: "n - 1 within Int", at: "self/regen.onus:74:41", def: "trim_end" };
+const $ob2 = { kind: "overflow", text: "n - 1 - i within Int", at: "self/regen.onus:74:41", def: "trim_end" };
+const $ob3 = { kind: "overflow", text: "end - 1 within Int", at: "self/regen.onus:76:15", def: "trim_end" };
+const $ob4 = { kind: "overflow", text: "i - 1 within Int", at: "self/regen.onus:119:73", def: "has_word" };
+const $ob5 = { kind: "overflow", text: "i + w within Int", at: "self/regen.onus:120:36", def: "has_word" };
+const $ob6 = { kind: "overflow", text: "i + w within Int", at: "self/regen.onus:121:55", def: "has_word" };
+const $ob7 = { kind: "overflow", text: "at + w within Int", at: "self/regen.onus:135:16", def: "matches_at" };
+const $ob8 = { kind: "overflow", text: "at + k within Int", at: "self/regen.onus:139:29", def: "matches_at" };
+const $ob9 = { kind: "overflow", text: "n - 1 within Int", at: "self/regen.onus:471:45", def: "strip_quotes" };
+const $ob10 = { kind: "overflow", text: "n - 1 within Int", at: "self/regen.onus:473:44", def: "strip_quotes" };
+const $ob11 = { kind: "overflow", text: "k + 1 within Int", at: "self/regen.onus:499:13", def: "env_line" };
+const $ob12 = { kind: "overflow", text: "Text.count(t: system) + Text.count(t: prompt) within Int", at: "self/regen.onus:582:11", def: "estimate" };
+const $ob13 = { kind: "overflow", text: "Text.count(t: system) + Text.count(t: prompt) + Text.count(t: text) within Int", at: "self/regen.onus:582:11", def: "estimate" };
+const $ob14 = { kind: "overflow", text: "Text.count(t: system) + Text.count(t: prompt) + Text.count(t: text) + 3 within Int", at: "self/regen.onus:582:11", def: "estimate" };
+const $ob15 = { kind: "overflow", text: "n - 1 within Int", at: "self/regen.onus:593:30", def: "at_or_last" };
+const $ob16 = { kind: "overflow", text: "Text.count(t: head) + 1 within Int", at: "self/regen.onus:608:49", def: "model_from_spec" };
+const $ob17 = { kind: "overflow", text: "Text.count(t: text) + 3 within Int", at: "self/regen.onus:778:24", def: "generate" };
+const $ob18 = { kind: "overflow", text: "json.int_at(j: usage, key: \"input_tokens\") + json.int_at(j: usage, key: \"output_tokens\") within Int", at: "self/regen.onus:783:16", def: "generate" };
+const $ob19 = { kind: "overflow", text: "fence + 3 within Int", at: "self/regen.onus:965:16", def: "after_fence" };
+const $ob20 = { kind: "overflow", text: "i + 4 within Int", at: "self/regen.onus:972:43", def: "after_fence" };
+const $ob21 = { kind: "overflow", text: "i + 4 within Int", at: "self/regen.onus:973:9", def: "after_fence" };
+const $ob22 = { kind: "overflow", text: "-1 within Int", at: "self/regen.onus:975:27", def: "after_fence" };
+const $ob23 = { kind: "overflow", text: "last_newline + 1 within Int", at: "self/regen.onus:992:45", def: "after_fence" };
+const $ob24 = { kind: "overflow", text: "Text.count(t: text) + 1 within Int", at: "self/regen.onus:1124:19", def: "apply_repairs" };
+const $ob25 = { kind: "overflow", text: "applied + 1 within Int", at: "self/regen.onus:1134:17", def: "apply_repairs" };
+const $ob26 = { kind: "overflow", text: "List.len(xs: parts) - 1 within Int", at: "self/regen.onus:1434:33", def: "last_segment" };
+const $ob27 = { kind: "overflow", text: "n_history - 1 within Int", at: "self/regen.onus:1591:55", def: "assemble" };
+const $ob28 = { kind: "overflow", text: "n_history - 1 within Int", at: "self/regen.onus:1651:14", def: "assemble" };
+const $ob29 = { kind: "overflow", text: "i + 1 within Int", at: "self/regen.onus:1667:11", def: "assemble" };
+const $ob30 = { kind: "overflow", text: "n_history - 1 within Int", at: "self/regen.onus:1685:55", def: "assemble" };
+const $ob31 = { kind: "overflow", text: "line - 1 within Int", at: "self/regen.onus:2332:54", def: "syntax_notes" };
+const $ob32 = { kind: "overflow", text: "scan + 1 within Int", at: "self/regen.onus:2337:18", def: "syntax_notes" };
+const $ob33 = { kind: "overflow", text: "line - 2 within Int", at: "self/regen.onus:2357:16", def: "syntax_notes" };
+const $ob34 = { kind: "overflow", text: "-1 within Int", at: "self/regen.onus:2427:20", def: "effects_of" };
+const $ob35 = { kind: "overflow", text: "i - 1 within Int", at: "self/regen.onus:2430:78", def: "effects_of" };
+const $ob36 = { kind: "overflow", text: "i + 3 within Int", at: "self/regen.onus:2431:28", def: "effects_of" };
+const $ob37 = { kind: "overflow", text: "i + 3 within Int", at: "self/regen.onus:2431:83", def: "effects_of" };
+const $ob38 = { kind: "overflow", text: "i + 3 within Int", at: "self/regen.onus:2433:17", def: "effects_of" };
+const $ob39 = { kind: "overflow", text: "k + 1 within Int", at: "self/regen.onus:2448:15", def: "effects_of" };
+const $ob40 = { kind: "overflow", text: "-1 within Int", at: "self/regen.onus:2494:20", def: "last_close" };
+const $ob41 = { kind: "overflow", text: "n - 1 within Int", at: "self/regen.onus:2497:20", def: "last_close" };
+const $ob42 = { kind: "overflow", text: "n - 1 - i within Int", at: "self/regen.onus:2497:20", def: "last_close" };
+const $ob43 = { kind: "overflow", text: "close + 1 within Int", at: "self/regen.onus:2515:63", def: "proposal_between" };
+const $ob44 = { kind: "overflow", text: "r.ladder + 1 within Int", at: "self/regen.onus:2693:24", def: "escalate" };
+const $ob45 = { kind: "overflow", text: "r.escalation_steps + 1 within Int", at: "self/regen.onus:2693:56", def: "escalate" };
+const $ob46 = { kind: "overflow", text: "guard - 1 within Int", at: "self/regen.onus:2711:13", def: "escalate" };
+const $ob47 = { kind: "overflow", text: "r.checks + 1 within Int", at: "self/regen.onus:2807:24", def: "check_working" };
+const $ob48 = { kind: "overflow", text: "r.calls + 1 within Int", at: "self/regen.onus:2864:23", def: "ask" };
+const $ob49 = { kind: "overflow", text: "r.tokens + answer.tokens within Int", at: "self/regen.onus:2864:44", def: "ask" };
+const $ob50 = { kind: "overflow", text: "n_history - 1 within Int", at: "self/regen.onus:3029:41", def: "conclude" };
+const $ob51 = { kind: "overflow", text: "io.time(clock: clock) - t0 within Int", at: "self/regen.onus:3138:54", def: "ticket" };
+const $ob52 = { kind: "overflow", text: "r.claim_edits + 1 within Int", at: "self/regen.onus:3242:31", def: "splice_found" };
+const $ob53 = { kind: "overflow", text: "sp.count + 1 within Int", at: "self/regen.onus:3323:41", def: "splice_into" };
+const $ob54 = { kind: "overflow", text: "repairs + applied.applied within Int", at: "self/regen.onus:3408:23", def: "repair_rounds" };
+const $ob55 = { kind: "overflow", text: "r.mechanical + repairs within Int", at: "self/regen.onus:3427:28", def: "repair_rounds" };
+const $ob56 = { kind: "overflow", text: "io.time(clock: clock) - r.started within Int", at: "self/regen.onus:3487:6", def: "iterate" };
+const $ob57 = { kind: "overflow", text: "io.time(clock: clock) - t0 within Int", at: "self/regen.onus:3568:11", def: "iterate" };
+const $ob58 = { kind: "overflow", text: "r.helper_attempts + 1 within Int", at: "self/regen.onus:3593:35", def: "iterate" };
+const $ob59 = { kind: "overflow", text: "io.time(clock: clock) - t0 within Int", at: "self/regen.onus:3626:13", def: "iterate" };
+const $ob60 = { kind: "overflow", text: "io.time(clock: clock) - t0 within Int", at: "self/regen.onus:3659:11", def: "iterate" };
+const $ob61 = { kind: "overflow", text: "io.time(clock: clock) - t0 within Int", at: "self/regen.onus:3686:11", def: "iterate" };
+const $ob62 = { kind: "overflow", text: "r.mechanical - mechanical_before within Int", at: "self/regen.onus:3714:22", def: "iterate" };
+const $ob63 = { kind: "overflow", text: "io.time(clock: clock) - t0 within Int", at: "self/regen.onus:3728:11", def: "iterate" };
+const $ob64 = { kind: "overflow", text: "List.len(xs: checked.json) + List.len(xs: failing) within Int", at: "self/regen.onus:3741:19", def: "iterate" };
+const $ob65 = { kind: "overflow", text: "size + 1 within Int", at: "self/regen.onus:3757:30", def: "iterate" };
+const $ob66 = { kind: "overflow", text: "n_history - 2 within Int", at: "self/regen.onus:3759:63", def: "iterate" };
+const $ob67 = { kind: "overflow", text: "List.len(xs: prev.diagnostics) + List.len(xs: prev.failing) within Int", at: "self/regen.onus:3760:23", def: "iterate" };
+const $ob68 = { kind: "overflow", text: "r.grew + 1 within Int", at: "self/regen.onus:3766:30", def: "iterate" };
+const $ob69 = { kind: "overflow", text: "io.time(clock: clock) - t0 within Int", at: "self/regen.onus:3790:9", def: "iterate" };
+const $ob70 = { kind: "overflow", text: "stray + 1 within Int", at: "self/regen.onus:3966:15", def: "run_task" };
+const $ob71 = { kind: "overflow", text: "task.budget.iterations + 1 within Int", at: "self/regen.onus:4002:31", def: "run_task" };
 export function skip($args) {
   return undefined;
 }
@@ -415,7 +416,7 @@ export function parse_task({ j }) {
       const wall_ms = $rt.unwrap(positive_int({ j: b, key: "wall_ms", dflt: default_wall_ms }));
       budget = { iterations: iterations, tokens: tokens, wall_ms: wall_ms };
     }
-    let context_policy = "module";
+    let context_policy = "";
     if ($json.has({ j: j, key: "context_policy" })) {
       const p = $json.str_at({ j: j, key: "context_policy" });
       if (p !== "none" && p !== "module" && p !== "scope") {
@@ -662,6 +663,7 @@ export function model_name({ m }) {
     }
     if ($m83.tag === "ClaudeCode") {
       const model_id = $m83.model_id;
+      const sandbox = $m83.sandbox;
       const $m84 = model_id;
       $m84$match: {
         if ($m84.tag === "Some") {
@@ -714,7 +716,15 @@ export function model_from_spec({ spec, env, files, env_dirs }) {
     arg = { tag: "Some", value: $std_text.slice({ t: spec, from: $rt.int.add($std_text.count({ t: head }), 1, $ob16), to: $std_text.count({ t: spec }) }) };
   }
   if (head === "claude-code") {
-    return { tag: "Ok", value: { tag: "ClaudeCode", model_id: arg } };
+    let base = ".";
+    if ($std_list.len({ xs: env_dirs }) > 0) {
+      base = $std_list.get({ xs: env_dirs, i: 0 });
+    }
+    const sandbox = base + "/.onus/model-sandbox";
+    if ($std_io.mkdir({ files: files, path: sandbox }).tag === "Err") {
+      return { tag: "Err", error: "claude-code: cannot create " + sandbox };
+    }
+    return { tag: "Ok", value: { tag: "ClaudeCode", model_id: arg, sandbox: sandbox } };
   }
   if (head === "anthropic") {
     const key = or_empty({ o: env_value({ env: env, files: files, dirs: env_dirs, name: "ANTHROPIC_API_KEY" }) });
@@ -732,16 +742,16 @@ export function model_from_spec({ spec, env, files, env_dirs }) {
     return { tag: "Ok", value: { tag: "OpenRouter", key: key, model_id: text_or({ o: arg, dflt: configured }) } };
   }
   if (head === "scripted") {
-    const $m95 = arg;
-    $m95$match: {
-      if ($m95.tag === "None") {
+    const $m96 = arg;
+    $m96$match: {
+      if ($m96.tag === "None") {
         return { tag: "Err", error: "scripted:<file.json> names a JSON array of answers" };
-        break $m95$match;
+        break $m96$match;
       }
-      if ($m95.tag === "Some") {
-        const value = $m95.value;
+      if ($m96.tag === "Some") {
+        const value = $m96.value;
         return scripted_from({ files: files, path: value });
-        break $m95$match;
+        break $m96$match;
       }
       $rt.unreachable();
     }
@@ -750,34 +760,34 @@ export function model_from_spec({ spec, env, files, env_dirs }) {
 }
 
 export function scripted_from({ files, path }) {
-  const $m98 = $std_io.read({ files: files, path: path });
-  $m98$match: {
-    if ($m98.tag === "Err") {
+  const $m99 = $std_io.read({ files: files, path: path });
+  $m99$match: {
+    if ($m99.tag === "Err") {
       return { tag: "Err", error: "cannot read " + path };
-      break $m98$match;
+      break $m99$match;
     }
-    if ($m98.tag === "Ok") {
-      const value = $m98.value;
+    if ($m99.tag === "Ok") {
+      const value = $m99.value;
       return scripted_of_text({ path: path, text: value });
-      break $m98$match;
+      break $m99$match;
     }
     $rt.unreachable();
   }
 }
 
 export function scripted_of_text({ path, text }) {
-  const $m100 = $json.parse({ t: text });
-  $m100$match: {
-    if ($m100.tag === "None") {
+  const $m101 = $json.parse({ t: text });
+  $m101$match: {
+    if ($m101.tag === "None") {
       return { tag: "Err", error: path + ": not a JSON array of strings" };
-      break $m100$match;
+      break $m101$match;
     }
-    if ($m100.tag === "Some") {
-      const value = $m100.value;
-      const $m102 = value;
-      $m102$match: {
-        if ($m102.tag === "JArray") {
-          const items = $m102.items;
+    if ($m101.tag === "Some") {
+      const value = $m101.value;
+      const $m103 = value;
+      $m103$match: {
+        if ($m103.tag === "JArray") {
+          const items = $m103.items;
           let out = $std_list.builder({  });
           for (const x of items) {
             if (!is_string({ j: x })) {
@@ -787,15 +797,15 @@ export function scripted_of_text({ path, text }) {
             out = out$6;
           }
           return { tag: "Ok", value: { tag: "Scripted", answers: $std_list.finish({ b: out }) } };
-          break $m102$match;
+          break $m103$match;
         }
         if (true) {
           return { tag: "Err", error: path + ": not a JSON array of strings" };
-          break $m102$match;
+          break $m103$match;
         }
         $rt.unreachable();
       }
-      break $m100$match;
+      break $m101$match;
     }
     $rt.unreachable();
   }
@@ -803,52 +813,53 @@ export function scripted_of_text({ path, text }) {
 
 export function generate({ m, process, net, call, system, prompt, max_tokens }) {
   try {
-    const $m107 = m;
-    $m107$match: {
-      if ($m107.tag === "Scripted") {
-        const answers = $m107.answers;
+    const $m108 = m;
+    $m108$match: {
+      if ($m108.tag === "Scripted") {
+        const answers = $m108.answers;
         const text = at_or_last({ xs: answers, i: call });
         return { tag: "Ok", value: { text: text, model: "scripted", tokens: estimate({ system: system, prompt: prompt, text: text }) } };
-        break $m107$match;
+        break $m108$match;
       }
-      if ($m107.tag === "ClaudeCode") {
-        const model_id = $m107.model_id;
-        let args = ["-c", "for v in $(env | sed -n 's/^\\(CLAUDE[A-Za-z0-9_]*\\)=.*/\\1/p'); do unset \"$v\"; done; exec claude \"$@\"", "sh", "-p", "--output-format", "text", "--system-prompt", system];
-        const $m110 = model_id;
-        $m110$match: {
-          if ($m110.tag === "Some") {
-            const value = $m110.value;
+      if ($m108.tag === "ClaudeCode") {
+        const model_id = $m108.model_id;
+        const sandbox = $m108.sandbox;
+        let args = ["-c", "for v in $(env | sed -n 's/^\\(CLAUDE[A-Za-z0-9_]*\\)=.*/\\1/p'); do unset \"$v\"; done; cd \"$0\" && exec claude \"$@\"", sandbox, "-p", "--output-format", "text", "--disallowedTools", "Read", "Glob", "Grep", "Bash", "Task", "WebFetch", "WebSearch", "Edit", "Write", "NotebookEdit", "--system-prompt", system];
+        const $m111 = model_id;
+        $m111$match: {
+          if ($m111.tag === "Some") {
+            const value = $m111.value;
             args = [...args, ...["--model", value]];
-            break $m110$match;
+            break $m111$match;
           }
-          if ($m110.tag === "None") {
+          if ($m111.tag === "None") {
             skip({  });
-            break $m110$match;
+            break $m111$match;
           }
           $rt.unreachable();
         }
-        const $m111 = $std_io.run({ process: process, program: "sh", args: args, stdin: prompt, timeout_ms: 900000 });
-        $m111$match: {
-          if ($m111.tag === "Err") {
-            const error = $m111.error;
+        const $m112 = $std_io.run({ process: process, program: "sh", args: args, stdin: prompt, timeout_ms: 900000 });
+        $m112$match: {
+          if ($m112.tag === "Err") {
+            const error = $m112.error;
             return { tag: "Err", error: "claude: " + io_error_text({ e: error }) };
-            break $m111$match;
+            break $m112$match;
           }
-          if ($m111.tag === "Ok") {
-            const value = $m111.value;
+          if ($m112.tag === "Ok") {
+            const value = $m112.value;
             if (value.status !== 0) {
               return { tag: "Err", error: "claude exited " + $std_int.to_text({ x: value.status }) + ": " + value.stderr };
             }
             return { tag: "Ok", value: { text: value.stdout, model: model_name({ m: m }), tokens: estimate({ system: system, prompt: prompt, text: value.stdout }) } };
-            break $m111$match;
+            break $m112$match;
           }
           $rt.unreachable();
         }
-        break $m107$match;
+        break $m108$match;
       }
-      if ($m107.tag === "Anthropic") {
-        const key = $m107.key;
-        const model_id = $m107.model_id;
+      if ($m108.tag === "Anthropic") {
+        const key = $m108.key;
+        const model_id = $m108.model_id;
         const body = { tag: "JObject", fields: [$json.field({ key: "model", value: $json.text({ t: model_id }) }), $json.field({ key: "max_tokens", value: $json.int({ v: max_tokens }) }), $json.field({ key: "system", value: $json.text({ t: system }) }), $json.field({ key: "messages", value: { tag: "JArray", items: [message({ role: "user", content: prompt })] } })] };
         const reply = $rt.unwrap(post({ net: net, provider: "anthropic", url: "https://api.anthropic.com/v1/messages", headers: ["content-type: application/json", "x-api-key: " + key, "anthropic-version: 2023-06-01"], body: body }));
         const text = content_text({ body: reply });
@@ -858,11 +869,11 @@ export function generate({ m, process, net, call, system, prompt, max_tokens }) 
           tokens = $rt.int.add($json.int_at({ j: usage, key: "input_tokens" }), $json.int_at({ j: usage, key: "output_tokens" }), $ob18);
         }
         return { tag: "Ok", value: { text: text, model: model_name({ m: m }), tokens: tokens } };
-        break $m107$match;
+        break $m108$match;
       }
-      if ($m107.tag === "OpenRouter") {
-        const key = $m107.key;
-        const model_id = $m107.model_id;
+      if ($m108.tag === "OpenRouter") {
+        const key = $m108.key;
+        const model_id = $m108.model_id;
         const body = { tag: "JObject", fields: [$json.field({ key: "model", value: $json.text({ t: model_id }) }), $json.field({ key: "max_tokens", value: $json.int({ v: max_tokens }) }), $json.field({ key: "messages", value: { tag: "JArray", items: [message({ role: "system", content: system }), message({ role: "user", content: prompt })] } })] };
         const reply = $rt.unwrap(post({ net: net, provider: "openrouter", url: "https://openrouter.ai/api/v1/chat/completions", headers: ["content-type: application/json", "authorization: Bearer " + key, "x-title: onus loop"], body: body }));
         const err = $json.at({ j: reply, key: "error" });
@@ -876,7 +887,7 @@ export function generate({ m, process, net, call, system, prompt, max_tokens }) 
           tokens = $json.int_at({ j: usage, key: "total_tokens" });
         }
         return { tag: "Ok", value: { text: text, model: model_name({ m: m }), tokens: tokens } };
-        break $m107$match;
+        break $m108$match;
       }
       $rt.unreachable();
     }
@@ -887,22 +898,22 @@ export function generate({ m, process, net, call, system, prompt, max_tokens }) 
 }
 
 export function io_error_text({ e }) {
-  const $m125 = e;
-  $m125$match: {
-    if ($m125.tag === "NotFound") {
-      const path = $m125.path;
+  const $m126 = e;
+  $m126$match: {
+    if ($m126.tag === "NotFound") {
+      const path = $m126.path;
       return "not found: " + path;
-      break $m125$match;
+      break $m126$match;
     }
-    if ($m125.tag === "Denied") {
-      const path = $m125.path;
+    if ($m126.tag === "Denied") {
+      const path = $m126.path;
       return "denied: " + path;
-      break $m125$match;
+      break $m126$match;
     }
-    if ($m125.tag === "Other") {
-      const detail = $m125.detail;
+    if ($m126.tag === "Other") {
+      const detail = $m126.detail;
       return detail;
-      break $m125$match;
+      break $m126$match;
     }
     $rt.unreachable();
   }
@@ -913,36 +924,36 @@ export function message({ role, content }) {
 }
 
 export function post({ net, provider, url, headers, body }) {
-  const $m127 = $std_http.post({ net: net, url: url, headers: headers, body: $json.compact({ j: body }), timeout_ms: request_timeout_ms });
-  $m127$match: {
-    if ($m127.tag === "Err") {
-      const error = $m127.error;
+  const $m128 = $std_http.post({ net: net, url: url, headers: headers, body: $json.compact({ j: body }), timeout_ms: request_timeout_ms });
+  $m128$match: {
+    if ($m128.tag === "Err") {
+      const error = $m128.error;
       return { tag: "Err", error: provider + ": " + io_error_text({ e: error }) };
-      break $m127$match;
+      break $m128$match;
     }
-    if ($m127.tag === "Ok") {
-      const value = $m127.value;
+    if ($m128.tag === "Ok") {
+      const value = $m128.value;
       if (value.status < 200 || value.status >= 300) {
         return { tag: "Err", error: provider + ": HTTP " + $std_int.to_text({ x: value.status }) + ": " + value.body };
       }
       return parse_reply({ provider: provider, body: value.body });
-      break $m127$match;
+      break $m128$match;
     }
     $rt.unreachable();
   }
 }
 
 export function parse_reply({ provider, body }) {
-  const $m130 = $json.parse({ t: body });
-  $m130$match: {
-    if ($m130.tag === "None") {
+  const $m131 = $json.parse({ t: body });
+  $m131$match: {
+    if ($m131.tag === "None") {
       return { tag: "Err", error: provider + ": the response is not JSON" };
-      break $m130$match;
+      break $m131$match;
     }
-    if ($m130.tag === "Some") {
-      const value = $m130.value;
+    if ($m131.tag === "Some") {
+      const value = $m131.value;
       return { tag: "Ok", value: value };
-      break $m130$match;
+      break $m131$match;
     }
     $rt.unreachable();
   }
@@ -965,26 +976,26 @@ export function choice_text({ body }) {
     return "";
   }
   const content = $json.at({ j: $json.at({ j: $std_list.get({ xs: choices, i: 0 }), key: "message" }), key: "content" });
-  const $m133 = content;
-  $m133$match: {
-    if ($m133.tag === "JString") {
-      const value = $m133.value;
+  const $m134 = content;
+  $m134$match: {
+    if ($m134.tag === "JString") {
+      const value = $m134.value;
       return value;
-      break $m133$match;
+      break $m134$match;
     }
-    if ($m133.tag === "JArray") {
-      const items = $m133.items;
+    if ($m134.tag === "JArray") {
+      const items = $m134.items;
       let parts = $std_list.builder({  });
       for (const part of items) {
         const [, parts$8] = $std_list.push({ b: parts, x: $json.str_at({ j: part, key: "text" }) });
         parts = parts$8;
       }
       return $std_text.join({ parts: $std_list.finish({ b: parts }), sep: "" });
-      break $m133$match;
+      break $m134$match;
     }
     if (true) {
       return "";
-      break $m133$match;
+      break $m134$match;
     }
     $rt.unreachable();
   }
@@ -996,9 +1007,9 @@ export function empty_table($args) {
 
 export function parse_module({ path, text }) {
   let ctx = $context.new_context({ root: { tag: "None" }, stdlib: { tag: "None" } });
-  const [$r136, ctx$9] = $loader.add_file({ ctx: ctx, path: path, text: text });
+  const [$r137, ctx$9] = $loader.add_file({ ctx: ctx, path: path, text: text });
   ctx = ctx$9;
-  const added = $r136;
+  const added = $r137;
   let module = { tag: "None" };
   if (added.tag === "Some") {
     module = $loader.module_of_file({ ctx: ctx, file: 0 });
@@ -1015,40 +1026,40 @@ export function parse_module({ path, text }) {
 
 export function canonical_text({ path, text }) {
   let ctx = $context.new_context({ root: { tag: "None" }, stdlib: { tag: "None" } });
-  const [$r141, ctx$11] = $loader.add_file({ ctx: ctx, path: path, text: text });
+  const [$r142, ctx$11] = $loader.add_file({ ctx: ctx, path: path, text: text });
   ctx = ctx$11;
-  const added = $r141;
+  const added = $r142;
   if (added.tag === "None") {
     return text;
   }
   const [, ctx$12] = $loader.canonical({ ctx: ctx, file: 0 });
   ctx = ctx$12;
-  const $m142 = $std_map.find({ d: ctx.canonical, key: 0 });
-  $m142$match: {
-    if ($m142.tag === "Some") {
-      const value = $m142.value;
+  const $m143 = $std_map.find({ d: ctx.canonical, key: 0 });
+  $m143$match: {
+    if ($m143.tag === "Some") {
+      const value = $m143.value;
       return value;
-      break $m142$match;
+      break $m143$match;
     }
-    if ($m142.tag === "None") {
+    if ($m143.tag === "None") {
       return text;
-      break $m142$match;
+      break $m143$match;
     }
     $rt.unreachable();
   }
 }
 
 export function extract_code({ answer }) {
-  const $m143 = $std_text.index_of({ t: answer, needle: "```", from: 0 });
-  $m143$match: {
-    if ($m143.tag === "None") {
+  const $m144 = $std_text.index_of({ t: answer, needle: "```", from: 0 });
+  $m144$match: {
+    if ($m144.tag === "None") {
       return $std_text.trim({ t: answer });
-      break $m143$match;
+      break $m144$match;
     }
-    if ($m143.tag === "Some") {
-      const value = $m143.value;
+    if ($m144.tag === "Some") {
+      const value = $m144.value;
       return after_fence({ answer: answer, fence: value });
-      break $m143$match;
+      break $m144$match;
     }
     $rt.unreachable();
   }
@@ -1091,16 +1102,16 @@ export function fenced_body({ answer, start }) {
   if (start < 0 || start > $std_text.count({ t: answer })) {
     return $std_text.trim({ t: answer });
   }
-  const $m144 = $std_text.index_of({ t: answer, needle: "```", from: start });
-  $m144$match: {
-    if ($m144.tag === "None") {
+  const $m145 = $std_text.index_of({ t: answer, needle: "```", from: start });
+  $m145$match: {
+    if ($m145.tag === "None") {
       return $std_text.trim({ t: answer });
-      break $m144$match;
+      break $m145$match;
     }
-    if ($m144.tag === "Some") {
-      const value = $m144.value;
+    if ($m145.tag === "Some") {
+      const value = $m145.value;
       return $std_text.trim({ t: slice_within({ t: answer, from: start, to: value }) });
-      break $m144$match;
+      break $m145$match;
     }
     $rt.unreachable();
   }
@@ -1113,17 +1124,17 @@ export function parse_fragment({ text }) {
 export function fns_of({ m }) {
   let out = $std_list.builder({  });
   for (const item of m.items) {
-    const $m145 = item;
-    $m145$match: {
-      if ($m145.tag === "FnItem") {
-        const decl = $m145.decl;
+    const $m146 = item;
+    $m146$match: {
+      if ($m146.tag === "FnItem") {
+        const decl = $m146.decl;
         const [, out$13] = $std_list.push({ b: out, x: decl });
         out = out$13;
-        break $m145$match;
+        break $m146$match;
       }
       if (true) {
         skip({  });
-        break $m145$match;
+        break $m146$match;
       }
       $rt.unreachable();
     }
@@ -1141,32 +1152,32 @@ export function find_fn({ m, name }) {
 }
 
 export function has_body({ f }) {
-  const $m148 = f.body;
-  $m148$match: {
-    if ($m148.tag === "Some") {
-      const value = $m148.value;
+  const $m149 = f.body;
+  $m149$match: {
+    if ($m149.tag === "Some") {
+      const value = $m149.value;
       return !value.elided;
-      break $m148$match;
+      break $m149$match;
     }
-    if ($m148.tag === "None") {
+    if ($m149.tag === "None") {
       return false;
-      break $m148$match;
+      break $m149$match;
     }
     $rt.unreachable();
   }
 }
 
 export function elide({ f }) {
-  const $m149 = f.body;
-  $m149$match: {
-    if ($m149.tag === "None") {
+  const $m150 = f.body;
+  $m150$match: {
+    if ($m150.tag === "None") {
       return f;
-      break $m149$match;
+      break $m150$match;
     }
-    if ($m149.tag === "Some") {
-      const value = $m149.value;
+    if ($m150.tag === "Some") {
+      const value = $m150.value;
       return { ...f, body: { tag: "Some", value: { stmts: [], elided: true, span: value.span } } };
-      break $m149$match;
+      break $m150$match;
     }
     $rt.unreachable();
   }
@@ -1261,18 +1272,18 @@ export function load_project({ files, root, scope }) {
   let texts = $std_map.dict({  });
   for (const name of scope) {
     const path = module_path({ root: root, name: name });
-    const $m158 = $std_io.read({ files: files, path: path });
-    $m158$match: {
-      if ($m158.tag === "Err") {
-        const error = $m158.error;
+    const $m159 = $std_io.read({ files: files, path: path });
+    $m159$match: {
+      if ($m159.tag === "Err") {
+        const error = $m159.error;
         return { tag: "Err", error: "cannot read module " + name + " at " + path + ": " + io_error_text({ e: error }) };
-        break $m158$match;
+        break $m159$match;
       }
-      if ($m158.tag === "Ok") {
-        const value = $m158.value;
+      if ($m159.tag === "Ok") {
+        const value = $m159.value;
         const [, texts$17] = $std_map.set({ d: texts, key: path, value: value });
         texts = texts$17;
-        break $m158$match;
+        break $m159$match;
       }
       $rt.unreachable();
     }
@@ -1283,28 +1294,28 @@ export function load_project({ files, root, scope }) {
 }
 
 export function text_of({ texts, fallback, path }) {
-  const $m162 = $std_map.find({ d: texts, key: path });
-  $m162$match: {
-    if ($m162.tag === "Some") {
-      const value = $m162.value;
+  const $m163 = $std_map.find({ d: texts, key: path });
+  $m163$match: {
+    if ($m163.tag === "Some") {
+      const value = $m163.value;
       return value;
-      break $m162$match;
+      break $m163$match;
     }
-    if ($m162.tag === "None") {
-      const $m163 = $std_map.find({ d: fallback, key: path });
-      $m163$match: {
-        if ($m163.tag === "Some") {
-          const value = $m163.value;
+    if ($m163.tag === "None") {
+      const $m164 = $std_map.find({ d: fallback, key: path });
+      $m164$match: {
+        if ($m164.tag === "Some") {
+          const value = $m164.value;
           return value;
-          break $m163$match;
+          break $m164$match;
         }
-        if ($m163.tag === "None") {
+        if ($m164.tag === "None") {
           return "";
-          break $m163$match;
+          break $m164$match;
         }
         $rt.unreachable();
       }
-      break $m162$match;
+      break $m163$match;
     }
     $rt.unreachable();
   }
@@ -1314,18 +1325,18 @@ export function check_project({ files, console, process, project, tools, texts, 
   try {
     let ctx = $context.new_context({ root: { tag: "Some", value: project.root }, stdlib: tools.stdlib });
     for (const name of project.scope) {
-      const $m165 = $std_map.find({ d: project.paths, key: name });
-      $m165$match: {
-        if ($m165.tag === "Some") {
-          const value = $m165.value;
-          const [$r166, ctx$19] = $loader.add_file({ ctx: ctx, path: value, text: text_of({ texts: texts, fallback: project.texts, path: value }) });
+      const $m166 = $std_map.find({ d: project.paths, key: name });
+      $m166$match: {
+        if ($m166.tag === "Some") {
+          const value = $m166.value;
+          const [$r167, ctx$19] = $loader.add_file({ ctx: ctx, path: value, text: text_of({ texts: texts, fallback: project.texts, path: value }) });
           ctx = ctx$19;
-          const added = $r166;
-          break $m165$match;
+          const added = $r167;
+          break $m166$match;
         }
-        if ($m165.tag === "None") {
+        if ($m166.tag === "None") {
           skip({  });
-          break $m165$match;
+          break $m166$match;
         }
         $rt.unreachable();
       }
@@ -1334,7 +1345,7 @@ export function check_project({ files, console, process, project, tools, texts, 
     if (tools.budget_ms >= 0) {
       budget = tools.budget_ms;
     }
-    const [, ctx$20] = $check.run_passes({ ctx: ctx, to: 11, files: files, console: console, process: process, vopts: { z3_path: { tag: "None" }, budget_ms: budget, cache_dir: { tag: "None" }, dump_dir: { tag: "None" } } });
+    const [, ctx$20] = $check.run_passes({ ctx: ctx, to: $check.pass_index({ name: "paths" }), files: files, console: console, process: process, vopts: { z3_path: { tag: "None" }, budget_ms: budget, cache_dir: { tag: "None" }, dump_dir: { tag: "None" } } });
     ctx = ctx$20;
     const diagnostics = $std_list.finish({ b: ctx.diagnostics });
     const tab = $loc.line_tables({ ctx: ctx });
@@ -1351,12 +1362,12 @@ export function check_project({ files, console, process, project, tools, texts, 
     let ledger = $std_list.builder({  });
     const clean = $context.clean({ ctx: ctx });
     if (clean) {
-      const $hi171 = ctx.module_count;
-      for (let mid = 0; mid < $hi171; mid++) {
-        const $m172 = $std_map.find({ d: ctx.modules, key: mid });
-        $m172$match: {
-          if ($m172.tag === "Some") {
-            const value = $m172.value;
+      const $hi172 = ctx.module_count;
+      for (let mid = 0; mid < $hi172; mid++) {
+        const $m173 = $std_map.find({ d: ctx.modules, key: mid });
+        $m173$match: {
+          if ($m173.tag === "Some") {
+            const value = $m173.value;
             if (!value.is_std) {
               const doc = $interface.interface_of({ ctx: ctx, mod: mid });
               const [, interfaces$22] = $std_map.set({ d: interfaces, key: value.name, value: doc });
@@ -1366,11 +1377,11 @@ export function check_project({ files, console, process, project, tools, texts, 
                 ledger = ledger$23;
               }
             }
-            break $m172$match;
+            break $m173$match;
           }
-          if ($m172.tag === "None") {
+          if ($m173.tag === "None") {
             skip({  });
-            break $m172$match;
+            break $m173$match;
           }
           $rt.unreachable();
         }
@@ -1402,23 +1413,7 @@ export function check_project({ files, console, process, project, tools, texts, 
 }
 
 export function module_items({ c, name }) {
-  const $m181 = $std_map.find({ d: c.ctx.by_name, key: name });
-  $m181$match: {
-    if ($m181.tag === "None") {
-      return [];
-      break $m181$match;
-    }
-    if ($m181.tag === "Some") {
-      const value = $m181.value;
-      return module_items_of({ c: c, mid: value });
-      break $m181$match;
-    }
-    $rt.unreachable();
-  }
-}
-
-export function module_items_of({ c, mid }) {
-  const $m182 = $std_map.find({ d: c.ctx.modules, key: mid });
+  const $m182 = $std_map.find({ d: c.ctx.by_name, key: name });
   $m182$match: {
     if ($m182.tag === "None") {
       return [];
@@ -1426,24 +1421,40 @@ export function module_items_of({ c, mid }) {
     }
     if ($m182.tag === "Some") {
       const value = $m182.value;
-      return value.tree.items;
+      return module_items_of({ c: c, mid: value });
       break $m182$match;
     }
     $rt.unreachable();
   }
 }
 
-export function module_name_of({ c, mid }) {
+export function module_items_of({ c, mid }) {
   const $m183 = $std_map.find({ d: c.ctx.modules, key: mid });
   $m183$match: {
     if ($m183.tag === "None") {
-      return "";
+      return [];
       break $m183$match;
     }
     if ($m183.tag === "Some") {
       const value = $m183.value;
-      return value.name;
+      return value.tree.items;
       break $m183$match;
+    }
+    $rt.unreachable();
+  }
+}
+
+export function module_name_of({ c, mid }) {
+  const $m184 = $std_map.find({ d: c.ctx.modules, key: mid });
+  $m184$match: {
+    if ($m184.tag === "None") {
+      return "";
+      break $m184$match;
+    }
+    if ($m184.tag === "Some") {
+      const value = $m184.value;
+      return value.name;
+      break $m184$match;
     }
     $rt.unreachable();
   }
@@ -1541,29 +1552,29 @@ export function assemble({ task, baseline, current, targets, ctx_policy, history
     const [, target_texts$25] = $std_list.push({ b: target_texts, x: item_text({ item: { tag: "FnItem", decl: elide({ f: target.decl }) } }) });
     target_texts = target_texts$25;
     for (const item of module_items({ c: baseline, name: target.module_name })) {
-      const $m185 = item;
-      $m185$match: {
-        if ($m185.tag === "ExampleItem") {
-          const decl = $m185.decl;
+      const $m186 = item;
+      $m186$match: {
+        if ($m186.tag === "ExampleItem") {
+          const decl = $m186.decl;
           const text = item_text({ item: item });
           if (decl.name.text === target.name || $std_text.contains({ t: text, needle: target.name + "(" })) {
             const [, target_texts$26] = $std_list.push({ b: target_texts, x: text });
             target_texts = target_texts$26;
           }
-          break $m185$match;
+          break $m186$match;
         }
-        if ($m185.tag === "PropertyItem") {
-          const decl = $m185.decl;
+        if ($m186.tag === "PropertyItem") {
+          const decl = $m186.decl;
           const text = item_text({ item: item });
           if (decl.name.text === target.name || $std_text.contains({ t: text, needle: target.name + "(" })) {
             const [, target_texts$27] = $std_list.push({ b: target_texts, x: text });
             target_texts = target_texts$27;
           }
-          break $m185$match;
+          break $m186$match;
         }
         if (true) {
           skip({  });
-          break $m185$match;
+          break $m186$match;
         }
         $rt.unreachable();
       }
@@ -1571,16 +1582,16 @@ export function assemble({ task, baseline, current, targets, ctx_policy, history
   }
   const target_list = $std_list.finish({ b: target_texts });
   let task_line = task.kind;
-  const $m186 = task.description;
-  $m186$match: {
-    if ($m186.tag === "Some") {
-      const value = $m186.value;
+  const $m187 = task.description;
+  $m187$match: {
+    if ($m187.tag === "Some") {
+      const value = $m187.value;
       task_line = task_line + ": " + value;
-      break $m186$match;
+      break $m187$match;
     }
-    if ($m186.tag === "None") {
+    if ($m187.tag === "None") {
       skip({  });
-      break $m186$match;
+      break $m187$match;
     }
     $rt.unreachable();
   }
@@ -1603,19 +1614,19 @@ export function assemble({ task, baseline, current, targets, ctx_policy, history
     if (!$std_map.contains({ d: seen, key: name })) {
       const [, seen$31] = $std_map.set({ d: seen, key: name, value: true });
       seen = seen$31;
-      const $m187 = $std_map.find({ d: current.ctx.by_name, key: name });
-      $m187$match: {
-        if ($m187.tag === "None") {
+      const $m188 = $std_map.find({ d: current.ctx.by_name, key: name });
+      $m188$match: {
+        if ($m188.tag === "None") {
           skip({  });
-          break $m187$match;
+          break $m188$match;
         }
-        if ($m187.tag === "Some") {
-          const value = $m187.value;
+        if ($m188.tag === "Some") {
+          const value = $m188.value;
           if (!is_std_module({ c: current, mid: value })) {
             const [, iface_texts$32] = $std_list.push({ b: iface_texts, x: $std_text.trim({ t: $interface.interface_text({ ctx: current.ctx, mod: value }) }) });
             iface_texts = iface_texts$32;
           }
-          break $m187$match;
+          break $m188$match;
         }
         $rt.unreachable();
       }
@@ -1639,8 +1650,8 @@ export function assemble({ task, baseline, current, targets, ctx_policy, history
       }
     }
     let bodies = $std_list.builder({  });
-    const $hi188 = current.ctx.module_count;
-    for (let mid = 0; mid < $hi188; mid++) {
+    const $hi189 = current.ctx.module_count;
+    for (let mid = 0; mid < $hi189; mid++) {
       const mname = module_name_of({ c: current, mid: mid });
       if ($std_map.contains({ d: chosen, key: mname })) {
         for (const f of fns_of_items({ items: module_items_of({ c: current, mid: mid }) })) {
@@ -1679,39 +1690,39 @@ export function assemble({ task, baseline, current, targets, ctx_policy, history
       let bodies = $std_list.builder({  });
       for (const name of last.failing) {
         const short = last_segment({ name: name });
-        const $hi190 = baseline.ctx.module_count;
-        for (let mid = 0; mid < $hi190; mid++) {
+        const $hi191 = baseline.ctx.module_count;
+        for (let mid = 0; mid < $hi191; mid++) {
           const mname = module_name_of({ c: baseline, mid: mid });
           for (const item of module_items_of({ c: baseline, mid: mid })) {
-            const $m191 = item;
-            $m191$match: {
-              if ($m191.tag === "ExampleItem") {
-                const decl = $m191.decl;
+            const $m192 = item;
+            $m192$match: {
+              if ($m192.tag === "ExampleItem") {
+                const decl = $m192.decl;
                 if (mname + "." + decl.name.text === name) {
                   const [, bodies$41] = $std_list.push({ b: bodies, x: item_text({ item: item }) });
                   bodies = bodies$41;
                 }
-                break $m191$match;
+                break $m192$match;
               }
-              if ($m191.tag === "PropertyItem") {
-                const decl = $m191.decl;
+              if ($m192.tag === "PropertyItem") {
+                const decl = $m192.decl;
                 if (mname + "." + decl.name.text === name) {
                   const [, bodies$42] = $std_list.push({ b: bodies, x: item_text({ item: item }) });
                   bodies = bodies$42;
                 }
-                break $m191$match;
+                break $m192$match;
               }
-              if ($m191.tag === "ImplItem") {
-                const decl = $m191.decl;
+              if ($m192.tag === "ImplItem") {
+                const decl = $m192.decl;
                 if ($std_text.starts_with({ t: short, prefix: "law " })) {
                   const [, bodies$43] = $std_list.push({ b: bodies, x: item_text({ item: item }) });
                   bodies = bodies$43;
                 }
-                break $m191$match;
+                break $m192$match;
               }
               if (true) {
                 skip({  });
-                break $m191$match;
+                break $m192$match;
               }
               $rt.unreachable();
             }
@@ -1750,17 +1761,17 @@ export function assemble({ task, baseline, current, targets, ctx_policy, history
     sections = sections$47;
   }
   let counterexamples = $std_list.builder({  });
-  const $m192 = task.counterexample;
-  $m192$match: {
-    if ($m192.tag === "Some") {
-      const value = $m192.value;
+  const $m193 = task.counterexample;
+  $m193$match: {
+    if ($m193.tag === "Some") {
+      const value = $m193.value;
       const [, counterexamples$48] = $std_list.push({ b: counterexamples, x: "from " + origin_kind({ task: task }) + against_text({ task: task }) + ": " + $json.compact({ j: value }) });
       counterexamples = counterexamples$48;
-      break $m192$match;
+      break $m193$match;
     }
-    if ($m192.tag === "None") {
+    if ($m193.tag === "None") {
       skip({  });
-      break $m192$match;
+      break $m193$match;
     }
     $rt.unreachable();
   }
@@ -1789,17 +1800,17 @@ export function assemble({ task, baseline, current, targets, ctx_policy, history
   let std_texts = $std_list.builder({  });
   for (const module_name of ["std.text", "std.list", "std.grid", "std.map", "std.bytes", "std.io", "std.sql", "std.float", "std.int"]) {
     if (mentions({ mention: mention, module_name: module_name })) {
-      const $m193 = $std_map.find({ d: current.ctx.by_name, key: module_name });
-      $m193$match: {
-        if ($m193.tag === "Some") {
-          const value = $m193.value;
+      const $m194 = $std_map.find({ d: current.ctx.by_name, key: module_name });
+      $m194$match: {
+        if ($m194.tag === "Some") {
+          const value = $m194.value;
           const [, std_texts$51] = $std_list.push({ b: std_texts, x: $std_text.trim({ t: $interface.interface_text({ ctx: current.ctx, mod: value }) }) });
           std_texts = std_texts$51;
-          break $m193$match;
+          break $m194$match;
         }
-        if ($m193.tag === "None") {
+        if ($m194.tag === "None") {
           skip({  });
-          break $m193$match;
+          break $m194$match;
         }
         $rt.unreachable();
       }
@@ -1823,23 +1834,7 @@ export function assemble({ task, baseline, current, targets, ctx_policy, history
 }
 
 export function imports_of({ c, name }) {
-  const $m195 = $std_map.find({ d: c.ctx.by_name, key: name });
-  $m195$match: {
-    if ($m195.tag === "None") {
-      return [];
-      break $m195$match;
-    }
-    if ($m195.tag === "Some") {
-      const value = $m195.value;
-      return imports_of_module({ c: c, mid: value });
-      break $m195$match;
-    }
-    $rt.unreachable();
-  }
-}
-
-export function imports_of_module({ c, mid }) {
-  const $m196 = $std_map.find({ d: c.ctx.modules, key: mid });
+  const $m196 = $std_map.find({ d: c.ctx.by_name, key: name });
   $m196$match: {
     if ($m196.tag === "None") {
       return [];
@@ -1847,77 +1842,93 @@ export function imports_of_module({ c, mid }) {
     }
     if ($m196.tag === "Some") {
       const value = $m196.value;
-      let out = $std_list.builder({  });
-      for (const imp of value.imports) {
-        const [, out$55] = $std_list.push({ b: out, x: module_name_of({ c: c, mid: imp.mod }) });
-        out = out$55;
-      }
-      return $std_list.finish({ b: out });
+      return imports_of_module({ c: c, mid: value });
       break $m196$match;
     }
     $rt.unreachable();
   }
 }
 
-export function origin_kind({ task }) {
-  const $m197 = task.origin;
+export function imports_of_module({ c, mid }) {
+  const $m197 = $std_map.find({ d: c.ctx.modules, key: mid });
   $m197$match: {
-    if ($m197.tag === "Some") {
-      const value = $m197.value;
-      return value.kind;
+    if ($m197.tag === "None") {
+      return [];
       break $m197$match;
     }
-    if ($m197.tag === "None") {
-      return "the task";
+    if ($m197.tag === "Some") {
+      const value = $m197.value;
+      let out = $std_list.builder({  });
+      for (const imp of value.imports) {
+        const [, out$55] = $std_list.push({ b: out, x: module_name_of({ c: c, mid: imp.mod }) });
+        out = out$55;
+      }
+      return $std_list.finish({ b: out });
       break $m197$match;
+    }
+    $rt.unreachable();
+  }
+}
+
+export function origin_kind({ task }) {
+  const $m198 = task.origin;
+  $m198$match: {
+    if ($m198.tag === "Some") {
+      const value = $m198.value;
+      return value.kind;
+      break $m198$match;
+    }
+    if ($m198.tag === "None") {
+      return "the task";
+      break $m198$match;
     }
     $rt.unreachable();
   }
 }
 
 export function against_text({ task }) {
-  const $m198 = task.target;
-  $m198$match: {
-    if ($m198.tag === "None") {
+  const $m199 = task.target;
+  $m199$match: {
+    if ($m199.tag === "None") {
       return "";
-      break $m198$match;
+      break $m199$match;
     }
-    if ($m198.tag === "Some") {
-      const value = $m198.value;
+    if ($m199.tag === "Some") {
+      const value = $m199.value;
       return obligation_text({ o: value.obligation });
-      break $m198$match;
+      break $m199$match;
     }
     $rt.unreachable();
   }
 }
 
 export function obligation_text({ o }) {
-  const $m199 = o;
-  $m199$match: {
-    if ($m199.tag === "Some") {
-      const value = $m199.value;
+  const $m200 = o;
+  $m200$match: {
+    if ($m200.tag === "Some") {
+      const value = $m200.value;
       return " against `" + value + "`";
-      break $m199$match;
+      break $m200$match;
     }
-    if ($m199.tag === "None") {
+    if ($m200.tag === "None") {
       return "";
-      break $m199$match;
+      break $m200$match;
     }
     $rt.unreachable();
   }
 }
 
 export function is_std_module({ c, mid }) {
-  const $m200 = $std_map.find({ d: c.ctx.modules, key: mid });
-  $m200$match: {
-    if ($m200.tag === "Some") {
-      const value = $m200.value;
+  const $m201 = $std_map.find({ d: c.ctx.modules, key: mid });
+  $m201$match: {
+    if ($m201.tag === "Some") {
+      const value = $m201.value;
       return value.is_std;
-      break $m200$match;
+      break $m201$match;
     }
-    if ($m200.tag === "None") {
+    if ($m201.tag === "None") {
       return true;
-      break $m200$match;
+      break $m201$match;
     }
     $rt.unreachable();
   }
@@ -1926,17 +1937,17 @@ export function is_std_module({ c, mid }) {
 export function fns_of_items({ items }) {
   let out = $std_list.builder({  });
   for (const item of items) {
-    const $m201 = item;
-    $m201$match: {
-      if ($m201.tag === "FnItem") {
-        const decl = $m201.decl;
+    const $m202 = item;
+    $m202$match: {
+      if ($m202.tag === "FnItem") {
+        const decl = $m202.decl;
         const [, out$56] = $std_list.push({ b: out, x: decl });
         out = out$56;
-        break $m201$match;
+        break $m202$match;
       }
       if (true) {
         skip({  });
-        break $m201$match;
+        break $m202$match;
       }
       $rt.unreachable();
     }
@@ -1981,17 +1992,17 @@ export function proposal_json({ kind, def, current, proposed, counterexample, it
   evidence = evidence$59;
   const [, evidence$60] = $std_list.push({ b: evidence, x: $json.field({ key: "iterations", value: $json.int({ v: iterations }) }) });
   evidence = evidence$60;
-  const $m203 = finding;
-  $m203$match: {
-    if ($m203.tag === "Some") {
-      const value = $m203.value;
+  const $m204 = finding;
+  $m204$match: {
+    if ($m204.tag === "Some") {
+      const value = $m204.value;
       const [, evidence$61] = $std_list.push({ b: evidence, x: $json.field({ key: "finding", value: $json.text({ t: value }) }) });
       evidence = evidence$61;
-      break $m203$match;
+      break $m204$match;
     }
-    if ($m203.tag === "None") {
+    if ($m204.tag === "None") {
       skip({  });
-      break $m203$match;
+      break $m204$match;
     }
     $rt.unreachable();
   }
@@ -2043,34 +2054,34 @@ export function ledger_delta({ before, after }) {
   }
   let out = $std_list.builder({  });
   for (const k of $std_map.keys({ d: b })) {
-    const $m207 = $std_map.find({ d: b, key: k });
-    $m207$match: {
-      if ($m207.tag === "None") {
+    const $m208 = $std_map.find({ d: b, key: k });
+    $m208$match: {
+      if ($m208.tag === "None") {
         skip({  });
-        break $m207$match;
+        break $m208$match;
       }
-      if ($m207.tag === "Some") {
-        const value = $m207.value;
+      if ($m208.tag === "Some") {
+        const value = $m208.value;
         const [, out$67] = delta_of({ a: a, r: value, out: out });
         out = out$67;
-        break $m207$match;
+        break $m208$match;
       }
       $rt.unreachable();
     }
   }
   for (const k of $std_map.keys({ d: a })) {
     if (!$std_map.contains({ d: b, key: k })) {
-      const $m208 = $std_map.find({ d: a, key: k });
-      $m208$match: {
-        if ($m208.tag === "None") {
+      const $m209 = $std_map.find({ d: a, key: k });
+      $m209$match: {
+        if ($m209.tag === "None") {
           skip({  });
-          break $m208$match;
+          break $m209$match;
         }
-        if ($m208.tag === "Some") {
-          const value = $m208.value;
+        if ($m209.tag === "Some") {
+          const value = $m209.value;
           const [, out$68] = $std_list.push({ b: out, x: delta_json({ r: value, before: { tag: "Some", value: value.status }, after: { tag: "None" } }) });
           out = out$68;
-          break $m208$match;
+          break $m209$match;
         }
         $rt.unreachable();
       }
@@ -2080,20 +2091,20 @@ export function ledger_delta({ before, after }) {
 }
 
 export function delta_of({ a, r, out }) {
-  const $m211 = $std_map.find({ d: a, key: row_key({ r: r }) });
-  $m211$match: {
-    if ($m211.tag === "None") {
+  const $m212 = $std_map.find({ d: a, key: row_key({ r: r }) });
+  $m212$match: {
+    if ($m212.tag === "None") {
       const [, out$69] = $std_list.push({ b: out, x: delta_json({ r: r, before: { tag: "None" }, after: { tag: "Some", value: r.status } }) });
       out = out$69;
-      break $m211$match;
+      break $m212$match;
     }
-    if ($m211.tag === "Some") {
-      const value = $m211.value;
+    if ($m212.tag === "Some") {
+      const value = $m212.value;
       if (value.status !== r.status) {
         const [, out$70] = $std_list.push({ b: out, x: delta_json({ r: r, before: { tag: "Some", value: value.status }, after: { tag: "Some", value: r.status } }) });
         out = out$70;
       }
-      break $m211$match;
+      break $m212$match;
     }
     $rt.unreachable();
   }
@@ -2104,17 +2115,17 @@ export function delta_of({ a, r, out }) {
 export function interface_diffs({ scope, before, after }) {
   let out = $std_list.builder({  });
   for (const name of scope) {
-    const $m216 = diff_pair({ a: $std_map.find({ d: before.interfaces, key: name }), b: $std_map.find({ d: after.interfaces, key: name }) });
-    $m216$match: {
-      if ($m216.tag === "Some") {
-        const value = $m216.value;
+    const $m217 = diff_pair({ a: $std_map.find({ d: before.interfaces, key: name }), b: $std_map.find({ d: after.interfaces, key: name }) });
+    $m217$match: {
+      if ($m217.tag === "Some") {
+        const value = $m217.value;
         const [, out$71] = $std_list.push({ b: out, x: value });
         out = out$71;
-        break $m216$match;
+        break $m217$match;
       }
-      if ($m216.tag === "None") {
+      if ($m217.tag === "None") {
         skip({  });
-        break $m216$match;
+        break $m217$match;
       }
       $rt.unreachable();
     }
@@ -2123,36 +2134,36 @@ export function interface_diffs({ scope, before, after }) {
 }
 
 export function diff_pair({ a, b }) {
-  const $m217 = a;
-  $m217$match: {
-    if ($m217.tag === "None") {
+  const $m218 = a;
+  $m218$match: {
+    if ($m218.tag === "None") {
       return { tag: "None" };
-      break $m217$match;
+      break $m218$match;
     }
-    if ($m217.tag === "Some") {
-      const value = $m217.value;
+    if ($m218.tag === "Some") {
+      const value = $m218.value;
       return diff_with({ before_doc: value, b: b });
-      break $m217$match;
+      break $m218$match;
     }
     $rt.unreachable();
   }
 }
 
 export function diff_with({ before_doc, b }) {
-  const $m219 = b;
-  $m219$match: {
-    if ($m219.tag === "None") {
+  const $m220 = b;
+  $m220$match: {
+    if ($m220.tag === "None") {
       return { tag: "None" };
-      break $m219$match;
+      break $m220$match;
     }
-    if ($m219.tag === "Some") {
-      const value = $m219.value;
+    if ($m220.tag === "Some") {
+      const value = $m220.value;
       const d = $idiff.interface_diff({ before: before_doc, after: value });
       if ($std_list.len({ xs: d.added }) > 0 || $std_list.len({ xs: d.removed }) > 0 || $std_list.len({ xs: d.changed }) > 0) {
         return { tag: "Some", value: $idiff.diff_json({ d: d }) };
       }
       return { tag: "None" };
-      break $m219$match;
+      break $m220$match;
     }
     $rt.unreachable();
   }
@@ -2171,16 +2182,16 @@ export function def_or_question({ d }) {
 }
 
 export function audit({ baseline, final }) {
-  const $m224 = final;
-  $m224$match: {
-    if ($m224.tag === "None") {
+  const $m225 = final;
+  $m225$match: {
+    if ($m225.tag === "None") {
       return [];
-      break $m224$match;
+      break $m225$match;
     }
-    if ($m224.tag === "Some") {
-      const value = $m224.value;
+    if ($m225.tag === "Some") {
+      const value = $m225.value;
       return audit_of({ baseline: baseline, final: value });
-      break $m224$match;
+      break $m225$match;
     }
     $rt.unreachable();
   }
@@ -2199,39 +2210,44 @@ export function audit_of({ baseline, final }) {
           const o = $json.at({ j: d, key: "obligation" });
           ob = " (" + $json.str_at({ j: o, key: "kind" }) + " " + $json.str_at({ j: o, key: "text" }) + ")";
         }
-        const [, out$73] = $std_list.push({ b: out, x: { finding: "obligation_regressed", detail: $json.str_at({ j: d, key: "code" }) + " " + $json.str_at({ j: d, key: "title" }) + ob + " in " + def_or_question({ d: d }) + ": the interfaces were sufficient to check the old body but not to reconstruct it" } });
-        out = out$73;
+        if ($json.str_at({ j: d, key: "code" }) === "E0115") {
+          const [, out$73] = $std_list.push({ b: out, x: { finding: "not_reconstructed", detail: "no usable body came back for " + def_or_question({ d: d }) + " within the budget" } });
+          out = out$73;
+        } else {
+          const [, out$74] = $std_list.push({ b: out, x: { finding: "obligation_regressed", detail: $json.str_at({ j: d, key: "code" }) + " " + $json.str_at({ j: d, key: "title" }) + ob + " in " + def_or_question({ d: d }) + ": the interfaces were sufficient to check the old body but not to reconstruct it" } });
+          out = out$74;
+        }
       }
     }
     return $std_list.finish({ b: out });
   }
   let after = $std_map.dict({  });
   for (const r of final.ledger) {
-    const [, after$74] = $std_map.set({ d: after, key: row_key({ r: r }), value: r.status });
-    after = after$74;
+    const [, after$75] = $std_map.set({ d: after, key: row_key({ r: r }), value: r.status });
+    after = after$75;
   }
   for (const r of baseline.ledger) {
     if (r.status === "proved" || r.status === "checked") {
       const now = or_empty({ o: $std_map.find({ d: after, key: row_key({ r: r }) }) });
       if (now === "failed" || now === "unprovable" || r.status === "proved" && now === "checked") {
-        const [, out$75] = $std_list.push({ b: out, x: { finding: "obligation_regressed", detail: r.kind + " " + r.text + " in " + r.def + ": " + r.status + " on the old body, " + now + " on the regenerated one; usually a missing example or invariant" } });
-        out = out$75;
+        const [, out$76] = $std_list.push({ b: out, x: { finding: "obligation_regressed", detail: r.kind + " " + r.text + " in " + r.def + ": " + r.status + " on the old body, " + now + " on the regenerated one; usually a missing example or invariant" } });
+        out = out$76;
       }
     }
   }
-  const $m228 = baseline.tests;
-  $m228$match: {
-    if ($m228.tag === "None") {
+  const $m230 = baseline.tests;
+  $m230$match: {
+    if ($m230.tag === "None") {
       skip({  });
-      break $m228$match;
+      break $m230$match;
     }
-    if ($m228.tag === "Some") {
-      const value = $m228.value;
+    if ($m230.tag === "Some") {
+      const value = $m230.value;
       for (const f of test_regressions({ before: value, after: final.tests })) {
-        const [, out$76] = $std_list.push({ b: out, x: f });
-        out = out$76;
+        const [, out$77] = $std_list.push({ b: out, x: f });
+        out = out$77;
       }
-      break $m228$match;
+      break $m230$match;
     }
     $rt.unreachable();
   }
@@ -2239,39 +2255,39 @@ export function audit_of({ baseline, final }) {
 }
 
 export function test_regressions({ before, after }) {
-  const $m229 = after;
-  $m229$match: {
-    if ($m229.tag === "None") {
+  const $m231 = after;
+  $m231$match: {
+    if ($m231.tag === "None") {
       return [];
-      break $m229$match;
+      break $m231$match;
     }
-    if ($m229.tag === "Some") {
-      const value = $m229.value;
+    if ($m231.tag === "Some") {
+      const value = $m231.value;
       let out = $std_list.builder({  });
       for (const name of $std_map.keys({ d: before })) {
         if (test_passed({ tests: before, name: name }) && $std_map.contains({ d: value, key: name }) && !test_passed({ tests: value, name: name })) {
-          const [, out$77] = $std_list.push({ b: out, x: { finding: "example_failed", detail: name + " passes on the old body and fails on the regenerated one: something the old body did that no claim required" } });
-          out = out$77;
+          const [, out$78] = $std_list.push({ b: out, x: { finding: "example_failed", detail: name + " passes on the old body and fails on the regenerated one: something the old body did that no claim required" } });
+          out = out$78;
         }
       }
       return $std_list.finish({ b: out });
-      break $m229$match;
+      break $m231$match;
     }
     $rt.unreachable();
   }
 }
 
 export function test_passed({ tests, name }) {
-  const $m231 = $std_map.find({ d: tests, key: name });
-  $m231$match: {
-    if ($m231.tag === "Some") {
-      const value = $m231.value;
+  const $m233 = $std_map.find({ d: tests, key: name });
+  $m233$match: {
+    if ($m233.tag === "Some") {
+      const value = $m233.value;
       return value;
-      break $m231$match;
+      break $m233$match;
     }
-    if ($m231.tag === "None") {
+    if ($m233.tag === "None") {
       return false;
-      break $m231$match;
+      break $m233$match;
     }
     $rt.unreachable();
   }
@@ -2284,27 +2300,27 @@ export function proposals_from_audit({ findings, target, iterations }) {
     if (f.finding === "example_failed") {
       kind = "add_claim";
     }
-    const [, out$78] = $std_list.push({ b: out, x: proposal_json({ kind: kind, def: target, current: { tag: "None" }, proposed: { tag: "None" }, counterexample: { tag: "JNull" }, iterations: iterations, finding: { tag: "Some", value: f.finding }, rationale: f.detail }) });
-    out = out$78;
+    const [, out$79] = $std_list.push({ b: out, x: proposal_json({ kind: kind, def: target, current: { tag: "None" }, proposed: { tag: "None" }, counterexample: { tag: "JNull" }, iterations: iterations, finding: { tag: "Some", value: f.finding }, rationale: f.detail }) });
+    out = out$79;
   }
   return $std_list.finish({ b: out });
 }
 
 export function target_body_spans({ c, targets }) {
   let out = $std_map.dict({  });
-  const $hi236 = c.ctx.module_count;
-  for (let mid = 0; mid < $hi236; mid++) {
-    const $m237 = $std_map.find({ d: c.ctx.modules, key: mid });
-    $m237$match: {
-      if ($m237.tag === "None") {
+  const $hi238 = c.ctx.module_count;
+  for (let mid = 0; mid < $hi238; mid++) {
+    const $m239 = $std_map.find({ d: c.ctx.modules, key: mid });
+    $m239$match: {
+      if ($m239.tag === "None") {
         skip({  });
-        break $m237$match;
+        break $m239$match;
       }
-      if ($m237.tag === "Some") {
-        const value = $m237.value;
-        const [, out$79] = body_spans_of({ c: c, m: value, targets: targets, out: out });
-        out = out$79;
-        break $m237$match;
+      if ($m239.tag === "Some") {
+        const value = $m239.value;
+        const [, out$80] = body_spans_of({ c: c, m: value, targets: targets, out: out });
+        out = out$80;
+        break $m239$match;
       }
       $rt.unreachable();
     }
@@ -2316,17 +2332,17 @@ export function body_spans_of({ c, m, targets, out }) {
   const path = file_path_of({ c: c, file: m.file });
   for (const f of fns_of({ m: m.tree })) {
     if (is_target({ targets: targets, module_name: m.name, name: f.name.text })) {
-      const $m238 = f.body;
-      $m238$match: {
-        if ($m238.tag === "Some") {
-          const value = $m238.value;
-          const [, out$80] = $std_map.set({ d: out, key: path, value: $std_list.append({ xs: or_list({ o: $std_map.find({ d: out, key: path }) }), x: value.span }) });
-          out = out$80;
-          break $m238$match;
+      const $m240 = f.body;
+      $m240$match: {
+        if ($m240.tag === "Some") {
+          const value = $m240.value;
+          const [, out$81] = $std_map.set({ d: out, key: path, value: $std_list.append({ xs: or_list({ o: $std_map.find({ d: out, key: path }) }), x: value.span }) });
+          out = out$81;
+          break $m240$match;
         }
-        if ($m238.tag === "None") {
+        if ($m240.tag === "None") {
           skip({  });
-          break $m238$match;
+          break $m240$match;
         }
         $rt.unreachable();
       }
@@ -2363,51 +2379,51 @@ export function select_targets({ task, project, baseline, texts }) {
   for (const name of project.scope) {
     const path = or_empty({ o: $std_map.find({ d: project.paths, key: name }) });
     const text = text_of({ texts: texts, fallback: project.texts, path: path });
-    const $m240 = parse_module({ path: path, text: text }).module;
-    $m240$match: {
-      if ($m240.tag === "None") {
+    const $m242 = parse_module({ path: path, text: text }).module;
+    $m242$match: {
+      if ($m242.tag === "None") {
         return { tag: "Err", error: path + " does not parse" };
-        break $m240$match;
+        break $m242$match;
       }
-      if ($m240.tag === "Some") {
-        const value = $m240.value;
+      if ($m242.tag === "Some") {
+        const value = $m242.value;
         for (const f of fns_of({ m: value })) {
-          const [, decls$81] = $std_map.set({ d: decls, key: name + "." + f.name.text, value: { fn_decl: f, module_name: name, path: path } });
-          decls = decls$81;
+          const [, decls$82] = $std_map.set({ d: decls, key: name + "." + f.name.text, value: { fn_decl: f, module_name: name, path: path } });
+          decls = decls$82;
         }
-        break $m240$match;
+        break $m242$match;
       }
       $rt.unreachable();
     }
   }
   if (task.kind === "implement" || task.kind === "repair") {
     let def = "";
-    const $m243 = task.target;
-    $m243$match: {
-      if ($m243.tag === "Some") {
-        const value = $m243.value;
+    const $m245 = task.target;
+    $m245$match: {
+      if ($m245.tag === "Some") {
+        const value = $m245.value;
         def = value.def;
-        break $m243$match;
+        break $m245$match;
       }
-      if ($m243.tag === "None") {
+      if ($m245.tag === "None") {
         skip({  });
-        break $m243$match;
+        break $m245$match;
       }
       $rt.unreachable();
     }
-    const $m244 = $std_map.find({ d: decls, key: def });
-    $m244$match: {
-      if ($m244.tag === "None") {
+    const $m246 = $std_map.find({ d: decls, key: def });
+    $m246$match: {
+      if ($m246.tag === "None") {
         return { tag: "Err", error: "target " + def + " is not a function in scope" };
-        break $m244$match;
+        break $m246$match;
       }
-      if ($m244.tag === "Some") {
-        const value = $m244.value;
+      if ($m246.tag === "Some") {
+        const value = $m246.value;
         if (task.kind === "repair" && !has_body({ f: value.fn_decl })) {
           return { tag: "Err", error: "target " + def + " has no body to repair" };
         }
         return { tag: "Ok", value: [info({ d: value })] };
-        break $m244$match;
+        break $m246$match;
       }
       $rt.unreachable();
     }
@@ -2416,8 +2432,8 @@ export function select_targets({ task, project, baseline, texts }) {
   if (task.kind === "interface_change") {
     for (const d of $std_map.values({ d: decls })) {
       if (has_body({ f: d.fn_decl }) && named_in({ diagnostics: baseline.json, name: d.fn_decl.name.text, path: d.path })) {
-        const [, out$82] = $std_list.push({ b: out, x: info({ d: d }) });
-        out = out$82;
+        const [, out$83] = $std_list.push({ b: out, x: info({ d: d }) });
+        out = out$83;
       }
     }
     return { tag: "Ok", value: $std_list.finish({ b: out }) };
@@ -2425,8 +2441,8 @@ export function select_targets({ task, project, baseline, texts }) {
   if (task.kind === "regenerate") {
     for (const d of $std_map.values({ d: decls })) {
       if (has_body({ f: d.fn_decl })) {
-        const [, out$83] = $std_list.push({ b: out, x: info({ d: d }) });
-        out = out$83;
+        const [, out$84] = $std_list.push({ b: out, x: info({ d: d }) });
+        out = out$84;
       }
     }
     return { tag: "Ok", value: $std_list.finish({ b: out }) };
@@ -2453,8 +2469,8 @@ export function syntax_notes({ fragment }) {
       const before = slice_within({ t: fragment.text, from: 0, to: d.span.start });
       const line = $std_list.len({ xs: $std_text.split({ t: before, sep: "\n" }) });
       if (!$std_map.contains({ d: seen_lines, key: line })) {
-        const [, seen_lines$84] = $std_map.set({ d: seen_lines, key: line, value: true });
-        seen_lines = seen_lines$84;
+        const [, seen_lines$85] = $std_map.set({ d: seen_lines, key: line, value: true });
+        seen_lines = seen_lines$85;
         let text = "";
         if (line >= 1 && line <= $std_list.len({ xs: lines })) {
           text = $std_text.trim({ t: $std_list.get({ xs: lines, i: $rt.int.sub(line, 1, $ob31) }) });
@@ -2479,8 +2495,8 @@ export function syntax_notes({ fragment }) {
         if ($std_list.len({ xs: legal_list }) > 0) {
           admits = ". A line here may start with: " + $std_text.join({ parts: legal_list, sep: " " });
         }
-        const [, out$85] = $std_list.push({ b: out, x: "line " + $std_int.to_text({ x: $rt.int.sub(line, 2, $ob33) }) + ": `" + text + "` — " + d.code + " " + $codes.title({ code: d.code }) + context_text + admits });
-        out = out$85;
+        const [, out$86] = $std_list.push({ b: out, x: "line " + $std_int.to_text({ x: $rt.int.sub(line, 2, $ob33) }) + ": `" + text + "` — " + d.code + " " + $codes.title({ code: d.code }) + context_text + admits });
+        out = out$86;
       }
     }
   }
@@ -2497,8 +2513,8 @@ export function legal_starts({ text, line_start }) {
   for (const k of $std_map.keys({ d: $parser.legal_tokens_at({ prefix: $parser.prefix_tokens({ toks: lexed.tokens }), offset: line_start }) })) {
     const name = $tokens.decoder_name_of({ kind: k });
     if (name !== "newline" && name !== "eof") {
-      const [, legal$86] = $std_list.push({ b: legal, x: name });
-      legal = legal$86;
+      const [, legal$87] = $std_list.push({ b: legal, x: name });
+      legal = legal$87;
     }
   }
   return sorted_texts({ xs: $std_list.finish({ b: legal }) });
@@ -2507,17 +2523,17 @@ export function legal_starts({ text, line_start }) {
 export function best_bodies({ texts, targets }) {
   let fields = $std_list.builder({  });
   for (const target of targets) {
-    const $m251 = body_text_of({ path: target.path, text: $std_map.find({ d: texts, key: target.path }), name: target.name });
-    $m251$match: {
-      if ($m251.tag === "Some") {
-        const value = $m251.value;
-        const [, fields$87] = $std_list.push({ b: fields, x: $json.field({ key: target.module_name + "." + target.name, value: $json.text({ t: value }) }) });
-        fields = fields$87;
-        break $m251$match;
+    const $m253 = body_text_of({ path: target.path, text: $std_map.find({ d: texts, key: target.path }), name: target.name });
+    $m253$match: {
+      if ($m253.tag === "Some") {
+        const value = $m253.value;
+        const [, fields$88] = $std_list.push({ b: fields, x: $json.field({ key: target.module_name + "." + target.name, value: $json.text({ t: value }) }) });
+        fields = fields$88;
+        break $m253$match;
       }
-      if ($m251.tag === "None") {
+      if ($m253.tag === "None") {
         skip({  });
-        break $m251$match;
+        break $m253$match;
       }
       $rt.unreachable();
     }
@@ -2526,23 +2542,7 @@ export function best_bodies({ texts, targets }) {
 }
 
 export function body_text_of({ path, text, name }) {
-  const $m253 = text;
-  $m253$match: {
-    if ($m253.tag === "None") {
-      return { tag: "None" };
-      break $m253$match;
-    }
-    if ($m253.tag === "Some") {
-      const value = $m253.value;
-      return fn_text({ m: parse_module({ path: path, text: value }).module, name: name });
-      break $m253$match;
-    }
-    $rt.unreachable();
-  }
-}
-
-export function fn_text({ m, name }) {
-  const $m255 = m;
+  const $m255 = text;
   $m255$match: {
     if ($m255.tag === "None") {
       return { tag: "None" };
@@ -2550,15 +2550,15 @@ export function fn_text({ m, name }) {
     }
     if ($m255.tag === "Some") {
       const value = $m255.value;
-      return fn_item_text({ f: find_fn({ m: value, name: name }) });
+      return fn_text({ m: parse_module({ path: path, text: value }).module, name: name });
       break $m255$match;
     }
     $rt.unreachable();
   }
 }
 
-export function fn_item_text({ f }) {
-  const $m257 = f;
+export function fn_text({ m, name }) {
+  const $m257 = m;
   $m257$match: {
     if ($m257.tag === "None") {
       return { tag: "None" };
@@ -2566,8 +2566,24 @@ export function fn_item_text({ f }) {
     }
     if ($m257.tag === "Some") {
       const value = $m257.value;
-      return { tag: "Some", value: item_text({ item: { tag: "FnItem", decl: value } }) };
+      return fn_item_text({ f: find_fn({ m: value, name: name }) });
       break $m257$match;
+    }
+    $rt.unreachable();
+  }
+}
+
+export function fn_item_text({ f }) {
+  const $m259 = f;
+  $m259$match: {
+    if ($m259.tag === "None") {
+      return { tag: "None" };
+      break $m259$match;
+    }
+    if ($m259.tag === "Some") {
+      const value = $m259.value;
+      return { tag: "Some", value: item_text({ item: { tag: "FnItem", decl: value } }) };
+      break $m259$match;
     }
     $rt.unreachable();
   }
@@ -2616,16 +2632,16 @@ export function signature_proposal({ target, proposed, iteration }) {
 }
 
 export function parse_proposal({ answer, fallback_def }) {
-  const $m265 = $std_text.index_of({ t: answer, needle: "{", from: 0 });
-  $m265$match: {
-    if ($m265.tag === "None") {
+  const $m267 = $std_text.index_of({ t: answer, needle: "{", from: 0 });
+  $m267$match: {
+    if ($m267.tag === "None") {
       return { tag: "None" };
-      break $m265$match;
+      break $m267$match;
     }
-    if ($m265.tag === "Some") {
-      const value = $m265.value;
+    if ($m267.tag === "Some") {
+      const value = $m267.value;
       return proposal_between({ answer: answer, open: value, close: last_close({ answer: answer, from: value }), fallback_def: fallback_def });
-      break $m265$match;
+      break $m267$match;
     }
     $rt.unreachable();
   }
@@ -2650,16 +2666,16 @@ export function proposal_between({ answer, open, close, fallback_def }) {
   if (close < open) {
     return { tag: "None" };
   }
-  const $m268 = $json.parse({ t: slice_within({ t: answer, from: open, to: $rt.int.add(close, 1, $ob43) }) });
-  $m268$match: {
-    if ($m268.tag === "None") {
+  const $m270 = $json.parse({ t: slice_within({ t: answer, from: open, to: $rt.int.add(close, 1, $ob43) }) });
+  $m270$match: {
+    if ($m270.tag === "None") {
       return { tag: "None" };
-      break $m268$match;
+      break $m270$match;
     }
-    if ($m268.tag === "Some") {
-      const value = $m268.value;
+    if ($m270.tag === "Some") {
+      const value = $m270.value;
       return proposal_of_object({ parsed: value, answer: answer, fallback_def: fallback_def });
-      break $m268$match;
+      break $m270$match;
     }
     $rt.unreachable();
   }
@@ -2688,8 +2704,8 @@ export function proposal_of_object({ parsed, answer, fallback_def }) {
 export function copy_texts({ d }) {
   let out = $std_map.dict({  });
   for (const k of $std_map.keys({ d: d })) {
-    const [, out$88] = $std_map.set({ d: out, key: k, value: or_empty({ o: $std_map.find({ d: d, key: k }) }) });
-    out = out$88;
+    const [, out$89] = $std_map.set({ d: out, key: k, value: or_empty({ o: $std_map.find({ d: d, key: k }) }) });
+    out = out$89;
   }
   return out;
 }
@@ -2704,16 +2720,16 @@ export function log({ console, line }) {
 }
 
 export function diagnostics_of({ c, fallback }) {
-  const $m278 = c;
-  $m278$match: {
-    if ($m278.tag === "Some") {
-      const value = $m278.value;
+  const $m280 = c;
+  $m280$match: {
+    if ($m280.tag === "Some") {
+      const value = $m280.value;
       return value.json;
-      break $m278$match;
+      break $m280$match;
     }
-    if ($m278.tag === "None") {
+    if ($m280.tag === "None") {
       return fallback.json;
-      break $m278$match;
+      break $m280$match;
     }
     $rt.unreachable();
   }
@@ -2723,11 +2739,64 @@ export function count_of({ c, fallback }) {
   return $std_list.len({ xs: diagnostics_of({ c: c, fallback: fallback }) });
 }
 
+export function target_zone({ r, files }) {
+  let manifest = $zones.empty_manifest({  });
+  const $m281 = $zones.read_manifest({ files: files, root: { tag: "Some", value: r.project.root } });
+  $m281$match: {
+    if ($m281.tag === "Ok") {
+      const value = $m281.value;
+      manifest = manifest_or_empty({ o: value });
+      break $m281$match;
+    }
+    if ($m281.tag === "Err") {
+      skip({  });
+      break $m281$match;
+    }
+    $rt.unreachable();
+  }
+  for (const t of r.targets) {
+    return $zones.zone_of({ m: manifest, name: t.module_name });
+  }
+  return $zones.zone_draft;
+}
+
+export function manifest_or_empty({ o }) {
+  const $m283 = o;
+  $m283$match: {
+    if ($m283.tag === "Some") {
+      const value = $m283.value;
+      return value;
+      break $m283$match;
+    }
+    if ($m283.tag === "None") {
+      return $zones.empty_manifest({  });
+      break $m283$match;
+    }
+    $rt.unreachable();
+  }
+}
+
+export function default_policy({ zone }) {
+  if (zone === $zones.zone_critical) {
+    return "none";
+  }
+  if (zone === $zones.zone_hardened) {
+    return "module";
+  }
+  return "scope";
+}
+
 export function escalate({ r }) {
   r = { ...r, ladder: $rt.int.add(r.ladder, 1, $ob44), escalation_steps: $rt.int.add(r.escalation_steps, 1, $ob45) };
   let go = true;
   let answer = false;
   let guard = 8;
+  if (r.zone === $zones.zone_critical) {
+    const [, r$90] = push_message({ r: r, m: "the module is `critical`: no re-prompting or wider context; a frontier model is not configured" });
+    r = r$90;
+    r = { ...r, cause: { tag: "Some", value: "stall" } };
+    return [false, r];
+  }
   while (go && guard > 0) {
     guard = $rt.int.sub(guard, 1, $ob46);
     if (r.ladder === 1) {
@@ -2764,8 +2833,8 @@ export function escalate({ r }) {
 export function record_trace({ r, console, iteration, model, prompt_hash, before, diags, failing, repairs, tokens, ms, classification, escalation }) {
   let codes = $std_list.builder({  });
   for (const d of diags) {
-    const [, codes$89] = $std_list.push({ b: codes, x: $json.str_at({ j: d, key: "code" }) });
-    codes = codes$89;
+    const [, codes$91] = $std_list.push({ b: codes, x: $json.str_at({ j: d, key: "code" }) });
+    codes = codes$91;
   }
   const entry = { tag: "JObject", fields: [$json.field({ key: "iteration", value: $json.int({ v: iteration }) }), $json.field({ key: "model", value: $json.text({ t: model }) }), $json.field({ key: "prompt_hash", value: $json.text({ t: prompt_hash }) }), $json.field({ key: "diagnostics_before", value: $json.int({ v: before }) }), $json.field({ key: "diagnostics_after", value: $json.int({ v: $std_list.len({ xs: diags }) }) }), $json.field({ key: "codes_after", value: $json.texts({ ts: $std_list.finish({ b: codes }) }) }), $json.field({ key: "failing_tests", value: $json.texts({ ts: failing }) }), $json.field({ key: "mechanical_repairs", value: $json.int({ v: repairs }) }), $json.field({ key: "tokens", value: $json.int({ v: tokens }) }), $json.field({ key: "ms", value: $json.int({ v: ms }) }), $json.field({ key: "classification", value: $json.text({ t: classification }) }), $json.field({ key: "escalation", value: $json.text_or_null({ o: escalation }) })] };
   r = { ...r, trace: $std_list.append({ xs: r.trace, x: entry }) };
@@ -2783,8 +2852,69 @@ export function check_working({ r, files, console, process, tools, texts }) {
   return [check_project({ files: files, console: console, process: process, project: r.project, tools: tools, texts: texts, run_tests: true, out_dir: r.work_dir + "/check-" + $std_int.to_text({ x: r.checks }) }), r];
 }
 
+export function write_working({ files, r }) {
+  try {
+    for (const path of $std_map.keys({ d: r.working })) {
+      const $m299 = $std_map.find({ d: r.working, key: path });
+      $m299$match: {
+        if ($m299.tag === "Some") {
+          const value = $m299.value;
+          $rt.unwrap($build.write_file({ files: files, path: path, text: value }));
+          break $m299$match;
+        }
+        if ($m299.tag === "None") {
+          skip({  });
+          break $m299$match;
+        }
+        $rt.unreachable();
+      }
+    }
+    return { tag: "Ok", value: undefined };
+  } catch ($e) {
+    if ($e instanceof $rt.EarlyReturn) return $e.value;
+    throw $e;
+  }
+}
+
+export function restore_tree({ files, r }) {
+  try {
+    for (const path of $std_map.keys({ d: r.texts0 })) {
+      const $m301 = $std_map.find({ d: r.texts0, key: path });
+      $m301$match: {
+        if ($m301.tag === "Some") {
+          const value = $m301.value;
+          $rt.unwrap($build.write_file({ files: files, path: path, text: value }));
+          break $m301$match;
+        }
+        if ($m301.tag === "None") {
+          skip({  });
+          break $m301$match;
+        }
+        $rt.unreachable();
+      }
+    }
+    return { tag: "Ok", value: undefined };
+  } catch ($e) {
+    if ($e instanceof $rt.EarlyReturn) return $e.value;
+    throw $e;
+  }
+}
+
 export function ask({ r, files, process, net, model, system, prompt, max_tokens }) {
   try {
+    const $m303 = write_working({ files: files, r: r });
+    $m303$match: {
+      if ($m303.tag === "Err") {
+        const error = $m303.error;
+        return [{ tag: "Err", error: "could not write the working tree: " + io_error_text({ e: error }) }, r];
+        break $m303$match;
+      }
+      if ($m303.tag === "Ok") {
+        skip({  });
+        break $m303$match;
+      }
+      $rt.unreachable();
+    }
     const answer = $rt.unwrap(generate({ m: model, process: process, net: net, call: r.calls, system: system, prompt: prompt, max_tokens: max_tokens }));
     r = { ...r, calls: $rt.int.add(r.calls, 1, $ob48), tokens: $rt.int.add(r.tokens, answer.tokens, $ob49), model_name: answer.model };
     return [{ tag: "Ok", value: answer }, r];
@@ -2807,6 +2937,11 @@ export function push_message({ r, m }) {
 }
 
 export function push_proposal({ r, p }) {
+  if (r.zone === $zones.zone_critical && $json.str_at({ j: p, key: "kind" }) === "widen_effects") {
+    const [, r$92] = push_message({ r: r, m: "an effect widening on a `critical` module is not proposed by the loop" });
+    r = r$92;
+    return [undefined, r];
+  }
   r = { ...r, proposals: $std_list.append({ xs: r.proposals, x: p }) };
   return [undefined, r];
   return [undefined, r];
@@ -2836,8 +2971,8 @@ export function body_diffs({ r }) {
           module_name = name;
         }
       }
-      const [, out$90] = $std_list.push({ b: out, x: { tag: "JObject", fields: [$json.field({ key: "file", value: $json.text({ t: path }) }), $json.field({ key: "module", value: $json.text({ t: module_name }) }), $json.field({ key: "before", value: $json.text({ t: before }) }), $json.field({ key: "after", value: $json.text({ t: after }) })] } });
-      out = out$90;
+      const [, out$93] = $std_list.push({ b: out, x: { tag: "JObject", fields: [$json.field({ key: "file", value: $json.text({ t: path }) }), $json.field({ key: "module", value: $json.text({ t: module_name }) }), $json.field({ key: "before", value: $json.text({ t: before }) }), $json.field({ key: "after", value: $json.text({ t: after }) })] } });
+      out = out$93;
     }
   }
   return $std_list.finish({ b: out });
@@ -2854,108 +2989,115 @@ export function conclude({ r, files, status, final, now, write }) {
     }
     const diffs = body_diffs({ r: r });
     let fields = $std_list.builder({  });
-    const [, fields$91] = $std_list.push({ b: fields, x: $json.field({ key: "schema_version", value: $json.int({ v: 1 }) }) });
-    fields = fields$91;
-    const [, fields$92] = $std_list.push({ b: fields, x: $json.field({ key: "task", value: task_json({ t: r.task }) }) });
-    fields = fields$92;
-    const [, fields$93] = $std_list.push({ b: fields, x: $json.field({ key: "status", value: $json.text({ t: status }) }) });
-    fields = fields$93;
-    const $m301 = r.cause;
-    $m301$match: {
-      if ($m301.tag === "Some") {
-        const value = $m301.value;
-        const [, fields$94] = $std_list.push({ b: fields, x: $json.field({ key: "cause", value: $json.text({ t: value }) }) });
-        fields = fields$94;
-        break $m301$match;
+    const [, fields$94] = $std_list.push({ b: fields, x: $json.field({ key: "schema_version", value: $json.int({ v: 1 }) }) });
+    fields = fields$94;
+    const [, fields$95] = $std_list.push({ b: fields, x: $json.field({ key: "task", value: task_json({ t: r.task }) }) });
+    fields = fields$95;
+    const [, fields$96] = $std_list.push({ b: fields, x: $json.field({ key: "status", value: $json.text({ t: status }) }) });
+    fields = fields$96;
+    const $m314 = r.cause;
+    $m314$match: {
+      if ($m314.tag === "Some") {
+        const value = $m314.value;
+        const [, fields$97] = $std_list.push({ b: fields, x: $json.field({ key: "cause", value: $json.text({ t: value }) }) });
+        fields = fields$97;
+        break $m314$match;
       }
-      if ($m301.tag === "None") {
+      if ($m314.tag === "None") {
         skip({  });
-        break $m301$match;
+        break $m314$match;
       }
       $rt.unreachable();
     }
-    const [, fields$95] = $std_list.push({ b: fields, x: $json.field({ key: "generated", value: { tag: "JObject", fields: [$json.field({ key: "at", value: $json.text({ t: $assumptions.iso_of_millis({ ms: now }) }) }), $json.field({ key: "model", value: $json.text({ t: r.model_name }) })] } }) });
-    fields = fields$95;
+    const [, fields$98] = $std_list.push({ b: fields, x: $json.field({ key: "generated", value: { tag: "JObject", fields: [$json.field({ key: "at", value: $json.text({ t: $assumptions.iso_of_millis({ ms: now }) }) }), $json.field({ key: "model", value: $json.text({ t: r.model_name }) })] } }) });
+    fields = fields$98;
     let iface = [];
     let delta = [];
-    const $m303 = final;
-    $m303$match: {
-      if ($m303.tag === "Some") {
-        const value = $m303.value;
+    const $m316 = final;
+    $m316$match: {
+      if ($m316.tag === "Some") {
+        const value = $m316.value;
         iface = interface_diffs({ scope: r.task.scope, before: r.baseline, after: value });
         delta = ledger_delta({ before: r.baseline, after: value });
-        break $m303$match;
+        break $m316$match;
       }
-      if ($m303.tag === "None") {
+      if ($m316.tag === "None") {
         skip({  });
-        break $m303$match;
+        break $m316$match;
       }
       $rt.unreachable();
     }
-    const [, fields$96] = $std_list.push({ b: fields, x: $json.field({ key: "interface_diff", value: { tag: "JArray", items: iface } }) });
-    fields = fields$96;
-    const [, fields$97] = $std_list.push({ b: fields, x: $json.field({ key: "ledger_delta", value: { tag: "JArray", items: delta } }) });
-    fields = fields$97;
+    const [, fields$99] = $std_list.push({ b: fields, x: $json.field({ key: "interface_diff", value: { tag: "JArray", items: iface } }) });
+    fields = fields$99;
+    const [, fields$100] = $std_list.push({ b: fields, x: $json.field({ key: "ledger_delta", value: { tag: "JArray", items: delta } }) });
+    fields = fields$100;
     let body_diff = [];
     if (status === "opened") {
       body_diff = diffs;
     }
-    const [, fields$98] = $std_list.push({ b: fields, x: $json.field({ key: "body_diff", value: { tag: "JArray", items: body_diff } }) });
-    fields = fields$98;
-    const [, fields$99] = $std_list.push({ b: fields, x: $json.field({ key: "trace", value: { tag: "JArray", items: r.trace } }) });
-    fields = fields$99;
-    const [, fields$100] = $std_list.push({ b: fields, x: $json.field({ key: "metrics", value: { tag: "JObject", fields: [$json.field({ key: "iterations", value: $json.int({ v: $std_list.len({ xs: r.trace }) }) }), $json.field({ key: "mechanical_repairs", value: $json.int({ v: r.mechanical }) }), $json.field({ key: "escalation_steps", value: $json.int({ v: r.escalation_steps }) }), $json.field({ key: "proposals", value: $json.int({ v: $std_list.len({ xs: r.proposals }) }) }), $json.field({ key: "tokens", value: $json.int({ v: r.tokens }) })] } }) });
-    fields = fields$100;
-    const [, fields$101] = $std_list.push({ b: fields, x: $json.field({ key: "proposals", value: { tag: "JArray", items: r.proposals } }) });
+    const [, fields$101] = $std_list.push({ b: fields, x: $json.field({ key: "body_diff", value: { tag: "JArray", items: body_diff } }) });
     fields = fields$101;
+    const [, fields$102] = $std_list.push({ b: fields, x: $json.field({ key: "trace", value: { tag: "JArray", items: r.trace } }) });
+    fields = fields$102;
+    const [, fields$103] = $std_list.push({ b: fields, x: $json.field({ key: "metrics", value: { tag: "JObject", fields: [$json.field({ key: "iterations", value: $json.int({ v: $std_list.len({ xs: r.trace }) }) }), $json.field({ key: "mechanical_repairs", value: $json.int({ v: r.mechanical }) }), $json.field({ key: "escalation_steps", value: $json.int({ v: r.escalation_steps }) }), $json.field({ key: "proposals", value: $json.int({ v: $std_list.len({ xs: r.proposals }) }) }), $json.field({ key: "tokens", value: $json.int({ v: r.tokens }) })] } }) });
+    fields = fields$103;
+    const [, fields$104] = $std_list.push({ b: fields, x: $json.field({ key: "proposals", value: { tag: "JArray", items: r.proposals } }) });
+    fields = fields$104;
     let audit_json = $std_list.builder({  });
     for (const f of findings) {
-      const [, audit_json$102] = $std_list.push({ b: audit_json, x: finding_json({ f: f }) });
-      audit_json = audit_json$102;
+      const [, audit_json$105] = $std_list.push({ b: audit_json, x: finding_json({ f: f }) });
+      audit_json = audit_json$105;
     }
-    const [, fields$103] = $std_list.push({ b: fields, x: $json.field({ key: "audit", value: { tag: "JArray", items: $std_list.finish({ b: audit_json }) } }) });
-    fields = fields$103;
+    const [, fields$106] = $std_list.push({ b: fields, x: $json.field({ key: "audit", value: { tag: "JArray", items: $std_list.finish({ b: audit_json }) } }) });
+    fields = fields$106;
+    const [, fields$107] = $std_list.push({ b: fields, x: $json.field({ key: "zone", value: $json.text({ t: r.zone }) }) });
+    fields = fields$107;
+    const [, fields$108] = $std_list.push({ b: fields, x: $json.field({ key: "loop_authored", value: $json.texts({ ts: r.loop_authored }) }) });
+    fields = fields$108;
     if (status === "blocked") {
       let last = [];
       const n_history = $std_list.len({ xs: r.history });
       if (n_history > 0) {
         last = $std_list.get({ xs: r.history, i: $rt.int.sub(n_history, 1, $ob50) }).diagnostics;
       } else {
-        const $m311 = final;
-        $m311$match: {
-          if ($m311.tag === "Some") {
-            const value = $m311.value;
+        const $m324 = final;
+        $m324$match: {
+          if ($m324.tag === "Some") {
+            const value = $m324.value;
             last = value.json;
-            break $m311$match;
+            break $m324$match;
           }
-          if ($m311.tag === "None") {
+          if ($m324.tag === "None") {
             skip({  });
-            break $m311$match;
+            break $m324$match;
           }
           $rt.unreachable();
         }
       }
-      const [, fields$104] = $std_list.push({ b: fields, x: $json.field({ key: "last_diagnostics", value: { tag: "JArray", items: last } }) });
-      fields = fields$104;
+      const [, fields$109] = $std_list.push({ b: fields, x: $json.field({ key: "last_diagnostics", value: { tag: "JArray", items: last } }) });
+      fields = fields$109;
       let best_json = { tag: "JNull" };
-      const $m314 = r.best;
-      $m314$match: {
-        if ($m314.tag === "Some") {
-          const value = $m314.value;
+      const $m327 = r.best;
+      $m327$match: {
+        if ($m327.tag === "Some") {
+          const value = $m327.value;
           best_json = { tag: "JObject", fields: [$json.field({ key: "iteration", value: $json.int({ v: value.iteration }) }), $json.field({ key: "diagnostics", value: $json.int({ v: value.diagnostics }) }), $json.field({ key: "bodies", value: best_bodies({ texts: value.texts, targets: r.targets }) })] };
-          break $m314$match;
+          break $m327$match;
         }
-        if ($m314.tag === "None") {
+        if ($m327.tag === "None") {
           skip({  });
-          break $m314$match;
+          break $m327$match;
         }
         $rt.unreachable();
       }
-      const [, fields$105] = $std_list.push({ b: fields, x: $json.field({ key: "best_attempt", value: best_json }) });
-      fields = fields$105;
+      const [, fields$110] = $std_list.push({ b: fields, x: $json.field({ key: "best_attempt", value: best_json }) });
+      fields = fields$110;
     }
     const change = { tag: "JObject", fields: $std_list.finish({ b: fields }) };
     let path = { tag: "None" };
+    if (!(write && status === "opened")) {
+      $rt.unwrap(restore_tree({ files: files, r: r }));
+    }
     if (write) {
       if (status === "opened") {
         for (const d of diffs) {
@@ -2979,63 +3121,63 @@ export function conclude({ r, files, status, final, now, write }) {
 export function ticket({ r, files, process, net, clock, model, write }) {
   const ctx_in = assemble({ task: r.task, baseline: r.baseline, current: r.baseline, targets: [], ctx_policy: r.task.context_policy, history: [], full_history: false, messages: ["This is a ticket. Do not write code. Answer with one JSON object describing the interface change it needs: {\"kind\": one of weaken_postcondition, add_precondition, widen_effects, add_claim, add_example, new_helper, unsatisfiable; \"def\": qualified name; \"current\": text or null; \"proposed\": text or null; \"rationale\": text}."] });
   const t0 = $std_io.time({ clock: clock });
-  const [$r324, r$106] = ask({ r: r, files: files, process: process, net: net, model: model, system: ctx_in.system, prompt: ctx_in.prompt, max_tokens: 4096 });
-  r = r$106;
-  const $m323 = $r324;
-  $m323$match: {
-    if ($m323.tag === "Err") {
-      const error = $m323.error;
+  const [$r337, r$111] = ask({ r: r, files: files, process: process, net: net, model: model, system: ctx_in.system, prompt: ctx_in.prompt, max_tokens: 4096 });
+  r = r$111;
+  const $m336 = $r337;
+  $m336$match: {
+    if ($m336.tag === "Err") {
+      const error = $m336.error;
       return [{ tag: "Ok", value: failure({ error: "model: " + error }) }, r];
-      break $m323$match;
+      break $m336$match;
     }
-    if ($m323.tag === "Ok") {
-      const value = $m323.value;
-      const [$r326, r$107] = note_proposal({ r: r, p: parse_proposal({ answer: value.text, fallback_def: fallback_def({ task: r.task }) }) });
-      r = r$107;
-      const classification = $r326;
+    if ($m336.tag === "Ok") {
+      const value = $m336.value;
+      const [$r339, r$112] = note_proposal({ r: r, p: parse_proposal({ answer: value.text, fallback_def: fallback_def({ task: r.task }) }) });
+      r = r$112;
+      const classification = $r339;
       const n = $std_list.len({ xs: r.baseline.json });
       r = { ...r, trace: $std_list.append({ xs: r.trace, x: { tag: "JObject", fields: [$json.field({ key: "iteration", value: $json.int({ v: 1 }) }), $json.field({ key: "model", value: $json.text({ t: value.model }) }), $json.field({ key: "prompt_hash", value: $json.text({ t: ctx_in.prompt_hash }) }), $json.field({ key: "diagnostics_before", value: $json.int({ v: n }) }), $json.field({ key: "diagnostics_after", value: $json.int({ v: n }) }), $json.field({ key: "codes_after", value: { tag: "JArray", items: [] } }), $json.field({ key: "failing_tests", value: { tag: "JArray", items: [] } }), $json.field({ key: "mechanical_repairs", value: $json.int({ v: 0 }) }), $json.field({ key: "tokens", value: $json.int({ v: value.tokens }) }), $json.field({ key: "ms", value: $json.int({ v: $rt.int.sub($std_io.time({ clock: clock }), t0, $ob51) }) }), $json.field({ key: "classification", value: $json.text({ t: classification }) }), $json.field({ key: "escalation", value: { tag: "JNull" } })] } }) };
-      const [$r333, r$108] = conclude({ r: r, files: files, status: "opened", final: { tag: "Some", value: r.baseline }, now: $std_io.time({ clock: clock }), write: write });
-      r = r$108;
-      return [$r333, r];
-      break $m323$match;
+      const [$r346, r$113] = conclude({ r: r, files: files, status: "opened", final: { tag: "Some", value: r.baseline }, now: $std_io.time({ clock: clock }), write: write });
+      r = r$113;
+      return [$r346, r];
+      break $m336$match;
     }
     $rt.unreachable();
   }
 }
 
 export function fallback_def({ task }) {
-  const $m334 = task.target;
-  $m334$match: {
-    if ($m334.tag === "Some") {
-      const value = $m334.value;
+  const $m347 = task.target;
+  $m347$match: {
+    if ($m347.tag === "Some") {
+      const value = $m347.value;
       return value.def;
-      break $m334$match;
+      break $m347$match;
     }
-    if ($m334.tag === "None") {
+    if ($m347.tag === "None") {
       if ($std_list.len({ xs: task.scope }) > 0) {
         return $std_list.get({ xs: task.scope, i: 0 });
       }
       return "";
-      break $m334$match;
+      break $m347$match;
     }
     $rt.unreachable();
   }
 }
 
 export function note_proposal({ r, p }) {
-  const $m335 = p;
-  $m335$match: {
-    if ($m335.tag === "Some") {
-      const value = $m335.value;
-      const [, r$109] = push_proposal({ r: r, p: value });
-      r = r$109;
+  const $m348 = p;
+  $m348$match: {
+    if ($m348.tag === "Some") {
+      const value = $m348.value;
+      const [, r$114] = push_proposal({ r: r, p: value });
+      r = r$114;
       return ["proposal", r];
-      break $m335$match;
+      break $m348$match;
     }
-    if ($m335.tag === "None") {
+    if ($m348.tag === "None") {
       return ["no proposal", r];
-      break $m335$match;
+      break $m348$match;
     }
     $rt.unreachable();
   }
@@ -3044,19 +3186,19 @@ export function note_proposal({ r, p }) {
 export function splice_answers({ r, returned, iteration }) {
   let sp = { texts: copy_texts({ d: r.working }), count: 0, repeated: false };
   for (const target of r.targets) {
-    const $m337 = find_in({ fns: returned, name: target.name });
-    $m337$match: {
-      if ($m337.tag === "None") {
-        const [, r$110] = push_message({ r: r, m: "The answer did not include `" + target.name + "`; return every target." });
-        r = r$110;
-        break $m337$match;
+    const $m350 = find_in({ fns: returned, name: target.name });
+    $m350$match: {
+      if ($m350.tag === "None") {
+        const [, r$115] = push_message({ r: r, m: "The answer did not include `" + target.name + "`; return every target." });
+        r = r$115;
+        break $m350$match;
       }
-      if ($m337.tag === "Some") {
-        const value = $m337.value;
-        const [, r$111, sp$111] = splice_found({ r: r, target: target, f: value, iteration: iteration, sp: sp });
-        r = r$111;
-        sp = sp$111;
-        break $m337$match;
+      if ($m350.tag === "Some") {
+        const value = $m350.value;
+        const [, r$116, sp$116] = splice_found({ r: r, target: target, f: value, iteration: iteration, sp: sp });
+        r = r$116;
+        sp = sp$116;
+        break $m350$match;
       }
       $rt.unreachable();
     }
@@ -3065,34 +3207,64 @@ export function splice_answers({ r, returned, iteration }) {
 }
 
 export function splice_found({ r, target, f, iteration, sp }) {
-  if (signature_text({ f: f }) !== signature_text({ f: target.decl })) {
-    r = { ...r, claim_edits: $rt.int.add(r.claim_edits, 1, $ob52) };
-    const [, r$112] = push_message({ r: r, m: "The signature of `" + target.name + "` was changed; only the body may change. Keep exactly:\n" + signature_text({ f: target.decl }) });
-    r = r$112;
-    if (r.claim_edits >= 2) {
-      const [, r$113] = push_proposal({ r: r, p: signature_proposal({ target: target, proposed: f, iteration: iteration }) });
-      r = r$113;
+  if (signature_text({ f: f }) !== signature_text({ f: target.decl }) && r.zone === $zones.zone_draft) {
+    const path_text = or_empty({ o: $std_map.find({ d: sp.texts, key: target.path }) });
+    let texts = sp.texts;
+    const [, texts$117] = $std_map.set({ d: texts, key: target.path, value: $std_text.replace({ t: path_text, from: signature_text({ f: target.decl }), to: signature_text({ f: f }) }) });
+    texts = texts$117;
+    sp = { ...sp, texts: texts };
+    const qualified = target.module_name + "." + target.name;
+    if (!$std_list.contains({ xs: r.loop_authored, x: qualified })) {
+      r = { ...r, loop_authored: [...r.loop_authored, ...[qualified]] };
+    }
+    const $m353 = f.body;
+    $m353$match: {
+      if ($m353.tag === "None") {
+        const [, r$118] = push_message({ r: r, m: "`" + target.name + "` came back without a body." });
+        r = r$118;
+        break $m353$match;
+      }
+      if ($m353.tag === "Some") {
+        const value = $m353.value;
+        if (!value.elided) {
+          const [, r$119, sp$119] = splice_body({ r: r, target: target, body: value, sp: sp });
+          r = r$119;
+          sp = sp$119;
+        }
+        break $m353$match;
+      }
+      $rt.unreachable();
     }
     return [undefined, r, sp];
   }
-  const $m339 = f.body;
-  $m339$match: {
-    if ($m339.tag === "None") {
-      const [, r$114] = push_message({ r: r, m: "`" + target.name + "` came back without a body." });
-      r = r$114;
-      break $m339$match;
+  if (signature_text({ f: f }) !== signature_text({ f: target.decl })) {
+    r = { ...r, claim_edits: $rt.int.add(r.claim_edits, 1, $ob52) };
+    const [, r$120] = push_message({ r: r, m: "The signature of `" + target.name + "` was changed; only the body may change. Keep exactly:\n" + signature_text({ f: target.decl }) });
+    r = r$120;
+    if (r.claim_edits >= 2) {
+      const [, r$121] = push_proposal({ r: r, p: signature_proposal({ target: target, proposed: f, iteration: iteration }) });
+      r = r$121;
     }
-    if ($m339.tag === "Some") {
-      const value = $m339.value;
+    return [undefined, r, sp];
+  }
+  const $m355 = f.body;
+  $m355$match: {
+    if ($m355.tag === "None") {
+      const [, r$122] = push_message({ r: r, m: "`" + target.name + "` came back without a body." });
+      r = r$122;
+      break $m355$match;
+    }
+    if ($m355.tag === "Some") {
+      const value = $m355.value;
       if (value.elided) {
-        const [, r$115] = push_message({ r: r, m: "`" + target.name + "` came back without a body." });
-        r = r$115;
+        const [, r$123] = push_message({ r: r, m: "`" + target.name + "` came back without a body." });
+        r = r$123;
       } else {
-        const [, r$116, sp$116] = splice_body({ r: r, target: target, body: value, sp: sp });
-        r = r$116;
-        sp = sp$116;
+        const [, r$124, sp$124] = splice_body({ r: r, target: target, body: value, sp: sp });
+        r = r$124;
+        sp = sp$124;
       }
-      break $m339$match;
+      break $m355$match;
     }
     $rt.unreachable();
   }
@@ -3102,18 +3274,18 @@ export function splice_found({ r, target, f, iteration, sp }) {
 
 export function splice_body({ r, target, body, sp }) {
   const text = or_empty({ o: $std_map.find({ d: sp.texts, key: target.path }) });
-  const $m340 = parse_module({ path: target.path, text: text }).module;
-  $m340$match: {
-    if ($m340.tag === "None") {
+  const $m356 = parse_module({ path: target.path, text: text }).module;
+  $m356$match: {
+    if ($m356.tag === "None") {
       skip({  });
-      break $m340$match;
+      break $m356$match;
     }
-    if ($m340.tag === "Some") {
-      const value = $m340.value;
-      const [, r$117, sp$117] = splice_into({ r: r, target: target, body: body, cur: find_fn({ m: value, name: target.name }), text: text, sp: sp });
-      r = r$117;
-      sp = sp$117;
-      break $m340$match;
+    if ($m356.tag === "Some") {
+      const value = $m356.value;
+      const [, r$125, sp$125] = splice_into({ r: r, target: target, body: body, cur: find_fn({ m: value, name: target.name }), text: text, sp: sp });
+      r = r$125;
+      sp = sp$125;
+      break $m356$match;
     }
     $rt.unreachable();
   }
@@ -3122,31 +3294,31 @@ export function splice_body({ r, target, body, sp }) {
 }
 
 export function splice_into({ r, target, body, cur, text, sp }) {
-  const $m341 = cur;
-  $m341$match: {
-    if ($m341.tag === "None") {
+  const $m357 = cur;
+  $m357$match: {
+    if ($m357.tag === "None") {
       skip({  });
-      break $m341$match;
+      break $m357$match;
     }
-    if ($m341.tag === "Some") {
-      const value = $m341.value;
+    if ($m357.tag === "Some") {
+      const value = $m357.value;
       const h = body_hash({ f: with_body({ f: target.decl, body: body }) });
       let hashes = or_dict({ o: $std_map.find({ d: r.seen_bodies, key: target.name }) });
       let repeated = sp.repeated;
       if ($std_map.contains({ d: hashes, key: h })) {
         repeated = true;
       }
-      const [, hashes$118] = $std_map.set({ d: hashes, key: h, value: true });
-      hashes = hashes$118;
+      const [, hashes$126] = $std_map.set({ d: hashes, key: h, value: true });
+      hashes = hashes$126;
       let seen_bodies = r.seen_bodies;
-      const [, seen_bodies$119] = $std_map.set({ d: seen_bodies, key: target.name, value: hashes });
-      seen_bodies = seen_bodies$119;
+      const [, seen_bodies$127] = $std_map.set({ d: seen_bodies, key: target.name, value: hashes });
+      seen_bodies = seen_bodies$127;
       r = { ...r, seen_bodies: seen_bodies };
       let texts = sp.texts;
-      const [, texts$120] = $std_map.set({ d: texts, key: target.path, value: canonical_text({ path: target.path, text: splice_item({ text: text, span: value.span, replacement: { tag: "FnItem", decl: with_body({ f: value, body: body }) } }) }) });
-      texts = texts$120;
+      const [, texts$128] = $std_map.set({ d: texts, key: target.path, value: canonical_text({ path: target.path, text: splice_item({ text: text, span: value.span, replacement: { tag: "FnItem", decl: with_body({ f: value, body: body }) } }) }) });
+      texts = texts$128;
       sp = { ...sp, texts: texts, count: $rt.int.add(sp.count, 1, $ob53), repeated: repeated };
-      break $m341$match;
+      break $m357$match;
     }
     $rt.unreachable();
   }
@@ -3155,16 +3327,16 @@ export function splice_into({ r, target, body, cur, text, sp }) {
 }
 
 export function or_dict({ o }) {
-  const $m345 = o;
-  $m345$match: {
-    if ($m345.tag === "Some") {
-      const value = $m345.value;
+  const $m361 = o;
+  $m361$match: {
+    if ($m361.tag === "Some") {
+      const value = $m361.value;
       return value;
-      break $m345$match;
+      break $m361$match;
     }
-    if ($m345.tag === "None") {
+    if ($m361.tag === "None") {
       return $std_map.dict({  });
-      break $m345$match;
+      break $m361$match;
     }
     $rt.unreachable();
   }
@@ -3181,21 +3353,21 @@ export function find_in({ fns, name }) {
 
 export function failing_of({ c }) {
   let out = $std_list.builder({  });
-  const $m348 = c.tests;
-  $m348$match: {
-    if ($m348.tag === "None") {
+  const $m364 = c.tests;
+  $m364$match: {
+    if ($m364.tag === "None") {
       skip({  });
-      break $m348$match;
+      break $m364$match;
     }
-    if ($m348.tag === "Some") {
-      const value = $m348.value;
+    if ($m364.tag === "Some") {
+      const value = $m364.value;
       for (const name of $std_map.keys({ d: value })) {
         if (!test_passed({ tests: value, name: name })) {
-          const [, out$121] = $std_list.push({ b: out, x: name });
-          out = out$121;
+          const [, out$129] = $std_list.push({ b: out, x: name });
+          out = out$129;
         }
       }
-      break $m348$match;
+      break $m364$match;
     }
     $rt.unreachable();
   }
@@ -3217,22 +3389,22 @@ export function repair_rounds({ r, files, console, process, tools, first }) {
         let changed = false;
         for (const path of $std_map.keys({ d: spans })) {
           const inside = or_list({ o: $std_map.find({ d: spans, key: path }) });
-          const $m350 = $std_map.find({ d: r.working, key: path });
-          $m350$match: {
-            if ($m350.tag === "None") {
+          const $m366 = $std_map.find({ d: r.working, key: path });
+          $m366$match: {
+            if ($m366.tag === "None") {
               skip({  });
-              break $m350$match;
+              break $m366$match;
             }
-            if ($m350.tag === "Some") {
-              const value = $m350.value;
+            if ($m366.tag === "Some") {
+              const value = $m366.value;
               const text = value;
               let edits = $std_list.builder({  });
               for (const d of current.diagnostics) {
                 if (file_path_of({ c: current, file: d.file }) === path) {
                   for (const rep of d.repairs) {
                     if (rep.confidence === "high" && within({ spans: inside, span: rep.span })) {
-                      const [, edits$122] = $std_list.push({ b: edits, x: { start: rep.span.start, end: rep.span.end, with_text: rep.with_text } });
-                      edits = edits$122;
+                      const [, edits$130] = $std_list.push({ b: edits, x: { start: rep.span.start, end: rep.span.end, with_text: rep.with_text } });
+                      edits = edits$130;
                     }
                   }
                 }
@@ -3240,21 +3412,21 @@ export function repair_rounds({ r, files, console, process, tools, first }) {
               const applied = apply_repairs({ text: text, edits: $std_list.finish({ b: edits }) });
               if (applied.applied > 0) {
                 let working = r.working;
-                const [, working$123] = $std_map.set({ d: working, key: path, value: canonical_text({ path: path, text: applied.text }) });
-                working = working$123;
+                const [, working$131] = $std_map.set({ d: working, key: path, value: canonical_text({ path: path, text: applied.text }) });
+                working = working$131;
                 r = { ...r, working: working };
                 repairs = $rt.int.add(repairs, applied.applied, $ob54);
                 changed = true;
               }
-              break $m350$match;
+              break $m366$match;
             }
             $rt.unreachable();
           }
         }
         if (changed) {
-          const [$r353, r$124] = check_working({ r: r, files: files, console: console, process: process, tools: tools, texts: r.working });
-          r = r$124;
-          current = $rt.unwrap($r353);
+          const [$r369, r$132] = check_working({ r: r, files: files, console: console, process: process, tools: tools, texts: r.working });
+          r = r$132;
+          current = $rt.unwrap($r369);
         } else {
           go = false;
         }
@@ -3269,16 +3441,16 @@ export function repair_rounds({ r, files, console, process, tools, first }) {
 }
 
 export function or_list({ o }) {
-  const $m356 = o;
-  $m356$match: {
-    if ($m356.tag === "Some") {
-      const value = $m356.value;
+  const $m372 = o;
+  $m372$match: {
+    if ($m372.tag === "Some") {
+      const value = $m372.value;
       return value;
-      break $m356$match;
+      break $m372$match;
     }
-    if ($m356.tag === "None") {
+    if ($m372.tag === "None") {
       return [];
-      break $m356$match;
+      break $m372$match;
     }
     $rt.unreachable();
   }
@@ -3286,16 +3458,16 @@ export function or_list({ o }) {
 
 export function set_best({ r, iteration, size }) {
   let better = true;
-  const $m357 = r.best;
-  $m357$match: {
-    if ($m357.tag === "Some") {
-      const value = $m357.value;
+  const $m373 = r.best;
+  $m373$match: {
+    if ($m373.tag === "Some") {
+      const value = $m373.value;
       better = size < value.diagnostics;
-      break $m357$match;
+      break $m373$match;
     }
-    if ($m357.tag === "None") {
+    if ($m373.tag === "None") {
       skip({  });
-      break $m357$match;
+      break $m373$match;
     }
     $rt.unreachable();
   }
@@ -3309,19 +3481,19 @@ export function set_best({ r, iteration, size }) {
 export function conflicts_of({ c, targets }) {
   let out = $std_list.builder({  });
   for (const d of c.diagnostics) {
-    const $m361 = d.obligation;
-    $m361$match: {
-      if ($m361.tag === "Some") {
-        const value = $m361.value;
+    const $m377 = d.obligation;
+    $m377$match: {
+      if ($m377.tag === "Some") {
+        const value = $m377.value;
         if (value.has_counterexample && is_target_name({ targets: targets, name: or_empty({ o: d.def_name }) })) {
-          const [, out$125] = $std_list.push({ b: out, x: d });
-          out = out$125;
+          const [, out$133] = $std_list.push({ b: out, x: d });
+          out = out$133;
         }
-        break $m361$match;
+        break $m377$match;
       }
-      if ($m361.tag === "None") {
+      if ($m377.tag === "None") {
         skip({  });
-        break $m361$match;
+        break $m377$match;
       }
       $rt.unreachable();
     }
@@ -3338,42 +3510,42 @@ export function iterate({ r, files, console, process, net, clock, model, tools, 
   try {
     if ($rt.int.sub($std_io.time({ clock: clock }), r.started, $ob56) > r.task.budget.wall_ms || r.tokens > r.task.budget.tokens) {
       r = { ...r, cause: { tag: "Some", value: "budget" } };
-      const [, r$126] = stop({ r: r });
-      r = r$126;
+      const [, r$134] = stop({ r: r });
+      r = r$134;
       return [{ tag: "Ok", value: { tag: "None" } }, r];
     }
     let current_check = r.baseline;
-    const $m366 = r.current;
-    $m366$match: {
-      if ($m366.tag === "Some") {
-        const value = $m366.value;
+    const $m382 = r.current;
+    $m382$match: {
+      if ($m382.tag === "Some") {
+        const value = $m382.value;
         current_check = value;
-        break $m366$match;
+        break $m382$match;
       }
-      if ($m366.tag === "None") {
+      if ($m382.tag === "None") {
         skip({  });
-        break $m366$match;
+        break $m382$match;
       }
       $rt.unreachable();
     }
-    const [$r367, r$127] = take_messages({ r: r });
-    r = r$127;
-    const ctx_in = assemble({ task: r.task, baseline: r.baseline, current: current_check, targets: r.targets, ctx_policy: r.ctx_policy, history: r.history, full_history: r.full_history, messages: $r367 });
+    const [$r383, r$135] = take_messages({ r: r });
+    r = r$135;
+    const ctx_in = assemble({ task: r.task, baseline: r.baseline, current: current_check, targets: r.targets, ctx_policy: r.ctx_policy, history: r.history, full_history: r.full_history, messages: $r383 });
     const t0 = $std_io.time({ clock: clock });
     let answer = { text: "", model: "", tokens: 0 };
-    const [$r370, r$128] = ask({ r: r, files: files, process: process, net: net, model: model, system: ctx_in.system, prompt: ctx_in.prompt, max_tokens: 8192 });
-    r = r$128;
-    const $m369 = $r370;
-    $m369$match: {
-      if ($m369.tag === "Err") {
-        const error = $m369.error;
+    const [$r386, r$136] = ask({ r: r, files: files, process: process, net: net, model: model, system: ctx_in.system, prompt: ctx_in.prompt, max_tokens: 8192 });
+    r = r$136;
+    const $m385 = $r386;
+    $m385$match: {
+      if ($m385.tag === "Err") {
+        const error = $m385.error;
         return [{ tag: "Ok", value: { tag: "Some", value: "model: " + error } }, r];
-        break $m369$match;
+        break $m385$match;
       }
-      if ($m369.tag === "Ok") {
-        const value = $m369.value;
+      if ($m385.tag === "Ok") {
+        const value = $m385.value;
         answer = value;
-        break $m369$match;
+        break $m385$match;
       }
       $rt.unreachable();
     }
@@ -3384,59 +3556,59 @@ export function iterate({ r, files, console, process, net, clock, model, tools, 
     const before = count_of({ c: r.current, fallback: r.baseline });
     const fragment = parse_fragment({ text: extract_code({ answer: answer.text }) });
     if (fragment.module.tag === "None" || $std_list.len({ xs: fragment.diagnostics }) > 0) {
-      const [, r$129] = push_history({ r: r, h: { iteration: iteration, diagnostics: fragment.json, failing: [] } });
-      r = r$129;
+      const [, r$137] = push_history({ r: r, h: { iteration: iteration, diagnostics: fragment.json, failing: [] } });
+      r = r$137;
       const sig = outcome_signature({ diagnostics: fragment.json, failing: [] });
       const stalled = $std_map.contains({ d: r.seen, key: sig });
       let seen = r.seen;
-      const [, seen$130] = $std_map.set({ d: seen, key: sig, value: true });
-      seen = seen$130;
+      const [, seen$138] = $std_map.set({ d: seen, key: sig, value: true });
+      seen = seen$138;
       r = { ...r, seen: seen };
-      const [, r$131] = push_message({ r: r, m: "The previous answer did not parse as Onus; the diagnostics above are about that answer, not the file. The offending lines of that answer were:" });
-      r = r$131;
+      const [, r$139] = push_message({ r: r, m: "The previous answer did not parse as Onus; the diagnostics above are about that answer, not the file. The offending lines of that answer were:" });
+      r = r$139;
       for (const note of syntax_notes({ fragment: fragment })) {
-        const [, r$132] = push_message({ r: r, m: note });
-        r = r$132;
+        const [, r$140] = push_message({ r: r, m: note });
+        r = r$140;
       }
       let classification = "progress";
       if (stalled) {
         classification = "stall";
       }
-      const [, r$133] = record_trace({ r: r, console: console, iteration: iteration, model: answer.model, prompt_hash: ctx_in.prompt_hash, before: before, diags: fragment.json, failing: [], repairs: 0, tokens: answer.tokens, ms: $rt.int.sub($std_io.time({ clock: clock }), t0, $ob57), classification: classification, escalation: escalation });
-      r = r$133;
-      let $sc378 = stalled;
-      if ($sc378) {
-        const [$r377, r$134] = escalate({ r: r });
-        r = r$134;
-        $sc378 = !$r377;
+      const [, r$141] = record_trace({ r: r, console: console, iteration: iteration, model: answer.model, prompt_hash: ctx_in.prompt_hash, before: before, diags: fragment.json, failing: [], repairs: 0, tokens: answer.tokens, ms: $rt.int.sub($std_io.time({ clock: clock }), t0, $ob57), classification: classification, escalation: escalation });
+      r = r$141;
+      let $sc394 = stalled;
+      if ($sc394) {
+        const [$r393, r$142] = escalate({ r: r });
+        r = r$142;
+        $sc394 = !$r393;
       }
-      if ($sc378) {
-        const [, r$135] = stop({ r: r });
-        r = r$135;
+      if ($sc394) {
+        const [, r$143] = stop({ r: r });
+        r = r$143;
       }
       return [{ tag: "Ok", value: { tag: "None" } }, r];
     }
     let returned = [];
     let item_count = 0;
-    const $m381 = fragment.module;
-    $m381$match: {
-      if ($m381.tag === "Some") {
-        const value = $m381.value;
+    const $m397 = fragment.module;
+    $m397$match: {
+      if ($m397.tag === "Some") {
+        const value = $m397.value;
         returned = fns_of({ m: value });
         item_count = $std_list.len({ xs: value.items });
-        break $m381$match;
+        break $m397$match;
       }
-      if ($m381.tag === "None") {
+      if ($m397.tag === "None") {
         skip({  });
-        break $m381$match;
+        break $m397$match;
       }
       $rt.unreachable();
     }
     let extra = $std_list.builder({  });
     for (const f of returned) {
       if (!is_target_name({ targets: r.targets, name: f.name.text })) {
-        const [, extra$136] = $std_list.push({ b: extra, x: f });
-        extra = extra$136;
+        const [, extra$144] = $std_list.push({ b: extra, x: f });
+        extra = extra$144;
       }
     }
     const extras = $std_list.finish({ b: extra });
@@ -3448,72 +3620,72 @@ export function iterate({ r, files, console, process, net, clock, model, tools, 
           first_module = $std_list.get({ xs: r.targets, i: 0 }).module_name;
         }
         for (const f of extras) {
-          const [, r$137] = push_proposal({ r: r, p: proposal_json({ kind: "new_helper", def: first_module + "." + f.name.text, current: { tag: "None" }, proposed: { tag: "Some", value: signature_text({ f: f }) }, counterexample: { tag: "JNull" }, iterations: iteration, finding: { tag: "None" }, rationale: "the model needed a helper it may not introduce (loop spec §4.1 step 3 is off)" }) });
-          r = r$137;
+          const [, r$145] = push_proposal({ r: r, p: proposal_json({ kind: "new_helper", def: first_module + "." + f.name.text, current: { tag: "None" }, proposed: { tag: "Some", value: signature_text({ f: f }) }, counterexample: { tag: "JNull" }, iterations: iteration, finding: { tag: "None" }, rationale: "the model needed a helper it may not introduce (loop spec §4.1 step 3 is off)" }) });
+          r = r$145;
         }
         r = { ...r, cause: { tag: "Some", value: "out_of_scope" } };
-        const [, r$138] = record_trace({ r: r, console: console, iteration: iteration, model: answer.model, prompt_hash: ctx_in.prompt_hash, before: before, diags: diagnostics_of({ c: r.current, fallback: r.baseline }), failing: [], repairs: 0, tokens: answer.tokens, ms: $rt.int.sub($std_io.time({ clock: clock }), t0, $ob59), classification: "unusable", escalation: escalation });
-        r = r$138;
-        const [, r$139] = stop({ r: r });
-        r = r$139;
+        const [, r$146] = record_trace({ r: r, console: console, iteration: iteration, model: answer.model, prompt_hash: ctx_in.prompt_hash, before: before, diags: diagnostics_of({ c: r.current, fallback: r.baseline }), failing: [], repairs: 0, tokens: answer.tokens, ms: $rt.int.sub($std_io.time({ clock: clock }), t0, $ob59), classification: "unusable", escalation: escalation });
+        r = r$146;
+        const [, r$147] = stop({ r: r });
+        r = r$147;
         return [{ tag: "Ok", value: { tag: "None" } }, r];
       }
       let names = $std_list.builder({  });
       for (const f of extras) {
-        const [, names$140] = $std_list.push({ b: names, x: "`" + f.name.text + "`" });
-        names = names$140;
+        const [, names$148] = $std_list.push({ b: names, x: "`" + f.name.text + "`" });
+        names = names$148;
       }
-      const [, r$141] = push_message({ r: r, m: "The answer added " + $std_text.join({ parts: $std_list.finish({ b: names }), sep: ", " }) + "; the loop may not add functions. Return only the targets." });
-      r = r$141;
+      const [, r$149] = push_message({ r: r, m: "The answer added " + $std_text.join({ parts: $std_list.finish({ b: names }), sep: ", " }) + "; the loop may not add functions. Return only the targets." });
+      r = r$149;
     }
-    const [$r391, r$142] = splice_answers({ r: r, returned: returned, iteration: iteration });
-    r = r$142;
-    const spliced = $r391;
+    const [$r407, r$150] = splice_answers({ r: r, returned: returned, iteration: iteration });
+    r = r$150;
+    const spliced = $r407;
     if (r.claim_edits >= 2) {
       r = { ...r, cause: { tag: "Some", value: "out_of_scope" } };
-      const [, r$143] = record_trace({ r: r, console: console, iteration: iteration, model: answer.model, prompt_hash: ctx_in.prompt_hash, before: before, diags: diagnostics_of({ c: r.current, fallback: r.baseline }), failing: [], repairs: 0, tokens: answer.tokens, ms: $rt.int.sub($std_io.time({ clock: clock }), t0, $ob60), classification: "unusable", escalation: escalation });
-      r = r$143;
-      const [, r$144] = stop({ r: r });
-      r = r$144;
-      return [{ tag: "Ok", value: { tag: "None" } }, r];
-    }
-    if (spliced.count === 0) {
-      const [, r$145] = push_history({ r: r, h: { iteration: iteration, diagnostics: diagnostics_of({ c: r.current, fallback: r.baseline }), failing: [] } });
-      r = r$145;
-      const [, r$146] = record_trace({ r: r, console: console, iteration: iteration, model: answer.model, prompt_hash: ctx_in.prompt_hash, before: before, diags: diagnostics_of({ c: r.current, fallback: r.baseline }), failing: [], repairs: 0, tokens: answer.tokens, ms: $rt.int.sub($std_io.time({ clock: clock }), t0, $ob61), classification: "unusable", escalation: escalation });
-      r = r$146;
-      const [$r397, r$147] = escalate({ r: r });
-      r = r$147;
-      if (!$r397) {
-        const [, r$148] = stop({ r: r });
-        r = r$148;
-      }
-      return [{ tag: "Ok", value: { tag: "None" } }, r];
-    }
-    r = { ...r, working: spliced.texts };
-    const [$r401, r$149] = check_working({ r: r, files: files, console: console, process: process, tools: tools, texts: r.working });
-    r = r$149;
-    const first = $rt.unwrap($r401);
-    const mechanical_before = r.mechanical;
-    const [$r402, r$150] = repair_rounds({ r: r, files: files, console: console, process: process, tools: tools, first: first });
-    r = r$150;
-    const checked = $rt.unwrap($r402);
-    const repairs = $rt.int.sub(r.mechanical, mechanical_before, $ob62);
-    if (checked.internal_error) {
-      r = { ...r, cause: { tag: "Some", value: "compiler_bug" }, current: { tag: "Some", value: checked } };
-      const [, r$151] = record_trace({ r: r, console: console, iteration: iteration, model: answer.model, prompt_hash: ctx_in.prompt_hash, before: before, diags: checked.json, failing: [], repairs: repairs, tokens: answer.tokens, ms: $rt.int.sub($std_io.time({ clock: clock }), t0, $ob63), classification: "unusable", escalation: escalation });
+      const [, r$151] = record_trace({ r: r, console: console, iteration: iteration, model: answer.model, prompt_hash: ctx_in.prompt_hash, before: before, diags: diagnostics_of({ c: r.current, fallback: r.baseline }), failing: [], repairs: 0, tokens: answer.tokens, ms: $rt.int.sub($std_io.time({ clock: clock }), t0, $ob60), classification: "unusable", escalation: escalation });
       r = r$151;
       const [, r$152] = stop({ r: r });
       r = r$152;
       return [{ tag: "Ok", value: { tag: "None" } }, r];
     }
+    if (spliced.count === 0) {
+      const [, r$153] = push_history({ r: r, h: { iteration: iteration, diagnostics: diagnostics_of({ c: r.current, fallback: r.baseline }), failing: [] } });
+      r = r$153;
+      const [, r$154] = record_trace({ r: r, console: console, iteration: iteration, model: answer.model, prompt_hash: ctx_in.prompt_hash, before: before, diags: diagnostics_of({ c: r.current, fallback: r.baseline }), failing: [], repairs: 0, tokens: answer.tokens, ms: $rt.int.sub($std_io.time({ clock: clock }), t0, $ob61), classification: "unusable", escalation: escalation });
+      r = r$154;
+      const [$r413, r$155] = escalate({ r: r });
+      r = r$155;
+      if (!$r413) {
+        const [, r$156] = stop({ r: r });
+        r = r$156;
+      }
+      return [{ tag: "Ok", value: { tag: "None" } }, r];
+    }
+    r = { ...r, working: spliced.texts };
+    const [$r417, r$157] = check_working({ r: r, files: files, console: console, process: process, tools: tools, texts: r.working });
+    r = r$157;
+    const first = $rt.unwrap($r417);
+    const mechanical_before = r.mechanical;
+    const [$r418, r$158] = repair_rounds({ r: r, files: files, console: console, process: process, tools: tools, first: first });
+    r = r$158;
+    const checked = $rt.unwrap($r418);
+    const repairs = $rt.int.sub(r.mechanical, mechanical_before, $ob62);
+    if (checked.internal_error) {
+      r = { ...r, cause: { tag: "Some", value: "compiler_bug" }, current: { tag: "Some", value: checked } };
+      const [, r$159] = record_trace({ r: r, console: console, iteration: iteration, model: answer.model, prompt_hash: ctx_in.prompt_hash, before: before, diags: checked.json, failing: [], repairs: repairs, tokens: answer.tokens, ms: $rt.int.sub($std_io.time({ clock: clock }), t0, $ob63), classification: "unusable", escalation: escalation });
+      r = r$159;
+      const [, r$160] = stop({ r: r });
+      r = r$160;
+      return [{ tag: "Ok", value: { tag: "None" } }, r];
+    }
     r = { ...r, current: { tag: "Some", value: checked } };
     const failing = failing_of({ c: checked });
-    const [, r$153] = push_history({ r: r, h: { iteration: iteration, diagnostics: checked.json, failing: failing } });
-    r = r$153;
+    const [, r$161] = push_history({ r: r, h: { iteration: iteration, diagnostics: checked.json, failing: failing } });
+    r = r$161;
     const size = $rt.int.add($std_list.len({ xs: checked.json }), $std_list.len({ xs: failing }), $ob64);
-    const [, r$154] = set_best({ r: r, iteration: iteration, size: size });
-    r = r$154;
+    const [, r$162] = set_best({ r: r, iteration: iteration, size: size });
+    r = r$162;
     const sig = outcome_signature({ diagnostics: checked.json, failing: failing });
     const conflicts = conflicts_of({ c: checked, targets: r.targets });
     let classification = "progress";
@@ -3547,27 +3719,27 @@ export function iterate({ r, files, console, process, net, clock, model, tools, 
       }
     }
     let seen = r.seen;
-    const [, seen$155] = $std_map.set({ d: seen, key: sig, value: true });
-    seen = seen$155;
+    const [, seen$163] = $std_map.set({ d: seen, key: sig, value: true });
+    seen = seen$163;
     r = { ...r, seen: seen };
-    const [, r$156] = record_trace({ r: r, console: console, iteration: iteration, model: answer.model, prompt_hash: ctx_in.prompt_hash, before: before, diags: checked.json, failing: failing, repairs: repairs, tokens: answer.tokens, ms: $rt.int.sub($std_io.time({ clock: clock }), t0, $ob69), classification: classification, escalation: escalation });
-    r = r$156;
+    const [, r$164] = record_trace({ r: r, console: console, iteration: iteration, model: answer.model, prompt_hash: ctx_in.prompt_hash, before: before, diags: checked.json, failing: failing, repairs: repairs, tokens: answer.tokens, ms: $rt.int.sub($std_io.time({ clock: clock }), t0, $ob69), classification: classification, escalation: escalation });
+    r = r$164;
     if (classification === "green") {
       r = { ...r, green: true };
-      const [, r$157] = stop({ r: r });
-      r = r$157;
+      const [, r$165] = stop({ r: r });
+      r = r$165;
       return [{ tag: "Ok", value: { tag: "None" } }, r];
     }
     if (classification === "contract conflict") {
       for (const d of conflicts) {
-        const $m417 = d.obligation;
-        $m417$match: {
-          if ($m417.tag === "None") {
+        const $m433 = d.obligation;
+        $m433$match: {
+          if ($m433.tag === "None") {
             skip({  });
-            break $m417$match;
+            break $m433$match;
           }
-          if ($m417.tag === "Some") {
-            const value = $m417.value;
+          if ($m433.tag === "Some") {
+            const value = $m433.value;
             const ob = value;
             let kind = "unsatisfiable";
             if (ob.kind === "ensures") {
@@ -3582,27 +3754,27 @@ export function iterate({ r, files, console, process, net, clock, model, tools, 
                 def = t.module_name + "." + t.name;
               }
             }
-            const [, r$158] = push_proposal({ r: r, p: proposal_json({ kind: kind, def: def, current: { tag: "Some", value: ob.kind + " " + ob.text }, proposed: { tag: "None" }, counterexample: counterexample_json({ c: checked, d: d }), iterations: iteration, finding: { tag: "None" }, rationale: "the counterexample satisfies every precondition and violates the clause, and the model proposed the same body twice: the contract is likely wrong" }) });
-            r = r$158;
-            break $m417$match;
+            const [, r$166] = push_proposal({ r: r, p: proposal_json({ kind: kind, def: def, current: { tag: "Some", value: ob.kind + " " + ob.text }, proposed: { tag: "None" }, counterexample: counterexample_json({ c: checked, d: d }), iterations: iteration, finding: { tag: "None" }, rationale: "the counterexample satisfies every precondition and violates the clause, and the model proposed the same body twice: the contract is likely wrong" }) });
+            r = r$166;
+            break $m433$match;
           }
           $rt.unreachable();
         }
       }
       r = { ...r, cause: { tag: "Some", value: "contract_conflict" } };
-      const [, r$159] = stop({ r: r });
-      r = r$159;
+      const [, r$167] = stop({ r: r });
+      r = r$167;
       return [{ tag: "Ok", value: { tag: "None" } }, r];
     }
-    let $sc426 = classification === "stall";
-    if ($sc426) {
-      const [$r425, r$160] = escalate({ r: r });
-      r = r$160;
-      $sc426 = !$r425;
+    let $sc442 = classification === "stall";
+    if ($sc442) {
+      const [$r441, r$168] = escalate({ r: r });
+      r = r$168;
+      $sc442 = !$r441;
     }
-    if ($sc426) {
-      const [, r$161] = stop({ r: r });
-      r = r$161;
+    if ($sc442) {
+      const [, r$169] = stop({ r: r });
+      r = r$169;
     }
     return [{ tag: "Ok", value: { tag: "None" } }, r];
   } catch ($e) {
@@ -3615,17 +3787,17 @@ export function run_task({ task, files, console, process, net, clock, opts }) {
   try {
     const started = $std_io.time({ clock: clock });
     let project = { root: opts.root, scope: [], paths: $std_map.dict({  }), texts: $std_map.dict({  }) };
-    const $m430 = load_project({ files: files, root: opts.root, scope: task.scope });
-    $m430$match: {
-      if ($m430.tag === "Err") {
-        const error = $m430.error;
+    const $m446 = load_project({ files: files, root: opts.root, scope: task.scope });
+    $m446$match: {
+      if ($m446.tag === "Err") {
+        const error = $m446.error;
         return { tag: "Ok", value: failure({ error: error }) };
-        break $m430$match;
+        break $m446$match;
       }
-      if ($m430.tag === "Ok") {
-        const value = $m430.value;
+      if ($m446.tag === "Ok") {
+        const value = $m446.value;
         project = value;
-        break $m430$match;
+        break $m446$match;
       }
       $rt.unreachable();
     }
@@ -3634,34 +3806,38 @@ export function run_task({ task, files, console, process, net, clock, opts }) {
     $rt.unwrap($std_io.mkdir({ files: files, path: work_dir }));
     let texts0 = $std_map.dict({  });
     for (const path of $std_map.keys({ d: project.texts })) {
-      const [, texts0$162] = $std_map.set({ d: texts0, key: path, value: canonical_text({ path: path, text: or_empty({ o: $std_map.find({ d: project.texts, key: path }) }) }) });
-      texts0 = texts0$162;
+      const [, texts0$170] = $std_map.set({ d: texts0, key: path, value: canonical_text({ path: path, text: or_empty({ o: $std_map.find({ d: project.texts, key: path }) }) }) });
+      texts0 = texts0$170;
     }
-    let r = { task: task, project: project, work_dir: work_dir, started: started, texts0: texts0, working: copy_texts({ d: texts0 }), baseline: $rt.unwrap(check_project({ files: files, console: console, process: process, project: project, tools: opts.tools, texts: texts0, run_tests: true, out_dir: work_dir + "/check-1" })), targets: [], trace: [], history: [], proposals: [], messages: [], tokens: 0, mechanical: 0, escalation_steps: 0, cause: { tag: "None" }, model_name: model_name({ m: opts.model }), ctx_policy: task.context_policy, full_history: false, ladder: 0, pending_escalation: { tag: "None" }, current: { tag: "None" }, grew: 0, seen: $std_map.dict({  }), seen_bodies: $std_map.dict({  }), claim_edits: 0, helper_attempts: 0, best: { tag: "None" }, checks: 1, calls: 0, done: false, green: false };
+    let r = { task: task, project: project, work_dir: work_dir, started: started, texts0: texts0, working: copy_texts({ d: texts0 }), baseline: $rt.unwrap(check_project({ files: files, console: console, process: process, project: project, tools: opts.tools, texts: texts0, run_tests: true, out_dir: work_dir + "/check-1" })), targets: [], trace: [], history: [], proposals: [], messages: [], tokens: 0, mechanical: 0, escalation_steps: 0, cause: { tag: "None" }, model_name: model_name({ m: opts.model }), ctx_policy: task.context_policy, zone: $zones.zone_draft, loop_authored: [], full_history: false, ladder: 0, pending_escalation: { tag: "None" }, current: { tag: "None" }, grew: 0, seen: $std_map.dict({  }), seen_bodies: $std_map.dict({  }), claim_edits: 0, helper_attempts: 0, best: { tag: "None" }, checks: 1, calls: 0, done: false, green: false };
     if (r.baseline.internal_error) {
       return { tag: "Ok", value: failure({ error: "the compiler reported E0999 on the baseline; this is filed against the compiler, not the task" }) };
     }
-    const $m438 = select_targets({ task: task, project: project, baseline: r.baseline, texts: texts0 });
-    $m438$match: {
-      if ($m438.tag === "Err") {
-        const error = $m438.error;
+    const $m454 = select_targets({ task: task, project: project, baseline: r.baseline, texts: texts0 });
+    $m454$match: {
+      if ($m454.tag === "Err") {
+        const error = $m454.error;
         return { tag: "Ok", value: failure({ error: error }) };
-        break $m438$match;
+        break $m454$match;
       }
-      if ($m438.tag === "Ok") {
-        const value = $m438.value;
+      if ($m454.tag === "Ok") {
+        const value = $m454.value;
         r = { ...r, targets: value };
-        break $m438$match;
+        break $m454$match;
       }
       $rt.unreachable();
     }
+    r = { ...r, zone: target_zone({ r: r, files: files }) };
+    if (task.context_policy === "") {
+      r = { ...r, ctx_policy: default_policy({ zone: r.zone }), task: { ...task, context_policy: default_policy({ zone: r.zone }) } };
+    }
     if (task.kind === "regenerate") {
-      r = { ...r, ctx_policy: "none" };
+      r = { ...r, ctx_policy: "none", task: { ...r.task, context_policy: "none" } };
     }
     if (task.kind === "ticket") {
-      const [$r442, r$163] = ticket({ r: r, files: files, process: process, net: net, clock: clock, model: opts.model, write: opts.write });
-      r = r$163;
-      return $r442;
+      const [$r462, r$171] = ticket({ r: r, files: files, process: process, net: net, clock: clock, model: opts.model, write: opts.write });
+      r = r$171;
+      return $r462;
     }
     let stray = 0;
     for (const d of r.baseline.json) {
@@ -3673,55 +3849,55 @@ export function run_task({ task, files, console, process, net, clock, opts }) {
     if (stray > 0 && task.kind !== "interface_change") {
       r = { ...r, cause: { tag: "Some", value: "baseline" } };
       log({ console: console, line: "onus loop: the baseline has " + $std_int.to_text({ x: stray }) + " diagnostic(s) outside the targets" });
-      const [$r446, r$164] = conclude({ r: r, files: files, status: "blocked", final: { tag: "Some", value: r.baseline }, now: $std_io.time({ clock: clock }), write: opts.write });
-      r = r$164;
-      return $r446;
+      const [$r466, r$172] = conclude({ r: r, files: files, status: "blocked", final: { tag: "Some", value: r.baseline }, now: $std_io.time({ clock: clock }), write: opts.write });
+      r = r$172;
+      return $r466;
     }
     if ($std_list.len({ xs: r.targets }) === 0) {
-      const [$r448, r$165] = conclude({ r: r, files: files, status: "opened", final: { tag: "Some", value: r.baseline }, now: $std_io.time({ clock: clock }), write: opts.write });
-      r = r$165;
-      return $r448;
+      const [$r468, r$173] = conclude({ r: r, files: files, status: "opened", final: { tag: "Some", value: r.baseline }, now: $std_io.time({ clock: clock }), write: opts.write });
+      r = r$173;
+      return $r468;
     }
     if (task.kind === "implement" || task.kind === "regenerate") {
       for (const target of r.targets) {
-        const [, r$166] = elide_target({ r: r, target: target });
-        r = r$166;
+        const [, r$174] = elide_target({ r: r, target: target });
+        r = r$174;
       }
     }
-    const $hi449 = $rt.int.add(task.budget.iterations, 1, $ob71);
-    for (let iteration = 1; iteration < $hi449; iteration++) {
+    const $hi469 = $rt.int.add(task.budget.iterations, 1, $ob71);
+    for (let iteration = 1; iteration < $hi469; iteration++) {
       if (!r.done) {
-        const [$r451, r$167] = iterate({ r: r, files: files, console: console, process: process, net: net, clock: clock, model: opts.model, tools: opts.tools, iteration: iteration });
-        r = r$167;
-        const $m450 = $r451;
-        $m450$match: {
-          if ($m450.tag === "Err") {
-            const error = $m450.error;
+        const [$r471, r$175] = iterate({ r: r, files: files, console: console, process: process, net: net, clock: clock, model: opts.model, tools: opts.tools, iteration: iteration });
+        r = r$175;
+        const $m470 = $r471;
+        $m470$match: {
+          if ($m470.tag === "Err") {
+            const error = $m470.error;
             return { tag: "Err", error: error };
-            break $m450$match;
+            break $m470$match;
           }
-          if ($m450.tag === "Ok") {
-            const value = $m450.value;
+          if ($m470.tag === "Ok") {
+            const value = $m470.value;
             if (value.tag === "Some") {
               return { tag: "Ok", value: failure({ error: or_empty({ o: value }) }) };
             }
-            break $m450$match;
+            break $m470$match;
           }
           $rt.unreachable();
         }
       }
     }
     if (r.green) {
-      const [$r454, r$168] = conclude({ r: r, files: files, status: "opened", final: r.current, now: $std_io.time({ clock: clock }), write: opts.write });
-      r = r$168;
-      return $r454;
+      const [$r474, r$176] = conclude({ r: r, files: files, status: "opened", final: r.current, now: $std_io.time({ clock: clock }), write: opts.write });
+      r = r$176;
+      return $r474;
     }
     if (r.cause.tag === "None") {
       r = { ...r, cause: { tag: "Some", value: "budget" } };
     }
-    const [$r457, r$169] = conclude({ r: r, files: files, status: "blocked", final: r.current, now: $std_io.time({ clock: clock }), write: opts.write });
-    r = r$169;
-    return $r457;
+    const [$r477, r$177] = conclude({ r: r, files: files, status: "blocked", final: r.current, now: $std_io.time({ clock: clock }), write: opts.write });
+    r = r$177;
+    return $r477;
   } catch ($e) {
     if ($e instanceof $rt.EarlyReturn) return $e.value;
     throw $e;
@@ -3729,17 +3905,17 @@ export function run_task({ task, files, console, process, net, clock, opts }) {
 }
 
 export function elide_target({ r, target }) {
-  const $m458 = $std_map.find({ d: r.working, key: target.path });
-  $m458$match: {
-    if ($m458.tag === "None") {
+  const $m478 = $std_map.find({ d: r.working, key: target.path });
+  $m478$match: {
+    if ($m478.tag === "None") {
       skip({  });
-      break $m458$match;
+      break $m478$match;
     }
-    if ($m458.tag === "Some") {
-      const value = $m458.value;
-      const [, r$170] = elide_in({ r: r, target: target, text: value });
-      r = r$170;
-      break $m458$match;
+    if ($m478.tag === "Some") {
+      const value = $m478.value;
+      const [, r$178] = elide_in({ r: r, target: target, text: value });
+      r = r$178;
+      break $m478$match;
     }
     $rt.unreachable();
   }
@@ -3748,17 +3924,17 @@ export function elide_target({ r, target }) {
 }
 
 export function elide_in({ r, target, text }) {
-  const $m459 = parse_module({ path: target.path, text: text }).module;
-  $m459$match: {
-    if ($m459.tag === "None") {
+  const $m479 = parse_module({ path: target.path, text: text }).module;
+  $m479$match: {
+    if ($m479.tag === "None") {
       skip({  });
-      break $m459$match;
+      break $m479$match;
     }
-    if ($m459.tag === "Some") {
-      const value = $m459.value;
-      const [, r$171] = elide_fn({ r: r, target: target, text: text, f: find_fn({ m: value, name: target.name }) });
-      r = r$171;
-      break $m459$match;
+    if ($m479.tag === "Some") {
+      const value = $m479.value;
+      const [, r$179] = elide_fn({ r: r, target: target, text: text, f: find_fn({ m: value, name: target.name }) });
+      r = r$179;
+      break $m479$match;
     }
     $rt.unreachable();
   }
@@ -3767,21 +3943,21 @@ export function elide_in({ r, target, text }) {
 }
 
 export function elide_fn({ r, target, text, f }) {
-  const $m460 = f;
-  $m460$match: {
-    if ($m460.tag === "None") {
+  const $m480 = f;
+  $m480$match: {
+    if ($m480.tag === "None") {
       skip({  });
-      break $m460$match;
+      break $m480$match;
     }
-    if ($m460.tag === "Some") {
-      const value = $m460.value;
+    if ($m480.tag === "Some") {
+      const value = $m480.value;
       if (has_body({ f: value })) {
         let working = r.working;
-        const [, working$172] = $std_map.set({ d: working, key: target.path, value: canonical_text({ path: target.path, text: splice_item({ text: text, span: value.span, replacement: { tag: "FnItem", decl: elide({ f: value }) } }) }) });
-        working = working$172;
+        const [, working$180] = $std_map.set({ d: working, key: target.path, value: canonical_text({ path: target.path, text: splice_item({ text: text, span: value.span, replacement: { tag: "FnItem", decl: elide({ f: value }) } }) }) });
+        working = working$180;
         r = { ...r, working: working };
       }
-      break $m460$match;
+      break $m480$match;
     }
     $rt.unreachable();
   }

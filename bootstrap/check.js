@@ -13,6 +13,7 @@ import * as $contracts from "./contracts.js";
 import * as $claimcheck from "./claimcheck.js";
 import * as $capabilities from "./capabilities.js";
 import * as $paths from "./paths.js";
+import * as $zones from "./zones.js";
 import * as $std_io from "./std/io.js";
 import * as $loc from "./loc.js";
 import * as $std_map from "./std/map.js";
@@ -29,12 +30,12 @@ import * as $pathreport from "./pathreport.js";
 import * as $obligations from "./obligations.js";
 import * as $std_bool from "./std/bool.js";
 
-const $ob1 = { kind: "overflow", text: "i + 1 within Int", at: "self/check.onus:84:187", def: "parse_args" };
-const $ob2 = { kind: "overflow", text: "i + 1 within Int", at: "self/check.onus:87:43", def: "parse_args" };
-const $ob3 = { kind: "overflow", text: "i + 2 within Int", at: "self/check.onus:124:11", def: "parse_args" };
-const $ob4 = { kind: "overflow", text: "i + 1 within Int", at: "self/check.onus:145:13", def: "parse_args" };
-const $ob5 = { kind: "overflow", text: "i + 1 within Int", at: "self/check.onus:148:13", def: "parse_args" };
-const $ob6 = { kind: "overflow", text: "-1 within Int", at: "self/check.onus:431:26", def: "main" };
+const $ob1 = { kind: "overflow", text: "i + 1 within Int", at: "self/check.onus:85:187", def: "parse_args" };
+const $ob2 = { kind: "overflow", text: "i + 1 within Int", at: "self/check.onus:88:43", def: "parse_args" };
+const $ob3 = { kind: "overflow", text: "i + 2 within Int", at: "self/check.onus:125:11", def: "parse_args" };
+const $ob4 = { kind: "overflow", text: "i + 1 within Int", at: "self/check.onus:146:13", def: "parse_args" };
+const $ob5 = { kind: "overflow", text: "i + 1 within Int", at: "self/check.onus:149:13", def: "parse_args" };
+const $ob6 = { kind: "overflow", text: "-1 within Int", at: "self/check.onus:438:26", def: "main" };
 export function parse_args({ args }) {
   let entry = "";
   let root = { tag: "None" };
@@ -173,7 +174,10 @@ export function pass_index({ name }) {
   if (name === "paths") {
     return 11;
   }
-  return 11;
+  if (name === "zones") {
+    return 12;
+  }
+  return 12;
 }
 
 export function def_text({ d }) {
@@ -242,6 +246,10 @@ export function run_passes({ ctx, to, files, console, process, vopts }) {
     const [, ctx$12] = $paths.paths_pass({ ctx: ctx });
     ctx = ctx$12;
   }
+  if (to >= 12 && $context.clean({ ctx: ctx })) {
+    const [, ctx$13] = $zones.zones_pass({ ctx: ctx, files: files });
+    ctx = ctx$13;
+  }
   return [undefined, ctx];
   return [undefined, ctx];
 }
@@ -252,13 +260,13 @@ export function main({ args, files, console, process }) {
     const to = pass_index({ name: opts.to });
     let ctx = $context.new_context({ root: opts.root, stdlib: opts.stdlib });
     const text = $rt.unwrap($std_io.read({ files: files, path: opts.entry }));
-    const [$r23, ctx$13] = $loader.add_file({ ctx: ctx, path: opts.entry, text: text });
-    ctx = ctx$13;
+    const [$r23, ctx$14] = $loader.add_file({ ctx: ctx, path: opts.entry, text: text });
+    ctx = ctx$14;
     if ($r23.tag === "None") {
       return { tag: "Err", error: { tag: "Other", detail: "the entry file is too long" } };
     }
-    const [, ctx$14] = run_passes({ ctx: ctx, to: to, files: files, console: console, process: process, vopts: { z3_path: opts.z3, budget_ms: opts.budget, cache_dir: opts.cache, dump_dir: opts.dump } });
-    ctx = ctx$14;
+    const [, ctx$15] = run_passes({ ctx: ctx, to: to, files: files, console: console, process: process, vopts: { z3_path: opts.z3, budget_ms: opts.budget, cache_dir: opts.cache, dump_dir: opts.dump } });
+    ctx = ctx$15;
     const tab = $loc.line_tables({ ctx: ctx });
     if ($context.clean({ ctx: ctx }) && opts.ir) {
       const $hi27 = ctx.module_count;
@@ -308,8 +316,8 @@ export function main({ args, files, console, process }) {
           if ($m36.tag === "Some") {
             const value = $m36.value;
             const m_ir = $lowerir.lower_module({ ctx: ctx, m: value, tables: tab, opts: { verify_all: false, negate_guard: { tag: "None" } } });
-            const [, lowered$15] = $std_list.push({ b: lowered, x: m_ir });
-            lowered = lowered$15;
+            const [, lowered$16] = $std_list.push({ b: lowered, x: m_ir });
+            lowered = lowered$16;
             if (value.file === 0) {
               entry_ir = { tag: "Some", value: m_ir };
             }
@@ -330,15 +338,15 @@ export function main({ args, files, console, process }) {
           $rt.unwrap($std_io.mkdir({ files: files, path: dir }));
           $rt.unwrap($build.write_file({ files: files, path: dir + "/program.ll", text: value.ll }));
           for (const u of value.unsupported) {
-            const [, ctx$16] = $context.report({ ctx: ctx, d: $report.diagnostic({ code: "E0800", file: u.file, span: u.span, def_name: { tag: "Some", value: $native.unsupported_def_name({ u: u }) }, detail: $native.unsupported_detail({ u: u }) }) });
-            ctx = ctx$16;
+            const [, ctx$17] = $context.report({ ctx: ctx, d: $report.diagnostic({ code: "E0800", file: u.file, span: u.span, def_name: { tag: "Some", value: $native.unsupported_def_name({ u: u }) }, detail: $native.unsupported_detail({ u: u }) }) });
+            ctx = ctx$17;
           }
           break $m40$match;
         }
         if ($m40.tag === "Err") {
           const error = $m40.error;
-          const [, ctx$17] = $context.report({ ctx: ctx, d: $report.diagnostic({ code: "E0999", file: 0, span: { start: 0, end: 0 }, def_name: { tag: "None" }, detail: error }) });
-          ctx = ctx$17;
+          const [, ctx$18] = $context.report({ ctx: ctx, d: $report.diagnostic({ code: "E0999", file: 0, span: { start: 0, end: 0 }, def_name: { tag: "None" }, detail: error }) });
+          ctx = ctx$18;
           break $m40$match;
         }
         $rt.unreachable();

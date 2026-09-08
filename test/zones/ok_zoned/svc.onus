@@ -1,0 +1,12 @@
+module svc
+import core.math
+import payments
+
+pub fn bill(x: Int where it >= 0) -> Int
+  ensures result >= 0
+{
+  return payments.charge(pence: math.double(x: x))
+}
+
+path billing
+  entry bill

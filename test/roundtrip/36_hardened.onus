@@ -1,0 +1,22 @@
+module hardened_items
+
+-- A draft module exposing a boundary (spec §21.1): `hardened` marks the
+-- public items a hardened or critical module may depend on.
+pub hardened record Receipt {
+  id: Text
+  amount_pence: Int where it >= 0
+}
+
+pub hardened fn charge(amount_pence: Int where it >= 0) -> Receipt may alloc
+  ensures result.amount_pence == amount_pence
+{
+  return Receipt { id: "r1", amount_pence: amount_pence }
+}
+
+pub hardened sealed record Token {
+  value: Text
+}
+
+pub fn refund(r: Receipt) -> Int {
+  return r.amount_pence
+}

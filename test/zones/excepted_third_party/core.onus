@@ -1,0 +1,14 @@
+module core
+import vendor
+
+-- The manifest excepts `vendor.charge` from `no_third_party_assumes` (no E0415); the
+-- assumption is still unverified (E0416).
+pub fn pay(pence: Int where it >= 0) -> Int may alloc
+  claims vendor.Settled
+{
+  return vendor.charge(pence: pence)
+}
+
+path paying
+  entry pay
+  require { vendor.Settled }
