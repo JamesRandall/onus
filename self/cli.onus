@@ -1469,6 +1469,24 @@ fn next_command(
   return Ok(value: 0)
 }
 
+-- The workbench the compiler carries (item 210: `self/workbench.onus` built
+-- by stage0 into the bundle under `workbench/`) and the runtime, written
+-- beside the page so that the directory is the live page.
+fn write_workbench(
+  files: io.Files,
+  out_dir: Text
+) -> Result[Unit, io.Error] may io.file, alloc, mutate {
+  for e: bundle.Entry in bundle.under(prefix: "workbench/") {
+    let rel: Text = Text.replace(t: e.path, from: "workbench/", to: "")
+    if Text.contains(t: rel, needle: "/") {
+      try io.mkdir(files: files, path: out_dir ++ "/" ++ nativebuild.dir_of(path: rel))
+    }
+    try build.write_file(files: files, path: out_dir ++ "/" ++ rel, text: e.text)
+  }
+  try build.write_bundled_runtime(files: files, out_dir: out_dir)
+  return Ok(value: Unit)
+}
+
 -- `onus review` (§15; item 193): the review bundle and page written into the
 -- output directory after the pipeline ran to paths; diagnostics are
 -- reported and the page then holds them alone.
@@ -1532,6 +1550,7 @@ fn review_command(
     path: out_dir ++ "/review.json",
     text: json.pretty(j: data) ++ "\n"
   )
+  try write_workbench(files: files, out_dir: out_dir)
   io.eprint(console: console, text: "onus review: wrote " ++ out_dir ++ "/index.html\n")
   if not context.clean(ctx: ctx) {
     return Err(error: Other(detail: "diagnostics"))

@@ -5,7 +5,8 @@ import std.host
 -- Views (spec §22): an immutable tree a pure function of state returns,
 -- patched onto the DOM by one primitive, with handlers as messages. A view
 -- cannot reach a capability or perform an effect; it describes.
--- The HTML vocabulary, closed (§22.2): no string-tagged element.
+-- The HTML vocabulary, closed (§22.2): no string-tagged element. The
+-- elements a document is made of, and the inline SVG subset a drawing needs.
 pub union Tag =
   | Div
   | Span
@@ -13,6 +14,8 @@ pub union Tag =
   | H1
   | H2
   | H3
+  | H4
+  | H5
   | Ul
   | Ol
   | Li
@@ -31,6 +34,7 @@ pub union Tag =
   | Pre
   | Code
   | Section
+  | Article
   | Header
   | Footer
   | Nav
@@ -38,6 +42,20 @@ pub union Tag =
   | Select
   | OptionItem
   | Textarea
+  | Details
+  | Summary
+  | Em
+  | Strong
+  | Small
+  | Br
+  -- Inline SVG: the drawing elements, `SvgText` for `<text>`.
+  | Svg
+  | G
+  | Rect
+  | Path
+  | Line
+  | Circle
+  | SvgText
 
 pub union AttrName =
   | Id
@@ -53,7 +71,24 @@ pub union AttrName =
   | Role
   | AriaLabel
   | Disabled
-  | Style
+  | Open
+  | Hidden
+  | Colspan
+  -- Geometry, for SVG and images.
+  | Width
+  | Height
+  | X
+  | Y
+  | Rx
+  | D
+  | Transform
+  | ViewBox
+  -- The `data-*` hooks a page marks its parts with.
+  | DataId
+  | DataModule
+  | DataItem
+  | DataView
+  | DataStatus
 
 pub union PropName =
   | Value
@@ -69,6 +104,8 @@ pub union EventKind =
   | KeyDown
   | Focus
   | Blur
+  -- A `details` element opened or closed.
+  | Toggle
 
 pub union Attr[Msg] =
   | Attribute of name: AttrName, value: Text
@@ -110,6 +147,11 @@ pub fn on[Msg](event: EventKind, msg: Msg) -> Attr[Msg] may alloc {
   return On(event: event, msg: msg)
 }
 
+-- A property of the live element (`value`, `checked`, `selected`), as text.
+pub fn prop[Msg](name: PropName, value: Text) -> Attr[Msg] may alloc {
+  return Property(name: name, value: value)
+}
+
 -- The tag's name as the document spells it.
 pub fn tag_name(tag: Tag) -> Text {
   match tag with
@@ -119,6 +161,8 @@ pub fn tag_name(tag: Tag) -> Text {
   | H1 -> return "h1"
   | H2 -> return "h2"
   | H3 -> return "h3"
+  | H4 -> return "h4"
+  | H5 -> return "h5"
   | Ul -> return "ul"
   | Ol -> return "ol"
   | Li -> return "li"
@@ -137,6 +181,7 @@ pub fn tag_name(tag: Tag) -> Text {
   | Pre -> return "pre"
   | Code -> return "code"
   | Section -> return "section"
+  | Article -> return "article"
   | Header -> return "header"
   | Footer -> return "footer"
   | Nav -> return "nav"
@@ -144,6 +189,19 @@ pub fn tag_name(tag: Tag) -> Text {
   | Select -> return "select"
   | OptionItem -> return "option"
   | Textarea -> return "textarea"
+  | Details -> return "details"
+  | Summary -> return "summary"
+  | Em -> return "em"
+  | Strong -> return "strong"
+  | Small -> return "small"
+  | Br -> return "br"
+  | Svg -> return "svg"
+  | G -> return "g"
+  | Rect -> return "rect"
+  | Path -> return "path"
+  | Line -> return "line"
+  | Circle -> return "circle"
+  | SvgText -> return "text"
 }
 
 pub fn attr_name(name: AttrName) -> Text {
@@ -161,7 +219,22 @@ pub fn attr_name(name: AttrName) -> Text {
   | Role -> return "role"
   | AriaLabel -> return "aria-label"
   | Disabled -> return "disabled"
-  | Style -> return "style"
+  | Open -> return "open"
+  | Hidden -> return "hidden"
+  | Colspan -> return "colspan"
+  | Width -> return "width"
+  | Height -> return "height"
+  | X -> return "x"
+  | Y -> return "y"
+  | Rx -> return "rx"
+  | D -> return "d"
+  | Transform -> return "transform"
+  | ViewBox -> return "viewBox"
+  | DataId -> return "data-id"
+  | DataModule -> return "data-module"
+  | DataItem -> return "data-item"
+  | DataView -> return "data-view"
+  | DataStatus -> return "data-status"
 }
 
 pub fn event_name(event: EventKind) -> Text {
@@ -173,6 +246,38 @@ pub fn event_name(event: EventKind) -> Text {
   | KeyDown -> return "keydown"
   | Focus -> return "focus"
   | Blur -> return "blur"
+  | Toggle -> return "toggle"
+}
+
+-- Whether the element is drawn inside an SVG namespace.
+pub fn is_svg(tag: Tag) -> Bool {
+  match tag with
+  | Svg -> return true
+  | G -> return true
+  | Rect -> return true
+  | Path -> return true
+  | Line -> return true
+  | Circle -> return true
+  | SvgText -> return true
+  | _ -> return false
+}
+
+-- Whether the element has no content and no closing tag in HTML.
+pub fn is_void(tag: Tag) -> Bool {
+  match tag with
+  | Input -> return true
+  | Img -> return true
+  | Br -> return true
+  | _ -> return false
+}
+
+-- Whether an attribute is written bare when present: `open`, not `open="..."`.
+pub fn is_boolean(name: AttrName) -> Bool {
+  match name with
+  | Open -> return true
+  | Hidden -> return true
+  | Disabled -> return true
+  | _ -> return false
 }
 
 -- Predicates (§22.4) ------------------------------------------------------------
@@ -357,7 +462,7 @@ pub intrinsic fn patch[Msg](
 pub intrinsic fn run[State, Msg, E, e](
   root: dom.Root,
   init: State,
-  view: fn(state: State) -> View[Msg] may alloc,
+  view: fn(state: State) -> View[Msg] may alloc, mutate,
   update: fn(state: State, msg: Msg) -> Result[State, E] may e
 ) -> Unit may dom.read, dom.write, dom.event, e, alloc
   claims host.js

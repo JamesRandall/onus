@@ -1,5 +1,6 @@
 module view_ops
 -- `std.view`'s predicates and accessibility conditions (§22.4), as examples over small trees.
+import std.html
 import std.view
 
 pub union Msg =
@@ -78,8 +79,63 @@ fn keyed_list(n: Int where 0 <= it and it <= 100) -> view.View[Msg] may alloc {
 
 example spellings {
   view.tag_name(tag: OptionItem) == "option"
+  view.tag_name(tag: SvgText) == "text"
   view.event_name(event: Edited) == "input"
+  view.event_name(event: Toggle) == "toggle"
   view.attr_name(name: AriaLabel) == "aria-label"
+  view.attr_name(name: ViewBox) == "viewBox"
+  view.attr_name(name: DataId) == "data-id"
+  view.is_svg(tag: Rect)
+  not view.is_svg(tag: Div)
+  view.is_void(tag: Br)
+  view.is_boolean(name: Open)
+}
+
+fn drawing() -> view.View[Msg] may alloc {
+  return view.element[Msg](
+    tag: Svg,
+    attrs: [view.attr(name: ViewBox, value: "0 0 10 10"), view.attr(name: Width, value: "10")],
+    children: [
+      view.element[Msg](
+        tag: Rect,
+        attrs: [view.attr(name: X, value: "1"), view.attr(name: Y, value: "1")],
+        children: []
+      ),
+      view.element[Msg](tag: SvgText, attrs: [], children: [view.text[Msg](value: "a < b & \"c\"")])
+    ]
+  )
+}
+
+fn folded() -> view.View[Msg] may alloc {
+  return view.element(
+    tag: Details,
+    attrs: [
+      view.attr(name: Open, value: ""),
+      view.attr(name: DataItem, value: "x"),
+      view.on(event: Toggle, msg: Pressed)
+    ],
+    children: [
+      view.element[Msg](tag: Summary, attrs: [], children: [view.text[Msg](value: "body")]),
+      view.keyed[Msg](key: "k", tag: Pre, attrs: [], children: [view.text[Msg](value: "{ ... }")]),
+      view.element[Msg](tag: Br, attrs: [], children: []),
+      view.element(
+        tag: Input,
+        attrs: [view.prop(name: Value, value: "v"), view.prop(name: Checked, value: "true")],
+        children: []
+      )
+    ]
+  )
+}
+
+example serialised {
+  html.escape(text: "a < b & \"c\"") == "a &lt; b &amp; &quot;c&quot;"
+  html.to_html(
+    tree: drawing()
+  ) == "<svg viewBox=\"0 0 10 10\" width=\"10\"><rect x=\"1\" y=\"1\"></rect><text>a &lt; b &amp; &quot;c&quot;</text></svg>"
+  html.to_html(
+    tree: folded()
+  ) == "<details open data-item=\"x\"><summary>body</summary><pre>{ ... }</pre><br><input value=\"v\" checked></details>"
+  html.to_html(tree: view.text[Msg](value: "plain")) == "plain"
 }
 
 example conditions {

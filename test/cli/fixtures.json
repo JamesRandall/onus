@@ -962,6 +962,13 @@
             "review/review.json": "expect/review.json",
             "review/index.html": "expect/review.html"
           },
+          "files_exist": [
+            "review/workbench.js",
+            "review/json.js",
+            "review/std/view.js",
+            "review/onus-runtime/index.js",
+            "review/onus-runtime/dom.js"
+          ],
           "files_contain": {
             "review/index.html": [
               "<g class=\"node fn assumed\" ",
@@ -2411,6 +2418,15 @@
           "stdout_contains": [
             "self/bundle.onus is current\n"
           ]
+        },
+        {
+          "name": "workbench_dom",
+          "run": "workbench_dom.sh",
+          "args": [
+            "$cli",
+            "$stage"
+          ],
+          "stdout": "expect/workbench_dom.out"
         },
         {
           "name": "release",

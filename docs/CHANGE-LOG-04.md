@@ -4,7 +4,7 @@ Follows `CHANGE-LOG-03.md`. Apply after it. Adds what the workbench needs to be 
 
 ---
 
-## 2026-09-05 — Views and the DOM **(applying; 2026-09-08, docs/CHANGES.md item 208: the capability, the primitive, `std.view` and the counter; the workbench in Onus is a later change)**
+## 2026-09-05 — Views and the DOM **(applied; 2026-09-08, docs/CHANGES.md items 208 (the capability, the primitive, `std.view` and the counter), 209 (the vocabulary for documents and `std.html`) and 210 (the workbench in Onus))**
 
 **Principle.** UI frameworks exist for human authors: syntax that reads like markup, components to reason about one piece at a time, lifecycle hooks, an ecosystem. A model needs none of that. What remains is the one non-ergonomic problem — keeping the DOM in sync with state without rebuilding it — and that is a small runtime primitive, not a dependency. A view in Onus is a pure function from state to a tree value; the tree is verifiable like any other value; only the patch step touches the DOM.
 

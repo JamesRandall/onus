@@ -2668,6 +2668,54 @@ own examples. The grammar as implemented is `grammar-v0.md`. Differences:
     Review artefacts under `.onus/changes/208/`: interface diffs of `capabilities`, `lowerir`, `native` (and, unchanged, `ir`, `build`, `nativebuild`, `jsemit`, `codes`), `ledger.md`; no obligation of `self/` changed status. Fixed
     point reached from `bootstrap/`, native stage agrees; promoted.
 
+209. **`std.view` for documents: the vocabulary, `to_html`, no `style`
+    attribute (spec §22.2, §22.6).** Preparing the review page to be a
+    view (docs/CHANGE-LOG-04.md, M10): `Tag` gains `H4`, `H5`, `Article`,
+    `Details`, `Summary`, `Em`, `Strong`, `Small`, `Br` and the inline SVG
+    subset `Svg`, `G`, `Rect`, `Path`, `Line`, `Circle`, `SvgText`;
+    `AttrName` gains `Open`, `Hidden`, `Colspan`, the geometry `Width`,
+    `Height`, `X`, `Y`, `Rx`, `D`, `Transform`, `ViewBox` and the hooks
+    `DataId`, `DataModule`, `DataItem`, `DataView`, `DataStatus`;
+    `EventKind` gains `Toggle`; the constructor `prop` joins `attr` and `on`. `is_svg`, `is_void` and `is_boolean`
+    describe the vocabulary; `std.html` (`escape`, `to_html`) writes a tree as HTML
+    text (handlers unwritten, boolean attributes bare, void elements
+    unclosed, a depth beyond 64 cut), so the function that describes a
+    live view also pre-renders a static page. The `style` attribute of
+    item 208 is removed: §22.6 lists inline styles as strings among what
+    is absent, and nothing used it. The runtime creates the SVG elements
+    in their namespace when the document offers `createElementNS`; the
+    fake document of the counter fixture offers it. Fixtures:
+    `test/stdlib/view_ops` (the new spellings, `to_html` over nesting,
+    escaping, a keyed child, a boolean attribute, a void element and a
+    handler). No compiler module changed; review artefacts under
+    `.onus/changes/209/`: the interface documents of `std.view` and `std.html` after the change and `README.md` listing the delta, since `change-review.mjs` covers `self/` only.
+    Fixed point reached from `bootstrap/`, native stage agrees; promoted.
+
+210. **The workbench in Onus (M10 redefined; spec §15, §22;
+    docs/CHANGE-LOG-04.md).** `self/workbench.onus` is the review page as
+    a program against `std.view`: `State` (the review bundle, the view
+    shown, the ledger filter, the bodies opened), the closed `Msg`
+    (`Show`, `Filter`, `Toggled`), `update`, and `page`, a pure function
+    of the state returning the tree — the graph layout and every view of
+    item 86 ported from text to `View` values, one function per part.
+    `main(args, root)` parses the bundle from its argument and hands the
+    three to `view.run`. `self/review.onus` keeps the data assembly and
+    writes the shell: the stylesheet, the page pre-rendered through
+    `std.html.to_html` from the same function, the bundle as a JSON
+    script, and a module script that boots `main`; the hand-written view
+    switcher, filter and counter are gone. `scripts/bundle.mjs` builds
+    the workbench with stage0 and carries its JavaScript under
+    `workbench/`; `onus review` writes it beside the page with the
+    runtime, so the directory is the live page. The `view` parameter of
+    `std.view.run` admits `mutate` (§22.3): a tree of any size is built
+    with builders. The module is in the
+    draft zone (no manifest names it). Fixtures: the review cases of
+    `test/cli` re-pinned from the view with the program's files expected,
+    and `workbench_dom` (a `script` case): the live page under the fake
+    document switches views, filters the ledger and counts an opened
+    body. Review artefacts under `.onus/changes/210/`: the interface diffs of `review` (the renderers removed, `render_page` kept) and `cli` (unchanged surface), the interface of the new `workbench`, `ledger.md`; no obligation of `self/` changed status, and every obligation of `workbench` is proved or checked under stage0. Fixed
+    point reached from `bootstrap/`, native stage agrees; promoted.
+
 ### Deferred, not changed
 
 - Decided 2026-09-06, to apply in M15.5: generics compile natively by

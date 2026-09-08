@@ -38,6 +38,7 @@ interface DomNode {
 
 interface DomDocument {
   createElement(tag: string): DomNode;
+  createElementNS?(namespace: string, tag: string): DomNode;
   createTextNode(text: string): DomNode;
   getElementById(id: string): DomNode | null;
   body?: DomNode;
@@ -77,10 +78,13 @@ export function subtree(root: Root, id: string): Root {
 // The vocabulary, as the document spells it
 // ---------------------------------------------------------------------------
 
-const TAGS: Readonly<Record<string, string>> = { Div: 'div', Span: 'span', P: 'p', H1: 'h1', H2: 'h2', H3: 'h3', Ul: 'ul', Ol: 'ol', Li: 'li', Button: 'button', Input: 'input', Label: 'label', Form: 'form', Table: 'table', Thead: 'thead', Tbody: 'tbody', Tr: 'tr', Th: 'th', Td: 'td', A: 'a', Img: 'img', Pre: 'pre', Code: 'code', Section: 'section', Header: 'header', Footer: 'footer', Nav: 'nav', Main: 'main', Select: 'select', OptionItem: 'option', Textarea: 'textarea' };
-const ATTRS: Readonly<Record<string, string>> = { Id: 'id', Class: 'class', Href: 'href', Src: 'src', Alt: 'alt', Title: 'title', For: 'for', Type: 'type', Placeholder: 'placeholder', Name: 'name', Role: 'role', AriaLabel: 'aria-label', Disabled: 'disabled', Style: 'style' };
+const TAGS: Readonly<Record<string, string>> = { Div: 'div', Span: 'span', P: 'p', H1: 'h1', H2: 'h2', H3: 'h3', H4: 'h4', H5: 'h5', Ul: 'ul', Ol: 'ol', Li: 'li', Button: 'button', Input: 'input', Label: 'label', Form: 'form', Table: 'table', Thead: 'thead', Tbody: 'tbody', Tr: 'tr', Th: 'th', Td: 'td', A: 'a', Img: 'img', Pre: 'pre', Code: 'code', Section: 'section', Article: 'article', Header: 'header', Footer: 'footer', Nav: 'nav', Main: 'main', Select: 'select', OptionItem: 'option', Textarea: 'textarea', Details: 'details', Summary: 'summary', Em: 'em', Strong: 'strong', Small: 'small', Br: 'br', Svg: 'svg', G: 'g', Rect: 'rect', Path: 'path', Line: 'line', Circle: 'circle', SvgText: 'text' };
+/** The elements created in the SVG namespace (`std.view.is_svg`). */
+const SVG_TAGS: ReadonlySet<string> = new Set(['Svg', 'G', 'Rect', 'Path', 'Line', 'Circle', 'SvgText']);
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const ATTRS: Readonly<Record<string, string>> = { Id: 'id', Class: 'class', Href: 'href', Src: 'src', Alt: 'alt', Title: 'title', For: 'for', Type: 'type', Placeholder: 'placeholder', Name: 'name', Role: 'role', AriaLabel: 'aria-label', Disabled: 'disabled', Open: 'open', Hidden: 'hidden', Colspan: 'colspan', Width: 'width', Height: 'height', X: 'x', Y: 'y', Rx: 'rx', D: 'd', Transform: 'transform', ViewBox: 'viewBox', DataId: 'data-id', DataModule: 'data-module', DataItem: 'data-item', DataView: 'data-view', DataStatus: 'data-status' };
 const PROPS: Readonly<Record<string, string>> = { Value: 'value', Checked: 'checked', Selected: 'selected' };
-const EVENTS: Readonly<Record<string, string>> = { Click: 'click', Edited: 'input', Change: 'change', Submit: 'submit', KeyDown: 'keydown', Focus: 'focus', Blur: 'blur' };
+const EVENTS: Readonly<Record<string, string>> = { Click: 'click', Edited: 'input', Change: 'change', Submit: 'submit', KeyDown: 'keydown', Focus: 'focus', Blur: 'blur', Toggle: 'toggle' };
 
 function spelled(table: Readonly<Record<string, string>>, v: Tagged): string {
   const s = table[v.tag];
@@ -110,7 +114,8 @@ function keyOf(v: View): string | null {
 function create(d: DomDocument, view: View, dispatch: Dispatch): DomNode {
   const v = unkey(view);
   if (v.tag === 'Text') return d.createTextNode(v.value);
-  const node = d.createElement(spelled(TAGS, v.element));
+  const name = spelled(TAGS, v.element);
+  const node = SVG_TAGS.has(v.element.tag) && d.createElementNS !== undefined ? d.createElementNS(SVG_NS, name) : d.createElement(name);
   setAttrs(node, [], v.attrs, dispatch);
   for (const c of v.children) node.appendChild(create(d, c, dispatch));
   return node;

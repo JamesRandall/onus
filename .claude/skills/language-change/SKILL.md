@@ -71,10 +71,12 @@ the change is small.
   in `self/` as an ordinary change.
 - A change that removes or tightens a rule first makes `self/` conform under
   the old rule: `self/` must check clean under both stage0 and stage1.
-- A change to `packages/stdlib/std`, to the JavaScript runtime or to the C
-  runtime regenerates what the compiler carries: `node scripts/bundle.mjs`
-  rewrites `self/bundle.onus` (the runtime package built first), and
-  `test/self/bundle.test.ts` fails until it is done.
+- A change to `packages/stdlib/std`, to the JavaScript runtime, to the C
+  runtime, to `self/workbench.onus` or to the JavaScript emitter regenerates
+  what the compiler carries: `node scripts/bundle.mjs` rewrites
+  `self/bundle.onus` (the runtime package built first; the workbench is built
+  by stage0 into it), and the `bundle` case of `test/cli` fails until it is
+  done.
 - Check with stage0 as you go: `pnpm onus check self/check.onus --root self`
   (and per module while iterating). Every obligation of a changed function is
   `proved`, or `checked` with the reason written in the `CHANGES.md` item.

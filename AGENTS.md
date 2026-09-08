@@ -49,7 +49,7 @@ Prefer the smallest change that resolves the problem. Do not "improve" the langu
 
 See `docs/onus-impl-spec-v0.md` §2. Short version:
 
-- `self/` — the compiler in Onus: every pass, both emitters, the command line (`onus check | build | run | fmt | interface | path | next | review | test | loop`) and the fixture runner (`fixtures.onus`)
+- `self/` — the compiler in Onus: every pass, both emitters, the command line (`onus check | build | run | fmt | interface | path | next | review | test | loop`) the fixture runner (`fixtures.onus`) and the review workbench (`workbench.onus`, a program against `std.view` that `onus review` pre-renders and carries)
 - `bootstrap/` — stage0: the compiler as the JavaScript it emitted for itself at the last fixed point, with its runtime; `node bootstrap/run_cli.js` is `onus`, and the chain (`scripts/bootstrap.sh`) rebuilds it from `self/`
 - `packages/runtime` — what generated JavaScript imports, and the C runtime for the native target
 - `packages/stdlib` — `std.*` written in Onus

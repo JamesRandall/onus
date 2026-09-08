@@ -28,9 +28,9 @@ import * as $interface from "./interface.js";
 import * as $idiff from "./idiff.js";
 import * as $regen from "./regen.js";
 import * as $nextcmd from "./nextcmd.js";
+import * as $bundle from "./bundle.js";
 import * as $review from "./review.js";
 import * as $pathreport from "./pathreport.js";
-import * as $bundle from "./bundle.js";
 import * as $zones from "./zones.js";
 
 const $ob1 = { kind: "overflow", text: "i + 1 within Int", at: "self/cli.onus:93:40", def: "parse_args" };
@@ -49,11 +49,11 @@ const $ob13 = { kind: "overflow", text: "n - surviving within Int", at: "self/cl
 const $ob14 = { kind: "overflow", text: "-1 within Int", at: "self/cli.onus:1112:10", def: "file_id_of" };
 const $ob15 = { kind: "overflow", text: "-1 within Int", at: "self/cli.onus:1174:18", def: "interface_command" };
 const $ob16 = { kind: "overflow", text: "-1 within Int", at: "self/cli.onus:1422:21", def: "next_command" };
-const $ob17 = { kind: "overflow", text: "-1 within Int", at: "self/cli.onus:1573:24", def: "path_command" };
-const $ob18 = { kind: "overflow", text: "cfg.max_assumption_age_days * 86400000 within Int", at: "self/cli.onus:1852:30", def: "zone_command" };
-const $ob19 = { kind: "overflow", text: "depth - 1 within Int", at: "self/cli.onus:1979:88", def: "project_sources" };
-const $ob20 = { kind: "overflow", text: "detected + 1 within Int", at: "self/cli.onus:2107:20", def: "mutation_summary" };
-const $ob21 = { kind: "overflow", text: "surviving + 1 within Int", at: "self/cli.onus:2109:21", def: "mutation_summary" };
+const $ob17 = { kind: "overflow", text: "-1 within Int", at: "self/cli.onus:1592:24", def: "path_command" };
+const $ob18 = { kind: "overflow", text: "cfg.max_assumption_age_days * 86400000 within Int", at: "self/cli.onus:1871:30", def: "zone_command" };
+const $ob19 = { kind: "overflow", text: "depth - 1 within Int", at: "self/cli.onus:1998:88", def: "project_sources" };
+const $ob20 = { kind: "overflow", text: "detected + 1 within Int", at: "self/cli.onus:2126:20", def: "mutation_summary" };
+const $ob21 = { kind: "overflow", text: "surviving + 1 within Int", at: "self/cli.onus:2128:21", def: "mutation_summary" };
 export const usage = "usage:\n  onus check <file.onus>... [--json] [--root <dir>] [--stdlib <dir>] [--to <pass>] [--budget <ms>] [--ledger] [--no-cache]\n      report every diagnostic; exit 1 if any. Passes: parse, canonical, load, resolve, types, consteval, effects, contracts, claims, capabilities, verify, paths, zones\n  onus fmt <file.onus>... [--stdout]\n      rewrite files in canonical form\n  onus build <entry.onus> [--out <dir>] [--emit js|ir] [--target js|native|wasm] [--root <dir>] [--stdlib <dir>] [--runtime <path>]\n      check, then emit JavaScript for every module into <dir> (default: <entry dir>/out); --target native compiles\n      an executable with clang into <dir>/native (§19); --emit ir prints the target-neutral form\n  onus run <entry.onus> [--out <dir>] [--target js|native|wasm] [-- args...]\n      build, then run the entry module's main\n  onus test <entry.onus> [--out <dir>] [--target js|native|all] [--root <dir>] [--stdlib <dir>]\n      build, then run the generated example, property and law tests (§20.6); --target all runs the examples on\n      both targets and reports any disagreement as E0801 (§19.5)\n  onus test <entry.onus> --mutate [--out <dir>] [--root <dir>] [--stdlib <dir>] [--budget <ms>]\n      weaken each contract in turn and report the weakenings no example, property or law detects (§20.4)\n  onus test <entry.onus> --assumptions [--env <test module>] [--out <dir>] [--root <dir>] [--stdlib <dir>]\n      run every verify block against capabilities from the environment module and record the results in .onus/ledger/ (§20.2–§20.3)\n  onus interface <file.onus> [--json] [--diff <old-interface.json>] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]\n      check, then print the entry module's interface: canonical source with bodies elided, or the §11.1 JSON;\n      with --diff, the changes since a previous interface document (§11.1, §15.1)\n  onus path <file.onus> [<name>] [--json] [--root <dir>] [--stdlib <dir>] [--budget <ms>] [--no-cache]\n      check, then print the §9.1 report of the entry module's paths (or of the named one)\n  onus zone show [--root <dir>]\n      print the manifest's zones and the promotion history (§21)\n  onus zone promote <module> <zone> [--root <dir>] [--stdlib <dir>] [--budget <ms>]\n      check the module at the zone's standard (its policy bundle, the static half of the audit; the\n      regeneration half is deferred) and, when it passes, write the signed manifest and the promotion record\n  onus zone demote <module> <zone> [--root <dir>]\n      always permitted and always recorded; dependents' guarantees become conditional (§21.3)\n  onus --version\n      print the compiler's version\n  onus review <entry.onus> [--out <dir>] [--against <interface.json>] [--root <dir>] [--stdlib <dir>] [--budget <ms>]\n      check, then write the review page and its bundle (§15) into <dir> (default: <entry dir>/review)\n  onus next <file.onus> --offset <n> [--json] [--root <dir>] [--stdlib <dir>]\n      the legal next tokens at the offset (in code points), the expected type there and the names in scope (§14)\n  onus loop run <task.json> [--root <dir>] [--model claude-code[:<model>]|anthropic[:<model>]|openrouter[:<model>]|scripted:<file.json>] [--budget <ms>] [--json] [--no-write]\n      run one task of the regeneration loop to its conclusion (docs/onus-loop-v0.md); exit 0 when a change is opened, 2 when blocked, 1 on error.\n      Keys are read from the environment, or from .env and .env.local in the project root and the current directory:\n      ANTHROPIC_API_KEY, OPENROUTER_API_KEY (and OPENROUTER_MODEL for the default model).\nThe standard library is --stdlib or ONUS_STDLIB, else the one the compiler carries; the runtime for build and run is --runtime or ONUS_RUNTIME, else the one the compiler carries, written beside the program.\n";
 
 export const passes = ["parse", "canonical", "load", "resolve", "types", "consteval", "effects", "contracts", "claims", "capabilities", "verify", "paths", "zones"];
@@ -1400,6 +1400,23 @@ export function next_command({ args, files, console, env, clock }) {
   }
 }
 
+export function write_workbench({ files, out_dir }) {
+  try {
+    for (const e of $bundle.under({ prefix: "workbench/" })) {
+      const rel = $std_text.replace({ t: e.path, from: "workbench/", to: "" });
+      if ($std_text.contains({ t: rel, needle: "/" })) {
+        $rt.unwrap($std_io.mkdir({ files: files, path: out_dir + "/" + $nativebuild.dir_of({ path: rel }) }));
+      }
+      $rt.unwrap($build.write_file({ files: files, path: out_dir + "/" + rel, text: e.text }));
+    }
+    $rt.unwrap($build.write_bundled_runtime({ files: files, out_dir: out_dir }));
+    return { tag: "Ok", value: undefined };
+  } catch ($e) {
+    if ($e instanceof $rt.EarlyReturn) return $e.value;
+    throw $e;
+  }
+}
+
 export function review_command({ args, files, console, process, env, clock }) {
   try {
     if ($std_list.len({ xs: args.files }) === 0) {
@@ -1407,10 +1424,10 @@ export function review_command({ args, files, console, process, env, clock }) {
     }
     const entry = $std_list.get({ xs: args.files, i: 0 });
     let against = { tag: "None" };
-    const $m206 = value({ args: args, name: "against" });
-    $m206$match: {
-      if ($m206.tag === "Some") {
-        const value = $m206.value;
+    const $m207 = value({ args: args, name: "against" });
+    $m207$match: {
+      if ($m207.tag === "Some") {
+        const value = $m207.value;
         const old_text = $rt.unwrap($std_io.read({ files: files, path: value }));
         const old_doc = or_null({ o: $json.parse({ t: old_text }) });
         if (!is_interface_document({ j: old_doc })) {
@@ -1418,19 +1435,19 @@ export function review_command({ args, files, console, process, env, clock }) {
           return { tag: "Err", error: { tag: "Other", detail: "not an interface document" } };
         }
         against = { tag: "Some", value: old_doc };
-        break $m206$match;
+        break $m207$match;
       }
-      if ($m206.tag === "None") {
+      if ($m207.tag === "None") {
         skip({  });
-        break $m206$match;
+        break $m207$match;
       }
       $rt.unreachable();
     }
     const s = setup({ args: args, files: files, env: env, clock: clock });
     let ctx = s.ctx;
-    const [$r210, ctx$29] = read_entries({ ctx: ctx, files: files, paths: [entry] });
+    const [$r211, ctx$29] = read_entries({ ctx: ctx, files: files, paths: [entry] });
     ctx = ctx$29;
-    $rt.unwrap($r210);
+    $rt.unwrap($r211);
     const [, ctx$30] = $check.run_passes({ ctx: ctx, to: 12, files: files, console: console, process: process, vopts: s.vopts });
     ctx = ctx$30;
     const tab = $loc.line_tables({ ctx: ctx });
@@ -1440,6 +1457,7 @@ export function review_command({ args, files, console, process, env, clock }) {
     $rt.unwrap($std_io.mkdir({ files: files, path: out_dir }));
     $rt.unwrap($build.write_file({ files: files, path: out_dir + "/index.html", text: $review.render_page({ data: data }) }));
     $rt.unwrap($build.write_file({ files: files, path: out_dir + "/review.json", text: $json.pretty({ j: data }) + "\n" }));
+    $rt.unwrap(write_workbench({ files: files, out_dir: out_dir }));
     $std_io.eprint({ console: console, text: "onus review: wrote " + out_dir + "/index.html\n" });
     if (!$context.clean({ ctx: ctx })) {
       return { tag: "Err", error: { tag: "Other", detail: "diagnostics" } };
@@ -1463,34 +1481,34 @@ export function path_command({ args, files, console, process, env, clock }) {
     }
     const s = setup({ args: args, files: files, env: env, clock: clock });
     let ctx = s.ctx;
-    const [$r216, ctx$31] = read_entries({ ctx: ctx, files: files, paths: [entry] });
+    const [$r217, ctx$31] = read_entries({ ctx: ctx, files: files, paths: [entry] });
     ctx = ctx$31;
-    $rt.unwrap($r216);
+    $rt.unwrap($r217);
     const [, ctx$32] = $check.run_passes({ ctx: ctx, to: 12, files: files, console: console, process: process, vopts: s.vopts });
     ctx = ctx$32;
     const tab = $loc.line_tables({ ctx: ctx });
     const as_json = flag({ args: args, name: "json" });
     emit_diagnostics({ ctx: ctx, console: console, tab: tab, as_json: as_json });
     let entry_mod = $rt.int.neg(1, $ob17);
-    const $m217 = entry_module({ ctx: ctx });
-    $m217$match: {
-      if ($m217.tag === "Some") {
-        const value = $m217.value;
+    const $m218 = entry_module({ ctx: ctx });
+    $m218$match: {
+      if ($m218.tag === "Some") {
+        const value = $m218.value;
         entry_mod = value;
-        break $m217$match;
+        break $m218$match;
       }
-      if ($m217.tag === "None") {
+      if ($m218.tag === "None") {
         skip({  });
-        break $m217$match;
+        break $m218$match;
       }
       $rt.unreachable();
     }
     let reports = $std_list.builder({  });
     for (const k of $std_map.keys({ d: ctx.analyses })) {
-      const $m218 = $std_map.find({ d: ctx.analyses, key: k });
-      $m218$match: {
-        if ($m218.tag === "Some") {
-          const value = $m218.value;
+      const $m219 = $std_map.find({ d: ctx.analyses, key: k });
+      $m219$match: {
+        if ($m219.tag === "Some") {
+          const value = $m219.value;
           if (value.mod === entry_mod) {
             let chosen = true;
             if (wanted.tag === "Some") {
@@ -1501,11 +1519,11 @@ export function path_command({ args, files, console, process, env, clock }) {
               reports = reports$33;
             }
           }
-          break $m218$match;
+          break $m219$match;
         }
-        if ($m218.tag === "None") {
+        if ($m219.tag === "None") {
           skip({  });
-          break $m218$match;
+          break $m219$match;
         }
         $rt.unreachable();
       }
@@ -1538,14 +1556,14 @@ export function main({ args, files, console, process, env, clock, net }) {
     $std_io.print({ console: console, text: "onus " + $bundle.version + "\n" });
     return { tag: "Ok", value: 0 };
   }
-  const $m225 = a.command;
-  $m225$match: {
-    if ($m225.tag === "None") {
+  const $m226 = a.command;
+  $m226$match: {
+    if ($m226.tag === "None") {
       return { tag: "Ok", value: exit_status({ console: console, r: usage_error({ console: console }) }) };
-      break $m225$match;
+      break $m226$match;
     }
-    if ($m225.tag === "Some") {
-      const value = $m225.value;
+    if ($m226.tag === "Some") {
+      const value = $m226.value;
       if (value === "check") {
         return { tag: "Ok", value: exit_status({ console: console, r: check_command({ args: a, files: files, console: console, process: process, env: env, clock: clock }) }) };
       }
@@ -1577,7 +1595,7 @@ export function main({ args, files, console, process, env, clock, net }) {
         return { tag: "Ok", value: exit_status_of({ console: console, r: review_command({ args: a, files: files, console: console, process: process, env: env, clock: clock }) }) };
       }
       return { tag: "Ok", value: exit_status({ console: console, r: usage_error({ console: console }) }) };
-      break $m225$match;
+      break $m226$match;
     }
     $rt.unreachable();
   }
@@ -1590,32 +1608,32 @@ export function zone_command({ args, files, console, process, env, clock, net })
     }
     const sub = $std_list.get({ xs: args.files, i: 0 });
     let root = ".";
-    const $m238 = value({ args: args, name: "root" });
-    $m238$match: {
-      if ($m238.tag === "Some") {
-        const value = $m238.value;
+    const $m239 = value({ args: args, name: "root" });
+    $m239$match: {
+      if ($m239.tag === "Some") {
+        const value = $m239.value;
         root = value;
-        break $m238$match;
+        break $m239$match;
       }
-      if ($m238.tag === "None") {
+      if ($m239.tag === "None") {
         skip({  });
-        break $m238$match;
+        break $m239$match;
       }
       $rt.unreachable();
     }
     let manifest = $zones.empty_manifest({  });
-    const $m239 = $zones.read_manifest({ files: files, root: { tag: "Some", value: root } });
-    $m239$match: {
-      if ($m239.tag === "Err") {
-        const error = $m239.error;
+    const $m240 = $zones.read_manifest({ files: files, root: { tag: "Some", value: root } });
+    $m240$match: {
+      if ($m240.tag === "Err") {
+        const error = $m240.error;
         $std_io.eprint({ console: console, text: "onus zone: onus.toml: " + error + "\n" });
         return { tag: "Ok", value: 1 };
-        break $m239$match;
+        break $m240$match;
       }
-      if ($m239.tag === "Ok") {
-        const value = $m239.value;
+      if ($m240.tag === "Ok") {
+        const value = $m240.value;
         manifest = manifest_or_empty({ o: value });
-        break $m239$match;
+        break $m240$match;
       }
       $rt.unreachable();
     }
@@ -1650,16 +1668,16 @@ export function zone_command({ args, files, console, process, env, clock, net })
         stdlib = $std_io.get_env({ env: env, name: "ONUS_STDLIB" });
       }
       let budget = 500;
-      const $m246 = value({ args: args, name: "budget" });
-      $m246$match: {
-        if ($m246.tag === "Some") {
-          const value = $m246.value;
+      const $m247 = value({ args: args, name: "budget" });
+      $m247$match: {
+        if ($m247.tag === "Some") {
+          const value = $m247.value;
           budget = parse_budget({ t: value });
-          break $m246$match;
+          break $m247$match;
         }
-        if ($m246.tag === "None") {
+        if ($m247.tag === "None") {
           skip({  });
-          break $m246$match;
+          break $m247$match;
         }
         $rt.unreachable();
       }
@@ -1671,20 +1689,20 @@ export function zone_command({ args, files, console, process, env, clock, net })
         return { tag: "Ok", value: 1 };
       }
       for (const path of project_sources({ files: files, dir: root, depth: 6 })) {
-        const $m251 = $std_io.read({ files: files, path: path });
-        $m251$match: {
-          if ($m251.tag === "Ok") {
-            const value = $m251.value;
-            const [$r252, ctx$34] = $loader.add_file({ ctx: ctx, path: path, text: value });
+        const $m252 = $std_io.read({ files: files, path: path });
+        $m252$match: {
+          if ($m252.tag === "Ok") {
+            const value = $m252.value;
+            const [$r253, ctx$34] = $loader.add_file({ ctx: ctx, path: path, text: value });
             ctx = ctx$34;
-            if ($r252.tag === "None") {
+            if ($r253.tag === "None") {
               return { tag: "Err", error: { tag: "Other", detail: path + " is too long" } };
             }
-            break $m251$match;
+            break $m252$match;
           }
-          if ($m251.tag === "Err") {
+          if ($m252.tag === "Err") {
             skip({  });
-            break $m251$match;
+            break $m252$match;
           }
           $rt.unreachable();
         }
@@ -1698,17 +1716,17 @@ export function zone_command({ args, files, console, process, env, clock, net })
         return { tag: "Ok", value: 1 };
       }
       audit = "policies passed; " + mutation_summary({ module: module, records: led.mutations }) + "; regeneration skipped";
-      const $m260 = value({ args: args, name: "model" });
-      $m260$match: {
-        if ($m260.tag === "None") {
+      const $m261 = value({ args: args, name: "model" });
+      $m261$match: {
+        if ($m261.tag === "None") {
           skip({  });
-          break $m260$match;
+          break $m261$match;
         }
-        if ($m260.tag === "Some") {
-          const value = $m260.value;
+        if ($m261.tag === "Some") {
+          const value = $m261.value;
           const regenerated = $rt.unwrap(audited_regeneration({ spec: value, module: module, root: root, stdlib: stdlib, budget: budget, args: args, files: files, console: console, process: process, env: env, clock: clock, net: net }));
           audit = "policies passed; " + mutation_summary({ module: module, records: led.mutations }) + "; " + regenerated;
-          break $m260$match;
+          break $m261$match;
         }
         $rt.unreachable();
       }
@@ -1729,16 +1747,16 @@ export function zone_command({ args, files, console, process, env, clock, net })
 }
 
 export function manifest_or_empty({ o }) {
-  const $m263 = o;
-  $m263$match: {
-    if ($m263.tag === "Some") {
-      const value = $m263.value;
+  const $m264 = o;
+  $m264$match: {
+    if ($m264.tag === "Some") {
+      const value = $m264.value;
       return value;
-      break $m263$match;
+      break $m264$match;
     }
-    if ($m263.tag === "None") {
+    if ($m264.tag === "None") {
       return $zones.empty_manifest({  });
-      break $m263$match;
+      break $m264$match;
     }
     $rt.unreachable();
   }
@@ -1746,14 +1764,14 @@ export function manifest_or_empty({ o }) {
 
 export function project_sources({ files, dir, depth }) {
   let out = $std_list.builder({  });
-  const $m264 = $std_io.list_dir({ files: files, path: dir });
-  $m264$match: {
-    if ($m264.tag === "Err") {
+  const $m265 = $std_io.list_dir({ files: files, path: dir });
+  $m265$match: {
+    if ($m265.tag === "Err") {
       skip({  });
-      break $m264$match;
+      break $m265$match;
     }
-    if ($m264.tag === "Ok") {
-      const value = $m264.value;
+    if ($m265.tag === "Ok") {
+      const value = $m265.value;
       for (const name of value) {
         if ($std_text.ends_with({ t: name, suffix: ".onus" }) && !$std_text.starts_with({ t: name, prefix: "." })) {
           const [, out$36] = $std_list.push({ b: out, x: dir + "/" + name });
@@ -1770,7 +1788,7 @@ export function project_sources({ files, dir, depth }) {
           }
         }
       }
-      break $m264$match;
+      break $m265$match;
     }
     $rt.unreachable();
   }
@@ -1780,33 +1798,33 @@ export function project_sources({ files, dir, depth }) {
 export function audited_regeneration({ spec, module, root, stdlib, budget, args, files, console, process, env, clock, net }) {
   try {
     let model = { tag: "Scripted", answers: [] };
-    const $m266 = $regen.model_from_spec({ spec: spec, env: env, files: files, env_dirs: [root, "."] });
-    $m266$match: {
-      if ($m266.tag === "Err") {
-        const error = $m266.error;
+    const $m267 = $regen.model_from_spec({ spec: spec, env: env, files: files, env_dirs: [root, "."] });
+    $m267$match: {
+      if ($m267.tag === "Err") {
+        const error = $m267.error;
         return { tag: "Ok", value: "regeneration did not run: " + error };
-        break $m266$match;
+        break $m267$match;
       }
-      if ($m266.tag === "Ok") {
-        const value = $m266.value;
+      if ($m267.tag === "Ok") {
+        const value = $m267.value;
         model = value;
-        break $m266$match;
+        break $m267$match;
       }
       $rt.unreachable();
     }
     const task_json = { tag: "JObject", fields: [$json.field({ key: "id", value: $json.text({ t: "promote_" + $std_text.replace({ t: module, from: ".", to: "_" }) }) }), $json.field({ key: "kind", value: $json.text({ t: "regenerate" }) }), $json.field({ key: "scope", value: $json.texts({ ts: [module] }) })] };
     let task = { id: "", kind: "regenerate", scope: [], target: { tag: "None" }, counterexample: { tag: "None" }, budget: { iterations: 0, tokens: 0, wall_ms: 0 }, context_policy: "", origin: { tag: "None" }, description: { tag: "None" }, helpers: false, alternate_model: { tag: "None" } };
-    const $m276 = $regen.parse_task({ j: task_json });
-    $m276$match: {
-      if ($m276.tag === "Err") {
-        const error = $m276.error;
+    const $m277 = $regen.parse_task({ j: task_json });
+    $m277$match: {
+      if ($m277.tag === "Err") {
+        const error = $m277.error;
         return { tag: "Ok", value: "regeneration did not run: " + error };
-        break $m276$match;
+        break $m277$match;
       }
-      if ($m276.tag === "Ok") {
-        const value = $m276.value;
+      if ($m277.tag === "Ok") {
+        const value = $m277.value;
         task = value;
-        break $m276$match;
+        break $m277$match;
       }
       $rt.unreachable();
     }
@@ -1815,16 +1833,16 @@ export function audited_regeneration({ spec, module, root, stdlib, budget, args,
     if (outcome.status === "error") {
       return { tag: "Ok", value: "regeneration did not run: " + value_or_text({ o: outcome.error, dflt: "error" }) };
     }
-    const $m281 = outcome.change;
-    $m281$match: {
-      if ($m281.tag === "None") {
+    const $m282 = outcome.change;
+    $m282$match: {
+      if ($m282.tag === "None") {
         return { tag: "Ok", value: "regeneration " + outcome.status };
-        break $m281$match;
+        break $m282$match;
       }
-      if ($m281.tag === "Some") {
-        const value = $m281.value;
+      if ($m282.tag === "Some") {
+        const value = $m282.value;
         return { tag: "Ok", value: audit_of_change({ console: console, change: value, status: outcome.status }) };
-        break $m281$match;
+        break $m282$match;
       }
       $rt.unreachable();
     }
